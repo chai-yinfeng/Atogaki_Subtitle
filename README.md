@@ -26,6 +26,7 @@ Outputs are written to `./atogaki_jobs/<timestamp>/` by default:
 - `segments.json`
 - `ja.srt`
 - `zh.srt`
+- `bilingual.srt`
 - `bilingual.ass`
 
 ## Commands
@@ -48,7 +49,7 @@ Process a media file end-to-end:
 cargo run -- process input.mp4 --model /path/to/model.bin
 ```
 
-Process and burn subtitles into a video:
+Process and render subtitles into a video. If your `ffmpeg` has libass, this burns styled ASS subtitles. Otherwise it muxes bilingual SRT as a soft subtitle track.
 
 ```bash
 cargo run -- process input.mp4 \

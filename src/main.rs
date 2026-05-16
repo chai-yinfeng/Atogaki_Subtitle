@@ -44,6 +44,11 @@ async fn main() -> Result<()> {
             deepl::translate_segments(&key, &mut segments).await?;
             job.write_segments(&segments)?;
             subtitle::write_srt(&job.zh_srt, &segments, subtitle::SubtitleTrack::Chinese)?;
+            subtitle::write_srt(
+                &job.bilingual_srt,
+                &segments,
+                subtitle::SubtitleTrack::Bilingual,
+            )?;
             subtitle::write_ass(&job.bilingual_ass, &segments)?;
             println!("Translated subtitles written to {}", job.dir.display());
             Ok(())
@@ -53,16 +58,22 @@ async fn main() -> Result<()> {
             let segments = job.read_segments()?;
             subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
             subtitle::write_srt(&job.zh_srt, &segments, subtitle::SubtitleTrack::Chinese)?;
+            subtitle::write_srt(
+                &job.bilingual_srt,
+                &segments,
+                subtitle::SubtitleTrack::Bilingual,
+            )?;
             subtitle::write_ass(&job.bilingual_ass, &segments)?;
             println!("Subtitles written to {}", job.dir.display());
             Ok(())
         }
         Command::Render(args) => {
             let job = job::Job::open(args.job_dir)?;
-            media::render_with_ass(
+            media::render_subtitles(
                 &config.ffmpeg,
                 &args.input,
                 &job.bilingual_ass,
+                &job.bilingual_srt,
                 &args.output,
             )
             .await?;
@@ -80,12 +91,18 @@ async fn main() -> Result<()> {
             if let Some(key) = args.deepl_auth_key.or(config.deepl_auth_key) {
                 deepl::translate_segments(&key, &mut segments).await?;
                 subtitle::write_srt(&job.zh_srt, &segments, subtitle::SubtitleTrack::Chinese)?;
+                subtitle::write_srt(
+                    &job.bilingual_srt,
+                    &segments,
+                    subtitle::SubtitleTrack::Bilingual,
+                )?;
                 subtitle::write_ass(&job.bilingual_ass, &segments)?;
                 if let Some(render_output) = args.render_output.as_deref() {
-                    media::render_with_ass(
+                    media::render_subtitles(
                         &config.ffmpeg,
                         &args.input,
                         &job.bilingual_ass,
+                        &job.bilingual_srt,
                         render_output,
                     )
                     .await?;

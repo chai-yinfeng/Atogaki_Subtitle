@@ -54,7 +54,13 @@ pub async fn extract_wav(ffmpeg: &Path, input: &Path, output: &Path) -> Result<P
     Ok(output.to_path_buf())
 }
 
-pub async fn render_with_ass(ffmpeg: &Path, input: &Path, ass: &Path, output: &Path) -> Result<()> {
+pub async fn render_subtitles(
+    ffmpeg: &Path,
+    input: &Path,
+    ass: &Path,
+    fallback_srt: &Path,
+    output: &Path,
+) -> Result<()> {
     if !input.exists() {
         anyhow::bail!("input file does not exist: {}", input.display());
     }
@@ -62,7 +68,26 @@ pub async fn render_with_ass(ffmpeg: &Path, input: &Path, ass: &Path, output: &P
         anyhow::bail!("ASS subtitle file does not exist: {}", ass.display());
     }
 
-    let filter = format!("ass={}", escape_filter_path(ass));
+    if supports_filter(ffmpeg, "ass").await? {
+        return burn_ass(ffmpeg, input, ass, output).await;
+    }
+
+    if !fallback_srt.exists() {
+        anyhow::bail!(
+            "ffmpeg does not support the ass filter, and fallback SRT is missing: {}",
+            fallback_srt.display()
+        );
+    }
+
+    eprintln!(
+        "ffmpeg does not support libass/ass filter; muxing bilingual soft subtitles instead of burning them."
+    );
+    mux_srt_soft_subtitle(ffmpeg, input, fallback_srt, output).await
+}
+
+async fn burn_ass(ffmpeg: &Path, input: &Path, ass: &Path, output: &Path) -> Result<()> {
+    let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
+    let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-y", "-i"]);
     cmd.arg(input);
@@ -70,6 +95,49 @@ pub async fn render_with_ass(ffmpeg: &Path, input: &Path, ass: &Path, output: &P
     cmd.arg(output);
 
     run_checked(cmd, "ffmpeg render").await
+}
+
+async fn mux_srt_soft_subtitle(
+    ffmpeg: &Path,
+    input: &Path,
+    srt: &Path,
+    output: &Path,
+) -> Result<()> {
+    let mut cmd = Command::new(ffmpeg);
+    cmd.args(["-y", "-i"]);
+    cmd.arg(input);
+    cmd.args(["-i"]);
+    cmd.arg(srt);
+    cmd.args([
+        "-map",
+        "0",
+        "-map",
+        "1:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "copy",
+        "-c:s",
+        "mov_text",
+        "-metadata:s:s:0",
+        "language=chi",
+    ]);
+    cmd.arg(output);
+
+    run_checked(cmd, "ffmpeg mux subtitles").await
+}
+
+async fn supports_filter(ffmpeg: &Path, filter: &str) -> Result<bool> {
+    let output = Command::new(ffmpeg)
+        .args(["-hide_banner", "-filters"])
+        .output()
+        .await
+        .context("failed to query ffmpeg filters")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .any(|line| line.split_whitespace().any(|part| part == filter)))
 }
 
 async fn run_checked(mut cmd: Command, name: &str) -> Result<()> {

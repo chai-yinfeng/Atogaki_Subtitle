@@ -16,6 +16,7 @@ pub struct Job {
     pub segments_json: PathBuf,
     pub ja_srt: PathBuf,
     pub zh_srt: PathBuf,
+    pub bilingual_srt: PathBuf,
     pub bilingual_ass: PathBuf,
 }
 
@@ -61,6 +62,7 @@ impl Job {
             segments_json: dir.join("segments.json"),
             ja_srt: dir.join("ja.srt"),
             zh_srt: dir.join("zh.srt"),
+            bilingual_srt: dir.join("bilingual.srt"),
             bilingual_ass: dir.join("bilingual.ass"),
             dir,
         }

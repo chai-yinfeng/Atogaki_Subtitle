@@ -8,6 +8,7 @@ use crate::segment::TranscriptSegment;
 pub enum SubtitleTrack {
     Japanese,
     Chinese,
+    Bilingual,
 }
 
 pub fn write_srt(path: &Path, segments: &[TranscriptSegment], track: SubtitleTrack) -> Result<()> {
@@ -17,6 +18,25 @@ pub fn write_srt(path: &Path, segments: &[TranscriptSegment], track: SubtitleTra
         let text = match track {
             SubtitleTrack::Japanese => seg.ja_text.as_str(),
             SubtitleTrack::Chinese => seg.zh_text.as_deref().unwrap_or(""),
+            SubtitleTrack::Bilingual => {
+                let zh = seg.zh_text.as_deref().unwrap_or("").trim();
+                if zh.is_empty() {
+                    seg.ja_text.as_str()
+                } else {
+                    out.push_str(&(idx + 1).to_string());
+                    out.push('\n');
+                    out.push_str(&format!(
+                        "{} --> {}\n",
+                        format_srt_time(seg.start_ms),
+                        format_srt_time(seg.end_ms)
+                    ));
+                    out.push_str(seg.ja_text.trim());
+                    out.push('\n');
+                    out.push_str(zh);
+                    out.push_str("\n\n");
+                    continue;
+                }
+            }
         };
         if text.trim().is_empty() {
             continue;
