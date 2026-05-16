@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "atogaki")]
@@ -52,8 +52,8 @@ pub struct RecordArgs {
 pub struct TranscribeArgs {
     pub input: PathBuf,
 
-    #[arg(long)]
-    pub model: PathBuf,
+    #[command(flatten)]
+    pub whisper: WhisperArgs,
 
     #[arg(long)]
     pub output_dir: Option<PathBuf>,
@@ -86,8 +86,8 @@ pub struct RenderArgs {
 pub struct ProcessArgs {
     pub input: PathBuf,
 
-    #[arg(long)]
-    pub model: PathBuf,
+    #[command(flatten)]
+    pub whisper: WhisperArgs,
 
     #[arg(long)]
     pub output_dir: Option<PathBuf>,
@@ -97,4 +97,47 @@ pub struct ProcessArgs {
 
     #[arg(long, help = "Burn bilingual ASS subtitles into a video output")]
     pub render_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct WhisperArgs {
+    #[arg(long, env = "ATOGAKI_WHISPER_MODEL")]
+    pub model: PathBuf,
+
+    #[arg(long, env = "ATOGAKI_VAD_MODEL")]
+    pub vad_model: Option<PathBuf>,
+
+    #[arg(long, default_value_t = 0.50)]
+    pub vad_threshold: f32,
+
+    #[arg(long, default_value_t = 250)]
+    pub vad_min_speech_ms: u64,
+
+    #[arg(long, default_value_t = 450)]
+    pub vad_min_silence_ms: u64,
+
+    #[arg(long, default_value_t = 8)]
+    pub vad_max_speech_s: u64,
+
+    #[arg(long, default_value_t = 120)]
+    pub vad_speech_pad_ms: u64,
+
+    #[arg(
+        long,
+        default_value_t = 32,
+        help = "Whisper max segment length in characters; 0 disables it"
+    )]
+    pub max_len: u32,
+
+    #[arg(long = "no-split-on-word", action = ArgAction::SetFalse, default_value_t = true)]
+    pub split_on_word: bool,
+
+    #[arg(long, default_value_t = 0.30)]
+    pub no_speech_threshold: f32,
+
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub output_json_full: bool,
+
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub no_gpu: bool,
 }

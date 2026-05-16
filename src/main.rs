@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
             let job = job::Job::create(args.output_dir.as_deref())?;
             let wav = media::extract_wav(&config.ffmpeg, &args.input, &job.audio_wav).await?;
             let raw =
-                whisper::transcribe(&config.whisper_cli, &args.model, &wav, &job.prefix).await?;
+                whisper::transcribe(&config.whisper_cli, &args.whisper, &wav, &job.prefix).await?;
             let refined = segment::refine(raw);
             job.write_segments(&refined)?;
             subtitle::write_srt(&job.ja_srt, &refined, subtitle::SubtitleTrack::Japanese)?;
@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
             let job = job::Job::create(args.output_dir.as_deref())?;
             let wav = media::extract_wav(&config.ffmpeg, &args.input, &job.audio_wav).await?;
             let raw =
-                whisper::transcribe(&config.whisper_cli, &args.model, &wav, &job.prefix).await?;
+                whisper::transcribe(&config.whisper_cli, &args.whisper, &wav, &job.prefix).await?;
             let mut segments = segment::refine(raw);
             subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
 

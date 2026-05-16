@@ -12,6 +12,16 @@ The current target is a Rust executable, not a macOS/Xcode app. The core pipelin
 - A local Whisper model, for example `ggml-medium.bin`
 - DeepL API key for translation
 
+Useful environment variables:
+
+```bash
+export DEEPL_AUTH_KEY="your-key"
+export ATOGAKI_FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"
+export ATOGAKI_WHISPER_CLI="/opt/homebrew/bin/whisper-cli"
+export ATOGAKI_WHISPER_MODEL="/Users/black_magic/Models/whisper/ggml-medium.bin"
+export ATOGAKI_VAD_MODEL="/Users/black_magic/Models/whisper/ggml-silero-v6.2.0.bin"
+```
+
 ## Quick Start
 
 ```bash
@@ -19,6 +29,22 @@ cargo run -- process input.mp4 \
   --model /path/to/ggml-medium.bin \
   --deepl-auth-key "$DEEPL_AUTH_KEY"
 ```
+
+If `ATOGAKI_WHISPER_MODEL` and `DEEPL_AUTH_KEY` are set:
+
+```bash
+cargo run -- process input.mp4
+```
+
+For tighter timestamping, pass a whisper.cpp VAD model:
+
+```bash
+cargo run -- process input.mp4 \
+  --model /path/to/ggml-medium.bin \
+  --vad-model /path/to/ggml-silero-v5.1.2.bin
+```
+
+If whisper.cpp crashes in the GPU backend, retry with `--no-gpu`.
 
 Outputs are written to `./atogaki_jobs/<timestamp>/` by default:
 
