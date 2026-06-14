@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod deepl;
+mod glossary;
 mod job;
 mod media;
 mod segment;
@@ -24,7 +25,7 @@ async fn main() -> Result<()> {
             let wav = media::extract_wav(&config.ffmpeg, &args.input, &job.audio_wav).await?;
             let raw =
                 whisper::transcribe(&config.whisper_cli, &args.whisper, &wav, &job.prefix).await?;
-            let refined = segment::refine(raw);
+            let refined = segment::refine(glossary::apply_to_segments(&args.whisper, raw)?);
             job.write_segments(&refined)?;
             subtitle::write_srt(&job.ja_srt, &refined, subtitle::SubtitleTrack::Japanese)?;
             println!("Job written to {}", job.dir.display());
@@ -85,7 +86,7 @@ async fn main() -> Result<()> {
             let wav = media::extract_wav(&config.ffmpeg, &args.input, &job.audio_wav).await?;
             let raw =
                 whisper::transcribe(&config.whisper_cli, &args.whisper, &wav, &job.prefix).await?;
-            let mut segments = segment::refine(raw);
+            let mut segments = segment::refine(glossary::apply_to_segments(&args.whisper, raw)?);
             subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
 
             if let Some(key) = args.deepl_auth_key.or(config.deepl_auth_key) {

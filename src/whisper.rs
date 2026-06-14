@@ -8,6 +8,7 @@ use serde::Deserialize;
 use tokio::process::Command;
 
 use crate::cli::WhisperArgs;
+use crate::glossary;
 use crate::segment::TranscriptSegment;
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +43,7 @@ pub async fn transcribe(
     {
         anyhow::bail!("VAD model does not exist: {}", vad_model.display());
     }
+    let prompt = glossary::build_whisper_prompt(options)?;
 
     let mut cmd = Command::new(whisper_cli);
     cmd.args(["-m"]);
@@ -62,6 +64,9 @@ pub async fn transcribe(
     }
     if options.no_gpu {
         cmd.arg("--no-gpu");
+    }
+    if let Some(prompt) = prompt.as_deref() {
+        cmd.args(["--prompt", prompt]);
     }
     cmd.arg("-otxt");
 

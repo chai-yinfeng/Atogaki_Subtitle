@@ -104,6 +104,12 @@ pub struct WhisperArgs {
     #[arg(long, env = "ATOGAKI_WHISPER_MODEL")]
     pub model: PathBuf,
 
+    #[arg(long, env = "ATOGAKI_GLOSSARY")]
+    pub glossary: Option<PathBuf>,
+
+    #[arg(long, env = "ATOGAKI_WHISPER_PROMPT")]
+    pub prompt: Option<String>,
+
     #[arg(long, env = "ATOGAKI_VAD_MODEL")]
     pub vad_model: Option<PathBuf>,
 

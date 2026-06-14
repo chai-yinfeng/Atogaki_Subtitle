@@ -20,6 +20,7 @@ export ATOGAKI_FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"
 export ATOGAKI_WHISPER_CLI="/opt/homebrew/bin/whisper-cli"
 export ATOGAKI_WHISPER_MODEL="/Users/black_magic/Models/whisper/ggml-medium.bin"
 export ATOGAKI_VAD_MODEL="/Users/black_magic/Models/whisper/ggml-silero-v6.2.0.bin"
+export ATOGAKI_GLOSSARY="/Users/black_magic/Desktop/Coding_projects/Atogaki_Sub/assets/glossaries/yorushika.txt"
 ```
 
 ## Quick Start
@@ -45,6 +46,8 @@ cargo run -- process input.mp4 \
 ```
 
 If whisper.cpp crashes in the GPU backend, retry with `--no-gpu`.
+
+Glossary files can be passed with `--glossary` or `ATOGAKI_GLOSSARY`. Plain lines are fed into Whisper's initial prompt as likely proper nouns. Lines in `wrong => correct` form are also applied as conservative text replacements after ASR.
 
 Outputs are written to `./atogaki_jobs/<timestamp>/` by default:
 
