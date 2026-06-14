@@ -6,7 +6,10 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use crate::domain::TranscriptSegment;
+use crate::{
+    application::job_manifest::{JobManifest, job_id_from_dir},
+    domain::TranscriptSegment,
+};
 
 #[derive(Debug, Clone)]
 pub struct Job {
@@ -18,6 +21,7 @@ pub struct Job {
     pub zh_srt: PathBuf,
     pub bilingual_srt: PathBuf,
     pub bilingual_ass: PathBuf,
+    pub status_json: PathBuf,
 }
 
 impl Job {
@@ -49,6 +53,16 @@ impl Job {
             .with_context(|| format!("failed to write {}", self.segments_json.display()))
     }
 
+    pub fn write_manifest(&self, manifest: &JobManifest) -> Result<()> {
+        let data = serde_json::to_vec_pretty(manifest)?;
+        fs::write(&self.status_json, data)
+            .with_context(|| format!("failed to write {}", self.status_json.display()))
+    }
+
+    pub fn id(&self) -> String {
+        job_id_from_dir(&self.dir)
+    }
+
     pub fn read_segments(&self) -> Result<Vec<TranscriptSegment>> {
         let data = fs::read(&self.segments_json)
             .with_context(|| format!("failed to read {}", self.segments_json.display()))?;
@@ -64,6 +78,7 @@ impl Job {
             zh_srt: dir.join("zh.srt"),
             bilingual_srt: dir.join("bilingual.srt"),
             bilingual_ass: dir.join("bilingual.ass"),
+            status_json: dir.join("status.json"),
             dir,
         }
     }

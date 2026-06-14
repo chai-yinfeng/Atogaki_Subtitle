@@ -62,12 +62,15 @@ Glossary files can be passed with `--glossary` or `ATOGAKI_GLOSSARY`. Plain line
 
 Outputs are written to `./atogaki_jobs/<timestamp>/` by default:
 
+- `status.json`
 - `audio.wav`
 - `segments.json`
 - `ja.srt`
 - `zh.srt`
 - `bilingual.srt`
 - `bilingual.ass`
+
+`status.json` records the durable job state for CLI progress and future Web polling.
 
 ## Commands
 

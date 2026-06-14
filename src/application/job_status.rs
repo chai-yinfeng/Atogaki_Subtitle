@@ -1,4 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum JobStatus {
     Created,
     ExtractingAudio,
@@ -8,6 +11,7 @@ pub enum JobStatus {
     ExportingSubtitles,
     RenderingVideo,
     Done,
+    Failed,
 }
 
 impl JobStatus {
@@ -21,6 +25,7 @@ impl JobStatus {
             Self::ExportingSubtitles => "exporting subtitles",
             Self::RenderingVideo => "rendering video",
             Self::Done => "done",
+            Self::Failed => "failed",
         }
     }
 }

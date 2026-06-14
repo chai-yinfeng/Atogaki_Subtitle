@@ -1,3 +1,4 @@
+pub mod job_manifest;
 pub mod job_runner;
 pub mod job_spec;
 pub mod job_status;
