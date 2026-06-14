@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 
-use crate::segment::TranscriptSegment;
+use crate::domain::TranscriptSegment;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SubtitleTrack {

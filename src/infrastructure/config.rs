@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::cli::Cli;
+use crate::interface::cli::Cli;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {

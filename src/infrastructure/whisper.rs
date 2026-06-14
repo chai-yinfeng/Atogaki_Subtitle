@@ -7,9 +7,10 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::cli::WhisperArgs;
-use crate::glossary;
-use crate::segment::TranscriptSegment;
+use crate::{
+    domain::{TranscriptSegment, glossary},
+    interface::cli::WhisperArgs,
+};
 
 #[derive(Debug, Deserialize)]
 struct WhisperJson {

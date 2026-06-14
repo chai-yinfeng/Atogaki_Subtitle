@@ -4,6 +4,17 @@ Local-first offline audio/video transcription and translation workflow.
 
 The current target is a Rust executable, not a macOS/Xcode app. The core pipeline is platform-neutral except for optional recording, which uses `ffmpeg` audio devices on the current machine.
 
+## Architecture
+
+The code is organized into four layers:
+
+- `src/interface`: CLI argument parsing and command dispatch.
+- `src/application`: job specs, job status, and `JobRunner` workflow orchestration.
+- `src/domain`: transcript segments, glossary handling, segmentation, and subtitle formatting.
+- `src/infrastructure`: filesystem job storage, ffmpeg, whisper-cli, DeepL, and runtime config.
+
+The CLI and future Web API should call the application layer instead of invoking ffmpeg, Whisper, or DeepL directly.
+
 ## Requirements
 
 - Rust toolchain

@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use crate::segment::TranscriptSegment;
+use crate::domain::TranscriptSegment;
 
 #[derive(Debug, Clone)]
 pub struct Job {

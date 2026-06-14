@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use tokio::process::Command;
 
-use crate::cli::RecordArgs;
+use crate::interface::cli::RecordArgs;
 
 pub async fn list_capture_devices(ffmpeg: &Path) -> Result<()> {
     let output = Command::new(ffmpeg)

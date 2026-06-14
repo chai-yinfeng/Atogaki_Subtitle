@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 
-use crate::{cli::WhisperArgs, segment::TranscriptSegment};
+use crate::{domain::TranscriptSegment, interface::cli::WhisperArgs};
 
 #[derive(Debug, Clone, Default)]
 struct Glossary {

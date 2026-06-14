@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::segment::TranscriptSegment;
+use crate::domain::TranscriptSegment;
 
 #[derive(Debug, Deserialize)]
 struct DeepLResponse {
