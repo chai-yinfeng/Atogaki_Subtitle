@@ -92,7 +92,7 @@ Process a media file end-to-end:
 cargo run -- process input.mp4 --model /path/to/model.bin
 ```
 
-Process and render subtitles into a video. If your `ffmpeg` has libass, this burns styled ASS subtitles and uses `h264_videotoolbox` when available for hardware video encoding. Otherwise it muxes bilingual SRT as a soft subtitle track.
+Process and render subtitles into a video. If your `ffmpeg` has libass, this burns styled ASS subtitles with `libx264 -crf 28` for stable, reasonably small output. Otherwise it muxes bilingual SRT as a soft subtitle track.
 
 ```bash
 cargo run -- process input.mp4 \

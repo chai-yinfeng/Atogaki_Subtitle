@@ -66,8 +66,8 @@ pub fn write_ass(path: &Path, segments: &[TranscriptSegment]) -> Result<()> {
          ScaledBorderAndShadow: yes\n\n\
          [V4+ Styles]\n\
          Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n\
-         Style: Japanese,Arial,42,&H00FFFFFF,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,120,1\n\
-         Style: Chinese,Arial,46,&H00D7FFFE,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,60,1\n\n\
+         Style: Japanese,Hiragino Sans,42,&H00FFFFFF,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,120,1\n\
+         Style: Chinese,Hiragino Sans GB,46,&H00D7FFFE,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,60,1\n\n\
          [Events]\n\
          Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
     );

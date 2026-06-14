@@ -88,36 +88,7 @@ pub async fn render_subtitles(
 async fn burn_ass(ffmpeg: &Path, input: &Path, ass: &Path, output: &Path) -> Result<()> {
     let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
     let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
-    if supports_encoder(ffmpeg, "h264_videotoolbox").await? {
-        eprintln!(
-            "ffmpeg supports h264_videotoolbox; trying hardware video encoding for subtitle burn."
-        );
-        let result = burn_ass_with_encoder(
-            ffmpeg,
-            input,
-            output,
-            &filter,
-            Some(&[
-                "-c:v",
-                "h264_videotoolbox",
-                "-allow_sw",
-                "1",
-                "-b:v",
-                "3000k",
-            ]),
-        )
-        .await;
-        match result {
-            Ok(()) => return Ok(()),
-            Err(error) => {
-                eprintln!(
-                    "h264_videotoolbox render failed; retrying with ffmpeg default video encoder. Error: {error}"
-                );
-            }
-        }
-    }
-
-    burn_ass_with_encoder(ffmpeg, input, output, &filter, None).await
+    burn_ass_with_encoder(ffmpeg, input, output, &filter).await
 }
 
 async fn burn_ass_with_encoder(
@@ -125,14 +96,15 @@ async fn burn_ass_with_encoder(
     input: &Path,
     output: &Path,
     filter: &str,
-    video_encoder_args: Option<&[&str]>,
 ) -> Result<()> {
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-y", "-i"]);
     cmd.arg(input);
     cmd.args(["-vf", &filter]);
-    if let Some(args) = video_encoder_args {
-        cmd.args(args);
+    if supports_encoder(ffmpeg, "libx264").await? {
+        cmd.args([
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-pix_fmt", "yuv420p",
+        ]);
     }
     cmd.args(["-c:a", "copy"]);
     cmd.arg(output);
