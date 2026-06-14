@@ -45,11 +45,9 @@ pub fn apply_to_segments(
     Ok(segments
         .into_iter()
         .map(|mut segment| {
-            for (from, to) in &glossary.replacements {
-                segment.ja_text = segment.ja_text.replace(from, to);
-                if let Some(zh) = segment.zh_text.as_mut() {
-                    *zh = zh.replace(from, to);
-                }
+            segment.ja_text = apply_replacements_to_text(&segment.ja_text, &glossary.replacements);
+            if let Some(zh) = segment.zh_text.as_mut() {
+                *zh = apply_replacements_to_text(zh, &glossary.replacements);
             }
             segment
         })
@@ -94,4 +92,90 @@ fn parse_replacement(line: &str) -> Option<(&str, &str)> {
         .or_else(|| line.split_once('\t'))
         .map(|(from, to)| (from.trim(), to.trim()))
         .filter(|(from, to)| !from.is_empty() && !to.is_empty())
+}
+
+fn apply_replacements_to_text(text: &str, replacements: &[(String, String)]) -> String {
+    replacements
+        .iter()
+        .fold(text.to_string(), |text, (from, to)| {
+            replace_glossary_term(&text, from, to)
+        })
+}
+
+fn replace_glossary_term(text: &str, from: &str, to: &str) -> String {
+    if should_require_katakana_boundaries(from) {
+        replace_with_katakana_boundaries(text, from, to)
+    } else {
+        text.replace(from, to)
+    }
+}
+
+fn should_require_katakana_boundaries(term: &str) -> bool {
+    term.chars().all(is_katakana_letter)
+}
+
+fn replace_with_katakana_boundaries(text: &str, from: &str, to: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+
+    for (start, _) in text.match_indices(from) {
+        let end = start + from.len();
+        let has_katakana_before = text[..start]
+            .chars()
+            .next_back()
+            .is_some_and(is_katakana_letter);
+        let has_katakana_after = text[end..].chars().next().is_some_and(is_katakana_letter);
+
+        if has_katakana_before || has_katakana_after {
+            continue;
+        }
+
+        out.push_str(&text[last..start]);
+        out.push_str(to);
+        last = end;
+    }
+
+    if last == 0 {
+        return text.to_string();
+    }
+
+    out.push_str(&text[last..]);
+    out
+}
+
+fn is_katakana_letter(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{30A1}'..='\u{30FA}' | '\u{30FC}' | '\u{31F0}'..='\u{31FF}' | '\u{FF66}'..='\u{FF9D}'
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn applies_asr_replacements_with_katakana_boundaries() {
+        let replacements = vec![
+            ("スイ".to_string(), "suis".to_string()),
+            ("ナブナ".to_string(), "n-buna".to_string()),
+        ];
+
+        let text = "スイさんとナブナさんがスイッチの話をした。";
+
+        assert_eq!(
+            apply_replacements_to_text(text, &replacements),
+            "suisさんとn-bunaさんがスイッチの話をした。"
+        );
+    }
+
+    #[test]
+    fn leaves_katakana_compounds_unchanged() {
+        let replacements = vec![("スイ".to_string(), "suis".to_string())];
+
+        assert_eq!(
+            apply_replacements_to_text("アイスイッチとスイッチ", &replacements),
+            "アイスイッチとスイッチ"
+        );
+    }
 }

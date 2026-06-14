@@ -5,9 +5,9 @@
 # Artist / members
 ヨルシカ
 n-buna
-ナブナ
+ナブナ => n-buna
 suis
-スイ
+スイ => suis
 下鶴光康
 下鶴 光康
 キタニタツヤ
