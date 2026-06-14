@@ -144,6 +144,10 @@ pub struct WhisperArgs {
     #[arg(long, action = ArgAction::SetTrue)]
     pub output_json_full: bool,
 
-    #[arg(long, action = ArgAction::SetTrue)]
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        help = "Force Whisper CPU mode. By default GPU is tried first and CPU is retried on GPU failure."
+    )]
     pub no_gpu: bool,
 }

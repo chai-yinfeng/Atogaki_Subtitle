@@ -88,10 +88,53 @@ pub async fn render_subtitles(
 async fn burn_ass(ffmpeg: &Path, input: &Path, ass: &Path, output: &Path) -> Result<()> {
     let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
     let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
+    if supports_encoder(ffmpeg, "h264_videotoolbox").await? {
+        eprintln!(
+            "ffmpeg supports h264_videotoolbox; trying hardware video encoding for subtitle burn."
+        );
+        let result = burn_ass_with_encoder(
+            ffmpeg,
+            input,
+            output,
+            &filter,
+            Some(&[
+                "-c:v",
+                "h264_videotoolbox",
+                "-allow_sw",
+                "1",
+                "-b:v",
+                "3000k",
+            ]),
+        )
+        .await;
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                eprintln!(
+                    "h264_videotoolbox render failed; retrying with ffmpeg default video encoder. Error: {error}"
+                );
+            }
+        }
+    }
+
+    burn_ass_with_encoder(ffmpeg, input, output, &filter, None).await
+}
+
+async fn burn_ass_with_encoder(
+    ffmpeg: &Path,
+    input: &Path,
+    output: &Path,
+    filter: &str,
+    video_encoder_args: Option<&[&str]>,
+) -> Result<()> {
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-y", "-i"]);
     cmd.arg(input);
-    cmd.args(["-vf", &filter, "-c:a", "copy"]);
+    cmd.args(["-vf", &filter]);
+    if let Some(args) = video_encoder_args {
+        cmd.args(args);
+    }
+    cmd.args(["-c:a", "copy"]);
     cmd.arg(output);
 
     run_checked(cmd, "ffmpeg render").await
@@ -138,6 +181,19 @@ async fn supports_filter(ffmpeg: &Path, filter: &str) -> Result<bool> {
     Ok(stdout
         .lines()
         .any(|line| line.split_whitespace().any(|part| part == filter)))
+}
+
+async fn supports_encoder(ffmpeg: &Path, encoder: &str) -> Result<bool> {
+    let output = Command::new(ffmpeg)
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .await
+        .context("failed to query ffmpeg encoders")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .any(|line| line.split_whitespace().any(|part| part == encoder)))
 }
 
 async fn run_checked(mut cmd: Command, name: &str) -> Result<()> {

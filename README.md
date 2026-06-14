@@ -56,7 +56,7 @@ cargo run -- process input.mp4 \
   --vad-model /path/to/ggml-silero-v5.1.2.bin
 ```
 
-If whisper.cpp crashes in the GPU backend, retry with `--no-gpu`.
+Whisper tries the GPU/Metal backend by default and automatically retries once with `--no-gpu` when the failure looks GPU-related. Pass `--no-gpu` to force CPU mode from the start.
 
 Glossary files can be passed with `--glossary` or `ATOGAKI_GLOSSARY`. Plain lines are fed into Whisper's initial prompt as likely proper nouns. Lines in `wrong => correct` form are also applied as conservative text replacements after ASR.
 
@@ -92,7 +92,7 @@ Process a media file end-to-end:
 cargo run -- process input.mp4 --model /path/to/model.bin
 ```
 
-Process and render subtitles into a video. If your `ffmpeg` has libass, this burns styled ASS subtitles. Otherwise it muxes bilingual SRT as a soft subtitle track.
+Process and render subtitles into a video. If your `ffmpeg` has libass, this burns styled ASS subtitles and uses `h264_videotoolbox` when available for hardware video encoding. Otherwise it muxes bilingual SRT as a soft subtitle track.
 
 ```bash
 cargo run -- process input.mp4 \
