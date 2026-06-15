@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
@@ -25,6 +25,7 @@ pub enum Command {
     Devices,
     Record(RecordArgs),
     Rerender(RerenderArgs),
+    Serve(ServeArgs),
     Transcribe(TranscribeArgs),
     Translate(TranslateArgs),
     Export(ExportArgs),
@@ -113,6 +114,33 @@ pub struct RerenderArgs {
 
     #[command(flatten)]
     pub render: RenderArgsCommon,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ServeArgs {
+    #[arg(long, env = "DATABASE_URL")]
+    pub database_url: Option<String>,
+
+    #[arg(long, env = "ATOGAKI_BIND", default_value = "127.0.0.1:8080")]
+    pub bind: SocketAddr,
+
+    #[arg(long, env = "ATOGAKI_JWT_SECRET", default_value = "dev-only-change-me")]
+    pub jwt_secret: String,
+
+    #[arg(long, env = "ATOGAKI_JOBS_DIR", default_value = "atogaki_jobs")]
+    pub jobs_dir: PathBuf,
+
+    #[arg(long, env = "ATOGAKI_UPLOADS_DIR", default_value = "atogaki_uploads")]
+    pub uploads_dir: PathBuf,
+
+    #[arg(long, env = "ATOGAKI_WHISPER_MODEL")]
+    pub whisper_model: Option<PathBuf>,
+
+    #[arg(long, env = "ATOGAKI_VAD_MODEL")]
+    pub vad_model: Option<PathBuf>,
+
+    #[arg(long, env = "ATOGAKI_WEB_WORKERS", default_value_t = 1)]
+    pub workers: usize,
 }
 
 #[derive(Debug, Args)]

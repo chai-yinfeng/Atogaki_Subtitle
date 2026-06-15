@@ -51,6 +51,7 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Serve(args) => interface::web::serve(args).await,
         Command::Transcribe(args) => {
             let job = runner
                 .transcribe(TranscribeSpec {
