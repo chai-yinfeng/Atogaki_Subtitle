@@ -3,7 +3,10 @@ use anyhow::{Result, anyhow};
 use crate::{
     application::{
         job_manifest::JobManifest,
-        job_spec::{ExportSpec, ProcessSpec, RenderSpec, TranscribeSpec, TranslateSpec},
+        job_spec::{
+            ApplyGlossarySpec, ExportSpec, ProcessSpec, RenderSpec, RerenderSpec, TranscribeSpec,
+            TranslateSpec,
+        },
         job_status::JobStatus,
     },
     domain::{glossary, segment, subtitle},
@@ -84,6 +87,7 @@ impl JobRunner {
                         &job.bilingual_ass,
                         &job.bilingual_srt,
                         render_output,
+                        &spec.render,
                     )
                     .await?;
                 }
@@ -102,7 +106,7 @@ impl JobRunner {
 
     pub async fn translate(&self, spec: TranslateSpec) -> Result<Job> {
         let job = Job::open(spec.job_dir)?;
-        let mut manifest = JobManifest::new(&job, None, None);
+        let mut manifest = self.manifest_for_existing_job(&job)?;
         let result = async {
             let mut segments = job.read_segments()?;
             let key = spec
@@ -127,9 +131,39 @@ impl JobRunner {
         self.finish(job, manifest, result)
     }
 
+    pub fn apply_glossary(&self, spec: ApplyGlossarySpec) -> Result<Job> {
+        let job = Job::open(spec.job_dir)?;
+        let mut manifest = self.manifest_for_existing_job(&job)?;
+
+        let result = (|| {
+            let segments = job.read_segments()?;
+
+            self.mark(&job, &mut manifest, JobStatus::RefiningSegments)?;
+            let (segments, report) = glossary::apply_file_to_segments(
+                &spec.glossary,
+                segments,
+                !spec.keep_translations,
+            )?;
+            job.write_segments(&segments)?;
+            eprintln!(
+                "[job] glossary applied: {} segment(s) changed, {} stale translation(s) cleared",
+                report.changed_segments, report.cleared_translations
+            );
+
+            self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
+            subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
+            self.write_translated_outputs(&job, &segments)?;
+
+            self.mark(&job, &mut manifest, JobStatus::Done)?;
+            Ok::<(), anyhow::Error>(())
+        })();
+
+        self.finish(job, manifest, result)
+    }
+
     pub fn export(&self, spec: ExportSpec) -> Result<Job> {
         let job = Job::open(spec.job_dir)?;
-        let mut manifest = JobManifest::new(&job, None, None);
+        let mut manifest = self.manifest_for_existing_job(&job)?;
 
         let result = (|| {
             let segments = job.read_segments()?;
@@ -147,8 +181,9 @@ impl JobRunner {
 
     pub async fn render(&self, spec: RenderSpec) -> Result<()> {
         let job = Job::open(spec.job_dir)?;
-        let mut manifest =
-            JobManifest::new(&job, Some(spec.input.clone()), Some(spec.output.clone()));
+        let mut manifest = self.manifest_for_existing_job(&job)?;
+        manifest.input = Some(spec.input.clone());
+        manifest.render_output = Some(spec.output.clone());
 
         let result = async {
             self.mark(&job, &mut manifest, JobStatus::RenderingVideo)?;
@@ -158,6 +193,48 @@ impl JobRunner {
                 &job.bilingual_ass,
                 &job.bilingual_srt,
                 &spec.output,
+                &spec.render,
+            )
+            .await?;
+
+            self.mark(&job, &mut manifest, JobStatus::Done)?;
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+
+        self.finish(job, manifest, result).map(|_| ())
+    }
+
+    pub async fn rerender(&self, spec: RerenderSpec) -> Result<()> {
+        let job = Job::open(spec.job_dir)?;
+        let mut manifest = self.manifest_for_existing_job(&job)?;
+        let input = spec
+            .input
+            .or_else(|| manifest.input.clone())
+            .ok_or_else(|| {
+                anyhow!("missing input. Pass --input or run from a job with status.json input")
+            })?;
+        let output = spec
+            .output
+            .or_else(|| manifest.render_output.clone())
+            .ok_or_else(|| {
+                anyhow!(
+                    "missing output. Pass --output or run from a job with status.json render_output"
+                )
+            })?;
+
+        manifest.input = Some(input.clone());
+        manifest.render_output = Some(output.clone());
+
+        let result = async {
+            self.mark(&job, &mut manifest, JobStatus::RenderingVideo)?;
+            media::render_subtitles(
+                &self.config.ffmpeg,
+                &input,
+                &job.bilingual_ass,
+                &job.bilingual_srt,
+                &output,
+                &spec.render,
             )
             .await?;
 
@@ -193,6 +270,12 @@ impl JobRunner {
         job.write_manifest(manifest)?;
         self.report(status);
         Ok(())
+    }
+
+    fn manifest_for_existing_job(&self, job: &Job) -> Result<JobManifest> {
+        Ok(job
+            .read_manifest_if_exists()?
+            .unwrap_or_else(|| JobManifest::new(job, None, None)))
     }
 
     fn finish(&self, job: Job, mut manifest: JobManifest, result: Result<()>) -> Result<Job> {

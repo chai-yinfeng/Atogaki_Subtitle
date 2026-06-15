@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use tokio::process::Command;
 
-use crate::interface::cli::RecordArgs;
+use crate::{domain::render::RenderOptions, interface::cli::RecordArgs};
 
 pub async fn list_capture_devices(ffmpeg: &Path) -> Result<()> {
     let output = Command::new(ffmpeg)
@@ -60,16 +60,31 @@ pub async fn render_subtitles(
     ass: &Path,
     fallback_srt: &Path,
     output: &Path,
+    options: &RenderOptions,
 ) -> Result<()> {
     if !input.exists() {
         anyhow::bail!("input file does not exist: {}", input.display());
     }
+
+    validate_render_options(options)?;
+
+    if options.soft_subtitles {
+        if !fallback_srt.exists() {
+            anyhow::bail!(
+                "soft subtitle file does not exist: {}",
+                fallback_srt.display()
+            );
+        }
+
+        return mux_srt_soft_subtitle(ffmpeg, input, fallback_srt, output).await;
+    }
+
     if !ass.exists() {
         anyhow::bail!("ASS subtitle file does not exist: {}", ass.display());
     }
 
     if supports_filter(ffmpeg, "ass").await? {
-        return burn_ass(ffmpeg, input, ass, output).await;
+        return burn_ass(ffmpeg, input, ass, output, options).await;
     }
 
     if !fallback_srt.exists() {
@@ -85,10 +100,16 @@ pub async fn render_subtitles(
     mux_srt_soft_subtitle(ffmpeg, input, fallback_srt, output).await
 }
 
-async fn burn_ass(ffmpeg: &Path, input: &Path, ass: &Path, output: &Path) -> Result<()> {
+async fn burn_ass(
+    ffmpeg: &Path,
+    input: &Path,
+    ass: &Path,
+    output: &Path,
+    options: &RenderOptions,
+) -> Result<()> {
     let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
     let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
-    burn_ass_with_encoder(ffmpeg, input, output, &filter).await
+    burn_ass_with_encoder(ffmpeg, input, output, &filter, options).await
 }
 
 async fn burn_ass_with_encoder(
@@ -96,14 +117,23 @@ async fn burn_ass_with_encoder(
     input: &Path,
     output: &Path,
     filter: &str,
+    options: &RenderOptions,
 ) -> Result<()> {
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-y", "-i"]);
     cmd.arg(input);
     cmd.args(["-vf", &filter]);
     if supports_encoder(ffmpeg, "libx264").await? {
+        let crf = options.video_crf.to_string();
         cmd.args([
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-pix_fmt", "yuv420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            &options.video_preset,
+            "-crf",
+            &crf,
+            "-pix_fmt",
+            "yuv420p",
         ]);
     }
     cmd.args(["-c:a", "copy"]);
@@ -140,6 +170,14 @@ async fn mux_srt_soft_subtitle(
     cmd.arg(output);
 
     run_checked(cmd, "ffmpeg mux subtitles").await
+}
+
+fn validate_render_options(options: &RenderOptions) -> Result<()> {
+    if options.video_crf > 51 {
+        anyhow::bail!("--video-crf must be between 0 and 51");
+    }
+
+    Ok(())
 }
 
 async fn supports_filter(ffmpeg: &Path, filter: &str) -> Result<bool> {

@@ -21,8 +21,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    ApplyGlossary(ApplyGlossaryArgs),
     Devices,
     Record(RecordArgs),
+    Rerender(RerenderArgs),
     Transcribe(TranscribeArgs),
     Translate(TranslateArgs),
     Export(ExportArgs),
@@ -68,6 +70,20 @@ pub struct TranslateArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct ApplyGlossaryArgs {
+    pub job_dir: PathBuf,
+
+    #[arg(long, env = "ATOGAKI_GLOSSARY")]
+    pub glossary: PathBuf,
+
+    #[arg(
+        long,
+        help = "Keep existing translations even when the Japanese source text changes"
+    )]
+    pub keep_translations: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct ExportArgs {
     pub job_dir: PathBuf,
 }
@@ -80,6 +96,23 @@ pub struct RenderArgs {
 
     #[arg(long)]
     pub output: PathBuf,
+
+    #[command(flatten)]
+    pub render: RenderArgsCommon,
+}
+
+#[derive(Debug, Args)]
+pub struct RerenderArgs {
+    pub job_dir: PathBuf,
+
+    #[arg(long, help = "Override the input media path saved in status.json")]
+    pub input: Option<PathBuf>,
+
+    #[arg(long, help = "Override the render output path saved in status.json")]
+    pub output: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub render: RenderArgsCommon,
 }
 
 #[derive(Debug, Args)]
@@ -97,6 +130,34 @@ pub struct ProcessArgs {
 
     #[arg(long, help = "Burn bilingual ASS subtitles into a video output")]
     pub render_output: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub render: RenderArgsCommon,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct RenderArgsCommon {
+    #[arg(
+        long,
+        env = "ATOGAKI_RENDER_CRF",
+        default_value_t = 20,
+        help = "libx264 CRF for hard-subtitle rendering; lower means larger and cleaner"
+    )]
+    pub video_crf: u8,
+
+    #[arg(
+        long,
+        env = "ATOGAKI_RENDER_PRESET",
+        default_value = "medium",
+        help = "libx264 preset for hard-subtitle rendering"
+    )]
+    pub video_preset: String,
+
+    #[arg(
+        long,
+        help = "Mux bilingual SRT as a soft subtitle track without re-encoding video"
+    )]
+    pub soft_subtitles: bool,
 }
 
 #[derive(Debug, Clone, Args)]

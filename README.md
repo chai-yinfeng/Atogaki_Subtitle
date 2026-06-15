@@ -32,6 +32,8 @@ export ATOGAKI_WHISPER_CLI="/opt/homebrew/bin/whisper-cli"
 export ATOGAKI_WHISPER_MODEL="/Users/black_magic/Models/whisper/ggml-medium.bin"
 export ATOGAKI_VAD_MODEL="/Users/black_magic/Models/whisper/ggml-silero-v6.2.0.bin"
 export ATOGAKI_GLOSSARY="/Users/black_magic/Desktop/Coding_projects/Atogaki_Sub/assets/glossaries/yorushika.txt"
+export ATOGAKI_RENDER_CRF="20"
+export ATOGAKI_RENDER_PRESET="medium"
 ```
 
 ## Quick Start
@@ -92,12 +94,43 @@ Process a media file end-to-end:
 cargo run -- process input.mp4 --model /path/to/model.bin
 ```
 
-Process and render subtitles into a video. If your `ffmpeg` has libass, this burns styled ASS subtitles with `libx264 -crf 28` for stable, reasonably small output. Otherwise it muxes bilingual SRT as a soft subtitle track.
+Process and render subtitles into a video. If your `ffmpeg` has libass, this burns styled ASS subtitles with `libx264 -crf 20 -preset medium` by default. Otherwise it muxes bilingual SRT as a soft subtitle track.
 
 ```bash
 cargo run -- process input.mp4 \
   --model /path/to/model.bin \
   --render-output output.mp4
+```
+
+Hard-subtitle rendering must re-encode the video because subtitles become pixels in the video stream. The default is `libx264 -crf 20 -preset medium`. Lower CRF values are larger and cleaner; higher values are smaller and softer.
+
+```bash
+cargo run -- render input.mp4 atogaki_jobs/job-... \
+  --output output.mp4 \
+  --video-crf 18 \
+  --video-preset medium
+```
+
+To preserve the original video stream, mux bilingual SRT as a soft subtitle track instead:
+
+```bash
+cargo run -- render input.mp4 atogaki_jobs/job-... \
+  --output output-soft.mp4 \
+  --soft-subtitles
+```
+
+After changing glossary rules, apply them to an existing job without rerunning Whisper. Changed Japanese lines have their stale Chinese translations cleared by default, so run `translate` again before final export/render.
+
+```bash
+cargo run -- apply-glossary atogaki_jobs/job-...
+cargo run -- translate atogaki_jobs/job-...
+cargo run -- export atogaki_jobs/job-...
+```
+
+If a job already has `input` and `render_output` in `status.json`, rerender it without repeating those paths:
+
+```bash
+cargo run -- rerender atogaki_jobs/job-...
 ```
 
 Use `DEEPL_AUTH_KEY` or pass `--deepl-auth-key`.

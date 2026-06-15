@@ -10,6 +10,12 @@ struct Glossary {
     replacements: Vec<(String, String)>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GlossaryApplyReport {
+    pub changed_segments: usize,
+    pub cleared_translations: usize,
+}
+
 pub fn build_whisper_prompt(options: &WhisperArgs) -> Result<Option<String>> {
     let glossary = load_from_options(options)?;
     let mut parts = Vec::new();
@@ -38,20 +44,54 @@ pub fn apply_to_segments(
     segments: Vec<TranscriptSegment>,
 ) -> Result<Vec<TranscriptSegment>> {
     let glossary = load_from_options(options)?;
+    let (segments, _) = apply_glossary_to_segments(&glossary, segments, false);
+    Ok(segments)
+}
+
+pub fn apply_file_to_segments(
+    path: &Path,
+    segments: Vec<TranscriptSegment>,
+    clear_changed_translations: bool,
+) -> Result<(Vec<TranscriptSegment>, GlossaryApplyReport)> {
+    let glossary = load(path)?;
+    Ok(apply_glossary_to_segments(
+        &glossary,
+        segments,
+        clear_changed_translations,
+    ))
+}
+
+fn apply_glossary_to_segments(
+    glossary: &Glossary,
+    segments: Vec<TranscriptSegment>,
+    clear_changed_translations: bool,
+) -> (Vec<TranscriptSegment>, GlossaryApplyReport) {
     if glossary.replacements.is_empty() {
-        return Ok(segments);
+        return (segments, GlossaryApplyReport::default());
     }
 
-    Ok(segments
+    let mut report = GlossaryApplyReport::default();
+    let segments = segments
         .into_iter()
         .map(|mut segment| {
+            let original_ja = segment.ja_text.clone();
             segment.ja_text = apply_replacements_to_text(&segment.ja_text, &glossary.replacements);
-            if let Some(zh) = segment.zh_text.as_mut() {
+
+            if segment.ja_text != original_ja {
+                report.changed_segments += 1;
+                if clear_changed_translations && segment.zh_text.take().is_some() {
+                    report.cleared_translations += 1;
+                }
+            }
+
+            if !clear_changed_translations && let Some(zh) = segment.zh_text.as_mut() {
                 *zh = apply_replacements_to_text(zh, &glossary.replacements);
             }
             segment
         })
-        .collect())
+        .collect();
+
+    (segments, report)
 }
 
 fn load_from_options(options: &WhisperArgs) -> Result<Glossary> {

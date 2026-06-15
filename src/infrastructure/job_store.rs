@@ -59,6 +59,18 @@ impl Job {
             .with_context(|| format!("failed to write {}", self.status_json.display()))
     }
 
+    pub fn read_manifest_if_exists(&self) -> Result<Option<JobManifest>> {
+        if !self.status_json.exists() {
+            return Ok(None);
+        }
+
+        let data = fs::read(&self.status_json)
+            .with_context(|| format!("failed to read {}", self.status_json.display()))?;
+        serde_json::from_slice(&data)
+            .with_context(|| format!("failed to parse {}", self.status_json.display()))
+            .map(Some)
+    }
+
     pub fn id(&self) -> String {
         job_id_from_dir(&self.dir)
     }
