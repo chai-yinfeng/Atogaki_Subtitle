@@ -10,8 +10,8 @@ use serde::Deserialize;
 use tokio::process::Command;
 
 use crate::{
+    application::TranscriptionOptions,
     domain::{TranscriptSegment, glossary},
-    interface::cli::WhisperArgs,
 };
 
 #[derive(Debug, Deserialize)]
@@ -33,7 +33,7 @@ struct Offsets {
 
 pub async fn transcribe(
     whisper_cli: &Path,
-    options: &WhisperArgs,
+    options: &TranscriptionOptions,
     wav: &Path,
     output_prefix: &Path,
 ) -> Result<Vec<TranscriptSegment>> {
@@ -93,19 +93,18 @@ pub async fn transcribe(
             if text.is_empty() {
                 return None;
             }
-            Some(TranscriptSegment {
-                start_ms: item.offsets.from,
-                end_ms: item.offsets.to,
-                ja_text: text,
-                zh_text: None,
-            })
+            Some(TranscriptSegment::new(
+                item.offsets.from,
+                item.offsets.to,
+                text,
+            ))
         })
         .collect())
 }
 
 async fn run_whisper(
     whisper_cli: &Path,
-    options: &WhisperArgs,
+    options: &TranscriptionOptions,
     wav: &Path,
     output_prefix: &Path,
     prompt: Option<&str>,
@@ -130,7 +129,7 @@ async fn run_whisper(
 }
 
 fn build_args(
-    options: &WhisperArgs,
+    options: &TranscriptionOptions,
     wav: &Path,
     output_prefix: &Path,
     prompt: Option<&str>,
@@ -140,7 +139,7 @@ fn build_args(
         "-m".into(),
         options.model.as_os_str().to_os_string(),
         "-l".into(),
-        "ja".into(),
+        options.source_language.clone().into(),
         "-sns".into(),
         "-nth".into(),
         format!("{:.2}", options.no_speech_threshold).into(),

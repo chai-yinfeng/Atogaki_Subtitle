@@ -2,6 +2,8 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
+use crate::application::TranscriptionOptions;
+
 #[derive(Debug, Parser)]
 #[command(name = "atogaki")]
 #[command(about = "Offline audio/video transcription and subtitle translation")]
@@ -68,6 +70,20 @@ pub struct TranslateArgs {
 
     #[arg(long, env = "DEEPL_AUTH_KEY", hide_env_values = true)]
     pub deepl_auth_key: Option<String>,
+
+    #[arg(
+        long,
+        env = "ATOGAKI_TRANSLATION_SOURCE_LANGUAGE",
+        default_value = "ja"
+    )]
+    pub source_language: String,
+
+    #[arg(
+        long,
+        env = "ATOGAKI_TRANSLATION_TARGET_LANGUAGE",
+        default_value = "zh"
+    )]
+    pub target_language: String,
 }
 
 #[derive(Debug, Args)]
@@ -156,6 +172,14 @@ pub struct ProcessArgs {
     #[arg(long, env = "DEEPL_AUTH_KEY", hide_env_values = true)]
     pub deepl_auth_key: Option<String>,
 
+    #[arg(
+        long,
+        env = "ATOGAKI_TRANSLATION_TARGET_LANGUAGE",
+        default_value = "zh",
+        help = "DeepL target language; source language follows --source-language"
+    )]
+    pub target_language: String,
+
     #[arg(long, help = "Burn bilingual ASS subtitles into a video output")]
     pub render_output: Option<PathBuf>,
 
@@ -192,6 +216,9 @@ pub struct RenderArgsCommon {
 pub struct WhisperArgs {
     #[arg(long, env = "ATOGAKI_WHISPER_MODEL")]
     pub model: PathBuf,
+
+    #[arg(long, env = "ATOGAKI_SOURCE_LANGUAGE", default_value = "ja")]
+    pub source_language: String,
 
     #[arg(long, env = "ATOGAKI_GLOSSARY")]
     pub glossary: Option<PathBuf>,
@@ -239,4 +266,26 @@ pub struct WhisperArgs {
         help = "Force Whisper CPU mode. By default GPU is tried first and CPU is retried on GPU failure."
     )]
     pub no_gpu: bool,
+}
+
+impl From<WhisperArgs> for TranscriptionOptions {
+    fn from(args: WhisperArgs) -> Self {
+        Self {
+            model: args.model,
+            source_language: args.source_language,
+            glossary: args.glossary,
+            prompt: args.prompt,
+            vad_model: args.vad_model,
+            vad_threshold: args.vad_threshold,
+            vad_min_speech_ms: args.vad_min_speech_ms,
+            vad_min_silence_ms: args.vad_min_silence_ms,
+            vad_max_speech_s: args.vad_max_speech_s,
+            vad_speech_pad_ms: args.vad_speech_pad_ms,
+            max_len: args.max_len,
+            split_on_word: args.split_on_word,
+            no_speech_threshold: args.no_speech_threshold,
+            output_json_full: args.output_json_full,
+            no_gpu: args.no_gpu,
+        }
+    }
 }

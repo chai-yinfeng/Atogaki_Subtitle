@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 
-use crate::{domain::TranscriptSegment, interface::cli::WhisperArgs};
+use crate::{application::TranscriptionOptions, domain::TranscriptSegment};
 
 #[derive(Debug, Clone, Default)]
 struct Glossary {
@@ -16,7 +16,7 @@ pub struct GlossaryApplyReport {
     pub cleared_translations: usize,
 }
 
-pub fn build_whisper_prompt(options: &WhisperArgs) -> Result<Option<String>> {
+pub fn build_whisper_prompt(options: &TranscriptionOptions) -> Result<Option<String>> {
     let glossary = load_from_options(options)?;
     let mut parts = Vec::new();
 
@@ -40,7 +40,7 @@ pub fn build_whisper_prompt(options: &WhisperArgs) -> Result<Option<String>> {
 }
 
 pub fn apply_to_segments(
-    options: &WhisperArgs,
+    options: &TranscriptionOptions,
     segments: Vec<TranscriptSegment>,
 ) -> Result<Vec<TranscriptSegment>> {
     let glossary = load_from_options(options)?;
@@ -79,8 +79,11 @@ fn apply_glossary_to_segments(
 
             if segment.ja_text != original_ja {
                 report.changed_segments += 1;
-                if clear_changed_translations && segment.zh_text.take().is_some() {
-                    report.cleared_translations += 1;
+                if segment.zh_text.is_some() {
+                    if clear_changed_translations {
+                        report.cleared_translations += 1;
+                    }
+                    segment.mark_translation_stale(clear_changed_translations);
                 }
             }
 
@@ -94,7 +97,7 @@ fn apply_glossary_to_segments(
     (segments, report)
 }
 
-fn load_from_options(options: &WhisperArgs) -> Result<Glossary> {
+fn load_from_options(options: &TranscriptionOptions) -> Result<Glossary> {
     match options.glossary.as_deref() {
         Some(path) => load(path),
         None => Ok(Glossary::default()),

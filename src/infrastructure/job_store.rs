@@ -1,10 +1,10 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
+use uuid::Uuid;
 
 use crate::{
     application::job_manifest::{JobManifest, job_id_from_dir},
@@ -28,14 +28,14 @@ impl Job {
     pub fn create(output_dir: Option<&Path>) -> Result<Self> {
         let dir = match output_dir {
             Some(path) => path.to_path_buf(),
-            None => {
-                let ts = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .context("system clock is before unix epoch")?
-                    .as_secs();
-                PathBuf::from("atogaki_jobs").join(format!("job-{ts}"))
-            }
+            None => return Self::create_in(Path::new("atogaki_jobs")),
         };
+        fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
+        Ok(Self::paths(dir))
+    }
+
+    pub fn create_in(jobs_dir: &Path) -> Result<Self> {
+        let dir = jobs_dir.join(format!("job-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
         Ok(Self::paths(dir))
     }
@@ -78,7 +78,12 @@ impl Job {
     pub fn read_segments(&self) -> Result<Vec<TranscriptSegment>> {
         let data = fs::read(&self.segments_json)
             .with_context(|| format!("failed to read {}", self.segments_json.display()))?;
-        serde_json::from_slice(&data).context("failed to parse segments.json")
+        let mut segments: Vec<TranscriptSegment> =
+            serde_json::from_slice(&data).context("failed to parse segments.json")?;
+        if segments.iter_mut().any(TranscriptSegment::ensure_id) {
+            self.write_segments(&segments)?;
+        }
+        Ok(segments)
     }
 
     fn paths(dir: PathBuf) -> Self {
@@ -93,5 +98,25 @@ impl Job {
             status_json: dir.join("status.json"),
             dir,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::Job;
+
+    #[test]
+    fn creates_uuid_named_jobs_in_the_requested_root() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-job-store-test-{}", uuid::Uuid::new_v4()));
+        let job = Job::create_in(&root).unwrap();
+
+        assert_eq!(job.dir.parent(), Some(root.as_path()));
+        assert!(job.id().strip_prefix("job-").is_some());
+        assert!(job.dir.is_dir());
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

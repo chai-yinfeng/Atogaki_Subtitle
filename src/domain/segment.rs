@@ -1,11 +1,67 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSegment {
+    #[serde(default)]
+    pub id: String,
     pub start_ms: u64,
     pub end_ms: u64,
     pub ja_text: String,
     pub zh_text: Option<String>,
+    #[serde(default)]
+    pub source_edited: bool,
+    #[serde(default)]
+    pub translation_stale: bool,
+}
+
+impl TranscriptSegment {
+    pub fn new(start_ms: u64, end_ms: u64, ja_text: String) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            start_ms,
+            end_ms,
+            ja_text,
+            zh_text: None,
+            source_edited: false,
+            translation_stale: false,
+        }
+    }
+
+    /// Applies a manual source-text edit and preserves any previous translation
+    /// for comparison while marking it as no longer trustworthy.
+    pub fn set_source_text(&mut self, ja_text: String) -> bool {
+        if self.ja_text == ja_text {
+            return false;
+        }
+
+        self.ja_text = ja_text;
+        self.source_edited = true;
+        self.translation_stale = self.zh_text.is_some();
+        true
+    }
+
+    pub fn set_translation(&mut self, zh_text: Option<String>) {
+        self.zh_text = zh_text;
+        self.translation_stale = false;
+    }
+
+    pub fn mark_translation_stale(&mut self, clear_translation: bool) {
+        if clear_translation {
+            self.zh_text = None;
+        }
+        self.translation_stale = self.zh_text.is_some() || clear_translation;
+    }
+
+    /// Returns true when a legacy segment without an ID was upgraded.
+    pub fn ensure_id(&mut self) -> bool {
+        if !self.id.is_empty() {
+            return false;
+        }
+
+        self.id = Uuid::new_v4().to_string();
+        true
+    }
 }
 
 pub fn refine(raw: Vec<TranscriptSegment>) -> Vec<TranscriptSegment> {
@@ -81,12 +137,7 @@ fn push_split(out: &mut Vec<TranscriptSegment>, seg: TranscriptSegment, max_char
         } else {
             start + duration * char_count(part) as u64 / total_chars.max(1) as u64
         };
-        out.push(TranscriptSegment {
-            start_ms: start,
-            end_ms: end,
-            ja_text: part.clone(),
-            zh_text: None,
-        });
+        out.push(TranscriptSegment::new(start, end, part.clone()));
         start = end;
     }
 }
@@ -128,4 +179,35 @@ fn sentence_punctuation(ch: char) -> bool {
 
 fn char_count(text: &str) -> usize {
     text.chars().count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TranscriptSegment;
+
+    #[test]
+    fn source_edits_mark_existing_translations_stale() {
+        let mut segment = TranscriptSegment::new(0, 1_000, "元の文".to_string());
+        segment.set_translation(Some("原来的句子".to_string()));
+
+        assert!(segment.set_source_text("修正後の文".to_string()));
+        assert_eq!(segment.zh_text.as_deref(), Some("原来的句子"));
+        assert!(segment.source_edited);
+        assert!(segment.translation_stale);
+
+        segment.set_translation(Some("修正后的句子".to_string()));
+        assert!(!segment.translation_stale);
+    }
+
+    #[test]
+    fn missing_legacy_id_is_repaired_once() {
+        let mut segment = TranscriptSegment::new(0, 1_000, "文".to_string());
+        segment.id.clear();
+
+        assert!(segment.ensure_id());
+        let id = segment.id.clone();
+        assert!(!id.is_empty());
+        assert!(!segment.ensure_id());
+        assert_eq!(segment.id, id);
+    }
 }

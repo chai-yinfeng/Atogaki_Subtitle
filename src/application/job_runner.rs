@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use crate::{
     application::{
         job_manifest::JobManifest,
+        job_snapshot::JobSnapshot,
         job_spec::{
             ApplyGlossarySpec, ExportSpec, ProcessSpec, RenderSpec, RerenderSpec, TranscribeSpec,
             TranslateSpec,
@@ -22,9 +23,15 @@ impl JobRunner {
         Self { config }
     }
 
+    /// Reads the durable state of a task without invoking any media tooling.
+    /// This is the query entry point for UI task lists and subtitle editors.
+    pub fn snapshot(&self, job_dir: impl AsRef<std::path::Path>) -> Result<JobSnapshot> {
+        JobSnapshot::load(job_dir)
+    }
+
     pub async fn transcribe(&self, spec: TranscribeSpec) -> Result<Job> {
         let job = Job::create(spec.output_dir.as_deref())?;
-        let mut manifest = JobManifest::new(&job, Some(spec.input.clone()), None);
+        let mut manifest = self.manifest_for_job(&job, Some(spec.input.clone()), None)?;
         self.mark(&job, &mut manifest, JobStatus::Created)?;
 
         let result = async {
@@ -32,12 +39,16 @@ impl JobRunner {
             let wav = media::extract_wav(&self.config.ffmpeg, &spec.input, &job.audio_wav).await?;
 
             self.mark(&job, &mut manifest, JobStatus::Transcribing)?;
-            let raw =
-                whisper::transcribe(&self.config.whisper_cli, &spec.whisper, &wav, &job.prefix)
-                    .await?;
+            let raw = whisper::transcribe(
+                &self.config.whisper_cli,
+                &spec.transcription,
+                &wav,
+                &job.prefix,
+            )
+            .await?;
 
             self.mark(&job, &mut manifest, JobStatus::RefiningSegments)?;
-            let refined = segment::refine(glossary::apply_to_segments(&spec.whisper, raw)?);
+            let refined = segment::refine(glossary::apply_to_segments(&spec.transcription, raw)?);
             job.write_segments(&refined)?;
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
@@ -54,7 +65,7 @@ impl JobRunner {
     pub async fn process(&self, spec: ProcessSpec) -> Result<Job> {
         let job = Job::create(spec.output_dir.as_deref())?;
         let mut manifest =
-            JobManifest::new(&job, Some(spec.input.clone()), spec.render_output.clone());
+            self.manifest_for_job(&job, Some(spec.input.clone()), spec.render_output.clone())?;
         self.mark(&job, &mut manifest, JobStatus::Created)?;
 
         let result = async {
@@ -62,19 +73,24 @@ impl JobRunner {
             let wav = media::extract_wav(&self.config.ffmpeg, &spec.input, &job.audio_wav).await?;
 
             self.mark(&job, &mut manifest, JobStatus::Transcribing)?;
-            let raw =
-                whisper::transcribe(&self.config.whisper_cli, &spec.whisper, &wav, &job.prefix)
-                    .await?;
+            let raw = whisper::transcribe(
+                &self.config.whisper_cli,
+                &spec.transcription,
+                &wav,
+                &job.prefix,
+            )
+            .await?;
 
             self.mark(&job, &mut manifest, JobStatus::RefiningSegments)?;
-            let mut segments = segment::refine(glossary::apply_to_segments(&spec.whisper, raw)?);
+            let mut segments =
+                segment::refine(glossary::apply_to_segments(&spec.transcription, raw)?);
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
             subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
 
             if let Some(key) = spec.deepl_auth_key.or(self.config.deepl_auth_key.clone()) {
                 self.mark(&job, &mut manifest, JobStatus::Translating)?;
-                deepl::translate_segments(&key, &mut segments).await?;
+                deepl::translate_segments(&key, &spec.translation, &mut segments).await?;
 
                 self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
                 self.write_translated_outputs(&job, &segments)?;
@@ -117,7 +133,7 @@ impl JobRunner {
                 })?;
 
             self.mark(&job, &mut manifest, JobStatus::Translating)?;
-            deepl::translate_segments(&key, &mut segments).await?;
+            deepl::translate_segments(&key, &spec.translation, &mut segments).await?;
             job.write_segments(&segments)?;
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
@@ -276,6 +292,18 @@ impl JobRunner {
         Ok(job
             .read_manifest_if_exists()?
             .unwrap_or_else(|| JobManifest::new(job, None, None)))
+    }
+
+    fn manifest_for_job(
+        &self,
+        job: &Job,
+        input: Option<std::path::PathBuf>,
+        render_output: Option<std::path::PathBuf>,
+    ) -> Result<JobManifest> {
+        let mut manifest = self.manifest_for_existing_job(job)?;
+        manifest.input = input;
+        manifest.render_output = render_output;
+        Ok(manifest)
     }
 
     fn finish(&self, job: Job, mut manifest: JobManifest, result: Result<()>) -> Result<Job> {

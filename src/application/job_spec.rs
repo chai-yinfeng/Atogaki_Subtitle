@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 
-use crate::{domain::render::RenderOptions, interface::cli::WhisperArgs};
+use crate::{
+    application::{TranscriptionOptions, TranslationOptions},
+    domain::render::RenderOptions,
+};
 
 #[derive(Debug, Clone)]
 pub struct TranscribeSpec {
     pub input: PathBuf,
     pub output_dir: Option<PathBuf>,
-    pub whisper: WhisperArgs,
+    pub transcription: TranscriptionOptions,
 }
 
 #[derive(Debug, Clone)]
@@ -15,7 +18,8 @@ pub struct ProcessSpec {
     pub output_dir: Option<PathBuf>,
     pub render_output: Option<PathBuf>,
     pub deepl_auth_key: Option<String>,
-    pub whisper: WhisperArgs,
+    pub transcription: TranscriptionOptions,
+    pub translation: TranslationOptions,
     pub render: RenderOptions,
 }
 
@@ -23,6 +27,7 @@ pub struct ProcessSpec {
 pub struct TranslateSpec {
     pub job_dir: PathBuf,
     pub deepl_auth_key: Option<String>,
+    pub translation: TranslationOptions,
 }
 
 #[derive(Debug, Clone)]

@@ -1,20 +1,20 @@
-mod application;
-mod domain;
-mod infrastructure;
-mod interface;
-
 use anyhow::Result;
-use application::{
-    JobRunner,
-    job_spec::{
-        ApplyGlossarySpec, ExportSpec, ProcessSpec, RenderSpec, RerenderSpec, TranscribeSpec,
-        TranslateSpec,
+use atogaki_subtitle::{
+    application::{
+        JobRunner, TranscriptionOptions, TranslationOptions,
+        job_spec::{
+            ApplyGlossarySpec, ExportSpec, ProcessSpec, RenderSpec, RerenderSpec, TranscribeSpec,
+            TranslateSpec,
+        },
+    },
+    domain::render::RenderOptions,
+    infrastructure::{config::AppConfig, media},
+    interface::{
+        self,
+        cli::{Cli, Command, RenderArgsCommon},
     },
 };
 use clap::Parser;
-use domain::render::RenderOptions;
-use infrastructure::{config::AppConfig, media};
-use interface::cli::{Cli, Command, RenderArgsCommon};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
                 .transcribe(TranscribeSpec {
                     input: args.input,
                     output_dir: args.output_dir,
-                    whisper: args.whisper,
+                    transcription: args.whisper.into(),
                 })
                 .await?;
             println!("Job written to {}", job.dir.display());
@@ -68,6 +68,10 @@ async fn main() -> Result<()> {
                 .translate(TranslateSpec {
                     job_dir: args.job_dir,
                     deepl_auth_key: args.deepl_auth_key,
+                    translation: TranslationOptions::new(
+                        args.source_language,
+                        args.target_language,
+                    ),
                 })
                 .await?;
             println!("Translated subtitles written to {}", job.dir.display());
@@ -94,13 +98,19 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Process(args) => {
+            let transcription: TranscriptionOptions = args.whisper.into();
+            let translation = TranslationOptions::new(
+                transcription.source_language.clone(),
+                args.target_language,
+            );
             let job = runner
                 .process(ProcessSpec {
                     input: args.input,
                     output_dir: args.output_dir,
                     render_output: args.render_output,
                     deepl_auth_key: args.deepl_auth_key,
-                    whisper: args.whisper,
+                    transcription,
+                    translation,
                     render: render_options(args.render),
                 })
                 .await?;
