@@ -17,7 +17,8 @@ pub use local_glossary_service::{
 };
 pub use local_task_service::LocalTaskService;
 pub use local_workspace_service::{
-    LocalSubtitleExport, LocalTranslationStatus, LocalWorkspaceJob, LocalWorkspaceService,
+    LocalSubtitleExport, LocalSubtitleExportPlan, LocalTranslationStatus, LocalWorkspaceJob,
+    LocalWorkspaceService,
 };
 pub use transcription_options::TranscriptionOptions;
 pub use translation_options::TranslationOptions;

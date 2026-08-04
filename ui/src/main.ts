@@ -114,6 +114,16 @@ type SubtitleExport = {
   missing_translation_count: number;
 };
 
+type SubtitleExportPlan = {
+  output_directory: string;
+  base_name: string;
+  ja_srt: string;
+  zh_srt: string;
+  bilingual_srt: string;
+  bilingual_ass: string;
+  existing_files: string[];
+};
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("missing app root");
 
@@ -181,7 +191,8 @@ app.innerHTML = `
         </div>
         <div class="workspace-action-buttons">
           <button id="translate-all" type="button">全部翻译／重译</button>
-          <button id="export-subtitles" type="button" class="secondary">从 SQLite 导出 SRT／ASS</button>
+          <button id="export-subtitles" type="button" class="secondary">导出字幕…</button>
+          <button id="reveal-export" type="button" class="secondary hidden">在 Finder 中显示</button>
         </div>
         <div class="workspace-glossary-row">
           <div>
@@ -276,6 +287,7 @@ const currentZh = document.querySelector<HTMLParagraphElement>("#current-zh");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
+const revealExportButton = document.querySelector<HTMLButtonElement>("#reveal-export");
 const workspaceActionMessage = document.querySelector<HTMLParagraphElement>("#workspace-action-message");
 const workspaceGlossary = document.querySelector<HTMLSelectElement>("#workspace-glossary");
 const jobGlossaryStatus = document.querySelector<HTMLSpanElement>("#job-glossary-status");
@@ -296,6 +308,7 @@ let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
 let activeSegmentId: string | null = null;
 let workspaceActionBusy = false;
+let lastExportedSubtitlePath: string | null = null;
 let glossaries: Glossary[] = [];
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
@@ -458,6 +471,9 @@ function updateTranslationControls(): void {
     translateAllButton.disabled = workspaceActionBusy || !hasSegments || !translationStatus.configured;
   }
   if (exportButton) exportButton.disabled = workspaceActionBusy || !hasSegments;
+  if (revealExportButton) {
+    revealExportButton.disabled = workspaceActionBusy || !lastExportedSubtitlePath;
+  }
   const previewButton = document.querySelector<HTMLButtonElement>("#preview-glossary");
   if (previewButton) {
     previewButton.disabled = workspaceActionBusy || !hasSegments || !workspaceGlossary?.value;
@@ -608,6 +624,8 @@ async function openJob(jobId: string): Promise<void> {
 }
 
 function renderWorkspace(detail: JobDetail): void {
+  lastExportedSubtitlePath = null;
+  revealExportButton?.classList.add("hidden");
   if (workspaceTitle) workspaceTitle.textContent = displayName(detail.job);
   if (workspaceMessage) {
     workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message}`;
@@ -900,19 +918,74 @@ async function exportSubtitles(): Promise<void> {
     setWorkspaceAction("请先保存各段尚未保存的修改，再导出字幕。", true);
     return;
   }
+  const staleCount = activeDetail.segments.filter((segment) => segment.translation_stale).length;
+  if (staleCount > 0) {
+    setWorkspaceAction(`有 ${staleCount} 段中文已过期，请重译或修正后再导出。`, true);
+    return;
+  }
 
   setWorkspaceBusy(true);
-  setWorkspaceAction("正在从 SQLite 当前内容生成日文、中文和双语字幕…");
+  setWorkspaceAction("正在选择字幕导出目录…");
   try {
+    const inputPath = activeDetail.job.input_path;
+    const separator = inputPath ? Math.max(inputPath.lastIndexOf("/"), inputPath.lastIndexOf("\\")) : -1;
+    const initialDirectory = inputPath && separator > 0 ? inputPath.slice(0, separator) : null;
+    const outputDirectory = await invoke<string | null>("pick_subtitle_export_directory", {
+      initialDirectory,
+    });
+    if (!outputDirectory) {
+      setWorkspaceAction("已取消字幕导出。");
+      return;
+    }
+
+    const plan = await invoke<SubtitleExportPlan>("preview_workspace_subtitle_export", {
+      request: {
+        jobId: activeDetail.job.job_id,
+        outputDirectory,
+      },
+    });
+    let overwriteExisting = false;
+    if (plan.existing_files.length > 0) {
+      const names = plan.existing_files
+        .map((path) => path.split(/[\\/]/).pop() ?? path)
+        .join("\n");
+      overwriteExisting = window.confirm(
+        `以下 ${plan.existing_files.length} 个字幕文件已存在：\n\n${names}\n\n是否覆盖？`,
+      );
+      if (!overwriteExisting) {
+        setWorkspaceAction("已取消导出，现有字幕文件没有被修改。");
+        return;
+      }
+    }
+
+    setWorkspaceAction("正在从 SQLite 当前内容生成日文、中文和双语字幕…");
     const exported = await invoke<SubtitleExport>("export_workspace_subtitles", {
-      jobId: activeDetail.job.job_id,
+      request: {
+        jobId: activeDetail.job.job_id,
+        outputDirectory,
+        overwriteExisting,
+      },
     });
     const missing = exported.missing_translation_count
       ? `；${exported.missing_translation_count} 段尚无中文，双语字幕中保留日文`
       : "";
-    setWorkspaceAction(`已导出到任务目录：${exported.bilingual_srt}${missing}`);
+    lastExportedSubtitlePath = exported.bilingual_ass;
+    revealExportButton?.classList.remove("hidden");
+    setWorkspaceAction(`已导出 4 个字幕文件到：${outputDirectory}${missing}`);
   } catch (error) {
     setWorkspaceAction(`导出失败：${String(error)}`, true);
+  } finally {
+    setWorkspaceBusy(false);
+  }
+}
+
+async function revealExportedSubtitle(): Promise<void> {
+  if (!lastExportedSubtitlePath || workspaceActionBusy) return;
+  setWorkspaceBusy(true);
+  try {
+    await invoke("reveal_exported_subtitle", { path: lastExportedSubtitlePath });
+  } catch (error) {
+    setWorkspaceAction(`Finder 定位失败：${String(error)}`, true);
   } finally {
     setWorkspaceBusy(false);
   }
@@ -1232,6 +1305,7 @@ document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("c
 });
 translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
 exportButton?.addEventListener("click", () => void exportSubtitles());
+revealExportButton?.addEventListener("click", () => void revealExportedSubtitle());
 document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());
 document.querySelector<HTMLButtonElement>("#close-glossaries")?.addEventListener("click", () => glossaryDialog?.close());
 document.querySelector<HTMLButtonElement>("#new-glossary")?.addEventListener("click", () => void editGlossary(null));

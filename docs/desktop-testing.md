@@ -36,6 +36,15 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 当前直接使用 `cargo run` 时加载的是最近一次 `ui/dist`，所以修改前端后必须先运行前端构建。`tauri.conf.json` 刻意不配置 `devUrl`，避免普通 `cargo run` 在没有同时启动 Vite server 时显示白屏。开发窗口启动后，首页会显示实际的应用数据目录和 SQLite 任务列表。
 
+桌面端优先使用 `ATOGAKI_FFMPEG` 和 `ATOGAKI_WHISPER_CLI`，不一定等同于终端中 `PATH` 找到的程序。进入视频烧录测试前可检查实际配置的 ffmpeg 是否能启动并包含 libass；Whisper 帮助信息的启动日志应列出 Metal 后端，且任务的 `recognition-options.json` 中 `no_gpu` 默认为 `false`：
+
+```bash
+"${ATOGAKI_FFMPEG:-ffmpeg}" -version
+"${ATOGAKI_FFMPEG:-ffmpeg}" -hide_banner -filters | rg ' ass '
+"${ATOGAKI_FFMPEG:-ffmpeg}" -hide_banner -encoders | rg 'h264_(videotoolbox)|libx264'
+"${ATOGAKI_WHISPER_CLI:-whisper-cli}" --help
+```
+
 模型选择器会优先打开 `ATOGAKI_WHISPER_MODEL` 或 `ATOGAKI_VAD_MODEL` 所在目录；未配置时，如果 `~/Models` 存在则从该目录打开。启动环境中配置的模型路径会自动填入；若 Whisper 模型所在目录包含文件名带 `silero` 的 `.bin`，也会自动选择首个候选 VAD 模型。所有路径输入框都允许直接粘贴完整路径，作为原生文件面板不可用时的降级方式。
 
 如果将来安装 Tauri CLI 并恢复热更新模式，应由 `tauri dev` 同时启动 Vite，再重新配置 `beforeDevCommand` 与 `devUrl`；不要把该配置与普通 `cargo run` 的使用说明混在一起。
@@ -61,12 +70,14 @@ cargo run --manifest-path src-tauri/Cargo.toml
 15. 点击“翻译本段”；译文应写入 SQLite，刷新或重启后仍然存在。
 16. 点击“全部翻译／重译”，确认覆盖提示；全部译文应一次性更新。没有 `DEEPL_AUTH_KEY` 时按钮应禁用并显示配置提示。
 17. 修改日文但保留旧中文并保存；导出应拒绝，并提示先处理待重译字幕。
-18. 重译后点击“从 SQLite 导出 SRT／ASS”；任务目录中的 `ja.srt`、`zh.srt`、`bilingual.srt` 和 `bilingual.ass` 应包含 SQLite 人工编辑后的内容。
-19. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
+18. 重译后点击“导出字幕…”，选择一个目录；应生成以任务显示名称为前缀的 `.ja.srt`、`.zh.srt`、`.bilingual.srt` 和 `.bilingual.ass`，内容来自 SQLite 人工编辑后的状态。
+19. 再次导出到同一目录，应列出冲突文件并要求确认；取消后原文件保持不变，确认后才覆盖。导出成功后点击“在 Finder 中显示”，应选中双语 ASS 文件。
+20. 任务目录中的 `ja.srt`、`zh.srt`、`bilingual.srt` 和 `bilingual.ass` 也应同步刷新，供后续视频烧录使用。
+21. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
 
 ## 当前测试边界
 
 - macOS WebView 通常可以直接播放 MP4/MOV 和常见音频；MKV、部分 WebM 或特殊编码可能失败，此时只保证 `audio.wav` 回听。
 - 桌面翻译使用 DeepL 云端 API，会发送当前日文字幕；单段和全部重译还会发送 SQLite 中前后约 30 秒的日文作为局部上下文。API key 只从启动环境读取，设置界面和 Keychain 存储尚未实现。
-- 桌面 SRT/ASS 导出已使用 SQLite；现有 CLI `translate`/`export` 仍读取任务 JSON，两条入口的数据源不同，不要用 CLI 命令验证桌面人工编辑。
+- 桌面 SRT/ASS 导出已使用 SQLite，并支持选择目标目录、覆盖确认与 Finder 定位；现有 CLI `translate`/`export` 仍读取任务 JSON，两条入口的数据源不同，不要用 CLI 命令验证桌面人工编辑。
 - 开发态 `cargo run` 二进制不是注册安装的 `.app`，部分 macOS GUI 自动化工具无法枚举它；打包阶段需要补充可重复的窗口自动化测试。

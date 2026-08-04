@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
-        LocalGlossaryService, LocalGlossaryTermDraft, LocalSubtitleExport, LocalTaskService,
-        LocalTranslationStatus, LocalWorkspaceService, TranscriptionOptions,
+        LocalGlossaryService, LocalGlossaryTermDraft, LocalSubtitleExport,
+        LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
+        TranscriptionOptions,
         job_spec::TranscribeSpec,
     },
     infrastructure::{
@@ -67,6 +68,21 @@ struct UpdateSubtitleRequest {
     segment_id: String,
     ja_text: String,
     zh_text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubtitleExportRequest {
+    job_id: String,
+    output_directory: String,
+    overwrite_existing: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubtitleExportPlanRequest {
+    job_id: String,
+    output_directory: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -298,11 +314,30 @@ async fn translate_all_subtitles(
 #[tauri::command]
 async fn export_workspace_subtitles(
     state: State<'_, DesktopState>,
-    job_id: String,
+    request: SubtitleExportRequest,
 ) -> Result<LocalSubtitleExport, String> {
     state
         .workspace_service
-        .export_subtitles(&job_id)
+        .export_subtitles_to(
+            &request.job_id,
+            &PathBuf::from(request.output_directory),
+            request.overwrite_existing,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn preview_workspace_subtitle_export(
+    state: State<'_, DesktopState>,
+    request: SubtitleExportPlanRequest,
+) -> Result<LocalSubtitleExportPlan, String> {
+    state
+        .workspace_service
+        .subtitle_export_plan(
+            &request.job_id,
+            &PathBuf::from(request.output_directory),
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -341,6 +376,62 @@ async fn pick_vad_model_file(app: AppHandle) -> Result<Option<String>, String> {
         vad_model_picker_directory(&app),
     )
     .await
+}
+
+#[tauri::command]
+async fn pick_subtitle_export_directory(
+    app: AppHandle,
+    initial_directory: Option<String>,
+) -> Result<Option<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let mut picker = app.dialog().file().set_title("选择字幕导出目录");
+    let initial_directory = initial_directory
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .or_else(|| app.path().download_dir().ok().filter(|path| path.is_dir()));
+    if let Some(directory) = initial_directory {
+        picker = picker.set_directory(directory);
+    }
+    picker.pick_folder(move |selection| {
+        let _ = sender.send(selection);
+    });
+
+    receiver
+        .await
+        .map_err(|_| "目录选择器意外关闭，请重试。".to_owned())?
+        .map(|selection| {
+            selection
+                .into_path()
+                .map(|path| path.display().to_string())
+                .map_err(|error| format!("无法读取所选目录：{error}"))
+        })
+        .transpose()
+}
+
+#[tauri::command]
+fn reveal_exported_subtitle(path: String) -> Result<(), String> {
+    let path = PathBuf::from(path)
+        .canonicalize()
+        .map_err(|error| format!("无法定位导出文件：{error}"))?;
+    if !path.is_file() {
+        return Err(format!("导出文件不存在：{}", path.display()));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .status()
+            .map_err(|error| format!("无法打开 Finder：{error}"))?;
+        if !status.success() {
+            return Err(format!("Finder 定位失败：{status}"));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    Err("当前只支持在 macOS Finder 中定位导出文件。".to_string())
 }
 
 #[tauri::command]
@@ -514,11 +605,14 @@ fn main() {
             list_jobs,
             pick_media_file,
             pick_model_file,
+            pick_subtitle_export_directory,
             pick_vad_model_file,
             apply_glossary_to_workspace,
             preview_glossary_application,
             preview_glossary_prompt,
+            preview_workspace_subtitle_export,
             recognition_defaults,
+            reveal_exported_subtitle,
             rename_job,
             save_glossary,
             submit_transcription,
