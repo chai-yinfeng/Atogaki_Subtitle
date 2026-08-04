@@ -6,7 +6,7 @@ use crate::{application::TranscriptionOptions, domain::TranscriptSegment};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Glossary {
-    terms: Vec<String>,
+    prompt_terms: Vec<String>,
     replacements: Vec<(String, String)>,
 }
 
@@ -35,10 +35,11 @@ pub fn build_whisper_prompt(options: &TranscriptionOptions) -> Result<Option<Str
         parts.push(prompt.to_string());
     }
 
-    if !glossary.terms.is_empty() {
+    let glossary_prompt = glossary.whisper_prompt_terms();
+    if !glossary_prompt.is_empty() {
         parts.push(format!(
             "以下の固有名詞が出る可能性があります: {}。",
-            glossary.terms.join("、")
+            glossary_prompt.join("、")
         ));
     }
 
@@ -90,9 +91,8 @@ impl Glossary {
                     glossary
                         .replacements
                         .push((source.to_string(), target.to_string()));
-                    glossary.terms.push(target.to_string());
                 }
-                None => glossary.terms.push(source.to_string()),
+                None => glossary.prompt_terms.push(source.to_string()),
             }
         }
         glossary.normalize();
@@ -100,7 +100,7 @@ impl Glossary {
     }
 
     pub fn to_file_text(&self) -> String {
-        let mut lines = self.terms.clone();
+        let mut lines = self.prompt_terms.clone();
         lines.extend(
             self.replacements
                 .iter()
@@ -119,9 +119,21 @@ impl Glossary {
         apply_replacements_to_text(text, &self.replacements)
     }
 
+    fn whisper_prompt_terms(&self) -> Vec<String> {
+        let mut terms = self.prompt_terms.clone();
+        terms.extend(
+            self.replacements
+                .iter()
+                .map(|(spoken, canonical)| format!("{spoken}（表記: {canonical}）")),
+        );
+        terms.sort();
+        terms.dedup();
+        terms
+    }
+
     fn normalize(&mut self) {
-        self.terms.sort();
-        self.terms.dedup();
+        self.prompt_terms.sort();
+        self.prompt_terms.dedup();
         self.replacements.sort_by(|(left, _), (right, _)| {
             right
                 .chars()
@@ -191,9 +203,8 @@ pub fn load(path: &Path) -> Result<Glossary> {
             glossary
                 .replacements
                 .push((from.to_string(), to.to_string()));
-            glossary.terms.push(to.to_string());
         } else {
-            glossary.terms.push(line.to_string());
+            glossary.prompt_terms.push(line.to_string());
         }
     }
 
@@ -266,6 +277,8 @@ fn is_katakana_letter(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
@@ -310,9 +323,31 @@ mod tests {
         let text = glossary.to_file_text();
         assert!(text.contains("ヨルシカ"));
         assert!(text.contains("ナブナ => n-buna"));
+        assert!(!text.lines().any(|line| line == "n-buna"));
+        assert!(
+            glossary
+                .whisper_prompt_terms()
+                .contains(&"ナブナ（表記: n-buna）".to_string())
+        );
         assert_eq!(
             glossary.corrected_text("ナブナとヨルシカ"),
             "n-bunaとヨルシカ"
         );
+    }
+
+    #[test]
+    fn correction_rules_prompt_whisper_with_reading_and_canonical_spelling() {
+        let path = std::env::temp_dir().join(format!(
+            "atogaki-glossary-prompt-test-{}.txt",
+            uuid::Uuid::new_v4()
+        ));
+        fs::write(&path, "スイ => suis\n").unwrap();
+        let mut options = TranscriptionOptions::japanese("model.bin".into());
+        options.glossary = Some(path.clone());
+
+        let prompt = build_whisper_prompt(&options).unwrap().unwrap();
+        assert!(prompt.contains("スイ（表記: suis）"));
+
+        fs::remove_file(path).unwrap();
     }
 }

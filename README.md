@@ -61,6 +61,9 @@ cargo run -- process input.mp4 \
 Whisper tries the GPU/Metal backend by default and automatically retries once with `--no-gpu` when the failure looks GPU-related. Pass `--no-gpu` to force CPU mode from the start.
 
 Glossary files can be passed with `--glossary` or `ATOGAKI_GLOSSARY`. Plain lines are fed into Whisper's initial prompt as likely proper nouns. Lines in `wrong => correct` form are also applied as conservative text replacements after ASR.
+For a canonical spelling whose Japanese reading differs, use the reading on the left, for example
+`スイ => suis`: Whisper is prompted with both forms and the post-ASR pass normalizes the result to
+`suis`. This is an ASR glossary and does not configure DeepL translation terminology.
 
 Outputs are written to `./atogaki_jobs/<timestamp>/` by default:
 

@@ -40,6 +40,8 @@ pub struct LocalGlossaryRecord {
     pub id: String,
     pub name: String,
     pub term_count: i64,
+    pub prompt_term_count: i64,
+    pub correction_count: i64,
     pub created_at_unix: i64,
     pub updated_at_unix: i64,
 }
@@ -294,6 +296,8 @@ impl LocalDatabase {
     pub async fn list_glossaries(&self) -> Result<Vec<LocalGlossaryRecord>> {
         sqlx::query_as::<_, LocalGlossaryRecord>(
             "SELECT g.id, g.name, COUNT(t.id) AS term_count,
+                COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.target_text IS NULL THEN 1 ELSE 0 END), 0) AS prompt_term_count,
+                COALESCE(SUM(CASE WHEN t.target_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS correction_count,
                 g.created_at_unix, g.updated_at_unix
              FROM local_glossaries g
              LEFT JOIN local_glossary_terms t ON t.glossary_id = g.id
@@ -308,6 +312,8 @@ impl LocalDatabase {
     pub async fn get_glossary(&self, glossary_id: &str) -> Result<Option<LocalGlossaryDetail>> {
         let glossary = sqlx::query_as::<_, LocalGlossaryRecord>(
             "SELECT g.id, g.name, COUNT(t.id) AS term_count,
+                COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.target_text IS NULL THEN 1 ELSE 0 END), 0) AS prompt_term_count,
+                COALESCE(SUM(CASE WHEN t.target_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS correction_count,
                 g.created_at_unix, g.updated_at_unix
              FROM local_glossaries g
              LEFT JOIN local_glossary_terms t ON t.glossary_id = g.id
@@ -814,7 +820,7 @@ fn normalized_glossary_terms(
     terms: Vec<LocalGlossaryTermInput>,
 ) -> Result<Vec<LocalGlossaryTermInput>> {
     let mut seen = HashSet::new();
-    terms
+    let mut terms = terms
         .into_iter()
         .map(|term| {
             let source_text = term.source_text.trim().to_string();
@@ -838,7 +844,15 @@ fn normalized_glossary_terms(
                 target_text,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    let correction_targets = terms
+        .iter()
+        .filter_map(|term| term.target_text.clone())
+        .collect::<HashSet<_>>();
+    terms.retain(|term| {
+        term.target_text.is_some() || !correction_targets.contains(&term.source_text)
+    });
+    Ok(terms)
 }
 
 #[cfg(test)]
@@ -1037,6 +1051,8 @@ mod tests {
         let glossaries = database.list_glossaries().await.unwrap();
         assert_eq!(glossaries.len(), 1);
         assert_eq!(glossaries[0].term_count, 2);
+        assert_eq!(glossaries[0].prompt_term_count, 1);
+        assert_eq!(glossaries[0].correction_count, 1);
         database.delete_glossary(&glossaries[0].id).await.unwrap();
         database
             .ensure_builtin_glossary("内置词表", "前世\n")

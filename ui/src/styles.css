@@ -109,11 +109,13 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .glossary-list-item span { color: #77796f; font-size: 11px; white-space: nowrap; }
 .glossary-editor { min-width: 0; display: grid; align-content: start; gap: 14px; }
 .glossary-editor > label { display: grid; gap: 6px; color: #62655e; font-size: 12px; font-weight: 700; }
-.glossary-editor input { width: 100%; min-width: 0; border: 1px solid #d3ccbd; border-radius: 8px; padding: 9px; color: #30332d; background: #fffdf7; }
+.glossary-editor input, .glossary-editor select { width: 100%; min-width: 0; border: 1px solid #d3ccbd; border-radius: 8px; padding: 9px; color: #30332d; background: #fffdf7; }
 .term-heading, .glossary-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .glossary-terms { max-height: 48vh; display: grid; gap: 8px; overflow-y: auto; padding-right: 4px; }
-.glossary-term-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.glossary-term-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .glossary-term-row > span { color: #787a72; }
+.glossary-term-row > span.inactive { opacity: .25; }
+.glossary-term-row input:disabled { color: #999b94; background: #eeeae1; }
 .term-remove { align-self: center; padding: 8px 10px; }
 .glossary-editor-footer { border-top: 1px solid #ded7c9; padding-top: 13px; }
 .glossary-editor-footer > span { color: #77796f; font-size: 12px; }
@@ -144,6 +146,10 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
   .subtitle-footer { align-items: flex-start; flex-direction: column; }
   .glossary-manager { grid-template-columns: 1fr; }
   .glossary-manager aside { border-right: 0; border-bottom: 1px solid #d8d0c1; padding: 0 0 14px; }
-  .glossary-term-row { grid-template-columns: 1fr auto; }
+  .glossary-term-row { grid-template-columns: 112px minmax(0, 1fr) auto; }
   .glossary-term-row > span { display: none; }
+  .glossary-term-row .term-kind { grid-column: 1; grid-row: 1; }
+  .glossary-term-row .term-source { grid-column: 2; grid-row: 1; }
+  .glossary-term-row .term-target { grid-column: 2; grid-row: 2; }
+  .glossary-term-row .term-remove { grid-column: 3; grid-row: 1 / span 2; }
 }

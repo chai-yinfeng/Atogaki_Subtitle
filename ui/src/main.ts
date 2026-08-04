@@ -18,6 +18,8 @@ type Glossary = {
   id: string;
   name: string;
   term_count: number;
+  prompt_term_count: number;
+  correction_count: number;
   created_at_unix: number;
   updated_at_unix: number;
 };
@@ -178,7 +180,7 @@ app.innerHTML = `
         <div><p class="eyebrow">RECOGNITION GLOSSARIES</p><h2>识别词表</h2></div>
         <button id="close-glossaries" type="button" class="secondary">关闭</button>
       </div>
-      <p class="dialog-help">目标词留空表示仅提示 Whisper；填写目标词表示“识别结果 → 规范写法”的修正规则。</p>
+      <p class="dialog-help"><strong>提示词</strong>直接告诉 Whisper 可能出现的写法；<strong>修正规则</strong>用日语读音提示识别，并在识别后统一成规范写法，例如“スイ → suis”。</p>
       <div class="glossary-manager">
         <aside>
           <button id="new-glossary" type="button">＋ 新建词表</button>
@@ -186,7 +188,7 @@ app.innerHTML = `
         </aside>
         <section class="glossary-editor">
           <label>词表名称<input id="glossary-name" maxlength="80" placeholder="例如：日语电台常用词" /></label>
-          <div class="term-heading"><strong>词条与修正规则</strong><button id="add-glossary-term" type="button" class="secondary">＋ 添加词条</button></div>
+          <div class="term-heading"><strong>提示词与识别修正规则</strong><button id="add-glossary-term" type="button" class="secondary">＋ 添加词条</button></div>
           <div id="glossary-terms" class="glossary-terms"></div>
           <div class="glossary-editor-footer">
             <span id="glossary-message" role="status"></span>
@@ -271,7 +273,7 @@ function renderGlossaryOptions(): void {
   const taskSelection = taskGlossary?.value ?? "";
   const workspaceSelection = workspaceGlossary?.value ?? "";
   const options = glossaries
-    .map((glossary) => `<option value="${escapeHtml(glossary.id)}">${escapeHtml(glossary.name)}（${glossary.term_count}）</option>`)
+    .map((glossary) => `<option value="${escapeHtml(glossary.id)}">${escapeHtml(glossary.name)}（提示 ${glossary.prompt_term_count}／修正 ${glossary.correction_count}）</option>`)
     .join("");
   if (taskGlossary) {
     taskGlossary.innerHTML = `<option value="">不使用词表</option>${options}`;
@@ -304,7 +306,7 @@ function renderGlossaryList(): void {
   }
   glossaryListHost.innerHTML = glossaries
     .map(
-      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}</strong><span>${glossary.term_count} 条</span></button>`,
+      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}</strong><span>提示 ${glossary.prompt_term_count} · 修正 ${glossary.correction_count}</span></button>`,
     )
     .join("");
   glossaryListHost.querySelectorAll<HTMLButtonElement>("[data-glossary-id]").forEach((button) => {
@@ -724,22 +726,35 @@ function addGlossaryTermRow(sourceText = "", targetText = ""): void {
   if (!glossaryTerms) return;
   const row = document.createElement("div");
   row.className = "glossary-term-row";
+  const kind = document.createElement("select");
+  kind.className = "term-kind";
+  kind.innerHTML = `<option value="prompt">提示词</option><option value="correction">修正规则</option>`;
+  kind.value = targetText ? "correction" : "prompt";
   const source = document.createElement("input");
   source.className = "term-source";
-  source.placeholder = "提示词或常见误识别";
   source.value = sourceText;
   const arrow = document.createElement("span");
   arrow.textContent = "→";
   const target = document.createElement("input");
   target.className = "term-target";
-  target.placeholder = "规范写法（可留空）";
   target.value = targetText;
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "term-remove secondary";
   remove.textContent = "移除";
   remove.addEventListener("click", () => row.remove());
-  row.append(source, arrow, target, remove);
+  const syncKind = (): void => {
+    const correction = kind.value === "correction";
+    row.dataset.termKind = kind.value;
+    source.placeholder = correction ? "日语读音或常见误识别" : "希望 Whisper 识别出的写法";
+    target.disabled = !correction;
+    target.placeholder = correction ? "最终规范写法" : "提示词不需要目标写法";
+    arrow.classList.toggle("inactive", !correction);
+    if (!correction) target.value = "";
+  };
+  kind.addEventListener("change", syncKind);
+  row.append(kind, source, arrow, target, remove);
+  syncKind();
   glossaryTerms.append(row);
 }
 
@@ -764,7 +779,9 @@ async function editGlossary(glossaryId: string | null): Promise<void> {
     if (glossaryTerms) glossaryTerms.replaceChildren();
     for (const term of detail.terms) addGlossaryTermRow(term.source_text, term.target_text ?? "");
     if (detail.terms.length === 0) addGlossaryTermRow();
-    if (glossaryMessage) glossaryMessage.textContent = `${detail.terms.length} 条词条`;
+    if (glossaryMessage) {
+      glossaryMessage.textContent = `提示词 ${detail.glossary.prompt_term_count} 条 · 修正规则 ${detail.glossary.correction_count} 条`;
+    }
   } catch (error) {
     if (glossaryMessage) glossaryMessage.textContent = `读取失败：${String(error)}`;
   }
@@ -780,10 +797,24 @@ async function openGlossaryManager(): Promise<void> {
 async function saveGlossaryEditor(): Promise<void> {
   if (!glossaryName || !glossaryTerms || !glossaryMessage) return;
   const name = glossaryName.value.trim();
-  const terms = Array.from(glossaryTerms.querySelectorAll<HTMLElement>(".glossary-term-row"))
+  const rows = Array.from(glossaryTerms.querySelectorAll<HTMLElement>(".glossary-term-row"));
+  if (
+    rows.some(
+      (row) =>
+        row.dataset.termKind === "correction" &&
+        !row.querySelector<HTMLInputElement>(".term-target")?.value.trim(),
+    )
+  ) {
+    glossaryMessage.textContent = "修正规则必须填写最终规范写法。";
+    return;
+  }
+  const terms = rows
     .map((row) => ({
       sourceText: row.querySelector<HTMLInputElement>(".term-source")?.value.trim() ?? "",
-      targetText: row.querySelector<HTMLInputElement>(".term-target")?.value.trim() || null,
+      targetText:
+        row.dataset.termKind === "correction"
+          ? row.querySelector<HTMLInputElement>(".term-target")?.value.trim() || null
+          : null,
     }))
     .filter((term) => term.sourceText || term.targetText);
   glossaryMessage.textContent = "正在保存…";

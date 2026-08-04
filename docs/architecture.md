@@ -41,7 +41,7 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService` 与 `LocalWorkspaceService`：前者负责创建、排队和同步后台任务，后者负责读取任务详情、保存编辑、调用 DeepL 翻译以及从 SQLite 当前状态导出字幕。界面通过原生文件选择器获取媒体和 Whisper 模型路径；打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
-`LocalGlossaryService` 管理 SQLite 词表、差异预览和对工作区的应用。新任务选择词表后，`LocalTaskService` 会在排队前把当时的词条冻结为任务目录中的 `recognition-glossary.txt`，并把路径交给 Whisper：普通词条进入初始提示，`误识别 => 规范写法` 同时在 ASR 后执行修正。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
+`LocalGlossaryService` 管理 SQLite 词表、差异预览和对工作区的应用。新任务选择词表后，`LocalTaskService` 会在排队前把当时的词条冻结为任务目录中的 `recognition-glossary.txt`，并把路径交给 Whisper。提示词直接进入初始 prompt；`日语读音/误识别 => 规范写法` 会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
 
 ## 数据边界
 
