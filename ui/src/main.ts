@@ -408,15 +408,31 @@ document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("c
 });
 
 async function chooseFile(kind: "media" | "model"): Promise<void> {
-  const path = await open({
-    multiple: false,
-    directory: false,
-    filters:
-      kind === "media"
-        ? [{ name: "媒体", extensions: ["mp3", "m4a", "wav", "mp4", "mkv", "webm", "mov"] }]
-        : [{ name: "Whisper 模型", extensions: ["bin"] }],
-  });
-  if (typeof path === "string") (kind === "media" ? mediaPath : modelPath)!.value = path;
+  const button = document.querySelector<HTMLButtonElement>(
+    kind === "media" ? "#choose-media" : "#choose-model",
+  );
+  if (button) button.disabled = true;
+  if (taskMessage) taskMessage.textContent = kind === "media" ? "正在打开媒体选择器…" : "正在打开模型选择器…";
+  try {
+    const path = await open({
+      multiple: false,
+      directory: false,
+      filters:
+        kind === "media"
+          ? [{ name: "媒体", extensions: ["mp3", "m4a", "wav", "mp4", "mkv", "webm", "mov"] }]
+          : [{ name: "Whisper 模型", extensions: ["bin"] }],
+    });
+    if (typeof path === "string") {
+      (kind === "media" ? mediaPath : modelPath)!.value = path;
+      if (taskMessage) taskMessage.textContent = kind === "media" ? "已选择媒体文件。" : "已选择 Whisper 模型。";
+    } else if (taskMessage) {
+      taskMessage.textContent = "已取消选择。";
+    }
+  } catch (error) {
+    if (taskMessage) taskMessage.textContent = `无法打开文件选择器：${String(error)}`;
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 document.querySelector<HTMLButtonElement>("#choose-media")?.addEventListener("click", () => void chooseFile("media"));
