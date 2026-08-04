@@ -122,7 +122,7 @@ async fn burn_ass_with_encoder(
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-y", "-i"]);
     cmd.arg(input);
-    cmd.args(["-vf", &filter]);
+    cmd.args(["-vf", filter]);
     if supports_encoder(ffmpeg, "libx264").await? {
         let crf = options.video_crf.to_string();
         cmd.args([

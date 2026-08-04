@@ -54,6 +54,14 @@ impl LocalTaskService {
         database_path: impl AsRef<Path>,
     ) -> Result<Self> {
         let database = LocalDatabase::open(database_path).await?;
+        Self::start_with_database(config, jobs_dir, database)
+    }
+
+    pub fn start_with_database(
+        config: AppConfig,
+        jobs_dir: impl Into<PathBuf>,
+        database: LocalDatabase,
+    ) -> Result<Self> {
         Self::with_workers_and_database(config, jobs_dir, 1, DEFAULT_QUEUE_CAPACITY, Some(database))
     }
 

@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-08-03_
+_最后更新：2026-08-04_
 
 ## 仓库组织
 
@@ -39,12 +39,12 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
-当前 Tauri 壳把 `LocalTaskService::start_persistent` 注册为应用状态：界面通过原生文件选择器获取媒体和 Whisper 模型路径，调用该服务创建日语转写任务，再从 SQLite 读取任务列表。媒体播放、字幕编辑与翻译是后续在同一边界上增加的命令，而不是直接由前端调用外部工具。
+当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService` 与 `LocalWorkspaceService`：前者负责创建、排队和同步后台任务，后者负责读取任务详情与保存字幕编辑。界面通过原生文件选择器获取媒体和 Whisper 模型路径；打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。
-- 任务元数据、字幕段、词表与编辑状态：桌面 MVP 使用 SQLite；`LocalDatabase` 的迁移和适配器独立于 Postgres 草稿。
+- 任务元数据、字幕段、词表与编辑状态：桌面 MVP 使用 SQLite；生成快照首次导入后，人工编辑字段以 SQLite 为准，后续快照同步不会覆盖具有编辑标记的字幕段。
 - 密钥：macOS Keychain（或同等系统密钥链），不写入任务 JSON。
 - `status.json`：保留为任务产物与故障恢复副本，不作为唯一长期数据库。
 
@@ -52,5 +52,6 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 - 任务目录以 UUID 命名，避免并发任务冲突。
 - 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。
+- SQLite 另外记录中文是否人工编辑；只修改日文时保留原译文并标记为过期，同时修改中文时视为已人工校正。
 - 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。
 - 外部工具和 API 是可替换基础设施：ASR、翻译和媒体处理分别通过应用层选项接入。CLI 默认日语识别、简中翻译，但不将该默认值写死到应用层或 DeepL 适配器。

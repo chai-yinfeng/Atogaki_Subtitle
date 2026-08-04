@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
@@ -39,6 +39,7 @@ pub struct LocalSubtitleSegmentRecord {
     pub ja_text: String,
     pub zh_text: Option<String>,
     pub source_edited: bool,
+    pub translation_edited: bool,
     pub translation_stale: bool,
 }
 
@@ -96,7 +97,7 @@ impl LocalDatabase {
                 status = excluded.status,
                 message = excluded.message,
                 error_message = excluded.error_message,
-                updated_at_unix = excluded.updated_at_unix",
+                updated_at_unix = MAX(local_jobs.updated_at_unix, excluded.updated_at_unix)",
         )
         .bind(&manifest.job_id)
         .bind(manifest.outputs.job_dir.display().to_string())
@@ -121,8 +122,14 @@ impl LocalDatabase {
         .await
         .context("failed to upsert local task")?;
 
-        self.replace_segments_in_transaction(&mut tx, &manifest.job_id, &snapshot.segments)
+        if !snapshot.segments.is_empty() {
+            self.merge_snapshot_segments_in_transaction(
+                &mut tx,
+                &manifest.job_id,
+                &snapshot.segments,
+            )
             .await?;
+        }
         tx.commit()
             .await
             .context("failed to commit local task transaction")
@@ -140,10 +147,23 @@ impl LocalDatabase {
         .context("failed to list local tasks")
     }
 
+    pub async fn get_job(&self, job_id: &str) -> Result<Option<LocalJobRecord>> {
+        sqlx::query_as::<_, LocalJobRecord>(
+            "SELECT job_id, storage_dir, input_path, render_output_path, status, message,
+                error_message, created_at_unix, updated_at_unix
+             FROM local_jobs
+             WHERE job_id = ?",
+        )
+        .bind(job_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to read local task")
+    }
+
     pub async fn list_segments(&self, job_id: &str) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
             "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
-                source_edited, translation_stale
+                source_edited, translation_edited, translation_stale
              FROM local_subtitle_segments
              WHERE job_id = ?
              ORDER BY segment_index ASC",
@@ -152,6 +172,94 @@ impl LocalDatabase {
         .fetch_all(&self.pool)
         .await
         .context("failed to list local subtitle segments")
+    }
+
+    pub async fn update_segment_text(
+        &self,
+        job_id: &str,
+        segment_id: &str,
+        ja_text: String,
+        zh_text: Option<String>,
+    ) -> Result<LocalSubtitleSegmentRecord> {
+        let ja_text = ja_text.trim().to_string();
+        if ja_text.is_empty() {
+            return Err(anyhow!("Japanese subtitle text cannot be empty"));
+        }
+        let zh_text = zh_text
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty());
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin local subtitle edit transaction")?;
+        let current = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
+            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+                source_edited, translation_edited, translation_stale
+             FROM local_subtitle_segments
+             WHERE job_id = ? AND id = ?",
+        )
+        .bind(job_id)
+        .bind(segment_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .context("failed to read local subtitle segment")?
+        .ok_or_else(|| anyhow!("subtitle segment not found: {segment_id}"))?;
+
+        let source_changed = current.ja_text != ja_text;
+        let translation_changed = current.zh_text != zh_text;
+        let source_edited = current.source_edited || source_changed;
+        let translation_edited = current.translation_edited || translation_changed;
+        let translation_stale = if translation_changed {
+            false
+        } else if source_changed {
+            current.zh_text.is_some()
+        } else {
+            current.translation_stale
+        };
+
+        sqlx::query(
+            "UPDATE local_subtitle_segments
+             SET ja_text = ?, zh_text = ?, source_edited = ?, translation_edited = ?,
+                 translation_stale = ?
+             WHERE job_id = ? AND id = ?",
+        )
+        .bind(&ja_text)
+        .bind(&zh_text)
+        .bind(source_edited)
+        .bind(translation_edited)
+        .bind(translation_stale)
+        .bind(job_id)
+        .bind(segment_id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to update local subtitle segment")?;
+        sqlx::query(
+            "UPDATE local_jobs
+             SET updated_at_unix = MAX(updated_at_unix, ?)
+             WHERE job_id = ?",
+        )
+        .bind(chrono::Utc::now().timestamp())
+        .bind(job_id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to update local task edit timestamp")?;
+
+        let updated = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
+            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+                source_edited, translation_edited, translation_stale
+             FROM local_subtitle_segments
+             WHERE job_id = ? AND id = ?",
+        )
+        .bind(job_id)
+        .bind(segment_id)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to reload local subtitle segment")?;
+        tx.commit()
+            .await
+            .context("failed to commit local subtitle edit")?;
+        Ok(updated)
     }
 
     pub async fn replace_segments(
@@ -184,28 +292,112 @@ impl LocalDatabase {
             .context("failed to clear local subtitle segments")?;
 
         for (index, segment) in segments.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO local_subtitle_segments (
-                    id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
-                    source_edited, translation_stale
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            insert_segment(
+                tx,
+                job_id,
+                index,
+                segment,
+                segment.ja_text.as_str(),
+                segment.zh_text.as_deref(),
+                segment.source_edited,
+                false,
+                segment.translation_stale,
             )
-            .bind(&segment.id)
-            .bind(job_id)
-            .bind(i64::try_from(index).context("subtitle index exceeds SQLite i64")?)
-            .bind(to_i64(segment.start_ms, "segment start")?)
-            .bind(to_i64(segment.end_ms, "segment end")?)
-            .bind(&segment.ja_text)
-            .bind(&segment.zh_text)
-            .bind(segment.source_edited)
-            .bind(segment.translation_stale)
-            .execute(&mut **tx)
-            .await
-            .context("failed to insert local subtitle segment")?;
+            .await?;
         }
 
         Ok(())
     }
+
+    async fn merge_snapshot_segments_in_transaction(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        job_id: &str,
+        segments: &[TranscriptSegment],
+    ) -> Result<()> {
+        let edited = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
+            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+                source_edited, translation_edited, translation_stale
+             FROM local_subtitle_segments
+             WHERE job_id = ? AND (source_edited = 1 OR translation_edited = 1)",
+        )
+        .bind(job_id)
+        .fetch_all(&mut **tx)
+        .await
+        .context("failed to read manually edited subtitle segments")?
+        .into_iter()
+        .map(|segment| (segment.id.clone(), segment))
+        .collect::<HashMap<_, _>>();
+
+        sqlx::query("DELETE FROM local_subtitle_segments WHERE job_id = ?")
+            .bind(job_id)
+            .execute(&mut **tx)
+            .await
+            .context("failed to refresh local subtitle segments")?;
+
+        for (index, segment) in segments.iter().enumerate() {
+            let previous = edited.get(&segment.id);
+            insert_segment(
+                tx,
+                job_id,
+                index,
+                segment,
+                previous
+                    .map(|segment| segment.ja_text.as_str())
+                    .unwrap_or(&segment.ja_text),
+                match previous {
+                    Some(segment) => segment.zh_text.as_deref(),
+                    None => segment.zh_text.as_deref(),
+                },
+                previous
+                    .map(|segment| segment.source_edited)
+                    .unwrap_or(segment.source_edited),
+                previous
+                    .map(|segment| segment.translation_edited)
+                    .unwrap_or(false),
+                previous
+                    .map(|segment| segment.translation_stale)
+                    .unwrap_or(segment.translation_stale),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_segment(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    index: usize,
+    segment: &TranscriptSegment,
+    ja_text: &str,
+    zh_text: Option<&str>,
+    source_edited: bool,
+    translation_edited: bool,
+    translation_stale: bool,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO local_subtitle_segments (
+            id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+            source_edited, translation_edited, translation_stale
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&segment.id)
+    .bind(job_id)
+    .bind(i64::try_from(index).context("subtitle index exceeds SQLite i64")?)
+    .bind(to_i64(segment.start_ms, "segment start")?)
+    .bind(to_i64(segment.end_ms, "segment end")?)
+    .bind(ja_text)
+    .bind(zh_text)
+    .bind(source_edited)
+    .bind(translation_edited)
+    .bind(translation_stale)
+    .execute(&mut **tx)
+    .await
+    .context("failed to insert local subtitle segment")?;
+    Ok(())
 }
 
 fn to_i64(value: u64, field: &str) -> Result<i64> {
@@ -232,7 +424,8 @@ mod tests {
         let job = Job::create_in(&root).unwrap();
         let mut manifest = JobManifest::new(&job, None, None);
         manifest.mark(JobStatus::Queued);
-        let segment = TranscriptSegment::new(0, 1_000, "テスト".to_string());
+        let mut segment = TranscriptSegment::new(0, 1_000, "テスト".to_string());
+        segment.set_translation(Some("测试".to_string()));
         let database = LocalDatabase::open(root.join("atogaki.sqlite"))
             .await
             .unwrap();
@@ -254,6 +447,48 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].id, segment.id);
         assert_eq!(segments[0].ja_text, "テスト");
+
+        let stale = database
+            .update_segment_text(
+                &manifest.job_id,
+                &segment.id,
+                "手動修正".to_string(),
+                Some("测试".to_string()),
+            )
+            .await
+            .unwrap();
+        assert!(stale.source_edited);
+        assert!(!stale.translation_edited);
+        assert!(stale.translation_stale);
+
+        let edited = database
+            .update_segment_text(
+                &manifest.job_id,
+                &segment.id,
+                "手動修正".to_string(),
+                Some("人工翻译".to_string()),
+            )
+            .await
+            .unwrap();
+        assert!(edited.source_edited);
+        assert!(edited.translation_edited);
+        assert!(!edited.translation_stale);
+
+        let mut regenerated = segment.clone();
+        regenerated.ja_text = "再生成された文".to_string();
+        regenerated.zh_text = Some("重新生成的翻译".to_string());
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest,
+                segments: vec![regenerated],
+            })
+            .await
+            .unwrap();
+        let preserved = database.list_segments(&edited.job_id).await.unwrap();
+        assert_eq!(preserved[0].ja_text, "手動修正");
+        assert_eq!(preserved[0].zh_text.as_deref(), Some("人工翻译"));
+        assert!(preserved[0].source_edited);
+        assert!(preserved[0].translation_edited);
 
         drop(database);
         fs::remove_dir_all(root).unwrap();

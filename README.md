@@ -90,6 +90,11 @@ After the frontend build, launch the desktop application directly:
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
 
+The desktop home screen can submit transcription jobs. Select a completed task to open the
+playback workspace, follow the highlighted subtitle, click a timecode to seek, and save Japanese
+or Chinese edits to SQLite. See `docs/desktop-testing.md` for the manual smoke-test checklist and
+current codec limitations.
+
 Start the Web API shell:
 
 ```bash

@@ -11,5 +11,5 @@ tauri-build = "2.6.3"
 [dependencies]
 atogaki-subtitle = { path = ".." }
 serde = { version = "1", features = ["derive"] }
-tauri = "2.11.5"
+tauri = { version = "2.11.5", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2.7.2"
