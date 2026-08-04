@@ -199,6 +199,17 @@ app.innerHTML = `
         </section>
       </div>
     </dialog>
+    <dialog id="rename-job-dialog" class="rename-job-dialog">
+      <form id="rename-job-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">TASK NAME</p><h2>重命名任务</h2></div>
+          <button id="cancel-rename-job" type="button" class="secondary">取消</button>
+        </div>
+        <label>任务名称<input id="rename-job-input" maxlength="100" autocomplete="off" /></label>
+        <p>名称只用于列表显示；留空会恢复为媒体文件名。</p>
+        <div class="rename-job-footer"><span id="rename-job-message" role="status"></span><button type="submit">保存名称</button></div>
+      </form>
+    </dialog>
   </main>
 `;
 
@@ -234,6 +245,10 @@ const glossaryName = document.querySelector<HTMLInputElement>("#glossary-name");
 const glossaryTerms = document.querySelector<HTMLDivElement>("#glossary-terms");
 const glossaryMessage = document.querySelector<HTMLSpanElement>("#glossary-message");
 const deleteGlossaryButton = document.querySelector<HTMLButtonElement>("#delete-glossary");
+const renameJobDialog = document.querySelector<HTMLDialogElement>("#rename-job-dialog");
+const renameJobForm = document.querySelector<HTMLFormElement>("#rename-job-form");
+const renameJobInput = document.querySelector<HTMLInputElement>("#rename-job-input");
+const renameJobMessage = document.querySelector<HTMLSpanElement>("#rename-job-message");
 
 let refreshing = false;
 let activeDetail: JobDetail | null = null;
@@ -243,6 +258,7 @@ let workspaceActionBusy = false;
 let glossaries: Glossary[] = [];
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
+let renamingJob: LocalJob | null = null;
 let translationStatus: TranslationStatus = {
   provider: "DeepL",
   configured: false,
@@ -386,7 +402,7 @@ function renderJobs(jobs: LocalJob[]): void {
   jobList.querySelectorAll<HTMLButtonElement>("[data-rename-job]").forEach((button) => {
     button.addEventListener("click", () => {
       const job = jobs.find((item) => item.job_id === button.dataset.renameJob);
-      if (job) void renameJob(job);
+      if (job) renameJob(job);
     });
   });
   jobList.querySelectorAll<HTMLButtonElement>("[data-delete-job]").forEach((button) => {
@@ -401,19 +417,29 @@ function matchesTerminalStatus(status: string): boolean {
   return status === "done" || status === "failed";
 }
 
-async function renameJob(job: LocalJob): Promise<void> {
-  const nextName = window.prompt("任务名称（留空恢复为媒体文件名）", job.display_name ?? displayName(job));
-  if (nextName === null) return;
-  if (jobManagementMessage) jobManagementMessage.textContent = "正在保存任务名称…";
+function renameJob(job: LocalJob): void {
+  renamingJob = job;
+  if (renameJobInput) renameJobInput.value = job.display_name ?? displayName(job);
+  if (renameJobMessage) renameJobMessage.textContent = "";
+  renameJobDialog?.showModal();
+  renameJobInput?.focus();
+  renameJobInput?.select();
+}
+
+async function saveRenamedJob(): Promise<void> {
+  if (!renamingJob || !renameJobInput) return;
+  if (renameJobMessage) renameJobMessage.textContent = "正在保存…";
   try {
     await invoke<LocalJob>("rename_job", {
-      jobId: job.job_id,
-      displayName: nextName.trim() || null,
+      jobId: renamingJob.job_id,
+      displayName: renameJobInput.value.trim() || null,
     });
     if (jobManagementMessage) jobManagementMessage.textContent = "任务名称已保存。";
+    renameJobDialog?.close();
+    renamingJob = null;
     await refresh();
   } catch (error) {
-    if (jobManagementMessage) jobManagementMessage.textContent = `重命名失败：${String(error)}`;
+    if (renameJobMessage) renameJobMessage.textContent = `保存失败：${String(error)}`;
   }
 }
 
@@ -1050,6 +1076,18 @@ document.querySelector<HTMLButtonElement>("#preview-glossary")?.addEventListener
 workspaceGlossary?.addEventListener("change", () => {
   clearGlossaryPreview();
   updateTranslationControls();
+});
+renameJobForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveRenamedJob();
+});
+document.querySelector<HTMLButtonElement>("#cancel-rename-job")?.addEventListener("click", () => {
+  renamingJob = null;
+  renameJobDialog?.close();
+});
+renameJobDialog?.addEventListener("close", () => {
+  renamingJob = null;
+  if (renameJobMessage) renameJobMessage.textContent = "";
 });
 
 async function chooseFile(kind: "media" | "model"): Promise<void> {
