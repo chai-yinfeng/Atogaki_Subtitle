@@ -1,5 +1,4 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import "./styles.css";
 
 type LocalJob = {
@@ -53,9 +52,9 @@ app.innerHTML = `
       <section class="create-task" aria-labelledby="create-heading">
         <div class="section-heading"><h2 id="create-heading">新建日语转写</h2><span>本地执行</span></div>
         <form id="task-form">
-          <label>媒体文件<input id="media-path" required readonly placeholder="选择音频或视频文件" /></label>
+          <label>媒体文件<input id="media-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
-          <label>Whisper 模型<input id="model-path" required readonly placeholder="选择 ggml 模型文件" /></label>
+          <label>Whisper 模型<input id="model-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-model" type="button" class="secondary">选择模型</button>
           <div class="form-footer"><span id="task-message" role="status"></span><button id="submit-task" type="submit">开始转写</button></div>
         </form>
@@ -414,14 +413,7 @@ async function chooseFile(kind: "media" | "model"): Promise<void> {
   if (button) button.disabled = true;
   if (taskMessage) taskMessage.textContent = kind === "media" ? "正在打开媒体选择器…" : "正在打开模型选择器…";
   try {
-    const path = await open({
-      multiple: false,
-      directory: false,
-      filters:
-        kind === "media"
-          ? [{ name: "媒体", extensions: ["mp3", "m4a", "wav", "mp4", "mkv", "webm", "mov"] }]
-          : [{ name: "Whisper 模型", extensions: ["bin"] }],
-    });
+    const path = await invoke<string | null>(kind === "media" ? "pick_media_file" : "pick_model_file");
     if (typeof path === "string") {
       (kind === "media" ? mediaPath : modelPath)!.value = path;
       if (taskMessage) taskMessage.textContent = kind === "media" ? "已选择媒体文件。" : "已选择 Whisper 模型。";

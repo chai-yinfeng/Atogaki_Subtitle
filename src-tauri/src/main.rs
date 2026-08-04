@@ -11,6 +11,7 @@ use atogaki_subtitle::{
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 struct DesktopState {
     data_dir: PathBuf,
@@ -115,6 +116,30 @@ async fn update_subtitle(
 }
 
 #[tauri::command]
+async fn pick_media_file(app: AppHandle) -> Result<Option<String>, String> {
+    pick_local_file(
+        &app,
+        "选择音频或视频文件",
+        "媒体",
+        &["mp3", "m4a", "wav", "mp4", "mkv", "webm", "mov"],
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn pick_model_file(app: AppHandle) -> Result<Option<String>, String> {
+    pick_local_file(
+        &app,
+        "选择 Whisper 模型",
+        "Whisper 模型",
+        &["bin"],
+        model_picker_directory(&app),
+    )
+    .await
+}
+
+#[tauri::command]
 fn data_directory(state: State<'_, DesktopState>) -> String {
     state.data_dir.display().to_string()
 }
@@ -127,6 +152,55 @@ fn allow_playback_file(app: &AppHandle, path: Option<&str>) -> Result<Option<Str
         .allow_file(&path)
         .map_err(|error| format!("failed to allow local media playback: {error}"))?;
     Ok(Some(path.display().to_string()))
+}
+
+async fn pick_local_file(
+    app: &AppHandle,
+    title: &str,
+    filter_name: &str,
+    extensions: &[&str],
+    initial_directory: Option<PathBuf>,
+) -> Result<Option<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let mut picker = app
+        .dialog()
+        .file()
+        .set_title(title)
+        .add_filter(filter_name, extensions);
+    if let Some(directory) = initial_directory {
+        picker = picker.set_directory(directory);
+    }
+
+    // The JavaScript dialog command uses blocking_pick_file. On macOS the native
+    // panel must stay attached to the main event loop, so use the callback API here.
+    picker.pick_file(move |selection| {
+        let _ = sender.send(selection);
+    });
+
+    receiver
+        .await
+        .map_err(|_| "文件选择器意外关闭，请直接粘贴文件路径后重试。".to_owned())?
+        .map(|selection| {
+            selection
+                .into_path()
+                .map(|path| path.display().to_string())
+                .map_err(|error| format!("无法读取所选文件路径：{error}"))
+        })
+        .transpose()
+}
+
+fn model_picker_directory(app: &AppHandle) -> Option<PathBuf> {
+    std::env::var_os("ATOGAKI_WHISPER_MODEL")
+        .map(PathBuf::from)
+        .and_then(|path| path.parent().map(PathBuf::from))
+        .filter(|path| path.is_dir())
+        .or_else(|| {
+            app.path()
+                .home_dir()
+                .ok()
+                .map(|home| home.join("Models"))
+                .filter(|path| path.is_dir())
+        })
 }
 
 fn main() {
@@ -165,6 +239,8 @@ fn main() {
             data_directory,
             get_job_detail,
             list_jobs,
+            pick_media_file,
+            pick_model_file,
             submit_transcription,
             update_subtitle
         ])
