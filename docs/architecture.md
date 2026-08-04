@@ -39,7 +39,7 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
-当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService` 与 `LocalWorkspaceService`：前者负责创建、排队和同步后台任务，后者负责读取任务详情、保存编辑、调用 DeepL 翻译以及从 SQLite 当前状态导出字幕。界面通过原生文件选择器获取媒体和 Whisper 模型路径；打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
+当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService` 与 `LocalWorkspaceService`：前者负责创建、排队和同步后台任务，后者负责读取任务详情、保存编辑、调用 DeepL 翻译以及从 SQLite 当前状态导出字幕。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
 `LocalGlossaryService` 管理 SQLite 词表、差异预览和对工作区的应用。新任务选择词表后，`LocalTaskService` 会在排队前把当时的词条冻结为任务目录中的 `recognition-glossary.txt`，并把路径交给 Whisper。提示词直接进入初始 prompt；`日语读音/误识别 => 规范写法` 会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
 
@@ -55,6 +55,7 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 ## 核心数据约定
 
 - 任务目录以 UUID 命名，避免并发任务冲突。
+- 新任务把 Whisper/VAD 模型路径、VAD 阈值、分段和运行选项写入 `recognition-options.json`。该文件是识别结果的可复现记录；既有任务不反向补造当时未记录的参数。
 - 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。
 - SQLite 另外记录中文是否人工编辑；只修改日文时保留原译文并标记为过期，同时修改中文时视为已人工校正。
 - SQLite 词表是可编辑主数据；每个转写任务使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新日文并把已有中文标记为过期。

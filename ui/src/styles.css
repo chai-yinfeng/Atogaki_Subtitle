@@ -27,6 +27,10 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .create-task form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
 .create-task label { display: grid; gap: 6px; color: #5f625b; font-size: 13px; }
 .create-task input, .create-task select { width: 100%; border: 1px solid #d3ccbd; border-radius: 8px; padding: 10px; color: #30332d; background: #fffdf7; }
+.vad-setting { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #e1dacd; padding-top: 12px; }
+.vad-setting label { display: flex; align-items: center; gap: 8px; color: #31584e; font-weight: 700; }
+.vad-setting input { width: auto; accent-color: #2e5d52; }
+.vad-setting span { color: #77796f; font-size: 12px; text-align: right; }
 .secondary { align-self: end; color: #2e5d52; background: #e2ece5; }
 .secondary:hover { background: #cfe0d6; }
 .form-footer { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 8px; }

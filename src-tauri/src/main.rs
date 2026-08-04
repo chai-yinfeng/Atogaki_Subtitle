@@ -30,7 +30,15 @@ struct DesktopState {
 struct SubmitTranscriptionRequest {
     input_path: String,
     model_path: String,
+    vad_model_path: Option<String>,
     glossary_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopRecognitionDefaults {
+    whisper_model_path: Option<String>,
+    vad_model_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,13 +102,14 @@ async fn submit_transcription(
     state: State<'_, DesktopState>,
     request: SubmitTranscriptionRequest,
 ) -> Result<String, String> {
+    let transcription = desktop_transcription_options(&request)?;
     let snapshot = state
         .task_service
         .submit_transcription_with_glossary(
             TranscribeSpec {
                 input: request.input_path.into(),
                 output_dir: None,
-                transcription: TranscriptionOptions::japanese(request.model_path.into()),
+                transcription,
             },
             request.glossary_id.as_deref(),
         )
@@ -299,6 +308,27 @@ async fn pick_model_file(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+async fn pick_vad_model_file(app: AppHandle) -> Result<Option<String>, String> {
+    pick_local_file(
+        &app,
+        "选择 Silero VAD 模型",
+        "VAD 模型",
+        &["bin"],
+        vad_model_picker_directory(&app),
+    )
+    .await
+}
+
+#[tauri::command]
+fn recognition_defaults(app: AppHandle) -> DesktopRecognitionDefaults {
+    DesktopRecognitionDefaults {
+        whisper_model_path: configured_file("ATOGAKI_WHISPER_MODEL")
+            .map(|path| path.display().to_string()),
+        vad_model_path: default_vad_model(&app).map(|path| path.display().to_string()),
+    }
+}
+
+#[tauri::command]
 fn data_directory(state: State<'_, DesktopState>) -> String {
     state.data_dir.display().to_string()
 }
@@ -362,6 +392,57 @@ fn model_picker_directory(app: &AppHandle) -> Option<PathBuf> {
         })
 }
 
+fn vad_model_picker_directory(app: &AppHandle) -> Option<PathBuf> {
+    configured_file("ATOGAKI_VAD_MODEL")
+        .and_then(|path| path.parent().map(PathBuf::from))
+        .or_else(|| model_picker_directory(app))
+}
+
+fn configured_file(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+}
+
+fn default_vad_model(app: &AppHandle) -> Option<PathBuf> {
+    configured_file("ATOGAKI_VAD_MODEL").or_else(|| {
+        let directory = model_picker_directory(app)?;
+        let mut candidates = std::fs::read_dir(directory)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_file()
+                    && path.extension().and_then(|extension| extension.to_str()) == Some("bin")
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.to_ascii_lowercase().contains("silero"))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort();
+        candidates.into_iter().next()
+    })
+}
+
+fn desktop_transcription_options(
+    request: &SubmitTranscriptionRequest,
+) -> Result<TranscriptionOptions, String> {
+    let mut options = TranscriptionOptions::japanese(request.model_path.trim().into());
+    options.vad_model = request
+        .vad_model_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+    if let Some(path) = options.vad_model.as_deref()
+        && !path.is_file()
+    {
+        return Err(format!("VAD 模型不存在：{}", path.display()));
+    }
+    Ok(options)
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -409,8 +490,10 @@ fn main() {
             list_jobs,
             pick_media_file,
             pick_model_file,
+            pick_vad_model_file,
             apply_glossary_to_workspace,
             preview_glossary_application,
+            recognition_defaults,
             rename_job,
             save_glossary,
             submit_transcription,
@@ -421,4 +504,51 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Atogaki desktop application");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{SubmitTranscriptionRequest, desktop_transcription_options};
+
+    #[test]
+    fn desktop_request_keeps_vad_disabled_when_no_model_is_selected() {
+        let request = SubmitTranscriptionRequest {
+            input_path: "audio.wav".to_string(),
+            model_path: "whisper.bin".to_string(),
+            vad_model_path: None,
+            glossary_id: None,
+        };
+
+        let options = desktop_transcription_options(&request).unwrap();
+
+        assert!(options.vad_model.is_none());
+    }
+
+    #[test]
+    fn desktop_request_enables_the_selected_vad_model() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-vad-test-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let vad_model = root.join("ggml-silero.bin");
+        fs::write(&vad_model, b"test model placeholder").unwrap();
+        let request = SubmitTranscriptionRequest {
+            input_path: "audio.wav".to_string(),
+            model_path: "whisper.bin".to_string(),
+            vad_model_path: Some(vad_model.display().to_string()),
+            glossary_id: None,
+        };
+
+        let options = desktop_transcription_options(&request).unwrap();
+
+        assert_eq!(options.vad_model.as_deref(), Some(vad_model.as_path()));
+        fs::remove_dir_all(root).unwrap();
+    }
 }

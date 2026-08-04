@@ -155,6 +155,7 @@ impl LocalTaskService {
             spec.transcription.glossary = Some(snapshot_path);
         }
         spec.output_dir = Some(job.dir.clone());
+        job.write_recognition_options(&spec.transcription)?;
         self.enqueue(
             job.clone(),
             QueuedTask::Transcribe {
@@ -171,6 +172,7 @@ impl LocalTaskService {
             .create_queued_job(Some(spec.input.clone()), spec.render_output.clone())
             .await?;
         spec.output_dir = Some(job.dir.clone());
+        job.write_recognition_options(&spec.transcription)?;
         self.enqueue(
             job.clone(),
             QueuedTask::Process {
@@ -463,12 +465,15 @@ mod tests {
             database: Some(database.clone()),
         };
 
+        let vad_model = root.join("ggml-silero.bin");
+        let mut transcription = TranscriptionOptions::japanese(root.join("model.bin"));
+        transcription.vad_model = Some(vad_model.clone());
         let snapshot = service
             .submit_transcription_with_glossary(
                 TranscribeSpec {
                     input: root.join("input.mp3"),
                     output_dir: None,
-                    transcription: TranscriptionOptions::japanese(root.join("model.bin")),
+                    transcription,
                 },
                 Some(&glossary.glossary.id),
             )
@@ -487,6 +492,20 @@ mod tests {
                 .unwrap()
                 .contains("ナブナ => n-buna")
         );
+        let persisted_options: TranscriptionOptions = serde_json::from_slice(
+            &fs::read(
+                root.join("jobs")
+                    .join(&snapshot.manifest.job_id)
+                    .join("recognition-options.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            persisted_options.vad_model.as_deref(),
+            Some(vad_model.as_path())
+        );
+        assert_eq!(persisted_options.vad_max_speech_s, 8);
 
         drop(service);
         drop(database);

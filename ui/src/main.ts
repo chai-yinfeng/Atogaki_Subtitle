@@ -82,6 +82,11 @@ type TranslationStatus = {
   target_language: string;
 };
 
+type RecognitionDefaults = {
+  whisperModelPath: string | null;
+  vadModelPath: string | null;
+};
+
 type SubtitleExport = {
   ja_srt: string;
   zh_srt: string;
@@ -115,6 +120,12 @@ app.innerHTML = `
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
           <label>Whisper 模型<input id="model-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-model" type="button" class="secondary">选择模型</button>
+          <div class="vad-setting">
+            <label><input id="vad-enabled" type="checkbox" checked />启用语音活动检测（推荐）</label>
+            <span>先过滤静音、音乐和环境声，再交给 Whisper；使用 Silero VAD 默认参数。</span>
+          </div>
+          <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
+          <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div class="form-footer"><span id="task-message" role="status"></span><button id="submit-task" type="submit">开始转写</button></div>
@@ -221,6 +232,8 @@ const jobManagementMessage = document.querySelector<HTMLParagraphElement>("#job-
 const dataPath = document.querySelector<HTMLParagraphElement>("#data-path");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
+const vadEnabled = document.querySelector<HTMLInputElement>("#vad-enabled");
+const vadModelPath = document.querySelector<HTMLInputElement>("#vad-model-path");
 const taskGlossary = document.querySelector<HTMLSelectElement>("#task-glossary");
 const taskMessage = document.querySelector<HTMLSpanElement>("#task-message");
 const submitButton = document.querySelector<HTMLButtonElement>("#submit-task");
@@ -1090,39 +1103,61 @@ renameJobDialog?.addEventListener("close", () => {
   if (renameJobMessage) renameJobMessage.textContent = "";
 });
 
-async function chooseFile(kind: "media" | "model"): Promise<void> {
+async function chooseFile(kind: "media" | "model" | "vad"): Promise<void> {
+  const buttonSelector = kind === "media" ? "#choose-media" : kind === "model" ? "#choose-model" : "#choose-vad-model";
   const button = document.querySelector<HTMLButtonElement>(
-    kind === "media" ? "#choose-media" : "#choose-model",
+    buttonSelector,
   );
   if (button) button.disabled = true;
-  if (taskMessage) taskMessage.textContent = kind === "media" ? "正在打开媒体选择器…" : "正在打开模型选择器…";
+  const label = kind === "media" ? "媒体" : kind === "model" ? "Whisper 模型" : "VAD 模型";
+  if (taskMessage) taskMessage.textContent = `正在打开${label}选择器…`;
   try {
-    const path = await invoke<string | null>(kind === "media" ? "pick_media_file" : "pick_model_file");
+    const command = kind === "media" ? "pick_media_file" : kind === "model" ? "pick_model_file" : "pick_vad_model_file";
+    const path = await invoke<string | null>(command);
     if (typeof path === "string") {
-      (kind === "media" ? mediaPath : modelPath)!.value = path;
-      if (taskMessage) taskMessage.textContent = kind === "media" ? "已选择媒体文件。" : "已选择 Whisper 模型。";
+      const input = kind === "media" ? mediaPath : kind === "model" ? modelPath : vadModelPath;
+      if (input) input.value = path;
+      if (taskMessage) taskMessage.textContent = `已选择${label}。`;
     } else if (taskMessage) {
       taskMessage.textContent = "已取消选择。";
     }
   } catch (error) {
     if (taskMessage) taskMessage.textContent = `无法打开文件选择器：${String(error)}`;
   } finally {
-    if (button) button.disabled = false;
+    if (button) button.disabled = kind === "vad" && !vadEnabled?.checked;
   }
+}
+
+function syncVadControls(): void {
+  const enabled = vadEnabled?.checked ?? false;
+  if (vadModelPath) {
+    vadModelPath.disabled = !enabled;
+    vadModelPath.required = enabled;
+  }
+  const chooseButton = document.querySelector<HTMLButtonElement>("#choose-vad-model");
+  if (chooseButton) chooseButton.disabled = !enabled;
 }
 
 document.querySelector<HTMLButtonElement>("#choose-media")?.addEventListener("click", () => void chooseFile("media"));
 document.querySelector<HTMLButtonElement>("#choose-model")?.addEventListener("click", () => void chooseFile("model"));
+document.querySelector<HTMLButtonElement>("#choose-vad-model")?.addEventListener("click", () => void chooseFile("vad"));
+vadEnabled?.addEventListener("change", syncVadControls);
 
 document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!mediaPath?.value || !modelPath?.value || !taskMessage || !submitButton) return;
+  if (vadEnabled?.checked && !vadModelPath?.value.trim()) {
+    taskMessage.textContent = "启用 VAD 时需要选择 Silero VAD 模型。";
+    vadModelPath?.focus();
+    return;
+  }
   submitButton.disabled = true;
   taskMessage.textContent = "正在创建本地任务…";
   void invoke<string>("submit_transcription", {
     request: {
       inputPath: mediaPath.value,
       modelPath: modelPath.value,
+      vadModelPath: vadEnabled?.checked ? vadModelPath?.value.trim() || null : null,
       glossaryId: taskGlossary?.value || null,
     },
   })
@@ -1137,6 +1172,16 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
       submitButton.disabled = false;
     });
 });
+
+syncVadControls();
+void invoke<RecognitionDefaults>("recognition_defaults")
+  .then((defaults) => {
+    if (modelPath && !modelPath.value && defaults.whisperModelPath) modelPath.value = defaults.whisperModelPath;
+    if (vadModelPath && !vadModelPath.value && defaults.vadModelPath) vadModelPath.value = defaults.vadModelPath;
+  })
+  .catch(() => {
+    // Manual path entry and the native pickers remain available.
+  });
 
 void invoke<string>("data_directory")
   .then((path) => {

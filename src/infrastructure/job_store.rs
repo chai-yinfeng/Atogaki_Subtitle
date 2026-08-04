@@ -7,7 +7,10 @@ use anyhow::{Context, Result};
 use uuid::Uuid;
 
 use crate::{
-    application::job_manifest::{JobManifest, job_id_from_dir},
+    application::{
+        TranscriptionOptions,
+        job_manifest::{JobManifest, job_id_from_dir},
+    },
     domain::TranscriptSegment,
 };
 
@@ -22,6 +25,7 @@ pub struct Job {
     pub bilingual_srt: PathBuf,
     pub bilingual_ass: PathBuf,
     pub status_json: PathBuf,
+    pub recognition_options_json: PathBuf,
 }
 
 impl Job {
@@ -57,6 +61,16 @@ impl Job {
         let data = serde_json::to_vec_pretty(manifest)?;
         fs::write(&self.status_json, data)
             .with_context(|| format!("failed to write {}", self.status_json.display()))
+    }
+
+    pub fn write_recognition_options(&self, options: &TranscriptionOptions) -> Result<()> {
+        let data = serde_json::to_vec_pretty(options)?;
+        fs::write(&self.recognition_options_json, data).with_context(|| {
+            format!(
+                "failed to write {}",
+                self.recognition_options_json.display()
+            )
+        })
     }
 
     pub fn read_manifest_if_exists(&self) -> Result<Option<JobManifest>> {
@@ -96,6 +110,7 @@ impl Job {
             bilingual_srt: dir.join("bilingual.srt"),
             bilingual_ass: dir.join("bilingual.ass"),
             status_json: dir.join("status.json"),
+            recognition_options_json: dir.join("recognition-options.json"),
             dir,
         }
     }

@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 /// Options for an ASR run, independent from a particular user interface.
 ///
 /// CLI, desktop UI, and future automation callers each translate their own
 /// input representation into this type before invoking the application layer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionOptions {
     pub model: PathBuf,
     pub source_language: String,
