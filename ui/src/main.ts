@@ -123,12 +123,12 @@ let activeMedia: HTMLMediaElement | null = null;
 let activeSegmentId: string | null = null;
 
 function displayName(job: LocalJob): string {
-  const source = job.input_path?.split("/").at(-1);
+  const source = job.input_path?.split("/").pop();
   return source || job.job_id;
 }
 
 function statusLabel(status: string): string {
-  return status.replaceAll("_", " ");
+  return status.split("_").join(" ");
 }
 
 function escapeHtml(value: string): string {
