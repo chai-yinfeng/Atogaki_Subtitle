@@ -36,6 +36,15 @@ pub async fn translate_texts(
     options: &TranslationOptions,
     texts: &[String],
 ) -> Result<Vec<String>> {
+    translate_texts_with_context(auth_key, options, texts, None).await
+}
+
+pub async fn translate_texts_with_context(
+    auth_key: &str,
+    options: &TranslationOptions,
+    texts: &[String],
+    context: Option<&str>,
+) -> Result<Vec<String>> {
     if texts.is_empty() {
         return Ok(Vec::new());
     }
@@ -43,7 +52,15 @@ pub async fn translate_texts(
         .timeout(Duration::from_secs(60))
         .build()
         .context("failed to build DeepL client")?;
-    translate_lines(&client, deepl_endpoint(auth_key), auth_key, options, texts).await
+    translate_lines(
+        &client,
+        deepl_endpoint(auth_key),
+        auth_key,
+        options,
+        texts,
+        context,
+    )
+    .await
 }
 
 async fn translate_lines(
@@ -52,20 +69,13 @@ async fn translate_lines(
     auth_key: &str,
     options: &TranslationOptions,
     texts: &[String],
+    context: Option<&str>,
 ) -> Result<Vec<String>> {
     const BATCH_SIZE: usize = 12;
     let mut out = Vec::with_capacity(texts.len());
 
     for batch in texts.chunks(BATCH_SIZE) {
-        let mut body = format!(
-            "source_lang={}&target_lang={}",
-            urlencoding::encode(&options.source_language.to_ascii_uppercase()),
-            urlencoding::encode(&options.target_language.to_ascii_uppercase())
-        );
-        for text in batch {
-            body.push_str("&text=");
-            body.push_str(&urlencoding::encode(text));
-        }
+        let body = translation_form(options, batch, context);
 
         let resp = client
             .post(endpoint)
@@ -100,6 +110,27 @@ async fn translate_lines(
     Ok(out)
 }
 
+fn translation_form(
+    options: &TranslationOptions,
+    texts: &[String],
+    context: Option<&str>,
+) -> String {
+    let mut body = format!(
+        "source_lang={}&target_lang={}",
+        urlencoding::encode(&options.source_language.to_ascii_uppercase()),
+        urlencoding::encode(&options.target_language.to_ascii_uppercase())
+    );
+    for text in texts {
+        body.push_str("&text=");
+        body.push_str(&urlencoding::encode(text));
+    }
+    if let Some(context) = context.map(str::trim).filter(|context| !context.is_empty()) {
+        body.push_str("&context=");
+        body.push_str(&urlencoding::encode(context));
+    }
+    body
+}
+
 fn deepl_endpoint(auth_key: &str) -> &'static str {
     if auth_key.trim().ends_with(":fx") {
         "https://api-free.deepl.com/v2/translate"
@@ -110,7 +141,7 @@ fn deepl_endpoint(auth_key: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{deepl_endpoint, translate_texts};
+    use super::{deepl_endpoint, translate_texts, translation_form};
     use crate::application::TranslationOptions;
 
     #[test]
@@ -123,6 +154,30 @@ mod tests {
             deepl_endpoint("pro-key"),
             "https://api.deepl.com/v2/translate"
         );
+    }
+
+    #[test]
+    fn adds_one_shared_context_to_a_translation_request() {
+        let body = translation_form(
+            &TranslationOptions::default(),
+            &["一行目".to_string(), "二行目".to_string()],
+            Some("前の話\n後の話"),
+        );
+
+        assert_eq!(body.matches("&text=").count(), 2);
+        assert_eq!(body.matches("&context=").count(), 1);
+        assert!(body.contains("%E5%89%8D%E3%81%AE%E8%A9%B1%0A%E5%BE%8C%E3%81%AE%E8%A9%B1"));
+    }
+
+    #[test]
+    fn omits_blank_translation_context() {
+        let body = translation_form(
+            &TranslationOptions::default(),
+            &["一行目".to_string()],
+            Some("  \n"),
+        );
+
+        assert!(!body.contains("&context="));
     }
 
     #[tokio::test]

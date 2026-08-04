@@ -937,7 +937,7 @@ function addGlossaryTermRow(
   group.placeholder = "内容包名称";
   const kind = document.createElement("select");
   kind.className = "term-kind";
-  kind.innerHTML = `<option value="prompt">提示词</option><option value="correction">修正规则</option>`;
+  kind.innerHTML = `<option value="prompt">提示词</option><option value="correction">提示＋修正</option>`;
   kind.value = targetText ? "correction" : "prompt";
   const source = document.createElement("input");
   source.className = "term-source";
@@ -964,7 +964,11 @@ function addGlossaryTermRow(
   const syncScope = (): void => {
     const correctionOnly = scope.value === "correction_only";
     const content = scope.value === "content";
+    const correctionOption = kind.querySelector<HTMLOptionElement>('option[value="correction"]');
     row.dataset.promptScope = scope.value;
+    if (correctionOption) {
+      correctionOption.textContent = correctionOnly ? "修正规则" : "提示＋修正";
+    }
     group.disabled = !content;
     group.placeholder = content ? "例如：幻燈・夏の肖像" : "当前类型不使用内容包";
     if (!content) group.value = "";

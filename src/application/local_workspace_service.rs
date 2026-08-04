@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
@@ -15,6 +15,10 @@ use crate::{
         },
     },
 };
+
+const TRANSLATION_BATCH_SIZE: usize = 12;
+const TRANSLATION_CONTEXT_WINDOW_MS: i64 = 30_000;
+const TRANSLATION_CONTEXT_MAX_CHARS: usize = 2_000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalWorkspaceJob {
@@ -103,12 +107,15 @@ impl LocalWorkspaceService {
         segment_id: &str,
     ) -> Result<LocalSubtitleSegmentRecord> {
         let _guard = self.translation_lock.lock().await;
-        let segment = self
-            .database
-            .get_segment(job_id, segment_id)
-            .await?
+        let context_segments = self.database.list_segments(job_id).await?;
+        let segment = context_segments
+            .iter()
+            .find(|segment| segment.id == segment_id)
+            .cloned()
             .ok_or_else(|| anyhow!("subtitle segment not found: {segment_id}"))?;
-        let translated = self.translate_records(job_id, &[segment]).await?;
+        let translated = self
+            .translate_records(job_id, &context_segments, &[segment])
+            .await?;
         translated
             .into_iter()
             .find(|segment| segment.id == segment_id)
@@ -123,7 +130,7 @@ impl LocalWorkspaceService {
                 "cannot translate a workspace without subtitle segments"
             ));
         }
-        self.translate_records(job_id, &segments).await
+        self.translate_records(job_id, &segments, &segments).await
     }
 
     pub async fn export_subtitles(&self, job_id: &str) -> Result<LocalSubtitleExport> {
@@ -176,32 +183,95 @@ impl LocalWorkspaceService {
     async fn translate_records(
         &self,
         job_id: &str,
-        segments: &[LocalSubtitleSegmentRecord],
+        context_segments: &[LocalSubtitleSegmentRecord],
+        segments_to_translate: &[LocalSubtitleSegmentRecord],
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         let auth_key = self.deepl_auth_key.as_deref().ok_or_else(|| {
             anyhow!("DeepL API key missing. Set DEEPL_AUTH_KEY and restart Atogaki")
         })?;
-        let source_texts = segments
-            .iter()
-            .map(|segment| segment.ja_text.clone())
-            .collect::<Vec<_>>();
-        let translated =
-            deepl::translate_texts(auth_key, &TranslationOptions::default(), &source_texts)
-                .await
-                .context("failed to translate SQLite subtitle workspace")?;
-        let updates = segments
-            .iter()
-            .zip(translated)
-            .map(|(segment, translated_text)| LocalMachineTranslation {
-                segment_id: segment.id.clone(),
-                source_text: segment.ja_text.clone(),
-                translated_text,
-            })
-            .collect::<Vec<_>>();
+        let options = TranslationOptions::default();
+        let mut updates = Vec::with_capacity(segments_to_translate.len());
+        for batch in segments_to_translate.chunks(TRANSLATION_BATCH_SIZE) {
+            let source_texts = batch
+                .iter()
+                .map(|segment| segment.ja_text.clone())
+                .collect::<Vec<_>>();
+            let context = translation_context(context_segments, batch);
+            let translated = deepl::translate_texts_with_context(
+                auth_key,
+                &options,
+                &source_texts,
+                context.as_deref(),
+            )
+            .await
+            .context("failed to translate SQLite subtitle workspace")?;
+            updates.extend(
+                batch
+                    .iter()
+                    .zip(translated)
+                    .map(|(segment, translated_text)| LocalMachineTranslation {
+                        segment_id: segment.id.clone(),
+                        source_text: segment.ja_text.clone(),
+                        translated_text,
+                    }),
+            );
+        }
         self.database
             .apply_machine_translations(job_id, &updates)
             .await
     }
+}
+
+fn translation_context(
+    all_segments: &[LocalSubtitleSegmentRecord],
+    batch: &[LocalSubtitleSegmentRecord],
+) -> Option<String> {
+    let first = batch.first()?;
+    let last = batch.last()?;
+    let window_start = first.start_ms.saturating_sub(TRANSLATION_CONTEXT_WINDOW_MS);
+    let window_end = last.end_ms.saturating_add(TRANSLATION_CONTEXT_WINDOW_MS);
+    let target_ids = batch
+        .iter()
+        .map(|segment| segment.id.as_str())
+        .collect::<HashSet<_>>();
+
+    let mut context = String::new();
+    let mut context_chars = 0;
+    let mut target_start = None;
+    let mut target_end = 0;
+    for segment in all_segments
+        .iter()
+        .filter(|segment| segment.end_ms >= window_start && segment.start_ms <= window_end)
+    {
+        if !context.is_empty() {
+            context.push('\n');
+            context_chars += 1;
+        }
+        let line_start = context_chars;
+        context.push_str(&segment.ja_text);
+        context_chars += segment.ja_text.chars().count();
+        if target_ids.contains(segment.id.as_str()) {
+            target_start.get_or_insert(line_start);
+            target_end = context_chars;
+        }
+    }
+
+    if context.trim().is_empty() {
+        return None;
+    }
+    if context_chars <= TRANSLATION_CONTEXT_MAX_CHARS {
+        return Some(context);
+    }
+
+    let chars = context.chars().collect::<Vec<_>>();
+    let target_start = target_start.unwrap_or(0);
+    let target_length = target_end.saturating_sub(target_start);
+    let surrounding_budget = TRANSLATION_CONTEXT_MAX_CHARS.saturating_sub(target_length);
+    let desired_start = target_start.saturating_sub(surrounding_budget / 2);
+    let latest_start = chars.len().saturating_sub(TRANSLATION_CONTEXT_MAX_CHARS);
+    let start = desired_start.min(latest_start);
+    let end = (start + TRANSLATION_CONTEXT_MAX_CHARS).min(chars.len());
+    Some(chars[start..end].iter().collect())
 }
 
 fn workspace_segments(records: &[LocalSubtitleSegmentRecord]) -> Result<Vec<TranscriptSegment>> {
@@ -227,12 +297,68 @@ fn workspace_segments(records: &[LocalSubtitleSegmentRecord]) -> Result<Vec<Tran
 mod tests {
     use std::fs;
 
-    use super::LocalWorkspaceService;
+    use super::{LocalWorkspaceService, TRANSLATION_CONTEXT_MAX_CHARS, translation_context};
     use crate::{
         application::{job_manifest::JobManifest, job_snapshot::JobSnapshot},
         domain::TranscriptSegment,
-        infrastructure::{job_store::Job, local_db::LocalDatabase},
+        infrastructure::{
+            job_store::Job,
+            local_db::{LocalDatabase, LocalSubtitleSegmentRecord},
+        },
     };
+
+    fn subtitle_record(
+        index: i64,
+        start_ms: i64,
+        end_ms: i64,
+        text: impl Into<String>,
+    ) -> LocalSubtitleSegmentRecord {
+        LocalSubtitleSegmentRecord {
+            id: format!("segment-{index}"),
+            job_id: "job".to_string(),
+            segment_index: index,
+            start_ms,
+            end_ms,
+            ja_text: text.into(),
+            zh_text: None,
+            source_edited: false,
+            translation_edited: false,
+            translation_stale: false,
+        }
+    }
+
+    #[test]
+    fn translation_context_uses_nearby_sqlite_segments() {
+        let segments = vec![
+            subtitle_record(0, 0, 1_000, "远处的旧内容"),
+            subtitle_record(1, 15_000, 16_000, "刚才提到的名字"),
+            subtitle_record(2, 40_000, 41_000, "当前 SQLite 日文"),
+            subtitle_record(3, 65_000, 66_000, "接下来的话题"),
+            subtitle_record(4, 80_000, 81_000, "远处的新内容"),
+        ];
+
+        let context = translation_context(&segments, &segments[2..3]).unwrap();
+
+        assert!(context.contains("刚才提到的名字"));
+        assert!(context.contains("当前 SQLite 日文"));
+        assert!(context.contains("接下来的话题"));
+        assert!(!context.contains("远处的旧内容"));
+        assert!(!context.contains("远处的新内容"));
+    }
+
+    #[test]
+    fn translation_context_is_capped_around_the_current_batch() {
+        let segments = vec![
+            subtitle_record(0, 0, 1_000, "前".repeat(1_500)),
+            subtitle_record(1, 1_000, 2_000, "当前中心"),
+            subtitle_record(2, 2_000, 3_000, "后".repeat(1_500)),
+        ];
+
+        let context = translation_context(&segments, &segments[1..2]).unwrap();
+
+        assert_eq!(context.chars().count(), TRANSLATION_CONTEXT_MAX_CHARS);
+        assert!(context.contains("当前中心"));
+    }
 
     #[tokio::test]
     async fn exports_the_current_sqlite_workspace_instead_of_generated_json() {

@@ -470,10 +470,15 @@ mod tests {
 
         assert_eq!(glossary.core_term_count, 17);
         assert_eq!(glossary.content_term_count, 126);
+        assert_eq!(glossary.correction_only_count, 2);
         assert_eq!(glossary.content_group_count, 11);
+        let detail = service.get(&glossary.id).await.unwrap();
+        let resolved = glossary_for_task(&detail, &[]).unwrap();
+        assert_eq!(resolved.corrected_text("すいとなぶな"), "suisとn-buna");
         let preview = service.prompt_preview(&glossary.id, &[]).await.unwrap();
         let prompt = preview.prompt.unwrap();
         assert!(prompt.contains("スイ（表記: suis）"));
+        assert!(!prompt.contains("すい"));
         assert!(!prompt.contains("月に吠える"));
 
         drop(service);

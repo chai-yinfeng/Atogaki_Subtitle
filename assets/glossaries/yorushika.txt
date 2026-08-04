@@ -184,3 +184,8 @@ Amy
 Paper Airplane
 紙ひこうき
 風のアンセム
+
+# @correction-only
+# Whisper may emit names that were prompted in katakana as hiragana.
+すい => suis
+なぶな => n-buna

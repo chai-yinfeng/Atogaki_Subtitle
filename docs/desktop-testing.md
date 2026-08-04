@@ -67,6 +67,6 @@ cargo run --manifest-path src-tauri/Cargo.toml
 ## 当前测试边界
 
 - macOS WebView 通常可以直接播放 MP4/MOV 和常见音频；MKV、部分 WebM 或特殊编码可能失败，此时只保证 `audio.wav` 回听。
-- 桌面翻译使用 DeepL 云端 API，会发送当前日文字幕；API key 只从启动环境读取，设置界面和 Keychain 存储尚未实现。
+- 桌面翻译使用 DeepL 云端 API，会发送当前日文字幕；单段和全部重译还会发送 SQLite 中前后约 30 秒的日文作为局部上下文。API key 只从启动环境读取，设置界面和 Keychain 存储尚未实现。
 - 桌面 SRT/ASS 导出已使用 SQLite；现有 CLI `translate`/`export` 仍读取任务 JSON，两条入口的数据源不同，不要用 CLI 命令验证桌面人工编辑。
 - 开发态 `cargo run` 二进制不是注册安装的 `.app`，部分 macOS GUI 自动化工具无法枚举它；打包阶段需要补充可重复的窗口自动化测试。
