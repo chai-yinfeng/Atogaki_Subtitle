@@ -3,6 +3,7 @@ import "./styles.css";
 
 type LocalJob = {
   job_id: string;
+  display_name: string | null;
   storage_dir: string;
   input_path: string | null;
   status: string;
@@ -124,6 +125,7 @@ app.innerHTML = `
           <h2 id="jobs-heading">最近任务</h2>
           <span id="job-count"></span>
         </div>
+        <p id="job-management-message" class="job-management-message" role="status"></p>
         <div id="job-list" class="job-list" aria-live="polite"></div>
       </section>
     </div>
@@ -204,6 +206,7 @@ const homeView = document.querySelector<HTMLDivElement>("#home-view");
 const workspaceView = document.querySelector<HTMLElement>("#workspace-view");
 const jobList = document.querySelector<HTMLDivElement>("#job-list");
 const jobCount = document.querySelector<HTMLSpanElement>("#job-count");
+const jobManagementMessage = document.querySelector<HTMLParagraphElement>("#job-management-message");
 const dataPath = document.querySelector<HTMLParagraphElement>("#data-path");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
@@ -248,6 +251,7 @@ let translationStatus: TranslationStatus = {
 };
 
 function displayName(job: LocalJob): string {
+  if (job.display_name?.trim()) return job.display_name;
   const source = job.input_path?.split("/").pop();
   return source || job.job_id;
 }
@@ -364,15 +368,69 @@ function renderJobs(jobs: LocalJob[]): void {
   jobList.innerHTML = jobs
     .map(
       (job) => `
-        <button class="job-card" data-job-id="${escapeHtml(job.job_id)}" type="button">
-          <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)}</p></div>
-          <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
-        </button>`,
+        <article class="job-card">
+          <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
+            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)}</p></div>
+            <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+          </button>
+          <div class="job-actions">
+            <button type="button" class="secondary" data-rename-job="${escapeHtml(job.job_id)}">重命名</button>
+            <button type="button" class="danger" data-delete-job="${escapeHtml(job.job_id)}" ${matchesTerminalStatus(job.status) ? "" : "disabled"} title="${matchesTerminalStatus(job.status) ? "删除任务数据，但保留原始媒体" : "任务结束后才能删除"}">删除</button>
+          </div>
+        </article>`,
     )
     .join("");
   jobList.querySelectorAll<HTMLButtonElement>("[data-job-id]").forEach((button) => {
     button.addEventListener("click", () => void openJob(button.dataset.jobId ?? ""));
   });
+  jobList.querySelectorAll<HTMLButtonElement>("[data-rename-job]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const job = jobs.find((item) => item.job_id === button.dataset.renameJob);
+      if (job) void renameJob(job);
+    });
+  });
+  jobList.querySelectorAll<HTMLButtonElement>("[data-delete-job]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const job = jobs.find((item) => item.job_id === button.dataset.deleteJob);
+      if (job) void deleteJob(job);
+    });
+  });
+}
+
+function matchesTerminalStatus(status: string): boolean {
+  return status === "done" || status === "failed";
+}
+
+async function renameJob(job: LocalJob): Promise<void> {
+  const nextName = window.prompt("任务名称（留空恢复为媒体文件名）", job.display_name ?? displayName(job));
+  if (nextName === null) return;
+  if (jobManagementMessage) jobManagementMessage.textContent = "正在保存任务名称…";
+  try {
+    await invoke<LocalJob>("rename_job", {
+      jobId: job.job_id,
+      displayName: nextName.trim() || null,
+    });
+    if (jobManagementMessage) jobManagementMessage.textContent = "任务名称已保存。";
+    await refresh();
+  } catch (error) {
+    if (jobManagementMessage) jobManagementMessage.textContent = `重命名失败：${String(error)}`;
+  }
+}
+
+async function deleteJob(job: LocalJob): Promise<void> {
+  if (!matchesTerminalStatus(job.status)) return;
+  const confirmed = window.confirm(
+    `删除任务“${displayName(job)}”？\n\n将删除 Atogaki 任务目录中的音频、字幕和中间产物，以及 SQLite 任务记录；不会删除原始媒体文件。`,
+  );
+  if (!confirmed) return;
+  if (jobManagementMessage) jobManagementMessage.textContent = "正在删除任务数据…";
+  try {
+    await invoke("delete_job", { jobId: job.job_id });
+    if (jobManagementMessage) jobManagementMessage.textContent = "任务已删除，原始媒体文件未改变。";
+    await refresh();
+  } catch (error) {
+    if (jobManagementMessage) jobManagementMessage.textContent = `删除失败：${String(error)}`;
+  }
 }
 
 async function refresh(): Promise<void> {

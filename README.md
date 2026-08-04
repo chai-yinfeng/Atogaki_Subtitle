@@ -104,6 +104,10 @@ a manual subtitle correction. Each selected glossary is snapshotted inside its t
 reproducibility. See `docs/desktop-testing.md` for the manual smoke-test checklist and current codec
 limitations.
 
+Desktop tasks may be given a SQLite-backed display name without renaming their durable UUID
+directory. Finished and failed tasks can be deleted from the task list; deletion removes only the
+managed task directory and SQLite workspace, never the original imported media file.
+
 Start the Web API shell:
 
 ```bash

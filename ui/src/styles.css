@@ -35,10 +35,15 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .section-heading h2 { margin-bottom: 20px; font-size: 24px; }
 .section-heading span { color: #75776f; font-size: 14px; }
 .job-list { display: grid; gap: 10px; }
-.job-card { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid #ded7c9; border-radius: 12px; padding: 17px 18px; color: inherit; background: rgba(255, 253, 247, .76); text-align: left; }
+.job-card { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid #ded7c9; border-radius: 12px; padding: 8px 10px 8px 18px; color: inherit; background: rgba(255, 253, 247, .76); }
 .job-card:hover { border-color: #9aae9f; background: #fffdf7; }
+.job-open { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 8px 9px 0; border-radius: 0; color: inherit; background: transparent; text-align: left; }
+.job-open:hover { background: transparent; }
 .job-card h3 { margin-bottom: 5px; font-size: 15px; }
 .job-card p { margin-bottom: 0; color: #77796f; font-size: 13px; }
+.job-actions { display: flex; gap: 7px; }
+.job-actions button { align-self: auto; padding: 8px 11px; font-size: 12px; }
+.job-management-message { min-height: 18px; margin: -10px 0 10px; color: #6e7068; font-size: 12px; }
 .status { border-radius: 999px; padding: 5px 9px; background: #e7e2d5; color: #55584f; font-size: 12px; text-transform: capitalize; white-space: nowrap; }
 .status-done { background: #d9eadf; color: #1d5c3e; }
 .status-failed { background: #f3d8d2; color: #8e3027; }
@@ -133,7 +138,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 @media (max-width: 620px) {
   .shell { padding: 30px 18px; }
   header { align-items: start; flex-direction: column; }
-  .job-card { align-items: start; flex-direction: column; }
+  .job-card { grid-template-columns: 1fr; }
+  .job-actions { justify-content: flex-end; }
   .create-task form { grid-template-columns: 1fr; }
   .secondary { justify-self: start; }
   .workspace-heading { grid-template-columns: 1fr; }

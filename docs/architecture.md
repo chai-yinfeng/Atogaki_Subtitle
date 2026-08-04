@@ -43,6 +43,8 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 `LocalGlossaryService` 管理 SQLite 词表、差异预览和对工作区的应用。新任务选择词表后，`LocalTaskService` 会在排队前把当时的词条冻结为任务目录中的 `recognition-glossary.txt`，并把路径交给 Whisper。提示词直接进入初始 prompt；`日语读音/误识别 => 规范写法` 会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
 
+任务显示名称只保存在 SQLite，不改变 UUID 任务目录和原媒体。任务删除仅允许 `done` 或 `failed` 状态：`LocalTaskService` 会校验目标确实是应用 `jobs` 根目录下与任务 ID 同名的目录，先将其原子移动为待删除目录，再删除 SQLite 记录和派生文件；数据库删除失败时恢复目录。任务记录中的原媒体路径永远不参与删除。
+
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。

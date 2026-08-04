@@ -68,6 +68,28 @@ async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<LocalJobRecord>
 }
 
 #[tauri::command]
+async fn rename_job(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    display_name: Option<String>,
+) -> Result<LocalJobRecord, String> {
+    state
+        .task_service
+        .rename_persisted_job(&job_id, display_name)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_job(state: State<'_, DesktopState>, job_id: String) -> Result<(), String> {
+    state
+        .task_service
+        .delete_persisted_job(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn submit_transcription(
     state: State<'_, DesktopState>,
     request: SubmitTranscriptionRequest,
@@ -378,6 +400,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             data_directory,
+            delete_job,
             delete_glossary,
             export_workspace_subtitles,
             get_glossary,
@@ -388,6 +411,7 @@ fn main() {
             pick_model_file,
             apply_glossary_to_workspace,
             preview_glossary_application,
+            rename_job,
             save_glossary,
             submit_transcription,
             translate_all_subtitles,

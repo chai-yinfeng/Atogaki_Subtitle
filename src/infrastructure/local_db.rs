@@ -22,6 +22,7 @@ pub struct LocalDatabase {
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct LocalJobRecord {
     pub job_id: String,
+    pub display_name: Option<String>,
     pub storage_dir: String,
     pub input_path: Option<String>,
     pub render_output_path: Option<String>,
@@ -188,7 +189,7 @@ impl LocalDatabase {
 
     pub async fn list_jobs(&self) -> Result<Vec<LocalJobRecord>> {
         sqlx::query_as::<_, LocalJobRecord>(
-            "SELECT job_id, storage_dir, input_path, render_output_path, status, message,
+            "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
                 created_at_unix, updated_at_unix
              FROM local_jobs
@@ -201,7 +202,7 @@ impl LocalDatabase {
 
     pub async fn get_job(&self, job_id: &str) -> Result<Option<LocalJobRecord>> {
         sqlx::query_as::<_, LocalJobRecord>(
-            "SELECT job_id, storage_dir, input_path, render_output_path, status, message,
+            "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
                 created_at_unix, updated_at_unix
              FROM local_jobs
@@ -211,6 +212,57 @@ impl LocalDatabase {
         .fetch_optional(&self.pool)
         .await
         .context("failed to read local task")
+    }
+
+    pub async fn rename_job(
+        &self,
+        job_id: &str,
+        display_name: Option<String>,
+    ) -> Result<LocalJobRecord> {
+        let display_name = display_name
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
+        if display_name
+            .as_ref()
+            .is_some_and(|name| name.chars().count() > 100)
+        {
+            return Err(anyhow!("task name cannot exceed 100 characters"));
+        }
+        if display_name
+            .as_ref()
+            .is_some_and(|name| name.chars().any(char::is_control))
+        {
+            return Err(anyhow!("task name cannot contain control characters"));
+        }
+        let result = sqlx::query(
+            "UPDATE local_jobs
+             SET display_name = ?, updated_at_unix = MAX(updated_at_unix, ?)
+             WHERE job_id = ?",
+        )
+        .bind(display_name)
+        .bind(chrono::Utc::now().timestamp())
+        .bind(job_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to rename local task")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("local task not found: {job_id}"));
+        }
+        self.get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("renamed local task disappeared: {job_id}"))
+    }
+
+    pub async fn delete_job(&self, job_id: &str) -> Result<()> {
+        let result = sqlx::query("DELETE FROM local_jobs WHERE job_id = ?")
+            .bind(job_id)
+            .execute(&self.pool)
+            .await
+            .context("failed to delete local task")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("local task not found: {job_id}"));
+        }
+        Ok(())
     }
 
     pub async fn assign_job_glossary(

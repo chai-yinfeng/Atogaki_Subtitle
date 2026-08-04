@@ -1,4 +1,5 @@
 use std::{
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -204,6 +205,95 @@ impl LocalTaskService {
         database.list_jobs().await
     }
 
+    pub async fn rename_persisted_job(
+        &self,
+        job_id: &str,
+        display_name: Option<String>,
+    ) -> Result<crate::infrastructure::local_db::LocalJobRecord> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("local task service was started without SQLite persistence"))?;
+        database.rename_job(job_id, display_name).await
+    }
+
+    pub async fn delete_persisted_job(&self, job_id: &str) -> Result<()> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("local task service was started without SQLite persistence"))?;
+        let record = database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        if !matches!(record.status.as_str(), "done" | "failed") {
+            bail!(
+                "cannot delete task {job_id} while its status is {}; wait for it to finish",
+                record.status
+            );
+        }
+
+        let jobs_root = fs::canonicalize(&self.jobs_dir).with_context(|| {
+            format!(
+                "failed to resolve local jobs directory {}",
+                self.jobs_dir.display()
+            )
+        })?;
+        let storage_dir = PathBuf::from(&record.storage_dir);
+        if storage_dir.file_name().and_then(|name| name.to_str()) != Some(job_id) {
+            bail!(
+                "refusing to delete task directory with unexpected name: {}",
+                storage_dir.display()
+            );
+        }
+        let storage_parent = storage_dir
+            .parent()
+            .ok_or_else(|| anyhow!("task directory has no parent: {}", storage_dir.display()))?;
+        let storage_parent = fs::canonicalize(storage_parent).with_context(|| {
+            format!(
+                "failed to resolve task directory parent {}",
+                storage_parent.display()
+            )
+        })?;
+        if storage_parent != jobs_root {
+            bail!(
+                "refusing to delete task directory outside managed jobs root: {}",
+                storage_dir.display()
+            );
+        }
+
+        if !storage_dir.exists() {
+            return database.delete_job(job_id).await;
+        }
+        let resolved_storage = fs::canonicalize(&storage_dir).with_context(|| {
+            format!("failed to resolve task directory {}", storage_dir.display())
+        })?;
+        if resolved_storage.parent() != Some(jobs_root.as_path()) {
+            bail!(
+                "refusing to delete resolved task directory outside managed jobs root: {}",
+                resolved_storage.display()
+            );
+        }
+
+        let tombstone = jobs_root.join(format!(".deleting-{job_id}-{}", uuid::Uuid::new_v4()));
+        fs::rename(&resolved_storage, &tombstone).with_context(|| {
+            format!(
+                "failed to prepare task directory for deletion: {}",
+                resolved_storage.display()
+            )
+        })?;
+        if let Err(error) = database.delete_job(job_id).await {
+            let _ = fs::rename(&tombstone, &resolved_storage);
+            return Err(error.context("failed to delete task metadata; restored task directory"));
+        }
+        fs::remove_dir_all(&tombstone).with_context(|| {
+            format!(
+                "task metadata was deleted but directory cleanup failed: {}",
+                tombstone.display()
+            )
+        })
+    }
+
     fn require_service_owned_output_dir(&self, output_dir: Option<&Path>) -> Result<()> {
         if let Some(output_dir) = output_dir {
             bail!(
@@ -397,6 +487,73 @@ mod tests {
                 .unwrap()
                 .contains("ナブナ => n-buna")
         );
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn renames_finished_tasks_and_deletes_only_managed_task_data() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-task-management-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let (sender, _receiver) = mpsc::channel(1);
+        let service = LocalTaskService {
+            sender,
+            jobs_dir: root.join("jobs"),
+            database: Some(database.clone()),
+        };
+        let source_media = root.join("source-media.mp3");
+        fs::write(&source_media, b"source media must survive task deletion").unwrap();
+        let job = service
+            .create_queued_job(Some(source_media.clone()), None)
+            .await
+            .unwrap();
+        let job_id = job.id();
+
+        let renamed = service
+            .rename_persisted_job(&job_id, Some("深夜电台 第 12 回".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(renamed.display_name.as_deref(), Some("深夜电台 第 12 回"));
+        assert!(service.delete_persisted_job(&job_id).await.is_err());
+        assert!(job.dir.is_dir());
+
+        let mut manifest = job.read_manifest_if_exists().unwrap().unwrap();
+        manifest.mark(crate::application::job_status::JobStatus::Done);
+        job.write_manifest(&manifest).unwrap();
+        database
+            .sync_snapshot(&crate::application::job_snapshot::JobSnapshot {
+                manifest,
+                segments: Vec::new(),
+            })
+            .await
+            .unwrap();
+        service.delete_persisted_job(&job_id).await.unwrap();
+        assert!(!job.dir.exists());
+        assert!(source_media.is_file());
+        assert!(database.get_job(&job_id).await.unwrap().is_none());
+
+        let unmanaged =
+            crate::infrastructure::job_store::Job::create_in(&root.join("foreign")).unwrap();
+        let mut unmanaged_manifest =
+            crate::application::job_manifest::JobManifest::new(&unmanaged, None, None);
+        unmanaged_manifest.mark(crate::application::job_status::JobStatus::Done);
+        unmanaged.write_manifest(&unmanaged_manifest).unwrap();
+        database
+            .sync_snapshot(&crate::application::job_snapshot::JobSnapshot {
+                manifest: unmanaged_manifest,
+                segments: Vec::new(),
+            })
+            .await
+            .unwrap();
+        assert!(service.delete_persisted_job(&unmanaged.id()).await.is_err());
+        assert!(unmanaged.dir.is_dir());
 
         drop(service);
         drop(database);
