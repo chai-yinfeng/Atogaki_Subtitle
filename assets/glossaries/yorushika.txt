@@ -3,6 +3,7 @@
 # "spoken/misrecognized => canonical" lines prompt Whisper with both the
 # Japanese reading and canonical spelling, then normalize the text after ASR.
 
+# @core
 # Artist / members
 ヨルシカ
 ナブナ => n-buna
@@ -22,6 +23,7 @@ DMYM
 No.734
 ぽぷりか
 
+# @content 作品・专辑・现场
 # Albums / EPs / books / lives
 夏草が邪魔をする
 負け犬にアンコールはいらない
@@ -40,6 +42,7 @@ No.734
 Elma
 Amy
 
+# @content 夏草が邪魔をする
 # 夏草が邪魔をする
 夏陰、ピアノを弾く
 カトレア
@@ -49,6 +52,7 @@ Amy
 靴の花火
 雲と幽霊
 
+# @content 負け犬にアンコールはいらない
 # 負け犬にアンコールはいらない
 前世
 負け犬にアンコールはいらない
@@ -60,6 +64,7 @@ Amy
 冬眠
 夏、バス停、君を待つ
 
+# @content だから僕は音楽を辞めた
 # だから僕は音楽を辞めた
 8/31
 藍二乗
@@ -74,6 +79,7 @@ Amy
 パレード
 4/10
 
+# @content エルマ
 # エルマ
 車窓
 憂一乗
@@ -90,6 +96,7 @@ Amy
 海底、月明かり
 ノーチラス
 
+# @content 盗作
 # 盗作
 音楽泥棒の自白
 昼鳶
@@ -104,12 +111,14 @@ Amy
 夜行
 花に亡霊
 
+# @content 創作
 # 創作
 強盗と花束
 春泥棒
 風を食む
 嘘月
 
+# @content 幻燈・夏の肖像
 # 幻燈 / 夏の肖像
 夏の肖像
 都落ち
@@ -126,6 +135,7 @@ Amy
 左右盲
 アルジャーノン
 
+# @content 幻燈・踊る動物
 # 幻燈 / 踊る動物
 踊る動物
 第一夜
@@ -139,6 +149,7 @@ Amy
 第九夜
 第十夜
 
+# @content 二人称
 # 二人称
 早朝、郵便受け
 雲になる
@@ -162,6 +173,7 @@ Amy
 櫂
 海へ
 
+# @content 其他近期作品
 # Other recent / non-album terms
 テレパス
 斜陽

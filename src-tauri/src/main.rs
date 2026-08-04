@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use atogaki_subtitle::{
     application::{
-        LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryService,
-        LocalGlossaryTermDraft, LocalSubtitleExport, LocalTaskService, LocalTranslationStatus,
-        LocalWorkspaceService, TranscriptionOptions, job_spec::TranscribeSpec,
+        LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
+        LocalGlossaryService, LocalGlossaryTermDraft, LocalSubtitleExport, LocalTaskService,
+        LocalTranslationStatus, LocalWorkspaceService, TranscriptionOptions,
+        job_spec::TranscribeSpec,
     },
     infrastructure::{
         config::AppConfig,
@@ -32,6 +33,16 @@ struct SubmitTranscriptionRequest {
     model_path: String,
     vad_model_path: Option<String>,
     glossary_id: Option<String>,
+    #[serde(default)]
+    selected_content_groups: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PromptPreviewRequest {
+    glossary_id: String,
+    #[serde(default)]
+    selected_content_groups: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,6 +123,7 @@ async fn submit_transcription(
                 transcription,
             },
             request.glossary_id.as_deref(),
+            &request.selected_content_groups,
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -137,6 +149,18 @@ async fn get_glossary(
     state
         .glossary_service
         .get(&glossary_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn preview_glossary_prompt(
+    state: State<'_, DesktopState>,
+    request: PromptPreviewRequest,
+) -> Result<LocalGlossaryPromptPreview, String> {
+    state
+        .glossary_service
+        .prompt_preview(&request.glossary_id, &request.selected_content_groups)
         .await
         .map_err(|error| error.to_string())
 }
@@ -493,6 +517,7 @@ fn main() {
             pick_vad_model_file,
             apply_glossary_to_workspace,
             preview_glossary_application,
+            preview_glossary_prompt,
             recognition_defaults,
             rename_job,
             save_glossary,
@@ -522,6 +547,7 @@ mod tests {
             model_path: "whisper.bin".to_string(),
             vad_model_path: None,
             glossary_id: None,
+            selected_content_groups: Vec::new(),
         };
 
         let options = desktop_transcription_options(&request).unwrap();
@@ -544,6 +570,7 @@ mod tests {
             model_path: "whisper.bin".to_string(),
             vad_model_path: Some(vad_model.display().to_string()),
             glossary_id: None,
+            selected_content_groups: Vec::new(),
         };
 
         let options = desktop_transcription_options(&request).unwrap();

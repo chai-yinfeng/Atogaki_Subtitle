@@ -21,6 +21,10 @@ type Glossary = {
   term_count: number;
   prompt_term_count: number;
   correction_count: number;
+  core_term_count: number;
+  content_term_count: number;
+  correction_only_count: number;
+  content_group_count: number;
   created_at_unix: number;
   updated_at_unix: number;
 };
@@ -30,6 +34,21 @@ type GlossaryTerm = {
   glossary_id: string;
   source_text: string;
   target_text: string | null;
+  prompt_scope: "core" | "content" | "correction_only";
+  content_group: string | null;
+};
+
+type GlossaryPromptPreview = {
+  glossary_id: string;
+  glossary_name: string;
+  available_content_groups: string[];
+  selected_content_groups: string[];
+  core_term_count: number;
+  selected_content_term_count: number;
+  correction_only_count: number;
+  included_prompt_term_count: number;
+  prompt_character_count: number;
+  prompt: string | null;
 };
 
 type GlossaryDetail = {
@@ -128,6 +147,11 @@ app.innerHTML = `
           <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
+          <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
+            <div class="content-pack-heading"><div><strong>当前内容包</strong><span>核心词条始终提示；只选择本期可能出现的作品。</span></div><span id="task-prompt-summary"></span></div>
+            <div id="task-content-packs" class="task-content-packs"></div>
+            <details open><summary>最终 Whisper prompt</summary><pre id="task-prompt-preview">正在生成预览…</pre></details>
+          </div>
           <div class="form-footer"><span id="task-message" role="status"></span><button id="submit-task" type="submit">开始转写</button></div>
         </form>
       </section>
@@ -193,7 +217,7 @@ app.innerHTML = `
         <div><p class="eyebrow">RECOGNITION GLOSSARIES</p><h2>识别词表</h2></div>
         <button id="close-glossaries" type="button" class="secondary">关闭</button>
       </div>
-      <p class="dialog-help"><strong>提示词</strong>直接告诉 Whisper 可能出现的写法；<strong>修正规则</strong>用日语读音提示识别，并在识别后统一成规范写法，例如“スイ → suis”。</p>
+      <p class="dialog-help"><strong>核心</strong>始终进入 prompt；<strong>内容包</strong>只在新建任务时选中后进入；<strong>仅修正</strong>只在识别后规范化。核心和内容包都可以同时带“读音 → 规范写法”。</p>
       <div class="glossary-manager">
         <aside>
           <button id="new-glossary" type="button">＋ 新建词表</button>
@@ -235,6 +259,10 @@ const modelPath = document.querySelector<HTMLInputElement>("#model-path");
 const vadEnabled = document.querySelector<HTMLInputElement>("#vad-enabled");
 const vadModelPath = document.querySelector<HTMLInputElement>("#vad-model-path");
 const taskGlossary = document.querySelector<HTMLSelectElement>("#task-glossary");
+const taskGlossaryConfiguration = document.querySelector<HTMLDivElement>("#task-glossary-configuration");
+const taskContentPacks = document.querySelector<HTMLDivElement>("#task-content-packs");
+const taskPromptSummary = document.querySelector<HTMLSpanElement>("#task-prompt-summary");
+const taskPromptPreview = document.querySelector<HTMLElement>("#task-prompt-preview");
 const taskMessage = document.querySelector<HTMLSpanElement>("#task-message");
 const submitButton = document.querySelector<HTMLButtonElement>("#submit-task");
 const workspaceTitle = document.querySelector<HTMLHeadingElement>("#workspace-title");
@@ -272,6 +300,8 @@ let glossaries: Glossary[] = [];
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
 let renamingJob: LocalJob | null = null;
+let taskGlossaryConfigurationId: string | null = null;
+let selectedTaskContentGroups = new Set<string>();
 let translationStatus: TranslationStatus = {
   provider: "DeepL",
   configured: false,
@@ -306,7 +336,7 @@ function renderGlossaryOptions(): void {
   const taskSelection = taskGlossary?.value ?? "";
   const workspaceSelection = workspaceGlossary?.value ?? "";
   const options = glossaries
-    .map((glossary) => `<option value="${escapeHtml(glossary.id)}">${escapeHtml(glossary.name)}（提示 ${glossary.prompt_term_count}／修正 ${glossary.correction_count}）</option>`)
+    .map((glossary) => `<option value="${escapeHtml(glossary.id)}">${escapeHtml(glossary.name)}（核心 ${glossary.core_term_count}／内容包 ${glossary.content_group_count}／仅修正 ${glossary.correction_only_count}）</option>`)
     .join("");
   if (taskGlossary) {
     taskGlossary.innerHTML = `<option value="">不使用词表</option>${options}`;
@@ -322,10 +352,79 @@ function renderGlossaryOptions(): void {
   renderGlossaryList();
 }
 
+async function refreshTaskGlossaryConfiguration(): Promise<void> {
+  const glossaryId = taskGlossary?.value || null;
+  if (!glossaryId) {
+    taskGlossaryConfigurationId = null;
+    selectedTaskContentGroups.clear();
+    taskGlossaryConfiguration?.classList.add("hidden");
+    if (taskContentPacks) taskContentPacks.replaceChildren();
+    return;
+  }
+  if (taskGlossaryConfigurationId !== glossaryId) {
+    taskGlossaryConfigurationId = glossaryId;
+    selectedTaskContentGroups = new Set<string>();
+  }
+  taskGlossaryConfiguration?.classList.remove("hidden");
+  if (taskPromptPreview) taskPromptPreview.textContent = "正在生成预览…";
+  try {
+    const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
+    const groups = Array.from(
+      new Set(
+        detail.terms
+          .filter((term) => term.prompt_scope === "content" && term.content_group)
+          .map((term) => term.content_group as string),
+      ),
+    ).sort((left, right) => left.localeCompare(right, "zh-CN"));
+    selectedTaskContentGroups = new Set(
+      Array.from(selectedTaskContentGroups).filter((group) => groups.includes(group)),
+    );
+    if (taskContentPacks) {
+      taskContentPacks.innerHTML = groups.length
+        ? groups
+            .map(
+              (group) => `<label><input type="checkbox" value="${escapeHtml(group)}"${selectedTaskContentGroups.has(group) ? " checked" : ""} />${escapeHtml(group)}</label>`,
+            )
+            .join("")
+        : `<span class="muted">这个词表没有内容包，只会使用核心词条和识别后修正。</span>`;
+      taskContentPacks.querySelectorAll<HTMLInputElement>("input[type=checkbox]").forEach((checkbox) => {
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) selectedTaskContentGroups.add(checkbox.value);
+          else selectedTaskContentGroups.delete(checkbox.value);
+          void refreshTaskPromptPreview();
+        });
+      });
+    }
+    await refreshTaskPromptPreview();
+  } catch (error) {
+    if (taskPromptPreview) taskPromptPreview.textContent = `无法生成 prompt：${String(error)}`;
+  }
+}
+
+async function refreshTaskPromptPreview(): Promise<void> {
+  const glossaryId = taskGlossary?.value;
+  if (!glossaryId || !taskPromptPreview) return;
+  try {
+    const preview = await invoke<GlossaryPromptPreview>("preview_glossary_prompt", {
+      request: {
+        glossaryId,
+        selectedContentGroups: Array.from(selectedTaskContentGroups),
+      },
+    });
+    taskPromptPreview.textContent = preview.prompt || "当前选择不会向 Whisper 发送词表提示。";
+    if (taskPromptSummary) {
+      taskPromptSummary.textContent = `核心 ${preview.core_term_count} · 已选内容 ${preview.selected_content_term_count} · prompt ${preview.included_prompt_term_count} 词／${preview.prompt_character_count} 字 · 仅修正 ${preview.correction_only_count}`;
+    }
+  } catch (error) {
+    taskPromptPreview.textContent = `无法生成 prompt：${String(error)}`;
+  }
+}
+
 async function refreshGlossaries(): Promise<void> {
   try {
     glossaries = await invoke<Glossary[]>("list_glossaries");
     renderGlossaryOptions();
+    await refreshTaskGlossaryConfiguration();
   } catch (error) {
     if (taskMessage) taskMessage.textContent = `无法读取识别词表：${String(error)}`;
   }
@@ -339,7 +438,7 @@ function renderGlossaryList(): void {
   }
   glossaryListHost.innerHTML = glossaries
     .map(
-      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}</strong><span>提示 ${glossary.prompt_term_count} · 修正 ${glossary.correction_count}</span></button>`,
+      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}</strong><span>核心 ${glossary.core_term_count} · 内容 ${glossary.content_group_count} 包 · 仅修正 ${glossary.correction_only_count}</span></button>`,
     )
     .join("");
   glossaryListHost.querySelectorAll<HTMLButtonElement>("[data-glossary-id]").forEach((button) => {
@@ -819,10 +918,23 @@ async function exportSubtitles(): Promise<void> {
   }
 }
 
-function addGlossaryTermRow(sourceText = "", targetText = ""): void {
+function addGlossaryTermRow(
+  sourceText = "",
+  targetText = "",
+  promptScope: "core" | "content" | "correction_only" = "core",
+  contentGroup = "",
+): void {
   if (!glossaryTerms) return;
   const row = document.createElement("div");
   row.className = "glossary-term-row";
+  const scope = document.createElement("select");
+  scope.className = "term-scope";
+  scope.innerHTML = `<option value="core">核心</option><option value="content">内容包</option><option value="correction_only">仅修正</option>`;
+  scope.value = promptScope;
+  const group = document.createElement("input");
+  group.className = "term-group";
+  group.value = contentGroup;
+  group.placeholder = "内容包名称";
   const kind = document.createElement("select");
   kind.className = "term-kind";
   kind.innerHTML = `<option value="prompt">提示词</option><option value="correction">修正规则</option>`;
@@ -849,9 +961,21 @@ function addGlossaryTermRow(sourceText = "", targetText = ""): void {
     arrow.classList.toggle("inactive", !correction);
     if (!correction) target.value = "";
   };
+  const syncScope = (): void => {
+    const correctionOnly = scope.value === "correction_only";
+    const content = scope.value === "content";
+    row.dataset.promptScope = scope.value;
+    group.disabled = !content;
+    group.placeholder = content ? "例如：幻燈・夏の肖像" : "当前类型不使用内容包";
+    if (!content) group.value = "";
+    if (correctionOnly) kind.value = "correction";
+    kind.disabled = correctionOnly;
+    syncKind();
+  };
   kind.addEventListener("change", syncKind);
-  row.append(kind, source, arrow, target, remove);
-  syncKind();
+  scope.addEventListener("change", syncScope);
+  row.append(scope, group, kind, source, arrow, target, remove);
+  syncScope();
   glossaryTerms.append(row);
 }
 
@@ -874,10 +998,17 @@ async function editGlossary(glossaryId: string | null): Promise<void> {
     if (glossaryName) glossaryName.value = detail.glossary.name;
     if (deleteGlossaryButton) deleteGlossaryButton.disabled = false;
     if (glossaryTerms) glossaryTerms.replaceChildren();
-    for (const term of detail.terms) addGlossaryTermRow(term.source_text, term.target_text ?? "");
+    for (const term of detail.terms) {
+      addGlossaryTermRow(
+        term.source_text,
+        term.target_text ?? "",
+        term.prompt_scope,
+        term.content_group ?? "",
+      );
+    }
     if (detail.terms.length === 0) addGlossaryTermRow();
     if (glossaryMessage) {
-      glossaryMessage.textContent = `提示词 ${detail.glossary.prompt_term_count} 条 · 修正规则 ${detail.glossary.correction_count} 条`;
+      glossaryMessage.textContent = `核心 ${detail.glossary.core_term_count} 条 · 内容 ${detail.glossary.content_term_count} 条／${detail.glossary.content_group_count} 包 · 仅修正 ${detail.glossary.correction_only_count} 条`;
     }
   } catch (error) {
     if (glossaryMessage) glossaryMessage.textContent = `读取失败：${String(error)}`;
@@ -905,12 +1036,27 @@ async function saveGlossaryEditor(): Promise<void> {
     glossaryMessage.textContent = "修正规则必须填写最终规范写法。";
     return;
   }
+  if (
+    rows.some(
+      (row) =>
+        row.dataset.promptScope === "content" &&
+        !row.querySelector<HTMLInputElement>(".term-group")?.value.trim(),
+    )
+  ) {
+    glossaryMessage.textContent = "内容包词条必须填写内容包名称。";
+    return;
+  }
   const terms = rows
     .map((row) => ({
       sourceText: row.querySelector<HTMLInputElement>(".term-source")?.value.trim() ?? "",
       targetText:
         row.dataset.termKind === "correction"
           ? row.querySelector<HTMLInputElement>(".term-target")?.value.trim() || null
+          : null,
+      promptScope: row.dataset.promptScope ?? "core",
+      contentGroup:
+        row.dataset.promptScope === "content"
+          ? row.querySelector<HTMLInputElement>(".term-group")?.value.trim() || null
           : null,
     }))
     .filter((term) => term.sourceText || term.targetText);
@@ -922,6 +1068,7 @@ async function saveGlossaryEditor(): Promise<void> {
     editingGlossaryId = detail.glossary.id;
     await refreshGlossaries();
     if (taskGlossary) taskGlossary.value = detail.glossary.id;
+    await refreshTaskGlossaryConfiguration();
     glossaryMessage.textContent = `已保存 ${detail.terms.length} 条词条。`;
     await editGlossary(detail.glossary.id);
   } catch (error) {
@@ -969,13 +1116,15 @@ async function captureGlossaryCorrection(
     const terms = detail.terms.map((term) => ({
       sourceText: term.source_text,
       targetText: term.target_text,
+      promptScope: term.prompt_scope,
+      contentGroup: term.content_group,
     }));
     if (terms.some((term) => term.sourceText === sourceText && term.targetText === targetText)) {
       setWorkspaceAction("这条修正规则已经存在于词表中。", true);
       state.textContent = "这条修正规则已经存在";
       return;
     }
-    terms.push({ sourceText, targetText });
+    terms.push({ sourceText, targetText, promptScope: "correction_only", contentGroup: null });
     await invoke<GlossaryDetail>("save_glossary", {
       request: {
         glossaryId,
@@ -1142,6 +1291,7 @@ document.querySelector<HTMLButtonElement>("#choose-media")?.addEventListener("cl
 document.querySelector<HTMLButtonElement>("#choose-model")?.addEventListener("click", () => void chooseFile("model"));
 document.querySelector<HTMLButtonElement>("#choose-vad-model")?.addEventListener("click", () => void chooseFile("vad"));
 vadEnabled?.addEventListener("change", syncVadControls);
+taskGlossary?.addEventListener("change", () => void refreshTaskGlossaryConfiguration());
 
 document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1159,6 +1309,7 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
       modelPath: modelPath.value,
       vadModelPath: vadEnabled?.checked ? vadModelPath?.value.trim() || null : null,
       glossaryId: taskGlossary?.value || null,
+      selectedContentGroups: taskGlossary?.value ? Array.from(selectedTaskContentGroups) : [],
     },
   })
     .then((jobId) => {

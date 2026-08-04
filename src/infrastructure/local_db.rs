@@ -43,6 +43,10 @@ pub struct LocalGlossaryRecord {
     pub term_count: i64,
     pub prompt_term_count: i64,
     pub correction_count: i64,
+    pub core_term_count: i64,
+    pub content_term_count: i64,
+    pub correction_only_count: i64,
+    pub content_group_count: i64,
     pub created_at_unix: i64,
     pub updated_at_unix: i64,
 }
@@ -53,6 +57,8 @@ pub struct LocalGlossaryTermRecord {
     pub glossary_id: String,
     pub source_text: String,
     pub target_text: Option<String>,
+    pub prompt_scope: String,
+    pub content_group: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,6 +71,8 @@ pub struct LocalGlossaryDetail {
 pub struct LocalGlossaryTermInput {
     pub source_text: String,
     pub target_text: Option<String>,
+    pub prompt_scope: String,
+    pub content_group: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -290,9 +298,18 @@ impl LocalDatabase {
         Ok(())
     }
 
-    pub async fn ensure_builtin_glossary(&self, name: &str, file_text: &str) -> Result<()> {
+    pub async fn ensure_builtin_glossary(
+        &self,
+        name: &str,
+        seed_version: &str,
+        terms: Vec<LocalGlossaryTermInput>,
+    ) -> Result<()> {
         let name = normalized_glossary_name(name)?;
-        let setting_key = format!("builtin_glossary_seeded:{name}");
+        let mut seen = HashSet::new();
+        let mut terms = terms;
+        terms.retain(|term| seen.insert((term.source_text.clone(), term.target_text.clone())));
+        let terms = normalized_glossary_terms(terms)?;
+        let setting_key = format!("builtin_glossary_seeded:{name}:{seed_version}");
         if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM local_settings WHERE key = ?")
             .bind(&setting_key)
             .fetch_one(&self.pool)
@@ -303,32 +320,35 @@ impl LocalDatabase {
             return Ok(());
         }
 
-        if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM local_glossaries WHERE name = ?")
-            .bind(&name)
-            .fetch_one(&self.pool)
-            .await
-            .context("failed to check built-in glossary")?
-            == 0
-        {
-            let mut terms = file_text
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .map(|line| {
-                    line.split_once("=>")
-                        .or_else(|| line.split_once('\t'))
-                        .map(|(source, target)| LocalGlossaryTermInput {
-                            source_text: source.trim().to_string(),
-                            target_text: Some(target.trim().to_string()),
-                        })
-                        .unwrap_or_else(|| LocalGlossaryTermInput {
-                            source_text: line.to_string(),
-                            target_text: None,
-                        })
-                })
-                .collect::<Vec<_>>();
-            let mut seen = HashSet::new();
-            terms.retain(|term| seen.insert((term.source_text.clone(), term.target_text.clone())));
+        let existing_id =
+            sqlx::query_scalar::<_, String>("SELECT id FROM local_glossaries WHERE name = ?")
+                .bind(&name)
+                .fetch_optional(&self.pool)
+                .await
+                .context("failed to check built-in glossary")?;
+        if let Some(glossary_id) = existing_id {
+            let mut tx = self.pool.begin().await?;
+            for term in terms {
+                sqlx::query(
+                    "UPDATE local_glossary_terms
+                     SET prompt_scope = ?, content_group = ?
+                     WHERE glossary_id = ? AND source_text = ?
+                       AND ((target_text IS NULL AND ? IS NULL) OR target_text = ?)",
+                )
+                .bind(term.prompt_scope)
+                .bind(term.content_group)
+                .bind(&glossary_id)
+                .bind(term.source_text)
+                .bind(&term.target_text)
+                .bind(&term.target_text)
+                .execute(&mut *tx)
+                .await
+                .context("failed to classify built-in glossary term")?;
+            }
+            tx.commit()
+                .await
+                .context("failed to classify built-in glossary")?;
+        } else {
             self.save_glossary(None, name, terms).await?;
         }
 
@@ -348,8 +368,12 @@ impl LocalDatabase {
     pub async fn list_glossaries(&self) -> Result<Vec<LocalGlossaryRecord>> {
         sqlx::query_as::<_, LocalGlossaryRecord>(
             "SELECT g.id, g.name, COUNT(t.id) AS term_count,
-                COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.target_text IS NULL THEN 1 ELSE 0 END), 0) AS prompt_term_count,
+                COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.prompt_scope != 'correction_only' THEN 1 ELSE 0 END), 0) AS prompt_term_count,
                 COALESCE(SUM(CASE WHEN t.target_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS correction_count,
+                COALESCE(SUM(CASE WHEN t.prompt_scope = 'core' THEN 1 ELSE 0 END), 0) AS core_term_count,
+                COALESCE(SUM(CASE WHEN t.prompt_scope = 'content' THEN 1 ELSE 0 END), 0) AS content_term_count,
+                COALESCE(SUM(CASE WHEN t.prompt_scope = 'correction_only' THEN 1 ELSE 0 END), 0) AS correction_only_count,
+                COUNT(DISTINCT CASE WHEN t.prompt_scope = 'content' THEN t.content_group END) AS content_group_count,
                 g.created_at_unix, g.updated_at_unix
              FROM local_glossaries g
              LEFT JOIN local_glossary_terms t ON t.glossary_id = g.id
@@ -364,8 +388,12 @@ impl LocalDatabase {
     pub async fn get_glossary(&self, glossary_id: &str) -> Result<Option<LocalGlossaryDetail>> {
         let glossary = sqlx::query_as::<_, LocalGlossaryRecord>(
             "SELECT g.id, g.name, COUNT(t.id) AS term_count,
-                COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.target_text IS NULL THEN 1 ELSE 0 END), 0) AS prompt_term_count,
+                COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.prompt_scope != 'correction_only' THEN 1 ELSE 0 END), 0) AS prompt_term_count,
                 COALESCE(SUM(CASE WHEN t.target_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS correction_count,
+                COALESCE(SUM(CASE WHEN t.prompt_scope = 'core' THEN 1 ELSE 0 END), 0) AS core_term_count,
+                COALESCE(SUM(CASE WHEN t.prompt_scope = 'content' THEN 1 ELSE 0 END), 0) AS content_term_count,
+                COALESCE(SUM(CASE WHEN t.prompt_scope = 'correction_only' THEN 1 ELSE 0 END), 0) AS correction_only_count,
+                COUNT(DISTINCT CASE WHEN t.prompt_scope = 'content' THEN t.content_group END) AS content_group_count,
                 g.created_at_unix, g.updated_at_unix
              FROM local_glossaries g
              LEFT JOIN local_glossary_terms t ON t.glossary_id = g.id
@@ -380,11 +408,11 @@ impl LocalDatabase {
             return Ok(None);
         };
         let terms = sqlx::query_as::<_, LocalGlossaryTermRecord>(
-            "SELECT id, glossary_id, source_text, target_text
+            "SELECT id, glossary_id, source_text, target_text, prompt_scope, content_group
              FROM local_glossary_terms
              WHERE glossary_id = ?
-             ORDER BY CASE WHEN target_text IS NULL THEN 0 ELSE 1 END,
-                lower(source_text), id",
+             ORDER BY CASE prompt_scope WHEN 'core' THEN 0 WHEN 'content' THEN 1 ELSE 2 END,
+                lower(COALESCE(content_group, '')), lower(source_text), id",
         )
         .bind(glossary_id)
         .fetch_all(&self.pool)
@@ -438,13 +466,15 @@ impl LocalDatabase {
         for term in terms {
             sqlx::query(
                 "INSERT INTO local_glossary_terms
-                    (id, glossary_id, source_text, target_text)
-                 VALUES (?, ?, ?, ?)",
+                    (id, glossary_id, source_text, target_text, prompt_scope, content_group)
+                 VALUES (?, ?, ?, ?, ?, ?)",
             )
             .bind(uuid::Uuid::new_v4().to_string())
             .bind(&glossary_id)
             .bind(term.source_text)
             .bind(term.target_text)
+            .bind(term.prompt_scope)
+            .bind(term.content_group)
             .execute(&mut *tx)
             .await
             .context("failed to insert local glossary term")?;
@@ -888,12 +918,35 @@ fn normalized_glossary_terms(
                     "glossary replacement source and target cannot be identical: {source_text}"
                 ));
             }
+            let prompt_scope = term.prompt_scope.trim().to_string();
+            if !matches!(
+                prompt_scope.as_str(),
+                "core" | "content" | "correction_only"
+            ) {
+                return Err(anyhow!("invalid glossary prompt scope: {prompt_scope}"));
+            }
+            let content_group = term
+                .content_group
+                .map(|group| group.trim().to_string())
+                .filter(|group| !group.is_empty());
+            if prompt_scope == "content" && content_group.is_none() {
+                return Err(anyhow!("content glossary terms require a content group"));
+            }
+            if prompt_scope == "correction_only" && target_text.is_none() {
+                return Err(anyhow!(
+                    "correction-only glossary terms require a canonical target"
+                ));
+            }
             if !seen.insert((source_text.clone(), target_text.clone())) {
                 return Err(anyhow!("duplicate glossary term: {source_text}"));
             }
             Ok(LocalGlossaryTermInput {
                 source_text,
                 target_text,
+                content_group: (prompt_scope == "content")
+                    .then_some(content_group)
+                    .flatten(),
+                prompt_scope,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -911,7 +964,7 @@ fn normalized_glossary_terms(
 mod tests {
     use std::fs;
 
-    use super::{LocalDatabase, LocalMachineTranslation};
+    use super::{LocalDatabase, LocalGlossaryTermInput, LocalMachineTranslation};
     use crate::{
         application::{
             job_manifest::JobManifest, job_snapshot::JobSnapshot, job_status::JobStatus,
@@ -1096,18 +1149,49 @@ mod tests {
         database
             .ensure_builtin_glossary(
                 "内置词表",
-                "# grouped terms\n前世\n前世\nナブナ => n-buna\nナブナ => n-buna\n",
+                "v1",
+                vec![
+                    LocalGlossaryTermInput {
+                        source_text: "前世".to_string(),
+                        target_text: None,
+                        prompt_scope: "content".to_string(),
+                        content_group: Some("作品".to_string()),
+                    },
+                    LocalGlossaryTermInput {
+                        source_text: "前世".to_string(),
+                        target_text: None,
+                        prompt_scope: "content".to_string(),
+                        content_group: Some("作品".to_string()),
+                    },
+                    LocalGlossaryTermInput {
+                        source_text: "ナブナ".to_string(),
+                        target_text: Some("n-buna".to_string()),
+                        prompt_scope: "core".to_string(),
+                        content_group: None,
+                    },
+                ],
             )
             .await
             .unwrap();
         let glossaries = database.list_glossaries().await.unwrap();
         assert_eq!(glossaries.len(), 1);
         assert_eq!(glossaries[0].term_count, 2);
-        assert_eq!(glossaries[0].prompt_term_count, 1);
+        assert_eq!(glossaries[0].prompt_term_count, 2);
         assert_eq!(glossaries[0].correction_count, 1);
+        assert_eq!(glossaries[0].core_term_count, 1);
+        assert_eq!(glossaries[0].content_group_count, 1);
         database.delete_glossary(&glossaries[0].id).await.unwrap();
         database
-            .ensure_builtin_glossary("内置词表", "前世\n")
+            .ensure_builtin_glossary(
+                "内置词表",
+                "v1",
+                vec![LocalGlossaryTermInput {
+                    source_text: "前世".to_string(),
+                    target_text: None,
+                    prompt_scope: "core".to_string(),
+                    content_group: None,
+                }],
+            )
             .await
             .unwrap();
         assert!(database.list_glossaries().await.unwrap().is_empty());

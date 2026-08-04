@@ -12,8 +12,8 @@ pub mod translation_options;
 pub use job_runner::JobRunner;
 pub use job_snapshot::JobSnapshot;
 pub use local_glossary_service::{
-    LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossarySegmentChange,
-    LocalGlossaryService, LocalGlossaryTermDraft,
+    LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
+    LocalGlossarySegmentChange, LocalGlossaryService, LocalGlossaryTermDraft,
 };
 pub use local_task_service::LocalTaskService;
 pub use local_workspace_service::{

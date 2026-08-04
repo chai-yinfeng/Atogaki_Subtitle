@@ -41,7 +41,7 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService` 与 `LocalWorkspaceService`：前者负责创建、排队和同步后台任务，后者负责读取任务详情、保存编辑、调用 DeepL 翻译以及从 SQLite 当前状态导出字幕。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
-`LocalGlossaryService` 管理 SQLite 词表、差异预览和对工作区的应用。新任务选择词表后，`LocalTaskService` 会在排队前把当时的词条冻结为任务目录中的 `recognition-glossary.txt`，并把路径交给 Whisper。提示词直接进入初始 prompt；`日语读音/误识别 => 规范写法` 会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
+`LocalGlossaryService` 管理 SQLite 词表、任务范围 prompt 预览、差异预览和对工作区的应用。词条分为始终提示的“核心”、按任务选择的“内容包”和不占 prompt 的“仅修正”。新任务选择词表和内容包后，`LocalTaskService` 会在排队前把解析后的词条冻结为任务目录中的 `recognition-glossary.txt`，把最终 prompt 写入 `whisper-prompt.txt`，再将快照路径交给 Whisper。带规范写法的核心或内容词条会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化；仅修正规则只执行后一阶段。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
 
 任务显示名称只保存在 SQLite，不改变 UUID 任务目录和原媒体。任务删除仅允许 `done` 或 `failed` 状态：`LocalTaskService` 会校验目标确实是应用 `jobs` 根目录下与任务 ID 同名的目录，先将其原子移动为待删除目录，再删除 SQLite 记录和派生文件；数据库删除失败时恢复目录。任务记录中的原媒体路径永远不参与删除。
 
@@ -59,6 +59,7 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 - 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。
 - SQLite 另外记录中文是否人工编辑；只修改日文时保留原译文并标记为过期，同时修改中文时视为已人工校正。
 - SQLite 词表是可编辑主数据；每个转写任务使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新日文并把已有中文标记为过期。
+- 词表分类只存在于 SQLite 主数据和桌面应用层；处理核心读取已解析的文本快照，避免把 UI 的内容包概念耦合进 Whisper 适配器。
 - DeepL 返回全部结果后，应用使用带原文校验的 SQLite 事务一次性写入；翻译期间若日文已被修改，本次结果整体拒绝，避免译文错配。
 - 桌面 SRT/ASS 是 SQLite 工作区的派生输出。存在过期译文时拒绝导出；缺失中文时允许导出并显式报告缺失段数。
 - 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。

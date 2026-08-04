@@ -14,7 +14,7 @@ use crate::{
         job_snapshot::JobSnapshot,
         job_spec::{ProcessSpec, TranscribeSpec},
         job_status::JobStatus,
-        local_glossary_service::glossary_from_detail,
+        local_glossary_service::glossary_for_task,
     },
     infrastructure::{config::AppConfig, job_store::Job, local_db::LocalDatabase},
 };
@@ -112,13 +112,15 @@ impl LocalTaskService {
     }
 
     pub async fn submit_transcription(&self, spec: TranscribeSpec) -> Result<JobSnapshot> {
-        self.submit_transcription_with_glossary(spec, None).await
+        self.submit_transcription_with_glossary(spec, None, &[])
+            .await
     }
 
     pub async fn submit_transcription_with_glossary(
         &self,
         mut spec: TranscribeSpec,
         glossary_id: Option<&str>,
+        selected_content_groups: &[String],
     ) -> Result<JobSnapshot> {
         self.require_service_owned_output_dir(spec.output_dir.as_deref())?;
         let job = self
@@ -133,17 +135,15 @@ impl LocalTaskService {
                 .await?
                 .ok_or_else(|| anyhow!("local glossary not found: {glossary_id}"))?;
             let snapshot_path = job.dir.join("recognition-glossary.txt");
-            tokio::fs::write(
-                &snapshot_path,
-                glossary_from_detail(&detail)?.to_file_text(),
-            )
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to write task glossary snapshot {}",
-                    snapshot_path.display()
-                )
-            })?;
+            let resolved = glossary_for_task(&detail, selected_content_groups)?;
+            tokio::fs::write(&snapshot_path, resolved.to_file_text())
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to write task glossary snapshot {}",
+                        snapshot_path.display()
+                    )
+                })?;
             database
                 .assign_job_glossary(
                     job.id().as_str(),
@@ -155,6 +155,8 @@ impl LocalTaskService {
             spec.transcription.glossary = Some(snapshot_path);
         }
         spec.output_dir = Some(job.dir.clone());
+        let prompt = crate::domain::glossary::build_whisper_prompt(&spec.transcription)?;
+        job.write_whisper_prompt(prompt.as_deref())?;
         job.write_recognition_options(&spec.transcription)?;
         self.enqueue(
             job.clone(),
@@ -172,6 +174,8 @@ impl LocalTaskService {
             .create_queued_job(Some(spec.input.clone()), spec.render_output.clone())
             .await?;
         spec.output_dir = Some(job.dir.clone());
+        let prompt = crate::domain::glossary::build_whisper_prompt(&spec.transcription)?;
+        job.write_whisper_prompt(prompt.as_deref())?;
         job.write_recognition_options(&spec.transcription)?;
         self.enqueue(
             job.clone(),
@@ -454,6 +458,8 @@ mod tests {
                 vec![LocalGlossaryTermInput {
                     source_text: "ナブナ".to_string(),
                     target_text: Some("n-buna".to_string()),
+                    prompt_scope: "core".to_string(),
+                    content_group: None,
                 }],
             )
             .await
@@ -476,6 +482,7 @@ mod tests {
                     transcription,
                 },
                 Some(&glossary.glossary.id),
+                &[],
             )
             .await
             .unwrap();
@@ -506,6 +513,13 @@ mod tests {
             Some(vad_model.as_path())
         );
         assert_eq!(persisted_options.vad_max_speech_s, 8);
+        let prompt = fs::read_to_string(
+            root.join("jobs")
+                .join(&snapshot.manifest.job_id)
+                .join("whisper-prompt.txt"),
+        )
+        .unwrap();
+        assert!(prompt.contains("ナブナ（表記: n-buna）"));
 
         drop(service);
         drop(database);

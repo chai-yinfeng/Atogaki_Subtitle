@@ -26,6 +26,7 @@ pub struct Job {
     pub bilingual_ass: PathBuf,
     pub status_json: PathBuf,
     pub recognition_options_json: PathBuf,
+    pub whisper_prompt_txt: PathBuf,
 }
 
 impl Job {
@@ -73,6 +74,11 @@ impl Job {
         })
     }
 
+    pub fn write_whisper_prompt(&self, prompt: Option<&str>) -> Result<()> {
+        fs::write(&self.whisper_prompt_txt, prompt.unwrap_or_default())
+            .with_context(|| format!("failed to write {}", self.whisper_prompt_txt.display()))
+    }
+
     pub fn read_manifest_if_exists(&self) -> Result<Option<JobManifest>> {
         if !self.status_json.exists() {
             return Ok(None);
@@ -111,6 +117,7 @@ impl Job {
             bilingual_ass: dir.join("bilingual.ass"),
             status_json: dir.join("status.json"),
             recognition_options_json: dir.join("recognition-options.json"),
+            whisper_prompt_txt: dir.join("whisper-prompt.txt"),
             dir,
         }
     }
