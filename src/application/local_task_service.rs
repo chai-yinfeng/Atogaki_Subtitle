@@ -14,7 +14,7 @@ use crate::{
         job_spec::{ProcessSpec, TranscribeSpec},
         job_status::JobStatus,
     },
-    infrastructure::{config::AppConfig, job_store::Job},
+    infrastructure::{config::AppConfig, job_store::Job, local_db::LocalDatabase},
 };
 
 const DEFAULT_QUEUE_CAPACITY: usize = 8;
@@ -26,11 +26,18 @@ const DEFAULT_QUEUE_CAPACITY: usize = 8;
 pub struct LocalTaskService {
     sender: mpsc::Sender<QueuedTask>,
     jobs_dir: PathBuf,
+    database: Option<LocalDatabase>,
 }
 
 enum QueuedTask {
-    Transcribe(TranscribeSpec),
-    Process(ProcessSpec),
+    Transcribe {
+        job_dir: PathBuf,
+        spec: TranscribeSpec,
+    },
+    Process {
+        job_dir: PathBuf,
+        spec: ProcessSpec,
+    },
 }
 
 impl LocalTaskService {
@@ -40,12 +47,32 @@ impl LocalTaskService {
         Self::with_workers(config, jobs_dir, 1, DEFAULT_QUEUE_CAPACITY)
     }
 
+    /// Opens the SQLite-backed variant used by the desktop application.
+    pub async fn start_persistent(
+        config: AppConfig,
+        jobs_dir: impl Into<PathBuf>,
+        database_path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let database = LocalDatabase::open(database_path).await?;
+        Self::with_workers_and_database(config, jobs_dir, 1, DEFAULT_QUEUE_CAPACITY, Some(database))
+    }
+
     /// Starts a bounded queue with an explicit number of workers.
     pub fn with_workers(
         config: AppConfig,
         jobs_dir: impl Into<PathBuf>,
         workers: usize,
         queue_capacity: usize,
+    ) -> Result<Self> {
+        Self::with_workers_and_database(config, jobs_dir, workers, queue_capacity, None)
+    }
+
+    pub fn with_workers_and_database(
+        config: AppConfig,
+        jobs_dir: impl Into<PathBuf>,
+        workers: usize,
+        queue_capacity: usize,
+        database: Option<LocalDatabase>,
     ) -> Result<Self> {
         if workers == 0 {
             bail!("local task service requires at least one worker");
@@ -60,33 +87,74 @@ impl LocalTaskService {
         let receiver = Arc::new(Mutex::new(receiver));
 
         for _ in 0..workers {
-            handle.spawn(run_worker(config.clone(), Arc::clone(&receiver)));
+            handle.spawn(run_worker(
+                config.clone(),
+                Arc::clone(&receiver),
+                database.clone(),
+            ));
         }
 
         Ok(Self {
             sender,
             jobs_dir: jobs_dir.into(),
+            database,
         })
     }
 
     pub async fn submit_transcription(&self, mut spec: TranscribeSpec) -> Result<JobSnapshot> {
         self.require_service_owned_output_dir(spec.output_dir.as_deref())?;
-        let job = self.create_queued_job(Some(spec.input.clone()), None)?;
+        let job = self
+            .create_queued_job(Some(spec.input.clone()), None)
+            .await?;
         spec.output_dir = Some(job.dir.clone());
-        self.enqueue(job, QueuedTask::Transcribe(spec)).await
+        self.enqueue(
+            job.clone(),
+            QueuedTask::Transcribe {
+                job_dir: job.dir.clone(),
+                spec,
+            },
+        )
+        .await
     }
 
     pub async fn submit_process(&self, mut spec: ProcessSpec) -> Result<JobSnapshot> {
         self.require_service_owned_output_dir(spec.output_dir.as_deref())?;
-        let job = self.create_queued_job(Some(spec.input.clone()), spec.render_output.clone())?;
+        let job = self
+            .create_queued_job(Some(spec.input.clone()), spec.render_output.clone())
+            .await?;
         spec.output_dir = Some(job.dir.clone());
-        self.enqueue(job, QueuedTask::Process(spec)).await
+        self.enqueue(
+            job.clone(),
+            QueuedTask::Process {
+                job_dir: job.dir.clone(),
+                spec,
+            },
+        )
+        .await
     }
 
     /// Reads a task's current durable state. A UI can poll this method now and
     /// switch to event-driven updates later without changing task persistence.
     pub fn snapshot(&self, job_dir: impl AsRef<Path>) -> Result<JobSnapshot> {
         JobSnapshot::load(job_dir)
+    }
+
+    pub async fn list_persisted_jobs(
+        &self,
+    ) -> Result<Vec<crate::infrastructure::local_db::LocalJobRecord>> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("local task service was started without SQLite persistence"))?;
+        let jobs = database.list_jobs().await?;
+        for job in jobs {
+            if let Ok(snapshot) = JobSnapshot::load(&job.storage_dir)
+                && snapshot.manifest.updated_at_unix > job.updated_at_unix as u64
+            {
+                database.sync_snapshot(&snapshot).await?;
+            }
+        }
+        database.list_jobs().await
     }
 
     fn require_service_owned_output_dir(&self, output_dir: Option<&Path>) -> Result<()> {
@@ -99,7 +167,7 @@ impl LocalTaskService {
         Ok(())
     }
 
-    fn create_queued_job(
+    async fn create_queued_job(
         &self,
         input: Option<PathBuf>,
         render_output: Option<PathBuf>,
@@ -108,6 +176,14 @@ impl LocalTaskService {
         let mut manifest = JobManifest::new(&job, input, render_output);
         manifest.mark(JobStatus::Queued);
         job.write_manifest(&manifest)?;
+        if let Some(database) = &self.database {
+            database
+                .sync_snapshot(&JobSnapshot {
+                    manifest,
+                    segments: Vec::new(),
+                })
+                .await?;
+        }
         Ok(job)
     }
 
@@ -125,7 +201,11 @@ impl LocalTaskService {
     }
 }
 
-async fn run_worker(config: AppConfig, receiver: Arc<Mutex<mpsc::Receiver<QueuedTask>>>) {
+async fn run_worker(
+    config: AppConfig,
+    receiver: Arc<Mutex<mpsc::Receiver<QueuedTask>>>,
+    database: Option<LocalDatabase>,
+) {
     let runner = JobRunner::new(config);
 
     loop {
@@ -138,21 +218,41 @@ async fn run_worker(config: AppConfig, receiver: Arc<Mutex<mpsc::Receiver<Queued
             return;
         };
 
-        let result = match task {
-            QueuedTask::Transcribe(spec) => runner.transcribe(spec).await.map(|_| ()),
-            QueuedTask::Process(spec) => runner.process(spec).await.map(|_| ()),
+        let (job_dir, result) = match task {
+            QueuedTask::Transcribe { job_dir, spec } => {
+                let result = runner.transcribe(spec).await.map(|_| ());
+                (job_dir, result)
+            }
+            QueuedTask::Process { job_dir, spec } => {
+                let result = runner.process(spec).await.map(|_| ());
+                (job_dir, result)
+            }
         };
 
         if let Err(error) = result {
             eprintln!("[task-service] task failed: {error:#}");
+        }
+
+        if let Some(database) = &database {
+            match JobSnapshot::load(&job_dir) {
+                Ok(snapshot) => {
+                    if let Err(error) = database.sync_snapshot(&snapshot).await {
+                        eprintln!("[task-service] failed to sync local database: {error:#}");
+                    }
+                }
+                Err(error) => eprintln!("[task-service] failed to load task state: {error:#}"),
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::LocalTaskService;
-    use crate::infrastructure::config::AppConfig;
+    use crate::infrastructure::{config::AppConfig, local_db::LocalDatabase};
+    use tokio::sync::mpsc;
 
     #[test]
     fn rejects_an_invalid_worker_or_queue_count_before_starting() {
@@ -164,5 +264,32 @@ mod tests {
 
         assert!(LocalTaskService::with_workers(config.clone(), "jobs", 0, 1).is_err());
         assert!(LocalTaskService::with_workers(config, "jobs", 1, 0).is_err());
+    }
+
+    #[tokio::test]
+    async fn persistent_queue_writes_a_queued_snapshot_before_dispatch() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-task-service-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let (sender, _receiver) = mpsc::channel(1);
+        let service = LocalTaskService {
+            sender,
+            jobs_dir: root.join("jobs"),
+            database: Some(database.clone()),
+        };
+
+        let job = service.create_queued_job(None, None).await.unwrap();
+        let jobs = database.list_jobs().await.unwrap();
+
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].job_id, job.id());
+        assert_eq!(jobs[0].status, "queued");
+
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 }

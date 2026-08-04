@@ -16,6 +16,21 @@ pub enum JobStatus {
 }
 
 impl JobStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Created => "created",
+            Self::ExtractingAudio => "extracting_audio",
+            Self::Transcribing => "transcribing",
+            Self::RefiningSegments => "refining_segments",
+            Self::Translating => "translating",
+            Self::ExportingSubtitles => "exporting_subtitles",
+            Self::RenderingVideo => "rendering_video",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Queued => "queued",

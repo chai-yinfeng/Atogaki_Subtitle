@@ -22,3 +22,25 @@ pub struct TranscriptionOptions {
     pub output_json_full: bool,
     pub no_gpu: bool,
 }
+
+impl TranscriptionOptions {
+    pub fn japanese(model: PathBuf) -> Self {
+        Self {
+            model,
+            source_language: "ja".to_string(),
+            glossary: None,
+            prompt: None,
+            vad_model: None,
+            vad_threshold: 0.50,
+            vad_min_speech_ms: 250,
+            vad_min_silence_ms: 450,
+            vad_max_speech_s: 8,
+            vad_speech_pad_ms: 120,
+            max_len: 32,
+            split_on_word: true,
+            no_speech_threshold: 0.30,
+            output_json_full: false,
+            no_gpu: false,
+        }
+    }
+}

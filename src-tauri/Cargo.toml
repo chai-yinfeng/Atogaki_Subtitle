@@ -1,0 +1,15 @@
+[package]
+name = "atogaki-desktop"
+version = "0.1.0"
+description = "Atogaki local desktop application"
+edition = "2024"
+rust-version = "1.85"
+
+[build-dependencies]
+tauri-build = "2.6.3"
+
+[dependencies]
+atogaki-subtitle = { path = ".." }
+serde = { version = "1", features = ["derive"] }
+tauri = "2.11.5"
+tauri-plugin-dialog = "2.7.2"

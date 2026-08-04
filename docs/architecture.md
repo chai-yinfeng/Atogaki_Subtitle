@@ -17,6 +17,9 @@ Atogaki_Sub/
 │   └── interface/             # CLI；未来会新增桌面 UI 适配层
 ├── assets/                    # 版本化的示例和内置词表
 ├── migrations/                # 现有 Postgres 实验性迁移；不作为桌面 MVP 依赖
+├── migrations/sqlite/         # 桌面本地 SQLite 迁移
+├── src-tauri/                 # Tauri 桌面壳；依赖根 Rust library
+├── ui/                        # Tauri 内嵌的 TypeScript/Vite 前端
 ├── docs/                      # 产品方向、路线图、架构与决策记录
 └── tests/                     # 跨模块集成测试（按需要新增）
 ```
@@ -36,10 +39,12 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
+当前 Tauri 壳把 `LocalTaskService::start_persistent` 注册为应用状态：界面通过原生文件选择器获取媒体和 Whisper 模型路径，调用该服务创建日语转写任务，再从 SQLite 读取任务列表。媒体播放、字幕编辑与翻译是后续在同一边界上增加的命令，而不是直接由前端调用外部工具。
+
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。
-- 任务元数据、字幕段、词表与编辑状态：桌面 MVP 使用 SQLite。
+- 任务元数据、字幕段、词表与编辑状态：桌面 MVP 使用 SQLite；`LocalDatabase` 的迁移和适配器独立于 Postgres 草稿。
 - 密钥：macOS Keychain（或同等系统密钥链），不写入任务 JSON。
 - `status.json`：保留为任务产物与故障恢复副本，不作为唯一长期数据库。
 

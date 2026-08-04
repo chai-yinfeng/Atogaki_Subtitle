@@ -1,0 +1,52 @@
+:root {
+  color: #22251f;
+  background: #f4f0e7;
+  font-family: "Hiragino Sans", "PingFang SC", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button { font: inherit; }
+
+.shell { max-width: 980px; margin: 0 auto; padding: 56px 32px 80px; }
+header { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
+.eyebrow { margin: 0 0 8px; color: #a54632; font-size: 12px; font-weight: 700; letter-spacing: .12em; }
+h1, h2, h3, p { margin-top: 0; }
+h1 { margin-bottom: 0; font-family: Georgia, "Songti SC", serif; font-size: clamp(44px, 8vw, 72px); font-weight: 500; letter-spacing: -.05em; }
+h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500; }
+button { border: 0; border-radius: 999px; padding: 11px 17px; color: #fffaf1; background: #2e5d52; cursor: pointer; }
+button:hover { background: #214940; }
+.intro { margin: 48px 0; max-width: 620px; }
+.intro p { color: #5f625b; line-height: 1.7; }
+.data-path { font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.jobs { border-top: 1px solid #d3ccbd; padding-top: 24px; }
+.create-task { margin: 44px 0; border: 1px solid #ded7c9; border-radius: 15px; padding: 24px; background: rgba(255, 253, 247, .58); }
+.create-task form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+.create-task label { display: grid; gap: 6px; color: #5f625b; font-size: 13px; }
+.create-task input { width: 100%; border: 1px solid #d3ccbd; border-radius: 8px; padding: 10px; color: #30332d; background: #fffdf7; font: inherit; }
+.secondary { align-self: end; color: #2e5d52; background: #e2ece5; }
+.secondary:hover { background: #cfe0d6; }
+.form-footer { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 8px; }
+.form-footer span { color: #6e7068; font-size: 13px; overflow-wrap: anywhere; }
+button:disabled { cursor: wait; opacity: .6; }
+.section-heading { display: flex; align-items: baseline; justify-content: space-between; }
+.section-heading h2 { margin-bottom: 20px; font-size: 24px; }
+.section-heading span { color: #75776f; font-size: 14px; }
+.job-list { display: grid; gap: 10px; }
+.job-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid #ded7c9; border-radius: 12px; padding: 17px 18px; background: rgba(255, 253, 247, .76); }
+.job-card h3 { margin-bottom: 5px; font-size: 15px; }
+.job-card p { margin-bottom: 0; color: #77796f; font-size: 13px; }
+.status { border-radius: 999px; padding: 5px 9px; background: #e7e2d5; color: #55584f; font-size: 12px; text-transform: capitalize; white-space: nowrap; }
+.status-done { background: #d9eadf; color: #1d5c3e; }
+.status-failed { background: #f3d8d2; color: #8e3027; }
+.status-transcribing, .status-translating, .status-extracting_audio { background: #e0e9ed; color: #315864; }
+.empty-state { display: grid; gap: 7px; min-height: 116px; place-content: center; border: 1px dashed #cfc6b7; border-radius: 12px; color: #717369; text-align: center; }
+.empty-state.error { color: #8e3027; }
+
+@media (max-width: 620px) {
+  .shell { padding: 36px 20px; }
+  header { align-items: start; flex-direction: column; }
+  .job-card { align-items: start; flex-direction: column; }
+  .create-task form { grid-template-columns: 1fr; }
+  .secondary { justify-self: start; }
+}

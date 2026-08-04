@@ -1,8 +1,8 @@
 # Atogaki Subtitle
 
-Local-first offline audio/video transcription and translation workflow.
+Local-first Japanese audio/video transcription and translation workspace.
 
-The current target is a Rust executable, not a macOS/Xcode app. The core pipeline is platform-neutral except for optional recording, which uses `ffmpeg` audio devices on the current machine.
+The repository contains a reusable Rust processing core, a CLI, an experimental Web/Postgres shell, and a Tauri desktop MVP backed by local SQLite. Product direction and current milestones live in `docs/product-direction.md` and `docs/roadmap.md`.
 
 ## Architecture
 
@@ -75,6 +75,33 @@ Outputs are written to `./atogaki_jobs/<timestamp>/` by default:
 `status.json` records the durable job state for CLI progress and future Web polling.
 
 ## Commands
+
+Build and check the desktop MVP:
+
+```bash
+npm --prefix ui install
+npm --prefix ui run build
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+After the frontend build, launch the desktop application directly:
+
+```bash
+cargo run --manifest-path src-tauri/Cargo.toml
+```
+
+Start the Web API shell:
+
+```bash
+cargo run -- serve --bind 127.0.0.1:8080
+```
+
+With Postgres configured, the server connects and runs migrations at startup:
+
+```bash
+export DATABASE_URL="postgres://$(whoami)@localhost:5432/atogaki_dev"
+cargo run -- serve --bind 127.0.0.1:8080
+```
 
 List macOS/ffmpeg capture devices:
 
