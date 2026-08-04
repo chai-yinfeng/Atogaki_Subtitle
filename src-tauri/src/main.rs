@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use atogaki_subtitle::{
     application::{
-        LocalTaskService, LocalWorkspaceService, TranscriptionOptions, job_spec::TranscribeSpec,
+        LocalSubtitleExport, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
+        TranscriptionOptions, job_spec::TranscribeSpec,
     },
     infrastructure::{
         config::AppConfig,
@@ -116,6 +117,48 @@ async fn update_subtitle(
 }
 
 #[tauri::command]
+fn translation_status(state: State<'_, DesktopState>) -> LocalTranslationStatus {
+    state.workspace_service.translation_status()
+}
+
+#[tauri::command]
+async fn translate_subtitle(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    segment_id: String,
+) -> Result<LocalSubtitleSegmentRecord, String> {
+    state
+        .workspace_service
+        .translate_segment(&job_id, &segment_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn translate_all_subtitles(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .workspace_service
+        .translate_all(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn export_workspace_subtitles(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<LocalSubtitleExport, String> {
+    state
+        .workspace_service
+        .export_subtitles(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn pick_media_file(app: AppHandle) -> Result<Option<String>, String> {
     pick_local_file(
         &app,
@@ -221,12 +264,13 @@ fn main() {
             ))?;
             let task_service = tauri::async_runtime::block_on(async {
                 LocalTaskService::start_with_database(
-                    config,
+                    config.clone(),
                     data_dir.join("jobs"),
                     database.clone(),
                 )
             })?;
-            let workspace_service = LocalWorkspaceService::new(database);
+            let workspace_service =
+                LocalWorkspaceService::with_deepl(database, config.deepl_auth_key);
             app.manage(DesktopState {
                 data_dir,
                 task_service,
@@ -237,11 +281,15 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             data_directory,
+            export_workspace_subtitles,
             get_job_detail,
             list_jobs,
             pick_media_file,
             pick_model_file,
             submit_transcription,
+            translate_all_subtitles,
+            translate_subtitle,
+            translation_status,
             update_subtitle
         ])
         .run(tauri::generate_context!())

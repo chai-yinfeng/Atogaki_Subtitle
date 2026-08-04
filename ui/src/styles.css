@@ -50,6 +50,14 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .workspace-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 24px; margin-bottom: 24px; }
 .workspace-heading h2 { margin-bottom: 6px; font-size: 30px; overflow-wrap: anywhere; }
 .workspace-message { margin-bottom: 0; color: #6f716a; font-size: 13px; }
+.workspace-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px 20px; margin-bottom: 22px; border: 1px solid #d8d0c1; border-radius: 14px; padding: 15px 17px; background: rgba(255, 253, 247, .72); }
+.workspace-toolbar > div:first-child { display: grid; gap: 4px; }
+.workspace-toolbar strong { font-size: 14px; }
+.workspace-toolbar span, .workspace-toolbar p { color: #73766e; font-size: 11px; line-height: 1.5; }
+.workspace-toolbar span.warning, .workspace-toolbar p.warning { color: #a54632; }
+.workspace-action-buttons, .subtitle-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.workspace-action-buttons button { white-space: nowrap; }
+.workspace-toolbar p { grid-column: 1 / -1; margin: 0; overflow-wrap: anywhere; }
 .review-grid { display: grid; grid-template-columns: minmax(340px, .9fr) minmax(420px, 1.1fr); align-items: start; gap: 22px; }
 .media-panel { position: sticky; top: 20px; border: 1px solid #d8d0c1; border-radius: 16px; padding: 16px; background: rgba(255, 253, 247, .8); }
 .media-host { display: grid; min-height: 120px; place-items: center; border-radius: 11px; overflow: hidden; background: #20231f; }
@@ -77,6 +85,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .subtitle-footer span { color: #74766e; font-size: 11px; }
 .subtitle-footer span.warning { color: #a54632; }
 .subtitle-footer button { padding: 7px 11px; font-size: 12px; }
+.subtitle-actions .secondary { align-self: auto; }
 
 @media (max-width: 900px) {
   .review-grid { grid-template-columns: 1fr; }
@@ -91,4 +100,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
   .create-task form { grid-template-columns: 1fr; }
   .secondary { justify-self: start; }
   .workspace-heading { grid-template-columns: 1fr; }
+  .workspace-toolbar { grid-template-columns: 1fr; }
+  .workspace-action-buttons { justify-content: flex-start; flex-wrap: wrap; }
+  .workspace-toolbar p { grid-column: 1; }
+  .subtitle-footer { align-items: flex-start; flex-direction: column; }
 }

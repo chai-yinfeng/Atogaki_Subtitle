@@ -87,13 +87,16 @@ cargo check --manifest-path src-tauri/Cargo.toml
 After the frontend build, launch the desktop application directly:
 
 ```bash
+export DEEPL_AUTH_KEY="your-deepl-api-key" # optional; enables Japanese -> Simplified Chinese
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
 
 The desktop home screen can submit transcription jobs. Select a completed task to open the
 playback workspace, follow the highlighted subtitle, click a timecode to seek, and save Japanese
-or Chinese edits to SQLite. See `docs/desktop-testing.md` for the manual smoke-test checklist and
-current codec limitations.
+or Chinese edits to SQLite. With DeepL configured, the workspace can translate one segment or
+atomically retranslate all segments, then export Japanese, Chinese, and bilingual SRT/ASS files
+from the current SQLite state. See `docs/desktop-testing.md` for the manual smoke-test checklist
+and current codec limitations.
 
 Start the Web API shell:
 

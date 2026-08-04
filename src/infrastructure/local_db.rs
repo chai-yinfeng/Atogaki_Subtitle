@@ -43,6 +43,13 @@ pub struct LocalSubtitleSegmentRecord {
     pub translation_stale: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct LocalMachineTranslation {
+    pub segment_id: String,
+    pub source_text: String,
+    pub translated_text: String,
+}
+
 impl LocalDatabase {
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
@@ -172,6 +179,82 @@ impl LocalDatabase {
         .fetch_all(&self.pool)
         .await
         .context("failed to list local subtitle segments")
+    }
+
+    pub async fn get_segment(
+        &self,
+        job_id: &str,
+        segment_id: &str,
+    ) -> Result<Option<LocalSubtitleSegmentRecord>> {
+        sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
+            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+                source_edited, translation_edited, translation_stale
+             FROM local_subtitle_segments
+             WHERE job_id = ? AND id = ?",
+        )
+        .bind(job_id)
+        .bind(segment_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to read local subtitle segment")
+    }
+
+    pub async fn apply_machine_translations(
+        &self,
+        job_id: &str,
+        translations: &[LocalMachineTranslation],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        if translations.is_empty() {
+            return self.list_segments(job_id).await;
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin local translation transaction")?;
+
+        for translation in translations {
+            let translated_text = translation.translated_text.trim();
+            if translated_text.is_empty() {
+                return Err(anyhow!(
+                    "machine translation cannot be empty for segment {}",
+                    translation.segment_id
+                ));
+            }
+            let result = sqlx::query(
+                "UPDATE local_subtitle_segments
+                 SET zh_text = ?, translation_edited = 0, translation_stale = 0
+                 WHERE job_id = ? AND id = ? AND ja_text = ?",
+            )
+            .bind(translated_text)
+            .bind(job_id)
+            .bind(&translation.segment_id)
+            .bind(&translation.source_text)
+            .execute(&mut *tx)
+            .await
+            .context("failed to store local machine translation")?;
+            if result.rows_affected() != 1 {
+                return Err(anyhow!(
+                    "subtitle changed while it was being translated: {}",
+                    translation.segment_id
+                ));
+            }
+        }
+
+        sqlx::query(
+            "UPDATE local_jobs
+             SET updated_at_unix = MAX(updated_at_unix, ?)
+             WHERE job_id = ?",
+        )
+        .bind(chrono::Utc::now().timestamp())
+        .bind(job_id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to update local task translation timestamp")?;
+        tx.commit()
+            .await
+            .context("failed to commit local translation transaction")?;
+        self.list_segments(job_id).await
     }
 
     pub async fn update_segment_text(
@@ -315,16 +398,16 @@ impl LocalDatabase {
         job_id: &str,
         segments: &[TranscriptSegment],
     ) -> Result<()> {
-        let edited = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
+        let existing = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
             "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
                 source_edited, translation_edited, translation_stale
              FROM local_subtitle_segments
-             WHERE job_id = ? AND (source_edited = 1 OR translation_edited = 1)",
+             WHERE job_id = ?",
         )
         .bind(job_id)
         .fetch_all(&mut **tx)
         .await
-        .context("failed to read manually edited subtitle segments")?
+        .context("failed to read existing local subtitle segments")?
         .into_iter()
         .map(|segment| (segment.id.clone(), segment))
         .collect::<HashMap<_, _>>();
@@ -336,28 +419,37 @@ impl LocalDatabase {
             .context("failed to refresh local subtitle segments")?;
 
         for (index, segment) in segments.iter().enumerate() {
-            let previous = edited.get(&segment.id);
+            let previous = existing.get(&segment.id);
+            let ja_text = previous
+                .filter(|segment| segment.source_edited)
+                .map(|segment| segment.ja_text.as_str())
+                .unwrap_or(&segment.ja_text);
+            let incoming_translation = segment.zh_text.as_deref();
+            let (zh_text, translation_edited, translation_stale) = match previous {
+                Some(previous) if previous.translation_edited => (
+                    previous.zh_text.as_deref(),
+                    true,
+                    previous.translation_stale || ja_text != previous.ja_text,
+                ),
+                Some(previous) if incoming_translation.is_none() && previous.zh_text.is_some() => (
+                    previous.zh_text.as_deref(),
+                    false,
+                    previous.translation_stale || ja_text != previous.ja_text,
+                ),
+                _ => (incoming_translation, false, segment.translation_stale),
+            };
             insert_segment(
                 tx,
                 job_id,
                 index,
                 segment,
-                previous
-                    .map(|segment| segment.ja_text.as_str())
-                    .unwrap_or(&segment.ja_text),
-                match previous {
-                    Some(segment) => segment.zh_text.as_deref(),
-                    None => segment.zh_text.as_deref(),
-                },
+                ja_text,
+                zh_text,
                 previous
                     .map(|segment| segment.source_edited)
                     .unwrap_or(segment.source_edited),
-                previous
-                    .map(|segment| segment.translation_edited)
-                    .unwrap_or(false),
-                previous
-                    .map(|segment| segment.translation_stale)
-                    .unwrap_or(segment.translation_stale),
+                translation_edited,
+                translation_stale,
             )
             .await?;
         }
@@ -408,7 +500,7 @@ fn to_i64(value: u64, field: &str) -> Result<i64> {
 mod tests {
     use std::fs;
 
-    use super::LocalDatabase;
+    use super::{LocalDatabase, LocalMachineTranslation};
     use crate::{
         application::{
             job_manifest::JobManifest, job_snapshot::JobSnapshot, job_status::JobStatus,
@@ -489,6 +581,92 @@ mod tests {
         assert_eq!(preserved[0].zh_text.as_deref(), Some("人工翻译"));
         assert!(preserved[0].source_edited);
         assert!(preserved[0].translation_edited);
+
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn machine_translations_are_atomic_and_survive_snapshot_refresh() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-local-translation-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let manifest = JobManifest::new(&job, None, None);
+        let first = TranscriptSegment::new(0, 1_000, "最初の文".to_string());
+        let second = TranscriptSegment::new(1_000, 2_000, "次の文".to_string());
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first.clone(), second.clone()],
+            })
+            .await
+            .unwrap();
+
+        database
+            .apply_machine_translations(
+                &manifest.job_id,
+                &[
+                    LocalMachineTranslation {
+                        segment_id: first.id.clone(),
+                        source_text: first.ja_text.clone(),
+                        translated_text: "第一句话".to_string(),
+                    },
+                    LocalMachineTranslation {
+                        segment_id: second.id.clone(),
+                        source_text: second.ja_text.clone(),
+                        translated_text: "下一句话".to_string(),
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        let translated = database.list_segments(&manifest.job_id).await.unwrap();
+        assert_eq!(translated[0].zh_text.as_deref(), Some("第一句话"));
+        assert!(!translated[0].translation_edited);
+        assert!(!translated[0].translation_stale);
+
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first.clone(), second.clone()],
+            })
+            .await
+            .unwrap();
+        let preserved = database.list_segments(&manifest.job_id).await.unwrap();
+        assert_eq!(preserved[0].zh_text.as_deref(), Some("第一句话"));
+
+        let mut changed = first.clone();
+        changed.ja_text = "変更された文".to_string();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![changed, second],
+            })
+            .await
+            .unwrap();
+        let stale = database.list_segments(&manifest.job_id).await.unwrap();
+        assert_eq!(stale[0].zh_text.as_deref(), Some("第一句话"));
+        assert!(stale[0].translation_stale);
+
+        let error = database
+            .apply_machine_translations(
+                &manifest.job_id,
+                &[LocalMachineTranslation {
+                    segment_id: first.id,
+                    source_text: "已经过时的日文".to_string(),
+                    translated_text: "不应写入".to_string(),
+                }],
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("changed while"));
+        let unchanged = database.list_segments(&manifest.job_id).await.unwrap();
+        assert_eq!(unchanged[0].zh_text.as_deref(), Some("第一句话"));
 
         drop(database);
         fs::remove_dir_all(root).unwrap();

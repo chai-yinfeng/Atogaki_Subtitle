@@ -16,6 +16,6 @@ impl TranslationOptions {
 
 impl Default for TranslationOptions {
     fn default() -> Self {
-        Self::new("ja", "zh")
+        Self::new("ja", "zh-hans")
     }
 }

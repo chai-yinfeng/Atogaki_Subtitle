@@ -1,4 +1,6 @@
-use anyhow::{Context, Result};
+use std::time::Duration;
+
+use anyhow::{Context, Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -19,9 +21,8 @@ pub async fn translate_segments(
     options: &TranslationOptions,
     segments: &mut [TranscriptSegment],
 ) -> Result<()> {
-    let client = Client::new();
     let texts: Vec<String> = segments.iter().map(|s| s.ja_text.clone()).collect();
-    let translated = translate_lines(&client, auth_key, options, &texts).await?;
+    let translated = translate_texts(auth_key, options, &texts).await?;
 
     for (segment, zh) in segments.iter_mut().zip(translated) {
         segment.set_translation(Some(zh));
@@ -30,8 +31,24 @@ pub async fn translate_segments(
     Ok(())
 }
 
+pub async fn translate_texts(
+    auth_key: &str,
+    options: &TranslationOptions,
+    texts: &[String],
+) -> Result<Vec<String>> {
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let client = Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .context("failed to build DeepL client")?;
+    translate_lines(&client, deepl_endpoint(auth_key), auth_key, options, texts).await
+}
+
 async fn translate_lines(
     client: &Client,
+    endpoint: &str,
     auth_key: &str,
     options: &TranslationOptions,
     texts: &[String],
@@ -51,7 +68,7 @@ async fn translate_lines(
         }
 
         let resp = client
-            .post("https://api-free.deepl.com/v2/translate")
+            .post(endpoint)
             .header("Authorization", format!("DeepL-Auth-Key {auth_key}"))
             .header(
                 "Content-Type",
@@ -70,8 +87,56 @@ async fn translate_lines(
 
         let decoded: DeepLResponse =
             serde_json::from_str(&data).context("failed to parse DeepL response")?;
+        if decoded.translations.len() != batch.len() {
+            return Err(anyhow!(
+                "DeepL returned {} translations for {} source lines",
+                decoded.translations.len(),
+                batch.len()
+            ));
+        }
         out.extend(decoded.translations.into_iter().map(|item| item.text));
     }
 
     Ok(out)
+}
+
+fn deepl_endpoint(auth_key: &str) -> &'static str {
+    if auth_key.trim().ends_with(":fx") {
+        "https://api-free.deepl.com/v2/translate"
+    } else {
+        "https://api.deepl.com/v2/translate"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{deepl_endpoint, translate_texts};
+    use crate::application::TranslationOptions;
+
+    #[test]
+    fn selects_the_endpoint_for_free_and_pro_keys() {
+        assert_eq!(
+            deepl_endpoint("free-key:fx"),
+            "https://api-free.deepl.com/v2/translate"
+        );
+        assert_eq!(
+            deepl_endpoint("pro-key"),
+            "https://api.deepl.com/v2/translate"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "uses the configured DeepL account and network"]
+    async fn configured_account_translates_japanese_to_simplified_chinese() {
+        let key = std::env::var("DEEPL_AUTH_KEY").expect("DEEPL_AUTH_KEY is required");
+        let translated = translate_texts(
+            &key,
+            &TranslationOptions::default(),
+            &["こんにちは。".to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(translated.len(), 1);
+        assert!(!translated[0].trim().is_empty());
+    }
 }

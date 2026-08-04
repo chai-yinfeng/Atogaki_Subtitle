@@ -27,6 +27,7 @@ cargo check --manifest-path src-tauri/Cargo.toml --offline
 ```bash
 export ATOGAKI_FFMPEG="/path/to/ffmpeg"
 export ATOGAKI_WHISPER_CLI="/path/to/whisper-cli"
+export DEEPL_AUTH_KEY="your-deepl-api-key"
 npm --prefix ui run build
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
@@ -47,11 +48,15 @@ cargo run --manifest-path src-tauri/Cargo.toml
 4. 播放时当前句应高亮；点击时间码应跳转并继续播放。
 5. 修改日文并保存；刷新或重启应用后修改仍应存在。已有中文时，日文修改应标记“待重译”。
 6. 修改中文并保存；“待重译”应清除，并显示中文已编辑。
-7. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
+7. 点击“翻译本段”；译文应写入 SQLite，刷新或重启后仍然存在。
+8. 点击“全部翻译／重译”，确认覆盖提示；全部译文应一次性更新。没有 `DEEPL_AUTH_KEY` 时按钮应禁用并显示配置提示。
+9. 修改日文但保留旧中文并保存；导出应拒绝，并提示先处理待重译字幕。
+10. 重译后点击“从 SQLite 导出 SRT／ASS”；任务目录中的 `ja.srt`、`zh.srt`、`bilingual.srt` 和 `bilingual.ass` 应包含 SQLite 人工编辑后的内容。
+11. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
 
 ## 当前测试边界
 
 - macOS WebView 通常可以直接播放 MP4/MOV 和常见音频；MKV、部分 WebM 或特殊编码可能失败，此时只保证 `audio.wav` 回听。
-- 当前桌面入口只创建转写任务，中文可人工填写；DeepL 单段/全部重译尚未接入界面。
-- SQLite 编辑已是桌面工作区主数据，但现有 CLI 导出仍读取任务 JSON；桌面导出接通前，不要用 CLI 文件链验证 SQLite 编辑结果。
+- 桌面翻译使用 DeepL 云端 API，会发送当前日文字幕；API key 只从启动环境读取，设置界面和 Keychain 存储尚未实现。
+- 桌面 SRT/ASS 导出已使用 SQLite；现有 CLI `translate`/`export` 仍读取任务 JSON，两条入口的数据源不同，不要用 CLI 命令验证桌面人工编辑。
 - 开发态 `cargo run` 二进制不是注册安装的 `.app`，部分 macOS GUI 自动化工具无法枚举它；打包阶段需要补充可重复的窗口自动化测试。

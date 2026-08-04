@@ -11,6 +11,8 @@ pub mod translation_options;
 pub use job_runner::JobRunner;
 pub use job_snapshot::JobSnapshot;
 pub use local_task_service::LocalTaskService;
-pub use local_workspace_service::{LocalWorkspaceJob, LocalWorkspaceService};
+pub use local_workspace_service::{
+    LocalSubtitleExport, LocalTranslationStatus, LocalWorkspaceJob, LocalWorkspaceService,
+};
 pub use transcription_options::TranscriptionOptions;
 pub use translation_options::TranslationOptions;

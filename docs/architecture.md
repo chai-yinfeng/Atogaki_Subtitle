@@ -39,13 +39,13 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
-当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService` 与 `LocalWorkspaceService`：前者负责创建、排队和同步后台任务，后者负责读取任务详情与保存字幕编辑。界面通过原生文件选择器获取媒体和 Whisper 模型路径；打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
+当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService` 与 `LocalWorkspaceService`：前者负责创建、排队和同步后台任务，后者负责读取任务详情、保存编辑、调用 DeepL 翻译以及从 SQLite 当前状态导出字幕。界面通过原生文件选择器获取媒体和 Whisper 模型路径；打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。
-- 任务元数据、字幕段、词表与编辑状态：桌面 MVP 使用 SQLite；生成快照首次导入后，人工编辑字段以 SQLite 为准，后续快照同步不会覆盖具有编辑标记的字幕段。
-- 密钥：macOS Keychain（或同等系统密钥链），不写入任务 JSON。
+- 任务元数据、字幕段、词表与编辑状态：桌面 MVP 使用 SQLite；生成快照首次导入后，人工编辑和 SQLite 生成的机器译文以 SQLite 为准，后续快照同步不会用旧 `segments.json` 清空它们。
+- 密钥：目标是使用 macOS Keychain（或同等系统密钥链），不写入任务 JSON；当前桌面 MVP 仅在启动时读取 `DEEPL_AUTH_KEY` 环境变量。
 - `status.json`：保留为任务产物与故障恢复副本，不作为唯一长期数据库。
 
 ## 核心数据约定
@@ -53,5 +53,7 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 - 任务目录以 UUID 命名，避免并发任务冲突。
 - 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。
 - SQLite 另外记录中文是否人工编辑；只修改日文时保留原译文并标记为过期，同时修改中文时视为已人工校正。
+- DeepL 返回全部结果后，应用使用带原文校验的 SQLite 事务一次性写入；翻译期间若日文已被修改，本次结果整体拒绝，避免译文错配。
+- 桌面 SRT/ASS 是 SQLite 工作区的派生输出。存在过期译文时拒绝导出；缺失中文时允许导出并显式报告缺失段数。
 - 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。
 - 外部工具和 API 是可替换基础设施：ASR、翻译和媒体处理分别通过应用层选项接入。CLI 默认日语识别、简中翻译，但不将该默认值写死到应用层或 DeepL 适配器。

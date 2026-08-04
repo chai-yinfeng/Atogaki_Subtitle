@@ -31,6 +31,21 @@ type JobDetail = {
   audio_fallback_path: string | null;
 };
 
+type TranslationStatus = {
+  provider: string;
+  configured: boolean;
+  source_language: string;
+  target_language: string;
+};
+
+type SubtitleExport = {
+  ja_srt: string;
+  zh_srt: string;
+  bilingual_srt: string;
+  bilingual_ass: string;
+  missing_translation_count: number;
+};
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("missing app root");
 
@@ -75,8 +90,19 @@ app.innerHTML = `
           <h2 id="workspace-title">任务详情</h2>
           <p id="workspace-message" class="workspace-message"></p>
         </div>
-        <button id="reload-detail" type="button">重新读取</button>
+        <button id="reload-detail" type="button" class="secondary">重新读取</button>
       </div>
+      <section class="workspace-toolbar" aria-label="翻译与导出">
+        <div>
+          <strong>简体中文翻译</strong>
+          <span id="translation-status">正在读取翻译配置…</span>
+        </div>
+        <div class="workspace-action-buttons">
+          <button id="translate-all" type="button">全部翻译／重译</button>
+          <button id="export-subtitles" type="button" class="secondary">从 SQLite 导出 SRT／ASS</button>
+        </div>
+        <p id="workspace-action-message" role="status"></p>
+      </section>
       <div class="review-grid">
         <section class="media-panel" aria-label="媒体播放器">
           <div id="media-host" class="media-host"></div>
@@ -115,11 +141,22 @@ const subtitleList = document.querySelector<HTMLDivElement>("#subtitle-list");
 const segmentCount = document.querySelector<HTMLSpanElement>("#segment-count");
 const currentJa = document.querySelector<HTMLParagraphElement>("#current-ja");
 const currentZh = document.querySelector<HTMLParagraphElement>("#current-zh");
+const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
+const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
+const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
+const workspaceActionMessage = document.querySelector<HTMLParagraphElement>("#workspace-action-message");
 
 let refreshing = false;
 let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
 let activeSegmentId: string | null = null;
+let workspaceActionBusy = false;
+let translationStatus: TranslationStatus = {
+  provider: "DeepL",
+  configured: false,
+  source_language: "ja",
+  target_language: "zh-hans",
+};
 
 function displayName(job: LocalJob): string {
   const source = job.input_path?.split("/").pop();
@@ -141,6 +178,38 @@ function escapeHtml(value: string): string {
     };
     return entities[character];
   });
+}
+
+function updateTranslationControls(): void {
+  const hasSegments = (activeDetail?.segments.length ?? 0) > 0;
+  if (translationStatusText) {
+    translationStatusText.textContent = translationStatus.configured
+      ? `${translationStatus.provider} 已配置 · 日文会发送到云端翻译为简体中文`
+      : `未配置 ${translationStatus.provider}；请设置 DEEPL_AUTH_KEY 后重启应用`;
+    translationStatusText.classList.toggle("warning", !translationStatus.configured);
+  }
+  if (translateAllButton) {
+    translateAllButton.disabled = workspaceActionBusy || !hasSegments || !translationStatus.configured;
+  }
+  if (exportButton) exportButton.disabled = workspaceActionBusy || !hasSegments;
+  subtitleList?.querySelectorAll<HTMLButtonElement>(".translate-segment").forEach((button) => {
+    button.disabled = workspaceActionBusy || !translationStatus.configured;
+  });
+}
+
+function setWorkspaceAction(message: string, isError = false): void {
+  if (!workspaceActionMessage) return;
+  workspaceActionMessage.textContent = message;
+  workspaceActionMessage.classList.toggle("warning", isError);
+}
+
+function setWorkspaceBusy(busy: boolean): void {
+  workspaceActionBusy = busy;
+  updateTranslationControls();
+}
+
+function hasUnsavedSubtitleEdits(): boolean {
+  return Boolean(subtitleList?.querySelector<HTMLElement>('[data-dirty="true"]'));
 }
 
 function renderJobs(jobs: LocalJob[]): void {
@@ -188,7 +257,9 @@ function showWorkspace(show: boolean): void {
 async function openJob(jobId: string): Promise<void> {
   if (!jobId || !workspaceMessage) return;
   showWorkspace(true);
+  window.scrollTo({ top: 0, behavior: "auto" });
   workspaceMessage.textContent = "正在读取 SQLite 字幕工作区…";
+  setWorkspaceAction("");
   if (subtitleList) subtitleList.innerHTML = `<div class="empty-state">正在读取字幕…</div>`;
   try {
     activeDetail = await invoke<JobDetail>("get_job_detail", { jobId });
@@ -208,6 +279,7 @@ function renderWorkspace(detail: JobDetail): void {
   mountMedia(detail.playback_path, detail.audio_fallback_path);
   renderSubtitleList(detail.segments);
   updateActiveSubtitle(0);
+  updateTranslationControls();
 }
 
 function isAudioPath(path: string): boolean {
@@ -263,6 +335,7 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
     const card = document.createElement("article");
     card.className = "subtitle-card";
     card.dataset.segmentId = segment.id;
+    card.dataset.dirty = "false";
 
     const meta = document.createElement("div");
     meta.className = "subtitle-meta";
@@ -302,7 +375,12 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
     save.type = "button";
     save.textContent = "保存本段";
     save.disabled = true;
+    const translate = document.createElement("button");
+    translate.type = "button";
+    translate.className = "translate-segment secondary";
+    translate.textContent = segment.zh_text ? "重译本段" : "翻译本段";
     const markDirty = (): void => {
+      card.dataset.dirty = "true";
       save.disabled = false;
       state.textContent = "有未保存的修改";
       state.classList.remove("warning");
@@ -310,12 +388,17 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
     ja.addEventListener("input", markDirty);
     zh.addEventListener("input", markDirty);
     save.addEventListener("click", () => void saveSegment(segment, ja, zh, save, state));
-    footer.append(state, save);
+    translate.addEventListener("click", () => void translateSegment(segment, ja, zh, state));
+    const actions = document.createElement("div");
+    actions.className = "subtitle-actions";
+    actions.append(translate, save);
+    footer.append(state, actions);
 
     card.append(meta, jaLabel, zhLabel, footer);
     subtitleList.append(card);
   }
   highlightSegment(activeSegmentId);
+  updateTranslationControls();
 }
 
 async function saveSegment(
@@ -329,21 +412,61 @@ async function saveSegment(
   button.disabled = true;
   state.textContent = "正在保存…";
   try {
-    const updated = await invoke<SubtitleSegment>("update_subtitle", {
-      request: {
-        jobId: activeDetail.job.job_id,
-        segmentId: segment.id,
-        jaText: ja.value,
-        zhText: zh.value.trim() || null,
-      },
-    });
-    activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
+    const updated = await persistSegment(segment.id, ja.value, zh.value);
+    replaceActiveSegment(updated);
     renderSubtitleList(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
   } catch (error) {
     state.textContent = `保存失败：${String(error)}`;
     state.classList.add("warning");
     button.disabled = false;
+  }
+}
+
+async function persistSegment(segmentId: string, jaText: string, zhText: string): Promise<SubtitleSegment> {
+  if (!activeDetail) throw new Error("没有打开的字幕任务");
+  return invoke<SubtitleSegment>("update_subtitle", {
+    request: {
+      jobId: activeDetail.job.job_id,
+      segmentId,
+      jaText,
+      zhText: zhText.trim() || null,
+    },
+  });
+}
+
+function replaceActiveSegment(updated: SubtitleSegment): void {
+  if (!activeDetail) return;
+  activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
+}
+
+async function translateSegment(
+  segment: SubtitleSegment,
+  ja: HTMLTextAreaElement,
+  zh: HTMLTextAreaElement,
+  state: HTMLSpanElement,
+): Promise<void> {
+  if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
+  setWorkspaceBusy(true);
+  state.textContent = "正在保存并发送本段到 DeepL…";
+  state.classList.remove("warning");
+  try {
+    const saved = await persistSegment(segment.id, ja.value, zh.value);
+    replaceActiveSegment(saved);
+    const translated = await invoke<SubtitleSegment>("translate_subtitle", {
+      jobId: activeDetail.job.job_id,
+      segmentId: segment.id,
+    });
+    replaceActiveSegment(translated);
+    setWorkspaceAction("本段中文已由 DeepL 更新并保存到 SQLite。");
+    renderSubtitleList(activeDetail.segments);
+    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+  } catch (error) {
+    state.textContent = `翻译失败：${String(error)}`;
+    state.classList.add("warning");
+    setWorkspaceAction(`翻译失败：${String(error)}`, true);
+  } finally {
+    setWorkspaceBusy(false);
   }
 }
 
@@ -393,6 +516,57 @@ function highlightSegment(segmentId: string | null): void {
   });
 }
 
+async function translateAllSubtitles(): Promise<void> {
+  if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
+  if (hasUnsavedSubtitleEdits()) {
+    setWorkspaceAction("请先保存各段尚未保存的修改，再执行全部重译。", true);
+    return;
+  }
+  const confirmed = window.confirm(
+    `将把 ${activeDetail.segments.length} 段日文发送到 DeepL，并覆盖现有中文（包括人工修改）。继续吗？`,
+  );
+  if (!confirmed) return;
+
+  setWorkspaceBusy(true);
+  setWorkspaceAction(`正在通过 DeepL 翻译 ${activeDetail.segments.length} 段字幕…`);
+  try {
+    activeDetail.segments = await invoke<SubtitleSegment[]>("translate_all_subtitles", {
+      jobId: activeDetail.job.job_id,
+    });
+    setWorkspaceAction(`已翻译 ${activeDetail.segments.length} 段并原子写入 SQLite。`);
+    renderSubtitleList(activeDetail.segments);
+    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+  } catch (error) {
+    setWorkspaceAction(`全部翻译失败：${String(error)}`, true);
+  } finally {
+    setWorkspaceBusy(false);
+  }
+}
+
+async function exportSubtitles(): Promise<void> {
+  if (!activeDetail || workspaceActionBusy) return;
+  if (hasUnsavedSubtitleEdits()) {
+    setWorkspaceAction("请先保存各段尚未保存的修改，再导出字幕。", true);
+    return;
+  }
+
+  setWorkspaceBusy(true);
+  setWorkspaceAction("正在从 SQLite 当前内容生成日文、中文和双语字幕…");
+  try {
+    const exported = await invoke<SubtitleExport>("export_workspace_subtitles", {
+      jobId: activeDetail.job.job_id,
+    });
+    const missing = exported.missing_translation_count
+      ? `；${exported.missing_translation_count} 段尚无中文，双语字幕中保留日文`
+      : "";
+    setWorkspaceAction(`已导出到任务目录：${exported.bilingual_srt}${missing}`);
+  } catch (error) {
+    setWorkspaceAction(`导出失败：${String(error)}`, true);
+  } finally {
+    setWorkspaceBusy(false);
+  }
+}
+
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
 document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
   activeMedia?.pause();
@@ -405,6 +579,8 @@ document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("cl
 document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
   if (activeDetail) void openJob(activeDetail.job.job_id);
 });
+translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
+exportButton?.addEventListener("click", () => void exportSubtitles());
 
 async function chooseFile(kind: "media" | "model"): Promise<void> {
   const button = document.querySelector<HTMLButtonElement>(
@@ -456,6 +632,15 @@ void invoke<string>("data_directory")
   })
   .catch(() => {
     if (dataPath) dataPath.textContent = "本地数据目录暂不可用。";
+  });
+void invoke<TranslationStatus>("translation_status")
+  .then((status) => {
+    translationStatus = status;
+    updateTranslationControls();
+  })
+  .catch((error) => {
+    setWorkspaceAction(`无法读取翻译配置：${String(error)}`, true);
+    updateTranslationControls();
   });
 void refresh();
 window.setInterval(() => void refresh(), 2_000);
