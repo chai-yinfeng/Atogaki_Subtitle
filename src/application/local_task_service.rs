@@ -13,6 +13,7 @@ use crate::{
         job_snapshot::JobSnapshot,
         job_spec::{ProcessSpec, TranscribeSpec},
         job_status::JobStatus,
+        local_glossary_service::glossary_from_detail,
     },
     infrastructure::{config::AppConfig, job_store::Job, local_db::LocalDatabase},
 };
@@ -109,11 +110,49 @@ impl LocalTaskService {
         })
     }
 
-    pub async fn submit_transcription(&self, mut spec: TranscribeSpec) -> Result<JobSnapshot> {
+    pub async fn submit_transcription(&self, spec: TranscribeSpec) -> Result<JobSnapshot> {
+        self.submit_transcription_with_glossary(spec, None).await
+    }
+
+    pub async fn submit_transcription_with_glossary(
+        &self,
+        mut spec: TranscribeSpec,
+        glossary_id: Option<&str>,
+    ) -> Result<JobSnapshot> {
         self.require_service_owned_output_dir(spec.output_dir.as_deref())?;
         let job = self
             .create_queued_job(Some(spec.input.clone()), None)
             .await?;
+        if let Some(glossary_id) = glossary_id {
+            let database = self.database.as_ref().ok_or_else(|| {
+                anyhow!("glossary selection requires SQLite-backed local task service")
+            })?;
+            let detail = database
+                .get_glossary(glossary_id)
+                .await?
+                .ok_or_else(|| anyhow!("local glossary not found: {glossary_id}"))?;
+            let snapshot_path = job.dir.join("recognition-glossary.txt");
+            tokio::fs::write(
+                &snapshot_path,
+                glossary_from_detail(&detail)?.to_file_text(),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to write task glossary snapshot {}",
+                    snapshot_path.display()
+                )
+            })?;
+            database
+                .assign_job_glossary(
+                    job.id().as_str(),
+                    &detail.glossary.id,
+                    &detail.glossary.name,
+                    &snapshot_path,
+                )
+                .await?;
+            spec.transcription.glossary = Some(snapshot_path);
+        }
         spec.output_dir = Some(job.dir.clone());
         self.enqueue(
             job.clone(),
@@ -259,7 +298,13 @@ mod tests {
     use std::fs;
 
     use super::LocalTaskService;
-    use crate::infrastructure::{config::AppConfig, local_db::LocalDatabase};
+    use crate::{
+        application::{TranscriptionOptions, job_spec::TranscribeSpec},
+        infrastructure::{
+            config::AppConfig,
+            local_db::{LocalDatabase, LocalGlossaryTermInput},
+        },
+    };
     use tokio::sync::mpsc;
 
     #[test]
@@ -297,6 +342,63 @@ mod tests {
         assert_eq!(jobs[0].job_id, job.id());
         assert_eq!(jobs[0].status, "queued");
 
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn selected_glossary_is_snapshotted_and_associated_before_dispatch() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-task-glossary-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let glossary = database
+            .save_glossary(
+                None,
+                "测试词表".to_string(),
+                vec![LocalGlossaryTermInput {
+                    source_text: "ナブナ".to_string(),
+                    target_text: Some("n-buna".to_string()),
+                }],
+            )
+            .await
+            .unwrap();
+        let (sender, _receiver) = mpsc::channel(1);
+        let service = LocalTaskService {
+            sender,
+            jobs_dir: root.join("jobs"),
+            database: Some(database.clone()),
+        };
+
+        let snapshot = service
+            .submit_transcription_with_glossary(
+                TranscribeSpec {
+                    input: root.join("input.mp3"),
+                    output_dir: None,
+                    transcription: TranscriptionOptions::japanese(root.join("model.bin")),
+                },
+                Some(&glossary.glossary.id),
+            )
+            .await
+            .unwrap();
+        let record = database
+            .get_job(&snapshot.manifest.job_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.glossary_id, Some(glossary.glossary.id));
+        assert_eq!(record.glossary_name.as_deref(), Some("测试词表"));
+        let glossary_path = record.glossary_snapshot_path.unwrap();
+        assert!(
+            fs::read_to_string(glossary_path)
+                .unwrap()
+                .contains("ナブナ => n-buna")
+        );
+
+        drop(service);
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

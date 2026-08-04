@@ -1,13 +1,19 @@
 use std::{fs, path::Path};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use crate::{application::TranscriptionOptions, domain::TranscriptSegment};
 
-#[derive(Debug, Clone, Default)]
-struct Glossary {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Glossary {
     terms: Vec<String>,
     replacements: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlossaryEntry {
+    pub source_text: String,
+    pub target_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -61,6 +67,72 @@ pub fn apply_file_to_segments(
     ))
 }
 
+impl Glossary {
+    pub fn from_entries(entries: impl IntoIterator<Item = GlossaryEntry>) -> Result<Self> {
+        let mut glossary = Self::default();
+        for entry in entries {
+            let source = entry.source_text.trim();
+            if source.is_empty() {
+                return Err(anyhow!("glossary source text cannot be empty"));
+            }
+            match entry
+                .target_text
+                .as_deref()
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+            {
+                Some(target) => {
+                    if source == target {
+                        return Err(anyhow!(
+                            "glossary replacement source and target cannot be identical: {source}"
+                        ));
+                    }
+                    glossary
+                        .replacements
+                        .push((source.to_string(), target.to_string()));
+                    glossary.terms.push(target.to_string());
+                }
+                None => glossary.terms.push(source.to_string()),
+            }
+        }
+        glossary.normalize();
+        Ok(glossary)
+    }
+
+    pub fn to_file_text(&self) -> String {
+        let mut lines = self.terms.clone();
+        lines.extend(
+            self.replacements
+                .iter()
+                .map(|(source, target)| format!("{source} => {target}")),
+        );
+        lines.sort();
+        lines.dedup();
+        if lines.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", lines.join("\n"))
+        }
+    }
+
+    pub fn corrected_text(&self, text: &str) -> String {
+        apply_replacements_to_text(text, &self.replacements)
+    }
+
+    fn normalize(&mut self) {
+        self.terms.sort();
+        self.terms.dedup();
+        self.replacements.sort_by(|(left, _), (right, _)| {
+            right
+                .chars()
+                .count()
+                .cmp(&left.chars().count())
+                .then_with(|| left.cmp(right))
+        });
+        self.replacements.dedup();
+    }
+}
+
 fn apply_glossary_to_segments(
     glossary: &Glossary,
     segments: Vec<TranscriptSegment>,
@@ -104,7 +176,7 @@ fn load_from_options(options: &TranscriptionOptions) -> Result<Glossary> {
     }
 }
 
-fn load(path: &Path) -> Result<Glossary> {
+pub fn load(path: &Path) -> Result<Glossary> {
     let raw =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut glossary = Glossary::default();
@@ -125,8 +197,7 @@ fn load(path: &Path) -> Result<Glossary> {
         }
     }
 
-    glossary.terms.sort();
-    glossary.terms.dedup();
+    glossary.normalize();
     Ok(glossary)
 }
 
@@ -219,6 +290,29 @@ mod tests {
         assert_eq!(
             apply_replacements_to_text("アイスイッチとスイッチ", &replacements),
             "アイスイッチとスイッチ"
+        );
+    }
+
+    #[test]
+    fn structured_entries_round_trip_to_the_file_format() {
+        let glossary = Glossary::from_entries([
+            GlossaryEntry {
+                source_text: "ヨルシカ".to_string(),
+                target_text: None,
+            },
+            GlossaryEntry {
+                source_text: "ナブナ".to_string(),
+                target_text: Some("n-buna".to_string()),
+            },
+        ])
+        .unwrap();
+
+        let text = glossary.to_file_text();
+        assert!(text.contains("ヨルシカ"));
+        assert!(text.contains("ナブナ => n-buna"));
+        assert_eq!(
+            glossary.corrected_text("ナブナとヨルシカ"),
+            "n-bunaとヨルシカ"
         );
     }
 }

@@ -2,12 +2,16 @@ use std::path::PathBuf;
 
 use atogaki_subtitle::{
     application::{
-        LocalSubtitleExport, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
-        TranscriptionOptions, job_spec::TranscribeSpec,
+        LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryService,
+        LocalGlossaryTermDraft, LocalSubtitleExport, LocalTaskService, LocalTranslationStatus,
+        LocalWorkspaceService, TranscriptionOptions, job_spec::TranscribeSpec,
     },
     infrastructure::{
         config::AppConfig,
-        local_db::{LocalDatabase, LocalJobRecord, LocalSubtitleSegmentRecord},
+        local_db::{
+            LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
+            LocalSubtitleSegmentRecord,
+        },
     },
 };
 use serde::{Deserialize, Serialize};
@@ -18,6 +22,7 @@ struct DesktopState {
     data_dir: PathBuf,
     task_service: LocalTaskService,
     workspace_service: LocalWorkspaceService,
+    glossary_service: LocalGlossaryService,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,6 +30,15 @@ struct DesktopState {
 struct SubmitTranscriptionRequest {
     input_path: String,
     model_path: String,
+    glossary_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveGlossaryRequest {
+    glossary_id: Option<String>,
+    name: String,
+    terms: Vec<LocalGlossaryTermDraft>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,14 +74,94 @@ async fn submit_transcription(
 ) -> Result<String, String> {
     let snapshot = state
         .task_service
-        .submit_transcription(TranscribeSpec {
-            input: request.input_path.into(),
-            output_dir: None,
-            transcription: TranscriptionOptions::japanese(request.model_path.into()),
-        })
+        .submit_transcription_with_glossary(
+            TranscribeSpec {
+                input: request.input_path.into(),
+                output_dir: None,
+                transcription: TranscriptionOptions::japanese(request.model_path.into()),
+            },
+            request.glossary_id.as_deref(),
+        )
         .await
         .map_err(|error| error.to_string())?;
     Ok(snapshot.manifest.job_id)
+}
+
+#[tauri::command]
+async fn list_glossaries(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<LocalGlossaryRecord>, String> {
+    state
+        .glossary_service
+        .list()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_glossary(
+    state: State<'_, DesktopState>,
+    glossary_id: String,
+) -> Result<LocalGlossaryDetail, String> {
+    state
+        .glossary_service
+        .get(&glossary_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_glossary(
+    state: State<'_, DesktopState>,
+    request: SaveGlossaryRequest,
+) -> Result<LocalGlossaryDetail, String> {
+    state
+        .glossary_service
+        .save(
+            request.glossary_id.as_deref(),
+            request.name,
+            request.terms,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_glossary(
+    state: State<'_, DesktopState>,
+    glossary_id: String,
+) -> Result<(), String> {
+    state
+        .glossary_service
+        .delete(&glossary_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn preview_glossary_application(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    glossary_id: String,
+) -> Result<LocalGlossaryPreview, String> {
+    state
+        .glossary_service
+        .preview_apply(&job_id, &glossary_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn apply_glossary_to_workspace(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    glossary_id: String,
+) -> Result<LocalGlossaryApplyResult, String> {
+    state
+        .glossary_service
+        .apply(&job_id, &glossary_id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -262,6 +356,8 @@ fn main() {
             let database = tauri::async_runtime::block_on(LocalDatabase::open(
                 data_dir.join("atogaki.sqlite"),
             ))?;
+            let glossary_service = LocalGlossaryService::new(database.clone());
+            tauri::async_runtime::block_on(glossary_service.ensure_builtins())?;
             let task_service = tauri::async_runtime::block_on(async {
                 LocalTaskService::start_with_database(
                     config.clone(),
@@ -275,17 +371,24 @@ fn main() {
                 data_dir,
                 task_service,
                 workspace_service,
+                glossary_service,
             });
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             data_directory,
+            delete_glossary,
             export_workspace_subtitles,
+            get_glossary,
             get_job_detail,
+            list_glossaries,
             list_jobs,
             pick_media_file,
             pick_model_file,
+            apply_glossary_to_workspace,
+            preview_glossary_application,
+            save_glossary,
             submit_transcription,
             translate_all_subtitles,
             translate_subtitle,

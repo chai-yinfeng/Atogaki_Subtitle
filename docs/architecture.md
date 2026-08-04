@@ -41,6 +41,8 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 
 当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService` 与 `LocalWorkspaceService`：前者负责创建、排队和同步后台任务，后者负责读取任务详情、保存编辑、调用 DeepL 翻译以及从 SQLite 当前状态导出字幕。界面通过原生文件选择器获取媒体和 Whisper 模型路径；打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
+`LocalGlossaryService` 管理 SQLite 词表、差异预览和对工作区的应用。新任务选择词表后，`LocalTaskService` 会在排队前把当时的词条冻结为任务目录中的 `recognition-glossary.txt`，并把路径交给 Whisper：普通词条进入初始提示，`误识别 => 规范写法` 同时在 ASR 后执行修正。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
+
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。
@@ -53,6 +55,7 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 - 任务目录以 UUID 命名，避免并发任务冲突。
 - 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。
 - SQLite 另外记录中文是否人工编辑；只修改日文时保留原译文并标记为过期，同时修改中文时视为已人工校正。
+- SQLite 词表是可编辑主数据；每个转写任务使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新日文并把已有中文标记为过期。
 - DeepL 返回全部结果后，应用使用带原文校验的 SQLite 事务一次性写入；翻译期间若日文已被修改，本次结果整体拒绝，避免译文错配。
 - 桌面 SRT/ASS 是 SQLite 工作区的派生输出。存在过期译文时拒绝导出；缺失中文时允许导出并显式报告缺失段数。
 - 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。

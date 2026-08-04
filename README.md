@@ -95,8 +95,11 @@ The desktop home screen can submit transcription jobs. Select a completed task t
 playback workspace, follow the highlighted subtitle, click a timecode to seek, and save Japanese
 or Chinese edits to SQLite. With DeepL configured, the workspace can translate one segment or
 atomically retranslate all segments, then export Japanese, Chinese, and bilingual SRT/ASS files
-from the current SQLite state. See `docs/desktop-testing.md` for the manual smoke-test checklist
-and current codec limitations.
+from the current SQLite state. Recognition glossaries can be created and edited in the desktop,
+selected for a new Whisper task, previewed against an existing SQLite workspace, and extended from
+a manual subtitle correction. Each selected glossary is snapshotted inside its task directory for
+reproducibility. See `docs/desktop-testing.md` for the manual smoke-test checklist and current codec
+limitations.
 
 Start the Web API shell:
 

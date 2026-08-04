@@ -8,7 +8,48 @@ type LocalJob = {
   status: string;
   message: string;
   error_message: string | null;
+  glossary_id: string | null;
+  glossary_name: string | null;
+  glossary_snapshot_path: string | null;
   updated_at_unix: number;
+};
+
+type Glossary = {
+  id: string;
+  name: string;
+  term_count: number;
+  created_at_unix: number;
+  updated_at_unix: number;
+};
+
+type GlossaryTerm = {
+  id: string;
+  glossary_id: string;
+  source_text: string;
+  target_text: string | null;
+};
+
+type GlossaryDetail = {
+  glossary: Glossary;
+  terms: GlossaryTerm[];
+};
+
+type GlossaryPreview = {
+  glossary_id: string;
+  glossary_name: string;
+  changes: Array<{
+    segment_id: string;
+    segment_index: number;
+    before_text: string;
+    after_text: string;
+    translation_will_be_stale: boolean;
+  }>;
+};
+
+type GlossaryApplyResult = {
+  changed_segments: number;
+  stale_translations: number;
+  segments: SubtitleSegment[];
 };
 
 type SubtitleSegment = {
@@ -71,6 +112,8 @@ app.innerHTML = `
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
           <label>Whisper 模型<input id="model-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-model" type="button" class="secondary">选择模型</button>
+          <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
+          <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div class="form-footer"><span id="task-message" role="status"></span><button id="submit-task" type="submit">开始转写</button></div>
         </form>
       </section>
@@ -101,6 +144,15 @@ app.innerHTML = `
           <button id="translate-all" type="button">全部翻译／重译</button>
           <button id="export-subtitles" type="button" class="secondary">从 SQLite 导出 SRT／ASS</button>
         </div>
+        <div class="workspace-glossary-row">
+          <div>
+            <strong>识别词表修正</strong>
+            <span id="job-glossary-status">当前任务未记录识别词表</span>
+          </div>
+          <select id="workspace-glossary"><option value="">选择词表…</option></select>
+          <button id="preview-glossary" type="button" class="secondary">预览应用</button>
+        </div>
+        <div id="glossary-preview" class="glossary-preview hidden"></div>
         <p id="workspace-action-message" role="status"></p>
       </section>
       <div class="review-grid">
@@ -121,6 +173,28 @@ app.innerHTML = `
         </section>
       </div>
     </section>
+    <dialog id="glossary-dialog" class="glossary-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">RECOGNITION GLOSSARIES</p><h2>识别词表</h2></div>
+        <button id="close-glossaries" type="button" class="secondary">关闭</button>
+      </div>
+      <p class="dialog-help">目标词留空表示仅提示 Whisper；填写目标词表示“识别结果 → 规范写法”的修正规则。</p>
+      <div class="glossary-manager">
+        <aside>
+          <button id="new-glossary" type="button">＋ 新建词表</button>
+          <div id="glossary-list" class="glossary-list"></div>
+        </aside>
+        <section class="glossary-editor">
+          <label>词表名称<input id="glossary-name" maxlength="80" placeholder="例如：日语电台常用词" /></label>
+          <div class="term-heading"><strong>词条与修正规则</strong><button id="add-glossary-term" type="button" class="secondary">＋ 添加词条</button></div>
+          <div id="glossary-terms" class="glossary-terms"></div>
+          <div class="glossary-editor-footer">
+            <span id="glossary-message" role="status"></span>
+            <div><button id="delete-glossary" type="button" class="danger">删除</button><button id="save-glossary" type="button">保存词表</button></div>
+          </div>
+        </section>
+      </div>
+    </dialog>
   </main>
 `;
 
@@ -131,6 +205,7 @@ const jobCount = document.querySelector<HTMLSpanElement>("#job-count");
 const dataPath = document.querySelector<HTMLParagraphElement>("#data-path");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
+const taskGlossary = document.querySelector<HTMLSelectElement>("#task-glossary");
 const taskMessage = document.querySelector<HTMLSpanElement>("#task-message");
 const submitButton = document.querySelector<HTMLButtonElement>("#submit-task");
 const workspaceTitle = document.querySelector<HTMLHeadingElement>("#workspace-title");
@@ -145,12 +220,24 @@ const translationStatusText = document.querySelector<HTMLSpanElement>("#translat
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
 const workspaceActionMessage = document.querySelector<HTMLParagraphElement>("#workspace-action-message");
+const workspaceGlossary = document.querySelector<HTMLSelectElement>("#workspace-glossary");
+const jobGlossaryStatus = document.querySelector<HTMLSpanElement>("#job-glossary-status");
+const glossaryPreviewHost = document.querySelector<HTMLDivElement>("#glossary-preview");
+const glossaryDialog = document.querySelector<HTMLDialogElement>("#glossary-dialog");
+const glossaryListHost = document.querySelector<HTMLDivElement>("#glossary-list");
+const glossaryName = document.querySelector<HTMLInputElement>("#glossary-name");
+const glossaryTerms = document.querySelector<HTMLDivElement>("#glossary-terms");
+const glossaryMessage = document.querySelector<HTMLSpanElement>("#glossary-message");
+const deleteGlossaryButton = document.querySelector<HTMLButtonElement>("#delete-glossary");
 
 let refreshing = false;
 let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
 let activeSegmentId: string | null = null;
 let workspaceActionBusy = false;
+let glossaries: Glossary[] = [];
+let editingGlossaryId: string | null = null;
+let pendingGlossaryPreview: GlossaryPreview | null = null;
 let translationStatus: TranslationStatus = {
   provider: "DeepL",
   configured: false,
@@ -180,6 +267,51 @@ function escapeHtml(value: string): string {
   });
 }
 
+function renderGlossaryOptions(): void {
+  const taskSelection = taskGlossary?.value ?? "";
+  const workspaceSelection = workspaceGlossary?.value ?? "";
+  const options = glossaries
+    .map((glossary) => `<option value="${escapeHtml(glossary.id)}">${escapeHtml(glossary.name)}（${glossary.term_count}）</option>`)
+    .join("");
+  if (taskGlossary) {
+    taskGlossary.innerHTML = `<option value="">不使用词表</option>${options}`;
+    if (glossaries.some((glossary) => glossary.id === taskSelection)) taskGlossary.value = taskSelection;
+  }
+  if (workspaceGlossary) {
+    workspaceGlossary.innerHTML = `<option value="">选择词表…</option>${options}`;
+    const preferred = glossaries.some((glossary) => glossary.id === workspaceSelection)
+      ? workspaceSelection
+      : activeDetail?.job.glossary_id ?? "";
+    workspaceGlossary.value = glossaries.some((glossary) => glossary.id === preferred) ? preferred : "";
+  }
+  renderGlossaryList();
+}
+
+async function refreshGlossaries(): Promise<void> {
+  try {
+    glossaries = await invoke<Glossary[]>("list_glossaries");
+    renderGlossaryOptions();
+  } catch (error) {
+    if (taskMessage) taskMessage.textContent = `无法读取识别词表：${String(error)}`;
+  }
+}
+
+function renderGlossaryList(): void {
+  if (!glossaryListHost) return;
+  if (glossaries.length === 0) {
+    glossaryListHost.innerHTML = `<p class="muted">还没有词表。</p>`;
+    return;
+  }
+  glossaryListHost.innerHTML = glossaries
+    .map(
+      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}</strong><span>${glossary.term_count} 条</span></button>`,
+    )
+    .join("");
+  glossaryListHost.querySelectorAll<HTMLButtonElement>("[data-glossary-id]").forEach((button) => {
+    button.addEventListener("click", () => void editGlossary(button.dataset.glossaryId ?? null));
+  });
+}
+
 function updateTranslationControls(): void {
   const hasSegments = (activeDetail?.segments.length ?? 0) > 0;
   if (translationStatusText) {
@@ -192,8 +324,15 @@ function updateTranslationControls(): void {
     translateAllButton.disabled = workspaceActionBusy || !hasSegments || !translationStatus.configured;
   }
   if (exportButton) exportButton.disabled = workspaceActionBusy || !hasSegments;
+  const previewButton = document.querySelector<HTMLButtonElement>("#preview-glossary");
+  if (previewButton) {
+    previewButton.disabled = workspaceActionBusy || !hasSegments || !workspaceGlossary?.value;
+  }
   subtitleList?.querySelectorAll<HTMLButtonElement>(".translate-segment").forEach((button) => {
     button.disabled = workspaceActionBusy || !translationStatus.configured;
+  });
+  subtitleList?.querySelectorAll<HTMLButtonElement>(".capture-glossary-term").forEach((button) => {
+    button.disabled = workspaceActionBusy || !workspaceGlossary?.value;
   });
 }
 
@@ -276,6 +415,15 @@ function renderWorkspace(detail: JobDetail): void {
     workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message}`;
   }
   if (segmentCount) segmentCount.textContent = `${detail.segments.length} 段`;
+  if (jobGlossaryStatus) {
+    jobGlossaryStatus.textContent = detail.job.glossary_name
+      ? `转写时使用：${detail.job.glossary_name}（已保存任务快照）`
+      : "转写时未使用识别词表";
+  }
+  if (workspaceGlossary && detail.job.glossary_id && glossaries.some((item) => item.id === detail.job.glossary_id)) {
+    workspaceGlossary.value = detail.job.glossary_id;
+  }
+  clearGlossaryPreview();
   mountMedia(detail.playback_path, detail.audio_fallback_path);
   renderSubtitleList(detail.segments);
   updateActiveSubtitle(0);
@@ -379,6 +527,10 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
     translate.type = "button";
     translate.className = "translate-segment secondary";
     translate.textContent = segment.zh_text ? "重译本段" : "翻译本段";
+    const capture = document.createElement("button");
+    capture.type = "button";
+    capture.className = "capture-glossary-term secondary";
+    capture.textContent = "修正加入词表";
     const markDirty = (): void => {
       card.dataset.dirty = "true";
       save.disabled = false;
@@ -389,9 +541,10 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
     zh.addEventListener("input", markDirty);
     save.addEventListener("click", () => void saveSegment(segment, ja, zh, save, state));
     translate.addEventListener("click", () => void translateSegment(segment, ja, zh, state));
+    capture.addEventListener("click", () => void captureGlossaryCorrection(segment, ja, state));
     const actions = document.createElement("div");
     actions.className = "subtitle-actions";
-    actions.append(translate, save);
+    actions.append(capture, translate, save);
     footer.append(state, actions);
 
     card.append(meta, jaLabel, zhLabel, footer);
@@ -567,6 +720,223 @@ async function exportSubtitles(): Promise<void> {
   }
 }
 
+function addGlossaryTermRow(sourceText = "", targetText = ""): void {
+  if (!glossaryTerms) return;
+  const row = document.createElement("div");
+  row.className = "glossary-term-row";
+  const source = document.createElement("input");
+  source.className = "term-source";
+  source.placeholder = "提示词或常见误识别";
+  source.value = sourceText;
+  const arrow = document.createElement("span");
+  arrow.textContent = "→";
+  const target = document.createElement("input");
+  target.className = "term-target";
+  target.placeholder = "规范写法（可留空）";
+  target.value = targetText;
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "term-remove secondary";
+  remove.textContent = "移除";
+  remove.addEventListener("click", () => row.remove());
+  row.append(source, arrow, target, remove);
+  glossaryTerms.append(row);
+}
+
+async function editGlossary(glossaryId: string | null): Promise<void> {
+  editingGlossaryId = glossaryId;
+  renderGlossaryList();
+  if (glossaryMessage) glossaryMessage.textContent = "";
+  if (glossaryTerms) glossaryTerms.replaceChildren();
+  if (!glossaryId) {
+    if (glossaryName) glossaryName.value = "";
+    if (deleteGlossaryButton) deleteGlossaryButton.disabled = true;
+    addGlossaryTermRow();
+    glossaryName?.focus();
+    return;
+  }
+
+  if (glossaryMessage) glossaryMessage.textContent = "正在读取词表…";
+  try {
+    const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
+    if (glossaryName) glossaryName.value = detail.glossary.name;
+    if (deleteGlossaryButton) deleteGlossaryButton.disabled = false;
+    if (glossaryTerms) glossaryTerms.replaceChildren();
+    for (const term of detail.terms) addGlossaryTermRow(term.source_text, term.target_text ?? "");
+    if (detail.terms.length === 0) addGlossaryTermRow();
+    if (glossaryMessage) glossaryMessage.textContent = `${detail.terms.length} 条词条`;
+  } catch (error) {
+    if (glossaryMessage) glossaryMessage.textContent = `读取失败：${String(error)}`;
+  }
+}
+
+async function openGlossaryManager(): Promise<void> {
+  await refreshGlossaries();
+  glossaryDialog?.showModal();
+  const preferred = taskGlossary?.value || glossaries[0]?.id || null;
+  await editGlossary(preferred);
+}
+
+async function saveGlossaryEditor(): Promise<void> {
+  if (!glossaryName || !glossaryTerms || !glossaryMessage) return;
+  const name = glossaryName.value.trim();
+  const terms = Array.from(glossaryTerms.querySelectorAll<HTMLElement>(".glossary-term-row"))
+    .map((row) => ({
+      sourceText: row.querySelector<HTMLInputElement>(".term-source")?.value.trim() ?? "",
+      targetText: row.querySelector<HTMLInputElement>(".term-target")?.value.trim() || null,
+    }))
+    .filter((term) => term.sourceText || term.targetText);
+  glossaryMessage.textContent = "正在保存…";
+  try {
+    const detail = await invoke<GlossaryDetail>("save_glossary", {
+      request: { glossaryId: editingGlossaryId, name, terms },
+    });
+    editingGlossaryId = detail.glossary.id;
+    await refreshGlossaries();
+    if (taskGlossary) taskGlossary.value = detail.glossary.id;
+    glossaryMessage.textContent = `已保存 ${detail.terms.length} 条词条。`;
+    await editGlossary(detail.glossary.id);
+  } catch (error) {
+    glossaryMessage.textContent = `保存失败：${String(error)}`;
+  }
+}
+
+async function deleteGlossaryEditor(): Promise<void> {
+  if (!editingGlossaryId) return;
+  const selected = glossaries.find((glossary) => glossary.id === editingGlossaryId);
+  if (!window.confirm(`删除词表“${selected?.name ?? editingGlossaryId}”？旧任务保留自己的词表快照。`)) return;
+  if (glossaryMessage) glossaryMessage.textContent = "正在删除…";
+  try {
+    await invoke("delete_glossary", { glossaryId: editingGlossaryId });
+    editingGlossaryId = null;
+    await refreshGlossaries();
+    await editGlossary(glossaries[0]?.id ?? null);
+  } catch (error) {
+    if (glossaryMessage) glossaryMessage.textContent = `删除失败：${String(error)}`;
+  }
+}
+
+async function captureGlossaryCorrection(
+  segment: SubtitleSegment,
+  ja: HTMLTextAreaElement,
+  state: HTMLSpanElement,
+): Promise<void> {
+  const glossaryId = workspaceGlossary?.value;
+  if (!glossaryId) {
+    setWorkspaceAction("请先在工作区选择一个词表。", true);
+    return;
+  }
+  const sourceText = window.prompt("常见误识别（可缩短为需要替换的词）", segment.ja_text)?.trim();
+  if (!sourceText) return;
+  const targetText = window.prompt("规范写法", ja.value.trim())?.trim();
+  if (!targetText) return;
+  if (sourceText === targetText) {
+    setWorkspaceAction("误识别与规范写法相同，没有创建规则。", true);
+    return;
+  }
+
+  state.textContent = "正在加入识别词表…";
+  try {
+    const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
+    const terms = detail.terms.map((term) => ({
+      sourceText: term.source_text,
+      targetText: term.target_text,
+    }));
+    if (terms.some((term) => term.sourceText === sourceText && term.targetText === targetText)) {
+      setWorkspaceAction("这条修正规则已经存在于词表中。", true);
+      state.textContent = "这条修正规则已经存在";
+      return;
+    }
+    terms.push({ sourceText, targetText });
+    await invoke<GlossaryDetail>("save_glossary", {
+      request: {
+        glossaryId,
+        name: detail.glossary.name,
+        terms,
+      },
+    });
+    await refreshGlossaries();
+    if (workspaceGlossary) workspaceGlossary.value = glossaryId;
+    setWorkspaceAction(`已把“${sourceText} → ${targetText}”加入 ${detail.glossary.name}。字幕修改仍需单独保存。`);
+    state.textContent = "修正规则已加入词表；本段有未保存修改";
+  } catch (error) {
+    state.textContent = `加入词表失败：${String(error)}`;
+    state.classList.add("warning");
+  }
+}
+
+function clearGlossaryPreview(): void {
+  pendingGlossaryPreview = null;
+  glossaryPreviewHost?.classList.add("hidden");
+  if (glossaryPreviewHost) glossaryPreviewHost.replaceChildren();
+}
+
+async function previewGlossaryApplication(): Promise<void> {
+  if (!activeDetail || !workspaceGlossary?.value || workspaceActionBusy) return;
+  if (hasUnsavedSubtitleEdits()) {
+    setWorkspaceAction("请先保存字幕修改，再预览词表修正。", true);
+    return;
+  }
+  setWorkspaceBusy(true);
+  setWorkspaceAction("正在比较词表与 SQLite 日文字幕…");
+  try {
+    pendingGlossaryPreview = await invoke<GlossaryPreview>("preview_glossary_application", {
+      jobId: activeDetail.job.job_id,
+      glossaryId: workspaceGlossary.value,
+    });
+    renderGlossaryPreview(pendingGlossaryPreview);
+    setWorkspaceAction(
+      pendingGlossaryPreview.changes.length
+        ? `词表预览完成：${pendingGlossaryPreview.changes.length} 段会改变。`
+        : "词表预览完成，没有需要修正的字幕。",
+    );
+  } catch (error) {
+    clearGlossaryPreview();
+    setWorkspaceAction(`词表预览失败：${String(error)}`, true);
+  } finally {
+    setWorkspaceBusy(false);
+  }
+}
+
+function renderGlossaryPreview(preview: GlossaryPreview): void {
+  if (!glossaryPreviewHost) return;
+  const staleCount = preview.changes.filter((change) => change.translation_will_be_stale).length;
+  const examples = preview.changes
+    .slice(0, 4)
+    .map(
+      (change) => `<li><span>#${change.segment_index + 1}</span><del>${escapeHtml(change.before_text)}</del><strong>${escapeHtml(change.after_text)}</strong></li>`,
+    )
+    .join("");
+  glossaryPreviewHost.innerHTML = preview.changes.length
+    ? `<div><strong>${escapeHtml(preview.glossary_name)} 将修改 ${preview.changes.length} 段</strong><span>${staleCount} 段已有中文，应用后会标记为待重译。</span></div><ul>${examples}</ul><button id="apply-previewed-glossary" type="button">确认应用</button>`
+    : `<div><strong>${escapeHtml(preview.glossary_name)} 无匹配修正</strong><span>提示词只影响新转写；这里只预览“错误写法 → 规范写法”规则。</span></div>`;
+  glossaryPreviewHost.classList.remove("hidden");
+  document.querySelector<HTMLButtonElement>("#apply-previewed-glossary")?.addEventListener("click", () => void applyPreviewedGlossary());
+}
+
+async function applyPreviewedGlossary(): Promise<void> {
+  if (!activeDetail || !pendingGlossaryPreview || workspaceActionBusy) return;
+  setWorkspaceBusy(true);
+  setWorkspaceAction("正在把词表修正写入 SQLite…");
+  try {
+    const applied = await invoke<GlossaryApplyResult>("apply_glossary_to_workspace", {
+      jobId: activeDetail.job.job_id,
+      glossaryId: pendingGlossaryPreview.glossary_id,
+    });
+    activeDetail.segments = applied.segments;
+    clearGlossaryPreview();
+    renderSubtitleList(activeDetail.segments);
+    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    setWorkspaceAction(
+      `已修正 ${applied.changed_segments} 段并保存到 SQLite；${applied.stale_translations} 段中文需要重译。`,
+    );
+  } catch (error) {
+    setWorkspaceAction(`应用词表失败：${String(error)}`, true);
+  } finally {
+    setWorkspaceBusy(false);
+  }
+}
+
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
 document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
   activeMedia?.pause();
@@ -581,6 +951,17 @@ document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("c
 });
 translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
 exportButton?.addEventListener("click", () => void exportSubtitles());
+document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());
+document.querySelector<HTMLButtonElement>("#close-glossaries")?.addEventListener("click", () => glossaryDialog?.close());
+document.querySelector<HTMLButtonElement>("#new-glossary")?.addEventListener("click", () => void editGlossary(null));
+document.querySelector<HTMLButtonElement>("#add-glossary-term")?.addEventListener("click", () => addGlossaryTermRow());
+document.querySelector<HTMLButtonElement>("#save-glossary")?.addEventListener("click", () => void saveGlossaryEditor());
+deleteGlossaryButton?.addEventListener("click", () => void deleteGlossaryEditor());
+document.querySelector<HTMLButtonElement>("#preview-glossary")?.addEventListener("click", () => void previewGlossaryApplication());
+workspaceGlossary?.addEventListener("change", () => {
+  clearGlossaryPreview();
+  updateTranslationControls();
+});
 
 async function chooseFile(kind: "media" | "model"): Promise<void> {
   const button = document.querySelector<HTMLButtonElement>(
@@ -612,7 +993,11 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
   submitButton.disabled = true;
   taskMessage.textContent = "正在创建本地任务…";
   void invoke<string>("submit_transcription", {
-    request: { inputPath: mediaPath.value, modelPath: modelPath.value },
+    request: {
+      inputPath: mediaPath.value,
+      modelPath: modelPath.value,
+      glossaryId: taskGlossary?.value || null,
+    },
   })
     .then((jobId) => {
       taskMessage.textContent = `已排队：${jobId}`;
@@ -642,5 +1027,6 @@ void invoke<TranslationStatus>("translation_status")
     setWorkspaceAction(`无法读取翻译配置：${String(error)}`, true);
     updateTranslationControls();
   });
+void refreshGlossaries();
 void refresh();
 window.setInterval(() => void refresh(), 2_000);

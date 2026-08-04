@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
@@ -25,8 +28,40 @@ pub struct LocalJobRecord {
     pub status: String,
     pub message: String,
     pub error_message: Option<String>,
+    pub glossary_id: Option<String>,
+    pub glossary_name: Option<String>,
+    pub glossary_snapshot_path: Option<String>,
     pub created_at_unix: i64,
     pub updated_at_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct LocalGlossaryRecord {
+    pub id: String,
+    pub name: String,
+    pub term_count: i64,
+    pub created_at_unix: i64,
+    pub updated_at_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct LocalGlossaryTermRecord {
+    pub id: String,
+    pub glossary_id: String,
+    pub source_text: String,
+    pub target_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalGlossaryDetail {
+    pub glossary: LocalGlossaryRecord,
+    pub terms: Vec<LocalGlossaryTermRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalGlossaryTermInput {
+    pub source_text: String,
+    pub target_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -48,6 +83,13 @@ pub struct LocalMachineTranslation {
     pub segment_id: String,
     pub source_text: String,
     pub translated_text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalGlossaryCorrection {
+    pub segment_id: String,
+    pub source_text: String,
+    pub corrected_text: String,
 }
 
 impl LocalDatabase {
@@ -145,7 +187,8 @@ impl LocalDatabase {
     pub async fn list_jobs(&self) -> Result<Vec<LocalJobRecord>> {
         sqlx::query_as::<_, LocalJobRecord>(
             "SELECT job_id, storage_dir, input_path, render_output_path, status, message,
-                error_message, created_at_unix, updated_at_unix
+                error_message, glossary_id, glossary_name, glossary_snapshot_path,
+                created_at_unix, updated_at_unix
              FROM local_jobs
              ORDER BY updated_at_unix DESC, job_id DESC",
         )
@@ -157,7 +200,8 @@ impl LocalDatabase {
     pub async fn get_job(&self, job_id: &str) -> Result<Option<LocalJobRecord>> {
         sqlx::query_as::<_, LocalJobRecord>(
             "SELECT job_id, storage_dir, input_path, render_output_path, status, message,
-                error_message, created_at_unix, updated_at_unix
+                error_message, glossary_id, glossary_name, glossary_snapshot_path,
+                created_at_unix, updated_at_unix
              FROM local_jobs
              WHERE job_id = ?",
         )
@@ -165,6 +209,206 @@ impl LocalDatabase {
         .fetch_optional(&self.pool)
         .await
         .context("failed to read local task")
+    }
+
+    pub async fn assign_job_glossary(
+        &self,
+        job_id: &str,
+        glossary_id: &str,
+        glossary_name: &str,
+        snapshot_path: &Path,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE local_jobs
+             SET glossary_id = ?, glossary_name = ?, glossary_snapshot_path = ?
+             WHERE job_id = ?",
+        )
+        .bind(glossary_id)
+        .bind(glossary_name)
+        .bind(snapshot_path.display().to_string())
+        .bind(job_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to associate glossary with local task")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("local task not found: {job_id}"));
+        }
+        Ok(())
+    }
+
+    pub async fn ensure_builtin_glossary(&self, name: &str, file_text: &str) -> Result<()> {
+        let name = normalized_glossary_name(name)?;
+        let setting_key = format!("builtin_glossary_seeded:{name}");
+        if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM local_settings WHERE key = ?")
+            .bind(&setting_key)
+            .fetch_one(&self.pool)
+            .await
+            .context("failed to check built-in glossary seed state")?
+            > 0
+        {
+            return Ok(());
+        }
+
+        if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM local_glossaries WHERE name = ?")
+            .bind(&name)
+            .fetch_one(&self.pool)
+            .await
+            .context("failed to check built-in glossary")?
+            == 0
+        {
+            let mut terms = file_text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(|line| {
+                    line.split_once("=>")
+                        .or_else(|| line.split_once('\t'))
+                        .map(|(source, target)| LocalGlossaryTermInput {
+                            source_text: source.trim().to_string(),
+                            target_text: Some(target.trim().to_string()),
+                        })
+                        .unwrap_or_else(|| LocalGlossaryTermInput {
+                            source_text: line.to_string(),
+                            target_text: None,
+                        })
+                })
+                .collect::<Vec<_>>();
+            let mut seen = HashSet::new();
+            terms.retain(|term| seen.insert((term.source_text.clone(), term.target_text.clone())));
+            self.save_glossary(None, name, terms).await?;
+        }
+
+        sqlx::query(
+            "INSERT INTO local_settings (key, value, updated_at_unix)
+             VALUES (?, '1', ?)
+             ON CONFLICT(key) DO NOTHING",
+        )
+        .bind(setting_key)
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await
+        .context("failed to record built-in glossary seed state")?;
+        Ok(())
+    }
+
+    pub async fn list_glossaries(&self) -> Result<Vec<LocalGlossaryRecord>> {
+        sqlx::query_as::<_, LocalGlossaryRecord>(
+            "SELECT g.id, g.name, COUNT(t.id) AS term_count,
+                g.created_at_unix, g.updated_at_unix
+             FROM local_glossaries g
+             LEFT JOIN local_glossary_terms t ON t.glossary_id = g.id
+             GROUP BY g.id
+             ORDER BY lower(g.name), g.id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list local glossaries")
+    }
+
+    pub async fn get_glossary(&self, glossary_id: &str) -> Result<Option<LocalGlossaryDetail>> {
+        let glossary = sqlx::query_as::<_, LocalGlossaryRecord>(
+            "SELECT g.id, g.name, COUNT(t.id) AS term_count,
+                g.created_at_unix, g.updated_at_unix
+             FROM local_glossaries g
+             LEFT JOIN local_glossary_terms t ON t.glossary_id = g.id
+             WHERE g.id = ?
+             GROUP BY g.id",
+        )
+        .bind(glossary_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to read local glossary")?;
+        let Some(glossary) = glossary else {
+            return Ok(None);
+        };
+        let terms = sqlx::query_as::<_, LocalGlossaryTermRecord>(
+            "SELECT id, glossary_id, source_text, target_text
+             FROM local_glossary_terms
+             WHERE glossary_id = ?
+             ORDER BY CASE WHEN target_text IS NULL THEN 0 ELSE 1 END,
+                lower(source_text), id",
+        )
+        .bind(glossary_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to read local glossary terms")?;
+        Ok(Some(LocalGlossaryDetail { glossary, terms }))
+    }
+
+    pub async fn save_glossary(
+        &self,
+        glossary_id: Option<&str>,
+        name: String,
+        terms: Vec<LocalGlossaryTermInput>,
+    ) -> Result<LocalGlossaryDetail> {
+        let name = normalized_glossary_name(&name)?;
+        let terms = normalized_glossary_terms(terms)?;
+        let glossary_id = glossary_id
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let now = chrono::Utc::now().timestamp();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin local glossary transaction")?;
+
+        if glossary_id.is_empty() {
+            return Err(anyhow!("glossary id cannot be empty"));
+        }
+        let result = sqlx::query(
+            "INSERT INTO local_glossaries (id, name, created_at_unix, updated_at_unix)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at_unix = excluded.updated_at_unix",
+        )
+        .bind(&glossary_id)
+        .bind(&name)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("failed to save glossary {name}"))?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("failed to save glossary {name}"));
+        }
+
+        sqlx::query("DELETE FROM local_glossary_terms WHERE glossary_id = ?")
+            .bind(&glossary_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to replace local glossary terms")?;
+        for term in terms {
+            sqlx::query(
+                "INSERT INTO local_glossary_terms
+                    (id, glossary_id, source_text, target_text)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&glossary_id)
+            .bind(term.source_text)
+            .bind(term.target_text)
+            .execute(&mut *tx)
+            .await
+            .context("failed to insert local glossary term")?;
+        }
+        tx.commit()
+            .await
+            .context("failed to commit local glossary")?;
+        self.get_glossary(&glossary_id)
+            .await?
+            .ok_or_else(|| anyhow!("saved glossary disappeared: {glossary_id}"))
+    }
+
+    pub async fn delete_glossary(&self, glossary_id: &str) -> Result<()> {
+        let result = sqlx::query("DELETE FROM local_glossaries WHERE id = ?")
+            .bind(glossary_id)
+            .execute(&self.pool)
+            .await
+            .context("failed to delete local glossary")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("local glossary not found: {glossary_id}"));
+        }
+        Ok(())
     }
 
     pub async fn list_segments(&self, job_id: &str) -> Result<Vec<LocalSubtitleSegmentRecord>> {
@@ -254,6 +498,65 @@ impl LocalDatabase {
         tx.commit()
             .await
             .context("failed to commit local translation transaction")?;
+        self.list_segments(job_id).await
+    }
+
+    pub async fn apply_glossary_corrections(
+        &self,
+        job_id: &str,
+        corrections: &[LocalGlossaryCorrection],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        if corrections.is_empty() {
+            return self.list_segments(job_id).await;
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin local glossary application transaction")?;
+
+        for correction in corrections {
+            let corrected_text = correction.corrected_text.trim();
+            if corrected_text.is_empty() {
+                return Err(anyhow!(
+                    "glossary correction cannot empty segment {}",
+                    correction.segment_id
+                ));
+            }
+            let result = sqlx::query(
+                "UPDATE local_subtitle_segments
+                 SET ja_text = ?, source_edited = 1,
+                     translation_stale = CASE WHEN zh_text IS NULL THEN translation_stale ELSE 1 END
+                 WHERE job_id = ? AND id = ? AND ja_text = ?",
+            )
+            .bind(corrected_text)
+            .bind(job_id)
+            .bind(&correction.segment_id)
+            .bind(&correction.source_text)
+            .execute(&mut *tx)
+            .await
+            .context("failed to apply local glossary correction")?;
+            if result.rows_affected() != 1 {
+                return Err(anyhow!(
+                    "subtitle changed while glossary preview was open: {}",
+                    correction.segment_id
+                ));
+            }
+        }
+
+        sqlx::query(
+            "UPDATE local_jobs
+             SET updated_at_unix = MAX(updated_at_unix, ?)
+             WHERE job_id = ?",
+        )
+        .bind(chrono::Utc::now().timestamp())
+        .bind(job_id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to update local task glossary timestamp")?;
+        tx.commit()
+            .await
+            .context("failed to commit local glossary application")?;
         self.list_segments(job_id).await
     }
 
@@ -496,6 +799,48 @@ fn to_i64(value: u64, field: &str) -> Result<i64> {
     i64::try_from(value).map_err(|_| anyhow!("{field} exceeds SQLite i64"))
 }
 
+fn normalized_glossary_name(name: &str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(anyhow!("glossary name cannot be empty"));
+    }
+    if name.chars().count() > 80 {
+        return Err(anyhow!("glossary name cannot exceed 80 characters"));
+    }
+    Ok(name.to_string())
+}
+
+fn normalized_glossary_terms(
+    terms: Vec<LocalGlossaryTermInput>,
+) -> Result<Vec<LocalGlossaryTermInput>> {
+    let mut seen = HashSet::new();
+    terms
+        .into_iter()
+        .map(|term| {
+            let source_text = term.source_text.trim().to_string();
+            if source_text.is_empty() {
+                return Err(anyhow!("glossary source text cannot be empty"));
+            }
+            let target_text = term
+                .target_text
+                .map(|target| target.trim().to_string())
+                .filter(|target| !target.is_empty());
+            if target_text.as_deref() == Some(source_text.as_str()) {
+                return Err(anyhow!(
+                    "glossary replacement source and target cannot be identical: {source_text}"
+                ));
+            }
+            if !seen.insert((source_text.clone(), target_text.clone())) {
+                return Err(anyhow!("duplicate glossary term: {source_text}"));
+            }
+            Ok(LocalGlossaryTermInput {
+                source_text,
+                target_text,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -667,6 +1012,37 @@ mod tests {
         assert!(error.to_string().contains("changed while"));
         let unchanged = database.list_segments(&manifest.job_id).await.unwrap();
         assert_eq!(unchanged[0].zh_text.as_deref(), Some("第一句话"));
+
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn built_in_glossary_import_deduplicates_grouped_terms() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-builtin-glossary-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+
+        database
+            .ensure_builtin_glossary(
+                "内置词表",
+                "# grouped terms\n前世\n前世\nナブナ => n-buna\nナブナ => n-buna\n",
+            )
+            .await
+            .unwrap();
+        let glossaries = database.list_glossaries().await.unwrap();
+        assert_eq!(glossaries.len(), 1);
+        assert_eq!(glossaries[0].term_count, 2);
+        database.delete_glossary(&glossaries[0].id).await.unwrap();
+        database
+            .ensure_builtin_glossary("内置词表", "前世\n")
+            .await
+            .unwrap();
+        assert!(database.list_glossaries().await.unwrap().is_empty());
 
         drop(database);
         fs::remove_dir_all(root).unwrap();
