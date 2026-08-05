@@ -4,16 +4,75 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 use tokio::process::Command;
 
 use crate::{domain::render::RenderOptions, interface::cli::RecordArgs};
 
 const VIDEOTOOLBOX_QUALITY: u8 = 65;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HardSubtitleEncoder {
     VideoToolbox,
     Libx264,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MediaCapabilities {
+    pub binary_path: String,
+    pub version: String,
+    pub ass_filter: bool,
+    pub videotoolbox_encoder: bool,
+    pub libx264_encoder: bool,
+    pub ready_for_hard_subtitles: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderEncoder {
+    VideoToolbox,
+    Libx264,
+    SubtitleMux,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RenderOutcome {
+    pub encoder: RenderEncoder,
+    pub hardware_accelerated: bool,
+    pub output_path: String,
+}
+
+pub async fn inspect_capabilities(ffmpeg: &Path) -> Result<MediaCapabilities> {
+    let output = Command::new(ffmpeg)
+        .arg("-version")
+        .output()
+        .await
+        .with_context(|| format!("failed to start ffmpeg at {}", ffmpeg.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "ffmpeg capability check failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .unwrap_or("unknown ffmpeg version")
+        .to_string();
+    let ass_filter = supports_filter(ffmpeg, "ass").await?;
+    let videotoolbox_encoder = supports_encoder(ffmpeg, "h264_videotoolbox").await?;
+    let libx264_encoder = supports_encoder(ffmpeg, "libx264").await?;
+
+    Ok(MediaCapabilities {
+        binary_path: ffmpeg.display().to_string(),
+        version,
+        ass_filter,
+        videotoolbox_encoder,
+        libx264_encoder,
+        ready_for_hard_subtitles: ass_filter && (videotoolbox_encoder || libx264_encoder),
+    })
 }
 
 pub async fn list_capture_devices(ffmpeg: &Path) -> Result<()> {
@@ -72,7 +131,7 @@ pub async fn render_subtitles(
     fallback_srt: &Path,
     output: &Path,
     options: &RenderOptions,
-) -> Result<()> {
+) -> Result<RenderOutcome> {
     if !input.exists() {
         anyhow::bail!("input file does not exist: {}", input.display());
     }
@@ -87,7 +146,12 @@ pub async fn render_subtitles(
             );
         }
 
-        return mux_srt_soft_subtitle(ffmpeg, input, fallback_srt, output).await;
+        mux_srt_soft_subtitle(ffmpeg, input, fallback_srt, output).await?;
+        return Ok(RenderOutcome {
+            encoder: RenderEncoder::SubtitleMux,
+            hardware_accelerated: false,
+            output_path: output.display().to_string(),
+        });
     }
 
     if !ass.exists() {
@@ -108,7 +172,7 @@ async fn burn_ass(
     ass: &Path,
     output: &Path,
     options: &RenderOptions,
-) -> Result<()> {
+) -> Result<RenderOutcome> {
     let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
     let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
     burn_ass_with_encoder(ffmpeg, input, output, &filter, options).await
@@ -120,7 +184,7 @@ async fn burn_ass_with_encoder(
     output: &Path,
     filter: &str,
     options: &RenderOptions,
-) -> Result<()> {
+) -> Result<RenderOutcome> {
     if supports_encoder(ffmpeg, "h264_videotoolbox").await? {
         eprintln!("ffmpeg render: using VideoToolbox hardware H.264 encoder");
         let result = run_burn_command(
@@ -133,7 +197,7 @@ async fn burn_ass_with_encoder(
         )
         .await;
         if result.is_ok() {
-            return result;
+            return Ok(render_outcome(output, HardSubtitleEncoder::VideoToolbox));
         }
         eprintln!(
             "VideoToolbox render failed; retrying with libx264. Original failure: {}",
@@ -155,7 +219,20 @@ async fn burn_ass_with_encoder(
         options,
         HardSubtitleEncoder::Libx264,
     )
-    .await
+    .await?;
+    Ok(render_outcome(output, HardSubtitleEncoder::Libx264))
+}
+
+fn render_outcome(output: &Path, encoder: HardSubtitleEncoder) -> RenderOutcome {
+    let (encoder, hardware_accelerated) = match encoder {
+        HardSubtitleEncoder::VideoToolbox => (RenderEncoder::VideoToolbox, true),
+        HardSubtitleEncoder::Libx264 => (RenderEncoder::Libx264, false),
+    };
+    RenderOutcome {
+        encoder,
+        hardware_accelerated,
+        output_path: output.display().to_string(),
+    }
 }
 
 async fn run_burn_command(

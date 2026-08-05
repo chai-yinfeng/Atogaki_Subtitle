@@ -9,11 +9,12 @@ use atogaki_subtitle::{
         job_spec::TranscribeSpec,
     },
     infrastructure::{
-        config::AppConfig,
+        config::{AppConfig, desktop_ffmpeg_path},
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
             LocalSubtitleSegmentRecord,
         },
+        media::{self, MediaCapabilities},
     },
 };
 use serde::{Deserialize, Serialize};
@@ -22,9 +23,17 @@ use tauri_plugin_dialog::DialogExt;
 
 struct DesktopState {
     data_dir: PathBuf,
+    ffmpeg: PathBuf,
     task_service: LocalTaskService,
     workspace_service: LocalWorkspaceService,
     glossary_service: LocalGlossaryService,
+}
+
+#[tauri::command]
+async fn media_capabilities(state: State<'_, DesktopState>) -> Result<MediaCapabilities, String> {
+    media::inspect_capabilities(&state.ffmpeg)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -563,9 +572,7 @@ fn main() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let config = AppConfig {
-                ffmpeg: std::env::var_os("ATOGAKI_FFMPEG")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("ffmpeg")),
+                ffmpeg: desktop_ffmpeg_path(),
                 whisper_cli: std::env::var_os("ATOGAKI_WHISPER_CLI")
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("whisper-cli")),
@@ -584,9 +591,10 @@ fn main() {
                 )
             })?;
             let workspace_service =
-                LocalWorkspaceService::with_deepl(database, config.deepl_auth_key);
+                LocalWorkspaceService::with_deepl(database, config.deepl_auth_key.clone());
             app.manage(DesktopState {
                 data_dir,
+                ffmpeg: config.ffmpeg,
                 task_service,
                 workspace_service,
                 glossary_service,
@@ -603,6 +611,7 @@ fn main() {
             get_job_detail,
             list_glossaries,
             list_jobs,
+            media_capabilities,
             pick_media_file,
             pick_model_file,
             pick_subtitle_export_directory,
