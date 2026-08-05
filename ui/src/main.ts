@@ -288,6 +288,18 @@ app.innerHTML = `
         <div class="rename-job-footer"><span id="rename-job-message" role="status"></span><button type="submit">保存名称</button></div>
       </form>
     </dialog>
+    <dialog id="confirmation-dialog" class="rename-job-dialog confirmation-dialog">
+      <form id="confirmation-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">CONFIRM ACTION</p><h2 id="confirmation-title">确认操作</h2></div>
+        </div>
+        <p id="confirmation-message" class="confirmation-message"></p>
+        <div class="confirmation-actions">
+          <button id="cancel-confirmation" type="button" class="secondary">取消</button>
+          <button id="accept-confirmation" type="submit">继续</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="glossary-correction-dialog" class="rename-job-dialog glossary-correction-dialog">
       <form id="glossary-correction-form">
         <div class="dialog-heading">
@@ -376,6 +388,11 @@ const renameJobDialog = document.querySelector<HTMLDialogElement>("#rename-job-d
 const renameJobForm = document.querySelector<HTMLFormElement>("#rename-job-form");
 const renameJobInput = document.querySelector<HTMLInputElement>("#rename-job-input");
 const renameJobMessage = document.querySelector<HTMLSpanElement>("#rename-job-message");
+const confirmationDialog = document.querySelector<HTMLDialogElement>("#confirmation-dialog");
+const confirmationForm = document.querySelector<HTMLFormElement>("#confirmation-form");
+const confirmationTitle = document.querySelector<HTMLHeadingElement>("#confirmation-title");
+const confirmationMessage = document.querySelector<HTMLParagraphElement>("#confirmation-message");
+const acceptConfirmationButton = document.querySelector<HTMLButtonElement>("#accept-confirmation");
 const glossaryCorrectionDialog = document.querySelector<HTMLDialogElement>("#glossary-correction-dialog");
 const glossaryCorrectionForm = document.querySelector<HTMLFormElement>("#glossary-correction-form");
 const glossaryCorrectionSource = document.querySelector<HTMLInputElement>("#glossary-correction-source");
@@ -400,6 +417,7 @@ let glossaries: Glossary[] = [];
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
 let renamingJob: LocalJob | null = null;
+let confirmationResolver: ((confirmed: boolean) => void) | null = null;
 let pendingGlossaryCorrection: {
   glossaryId: string;
   state: HTMLSpanElement;
@@ -425,6 +443,34 @@ function displayName(job: LocalJob): string {
 
 function statusLabel(status: string): string {
   return status.split("_").join(" ");
+}
+
+function settleConfirmation(confirmed: boolean): void {
+  const resolve = confirmationResolver;
+  confirmationResolver = null;
+  if (confirmationDialog?.open) confirmationDialog.close();
+  resolve?.(confirmed);
+}
+
+function confirmAction(options: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+}): Promise<boolean> {
+  if (!confirmationDialog || !confirmationTitle || !confirmationMessage || !acceptConfirmationButton) {
+    return Promise.resolve(false);
+  }
+  if (confirmationResolver) settleConfirmation(false);
+  confirmationTitle.textContent = options.title;
+  confirmationMessage.textContent = options.message;
+  acceptConfirmationButton.textContent = options.confirmLabel;
+  acceptConfirmationButton.classList.toggle("danger", options.danger ?? false);
+  confirmationDialog.showModal();
+  document.querySelector<HTMLButtonElement>("#cancel-confirmation")?.focus();
+  return new Promise<boolean>((resolve) => {
+    confirmationResolver = resolve;
+  });
 }
 
 function escapeHtml(value: string): string {
@@ -674,9 +720,12 @@ async function saveRenamedJob(): Promise<void> {
 
 async function deleteJob(job: LocalJob): Promise<void> {
   if (!matchesTerminalStatus(job.status)) return;
-  const confirmed = window.confirm(
-    `删除任务“${displayName(job)}”？\n\n将删除 Atogaki 任务目录中的音频、字幕和中间产物，以及 SQLite 任务记录；不会删除原始媒体文件。`,
-  );
+  const confirmed = await confirmAction({
+    title: "删除任务数据？",
+    message: `将删除“${displayName(job)}”在 Atogaki 中的音频、字幕、中间产物和 SQLite 记录。原始媒体文件不会被删除。`,
+    confirmLabel: "删除任务",
+    danger: true,
+  });
   if (!confirmed) return;
   if (jobManagementMessage) jobManagementMessage.textContent = "正在删除任务数据…";
   try {
@@ -993,9 +1042,12 @@ async function translateAllSubtitles(): Promise<void> {
     setWorkspaceAction("请先保存各段尚未保存的修改，再执行全部重译。", true);
     return;
   }
-  const confirmed = window.confirm(
-    `将把 ${activeDetail.segments.length} 段日文发送到 DeepL，并覆盖现有中文（包括人工修改）。继续吗？`,
-  );
+  const confirmed = await confirmAction({
+    title: "全部翻译／重译？",
+    message: `将把 ${activeDetail.segments.length} 段日文发送到 DeepL，并覆盖现有中文，包括人工修改。`,
+    confirmLabel: "发送并覆盖",
+    danger: true,
+  });
   if (!confirmed) return;
 
   setWorkspaceBusy(true);
@@ -1051,9 +1103,12 @@ async function exportSubtitles(): Promise<void> {
       const names = plan.existing_files
         .map((path) => path.split(/[\\/]/).pop() ?? path)
         .join("\n");
-      overwriteExisting = window.confirm(
-        `以下 ${plan.existing_files.length} 个字幕文件已存在：\n\n${names}\n\n是否覆盖？`,
-      );
+      overwriteExisting = await confirmAction({
+        title: "覆盖已有字幕？",
+        message: `以下 ${plan.existing_files.length} 个字幕文件已存在：\n\n${names}`,
+        confirmLabel: "覆盖字幕",
+        danger: true,
+      });
       if (!overwriteExisting) {
         setWorkspaceAction("已取消导出，现有字幕文件没有被修改。");
         return;
@@ -1262,7 +1317,12 @@ async function submitVideoRender(): Promise<void> {
   }
   let overwriteExisting = false;
   if (selectedVideoOutputAlreadyExists) {
-    overwriteExisting = window.confirm("目标视频已经存在。烧录成功后用新视频安全替换它吗？");
+    overwriteExisting = await confirmAction({
+      title: "覆盖已有视频？",
+      message: "目标视频已经存在。只有新视频烧录成功后，Atogaki 才会安全替换它。",
+      confirmLabel: "烧录并替换",
+      danger: true,
+    });
     if (!overwriteExisting) {
       if (videoRenderMessage) videoRenderMessage.textContent = "已取消，现有视频不会被修改。";
       return;
@@ -1296,7 +1356,14 @@ async function submitVideoRender(): Promise<void> {
 }
 
 async function cancelVideoRender(renderId: string): Promise<void> {
-  if (!renderId || !window.confirm("取消这次视频烧录？已完成的源任务和字幕不会改变。")) return;
+  if (!renderId) return;
+  const confirmed = await confirmAction({
+    title: "取消视频烧录？",
+    message: "FFmpeg 会停止，临时输出会被清理；已完成的源任务和字幕不会改变。",
+    confirmLabel: "取消烧录",
+    danger: true,
+  });
+  if (!confirmed) return;
   try {
     await invoke<VideoRender>("cancel_video_render", { renderId });
     if (videoRenderMessage) videoRenderMessage.textContent = "已请求取消，正在停止 FFmpeg 并清理临时文件。";
@@ -1479,7 +1546,13 @@ async function saveGlossaryEditor(): Promise<void> {
 async function deleteGlossaryEditor(): Promise<void> {
   if (!editingGlossaryId) return;
   const selected = glossaries.find((glossary) => glossary.id === editingGlossaryId);
-  if (!window.confirm(`删除词表“${selected?.name ?? editingGlossaryId}”？旧任务保留自己的词表快照。`)) return;
+  const confirmed = await confirmAction({
+    title: "删除识别词表？",
+    message: `将删除词表“${selected?.name ?? editingGlossaryId}”。旧任务仍保留提交时的词表快照。`,
+    confirmLabel: "删除词表",
+    danger: true,
+  });
+  if (!confirmed) return;
   if (glossaryMessage) glossaryMessage.textContent = "正在删除…";
   try {
     await invoke("delete_glossary", { glossaryId: editingGlossaryId });
@@ -1680,6 +1753,20 @@ document.querySelector<HTMLButtonElement>("#cancel-rename-job")?.addEventListene
 renameJobDialog?.addEventListener("close", () => {
   renamingJob = null;
   if (renameJobMessage) renameJobMessage.textContent = "";
+});
+confirmationForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  settleConfirmation(true);
+});
+document.querySelector<HTMLButtonElement>("#cancel-confirmation")?.addEventListener("click", () => {
+  settleConfirmation(false);
+});
+confirmationDialog?.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  settleConfirmation(false);
+});
+confirmationDialog?.addEventListener("close", () => {
+  if (confirmationResolver) settleConfirmation(false);
 });
 glossaryCorrectionForm?.addEventListener("submit", (event) => {
   event.preventDefault();

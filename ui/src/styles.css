@@ -125,6 +125,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .rename-job-dialog form > p { margin: -7px 0 0; color: #73766e; font-size: 12px; }
 .rename-job-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .rename-job-footer span { color: #a54632; font-size: 12px; }
+.confirmation-message { white-space: pre-wrap; line-height: 1.6; }
+.confirmation-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .video-render-dialog { width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 40px); border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: #22251f; background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
 .media-capabilities { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; margin: 18px 0; border: 1px solid #c8d8ce; border-radius: 10px; padding: 12px; color: #31584e; background: #f2f7f3; }
 .media-capabilities.warning { border-color: #e2b7aa; color: #8e3027; background: #fcf0ec; }
