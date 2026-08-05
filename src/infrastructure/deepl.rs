@@ -9,18 +9,33 @@ use crate::{
         TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
     },
     domain::TranscriptSegment,
+    infrastructure::network::NetworkClientConfig,
 };
 
 #[derive(Clone)]
 pub struct DeepLTranslationProvider {
     auth_key: Option<String>,
+    client: Client,
 }
 
 impl DeepLTranslationProvider {
     pub fn new(auth_key: Option<String>) -> Self {
-        Self {
+        Self::with_network_config(auth_key, &NetworkClientConfig::environment())
+            .expect("default DeepL HTTP client must be valid")
+    }
+
+    pub fn with_network_config(
+        auth_key: Option<String>,
+        network: &NetworkClientConfig,
+    ) -> Result<Self> {
+        let client = network
+            .apply(Client::builder().timeout(Duration::from_secs(60)))?
+            .build()
+            .context("failed to build DeepL client")?;
+        Ok(Self {
             auth_key: auth_key.filter(|key| !key.trim().is_empty()),
-        }
+            client,
+        })
     }
 }
 
@@ -40,9 +55,10 @@ impl TranslationProvider for DeepLTranslationProvider {
             name: "DeepL".to_string(),
             configured: self.auth_key.is_some(),
             model: None,
-            configuration_hint: self.auth_key.is_none().then(|| {
-                "请设置 DEEPL_AUTH_KEY 并重启应用；后续将迁移到设置与 Keychain。".to_string()
-            }),
+            configuration_hint: self
+                .auth_key
+                .is_none()
+                .then(|| "请在设置中配置 DeepL API Key。".to_string()),
         }
     }
 
@@ -57,7 +73,15 @@ impl TranslationProvider for DeepLTranslationProvider {
                 .auth_key
                 .as_deref()
                 .ok_or_else(|| anyhow!("DeepL API key is not configured"))?;
-            translate_texts_with_context(auth_key, options, texts, context).await
+            translate_lines(
+                &self.client,
+                deepl_endpoint(auth_key),
+                auth_key,
+                options,
+                texts,
+                context,
+            )
+            .await
         })
     }
 }

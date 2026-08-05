@@ -1,6 +1,6 @@
 # 桌面界面测试
 
-_最后更新：2026-08-05_
+_最后更新：2026-08-06_
 
 ## 构建回归
 
@@ -49,6 +49,10 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。本地无需签名的 App Bundle 可用 `tauri build --bundles app --no-sign` 生成，再从 `src-tauri/target/release/bundle/macos/Atogaki.app` 启动。
 
+本机验证 DMG 时使用 `CI=true tauri build --bundles dmg --no-sign`。当前 macOS 26 上非 CI 模式的 Finder 美化 AppleScript 会挂起并导致 `bundle_dmg.sh` 失败；CI 模式跳过图标定位与背景美化，但生成的 DMG 可正常挂载、校验和安装，适合作为首轮测试发布基线。
+
+从终端直接执行 Bundle 内二进制前，必须先退出同一 bundle identifier 的现有 Atogaki 进程。macOS 26 上同时直接执行第二个 GUI 二进制会在 AppKit `_RegisterApplication` 阶段触发 `SIGABRT`；这是重复实例的启动方式问题，不是数据目录初始化崩溃。Finder 的普通再次打开会交给 LaunchServices 激活现有实例。
+
 桌面端优先使用显式的 `ATOGAKI_FFMPEG`、`ATOGAKI_FFPROBE` 和 `ATOGAKI_WHISPER_CLI` 开发覆盖，否则使用与主程序同目录的 sidecar。进入视频烧录测试前可检查目标 ffmpeg 是否能启动并包含 libass；Whisper 帮助信息的启动日志应列出 Metal 后端，且任务的 `recognition-options.json` 中 `no_gpu` 默认为 `false`：
 
 ```bash
@@ -60,7 +64,7 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 正式 sidecar 必须同时看到 `h264_videotoolbox`、`mpeg4` 和 `ass`，且不能看到 `libx264`。源码态 `cargo run` 找不到同目录 sidecar 时仍会回退 Homebrew/PATH，方便开发，但这不是正式分发路径。
 
-模型选择器会优先打开 `ATOGAKI_WHISPER_MODEL` 或 `ATOGAKI_VAD_MODEL` 所在目录；未配置时，如果 `~/Models` 存在则从该目录打开。启动环境中配置的模型路径会自动填入；若 Whisper 模型所在目录包含文件名带 `silero` 的 `.bin`，也会自动选择首个候选 VAD 模型。所有路径输入框都允许直接粘贴完整路径，作为原生文件面板不可用时的降级方式。设置页下载使用 whisper.cpp 官方模型来源；文件先进入应用数据目录 `models/` 下的 `.part`，校验完成后才原子安装。失败或下次启动会清理该目录中的未完成文件。
+模型选择器会优先打开 `ATOGAKI_WHISPER_MODEL` 或 `ATOGAKI_VAD_MODEL` 所在目录；未配置时，如果 `~/Models` 存在则从该目录打开。启动环境中配置的模型路径会自动填入；若 Whisper 模型所在目录包含文件名带 `silero` 的 `.bin`，也会自动选择首个候选 VAD 模型。所有路径输入框都允许直接粘贴完整路径，作为原生文件面板不可用时的降级方式。设置页下载可使用用户填写的 HTTPS 镜像并回退 Hugging Face 官方源；文件先进入应用数据目录 `models/` 下的 `.part`，完整文件通过固定 SHA-256 后才原子安装。失败或下次启动会清理该目录中的未完成文件。
 
 如果将来安装 Tauri CLI 并恢复热更新模式，应由 `tauri dev` 同时启动 Vite，再重新配置 `beforeDevCommand` 与 `devUrl`；不要把该配置与普通 `cargo run` 的使用说明混在一起。
 
@@ -71,7 +75,7 @@ cargo run --manifest-path src-tauri/Cargo.toml
 配置与恢复预检：
 
 1. 使用全新隔离数据目录启动；首次配置窗口应自动出现，显示系统凭据后端和应用管理的模型目录。没有 Whisper 模型时应明确阻止完成引导。
-2. 选择已有 Whisper/VAD 模型，或下载官方模型；下载期间应显示字节进度，完成后路径和就绪状态自动更新，且目录中不留下 `.part`。
+2. 网络配置分别测试“跟随启动环境”“直连”和本机 HTTP 代理；填写镜像时测试结果应同时列出镜像与官方源。保存后下载 VAD，期间应显示字节进度与实际来源，完成后路径和就绪状态自动更新，且目录中不留下 `.part`。将镜像指向返回错误内容的测试端点时，应因状态或 SHA-256 失败回退官方源。
 3. 将翻译切换为“关闭”并保存，工作区翻译按钮应立即反映未配置状态，无需重启。配置 DeepL 时 key 输入框不得回显既有值，SQLite 和任务目录中不得出现 key；真实 key 写入测试只在明确允许修改本机系统凭据时执行。
 4. 运行中关闭 App 后再次启动；旧任务应显示因上次退出而失败。点击重试应创建新 UUID，保留旧目录；若旧模型路径已失效，应使用设置页当前有效模型。
 
@@ -105,6 +109,15 @@ cargo run --manifest-path src-tauri/Cargo.toml
 每轮真实窗口回归还应确认首页显示的数据目录等于本轮 `ATOGAKI_DATA_DIR`，并在结束后检查系统正式应用数据目录未产生本轮测试任务。
 
 ## 最近一次打包窗口回归
+
+2026-08-06 使用未签名打包 App 和 `/tmp/atogaki-network-ui-20260806` 完成网络与模型下载回归：
+
+- 清除进程中的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`ATOGAKI_*` 与 `DEEPL_AUTH_KEY` 后，设置页正确显示隔离模型目录。
+- 自定义代理 `http://127.0.0.1:7897` 下，自定义镜像与 Hugging Face 官方源连通性测试均返回 HTTP 206，并显示实际重定向主机。
+- 从 `https://hf-mirror.com` 路径下载 Silero VAD 成功，完整文件为 885,098 字节，SHA-256 为 `2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987`，没有残留 `.part`。
+- 把镜像改为返回 404 的 `https://example.com` 后重新下载，应用自动回退 Hugging Face 官方源并再次通过相同 SHA-256；界面最终来源显示为官方源。
+- 隔离 SQLite 只保存代理模式、无凭据代理 URL、镜像 URL、provider ID 和模型路径，没有 API key。本轮读取但没有写入、回显或删除现有 Keychain 凭据。
+- 同日三份启动崩溃报告均为已有 Atogaki 运行时再次直接执行 Bundle 内二进制，在 AppKit `_RegisterApplication` 触发 `SIGABRT`；关闭旧进程后相同构建可稳定启动并完成上述测试。
 
 2026-08-05 使用固定版本 Apple Silicon sidecar 与全新 `/tmp` 数据目录，在清除 `ATOGAKI_*` 和 `DEEPL_AUTH_KEY` 的进程环境后启动未签名 `Atogaki.app`：
 

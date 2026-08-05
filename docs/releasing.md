@@ -1,0 +1,40 @@
+# macOS 发布说明
+
+_最后更新：2026-08-06_
+
+## 产物边界
+
+DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后，把 DMG 作为 GitHub Release asset 上传。这样仓库保持轻量，Release 页面仍能为测试者提供固定版本下载。
+
+首个 Apple Silicon 预发布建议包含：
+
+- `Atogaki-v0.1.0-alpha.1-macos-arm64.dmg`
+- `Atogaki-v0.1.0-alpha.1-macos-arm64.dmg.sha256`
+- sidecar 的完整对应源码归档与校验值
+- `src-tauri/third-party/` 中的构建清单和许可证材料
+
+GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpeg、whisper.cpp 与静态依赖的对应源码材料。
+
+## 首次手工预发布
+
+1. 在干净提交上完成 Rust、前端、打包 App、模型下载和真实窗口回归。
+2. 用固定 sidecar 构建 DMG；本机可用 `CI=true tauri build --bundles dmg --no-sign` 跳过 Finder 美化脚本。没有 Apple Developer 账号时只发布为明确标注“未签名、未公证”的 prerelease，供知情测试者使用。
+3. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.1`，并把 tag 推送到 GitHub。
+4. 在 GitHub 的 Releases 页面从该 tag 创建 prerelease，填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值和第三方许可证说明。
+5. 上传 DMG、SHA-256、第三方源码与许可证材料，而不是把它们 `git add` 到仓库。
+
+可使用 GitHub CLI 上传已核对的产物：
+
+```bash
+gh release create v0.1.0-alpha.1 \
+  path/to/Atogaki-v0.1.0-alpha.1-macos-arm64.dmg \
+  path/to/Atogaki-v0.1.0-alpha.1-macos-arm64.dmg.sha256 \
+  path/to/Atogaki-v0.1.0-alpha.1-third-party-sources.tar.xz \
+  --prerelease --title "Atogaki v0.1.0-alpha.1" --notes-file path/to/release-notes.md
+```
+
+## 自动化时机
+
+首轮建议手工发布以稳定构建清单和窗口回归。取得 Apple Developer Program 资格后，再让 GitHub Actions 在版本 tag 上构建、签名、公证、装订 notarization ticket、生成 DMG 和校验文件，并上传到同一个 Release。签名证书、App Store Connect API key 等只放 GitHub Actions encrypted secrets，不进入仓库。
+
+当前 Apple Silicon 未签名 DMG 已在本机用 `hdiutil verify` 通过结构校验，并确认包含 `.app`、Applications 链接、三个 sidecar、Apache-2.0 项目许可证和第三方构建清单。普通本机 Tauri DMG 的 Finder 美化脚本在当前 macOS 26 环境会挂起并失败，`CI=true` 的无美化产物可正常生成；GitHub Actions 本身就是 CI 环境，首个自动化流水线应沿用该路径，后续再单独修复背景图和图标布局。

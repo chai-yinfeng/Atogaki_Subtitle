@@ -28,7 +28,10 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::{
     desktop_settings::{DesktopSettings, DesktopSettingsService, SaveDesktopSettingsRequest},
-    model_download::{ModelCatalogItem, ModelDownloadService, ModelDownloadState},
+    model_download::{
+        ModelCatalogItem, ModelDownloadService, ModelDownloadState, NetworkSourceCheck,
+        test_download_network,
+    },
 };
 
 struct DesktopState {
@@ -74,6 +77,14 @@ struct PromptPreviewRequest {
 struct DesktopRecognitionDefaults {
     whisper_model_path: Option<String>,
     vad_model_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TestDownloadNetworkRequest {
+    proxy_mode: String,
+    proxy_url: Option<String>,
+    model_mirror_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -635,6 +646,19 @@ async fn model_download_states(
 }
 
 #[tauri::command]
+async fn test_network_connection(
+    request: TestDownloadNetworkRequest,
+) -> Result<Vec<NetworkSourceCheck>, String> {
+    test_download_network(
+        &request.proxy_mode,
+        request.proxy_url,
+        request.model_mirror_url,
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn data_directory(state: State<'_, DesktopState>) -> String {
     state.data_dir.display().to_string()
 }
@@ -847,6 +871,7 @@ fn main() {
             save_glossary,
             submit_transcription,
             start_model_download,
+            test_network_connection,
             submit_video_render,
             cancel_video_render,
             translate_all_subtitles,

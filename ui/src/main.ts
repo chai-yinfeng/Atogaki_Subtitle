@@ -122,6 +122,9 @@ type DesktopSettings = {
   credentialStore: string;
   credentialError: string | null;
   modelsDirectory: string;
+  networkProxyMode: "environment" | "direct" | "custom";
+  networkProxyUrl: string | null;
+  modelMirrorUrl: string | null;
 };
 
 type ModelCatalogItem = {
@@ -140,6 +143,16 @@ type ModelDownloadState = {
   downloadedBytes: number;
   totalBytes: number | null;
   path: string | null;
+  error: string | null;
+  source: string | null;
+};
+
+type NetworkSourceCheck = {
+  label: string;
+  requestedUrl: string;
+  resolvedHost: string | null;
+  status: number | null;
+  ok: boolean;
   error: string | null;
 };
 
@@ -398,11 +411,31 @@ app.innerHTML = `
             <label>Silero VAD 模型（推荐）<input id="settings-vad-model" placeholder="选择已有 ggml-silero-*.bin，或从下方下载" /></label>
             <button id="settings-choose-vad" type="button" class="secondary">选择文件</button>
           </div>
+        </section>
+        <section class="settings-section">
+          <div class="settings-section-heading"><div><strong>2. 网络与模型下载</strong><span>代理同时用于模型下载与 DeepL；镜像只用于模型下载，失败会回退官方源。</span></div><span>每个模型都会校验 SHA-256</span></div>
+          <div class="network-settings-grid">
+            <label>代理模式
+              <select id="settings-proxy-mode">
+                <option value="environment">跟随启动环境</option>
+                <option value="direct">直连（忽略系统与环境代理）</option>
+                <option value="custom">自定义 HTTP 代理</option>
+              </select>
+            </label>
+            <label id="proxy-url-field">HTTP 代理地址
+              <input id="settings-proxy-url" inputmode="url" placeholder="http://127.0.0.1:7897" />
+            </label>
+            <label>Hugging Face 镜像根地址（可选）
+              <input id="settings-model-mirror" inputmode="url" placeholder="https://example.com" />
+            </label>
+          </div>
+          <div class="network-test-row"><button id="test-network" type="button" class="secondary">测试当前网络配置</button><span>测试使用当前输入；模型下载使用已保存配置。</span></div>
+          <div id="network-test-results" class="network-test-results" role="status"></div>
           <div id="model-catalog" class="model-catalog"></div>
           <p id="model-download-message" class="settings-message" role="status"></p>
         </section>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>2. 云端翻译（可选）</strong><span>不配置也可以完成日语转写、编辑和日文字幕导出。</span></div><span id="credential-store-label"></span></div>
+          <div class="settings-section-heading"><div><strong>3. 云端翻译（可选）</strong><span>不配置也可以完成日语转写、编辑和日文字幕导出。</span></div><span id="credential-store-label"></span></div>
           <label>翻译 provider
             <select id="settings-provider">
               <option value="deepl">DeepL</option>
@@ -490,6 +523,11 @@ const settingsDialog = document.querySelector<HTMLDialogElement>("#settings-dial
 const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
 const settingsWhisperModel = document.querySelector<HTMLInputElement>("#settings-whisper-model");
 const settingsVadModel = document.querySelector<HTMLInputElement>("#settings-vad-model");
+const settingsProxyMode = document.querySelector<HTMLSelectElement>("#settings-proxy-mode");
+const settingsProxyUrl = document.querySelector<HTMLInputElement>("#settings-proxy-url");
+const settingsModelMirror = document.querySelector<HTMLInputElement>("#settings-model-mirror");
+const testNetworkButton = document.querySelector<HTMLButtonElement>("#test-network");
+const networkTestResults = document.querySelector<HTMLDivElement>("#network-test-results");
 const settingsProvider = document.querySelector<HTMLSelectElement>("#settings-provider");
 const settingsApiKey = document.querySelector<HTMLInputElement>("#settings-api-key");
 const settingsClearApiKey = document.querySelector<HTMLInputElement>("#settings-clear-api-key");
@@ -599,10 +637,20 @@ function syncProviderSettings(): void {
   settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !deeplEnabled);
 }
 
+function syncNetworkSettings(): void {
+  const customProxy = settingsProxyMode?.value === "custom";
+  const proxyField = document.querySelector<HTMLElement>("#proxy-url-field");
+  proxyField?.classList.toggle("disabled-field", !customProxy);
+  if (settingsProxyUrl) settingsProxyUrl.disabled = !customProxy;
+}
+
 function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
   if (settingsWhisperModel) settingsWhisperModel.value = settings.whisperModelPath ?? "";
   if (settingsVadModel) settingsVadModel.value = settings.vadModelPath ?? "";
+  if (settingsProxyMode) settingsProxyMode.value = settings.networkProxyMode;
+  if (settingsProxyUrl) settingsProxyUrl.value = settings.networkProxyUrl ?? "";
+  if (settingsModelMirror) settingsModelMirror.value = settings.modelMirrorUrl ?? "";
   if (settingsProvider) settingsProvider.value = settings.translationProviderId;
   if (settingsApiKey) settingsApiKey.value = "";
   if (settingsClearApiKey) settingsClearApiKey.checked = false;
@@ -628,6 +676,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   if (modelPath && settings.whisperModelPath) modelPath.value = settings.whisperModelPath;
   if (vadModelPath && settings.vadModelPath) vadModelPath.value = settings.vadModelPath;
   syncProviderSettings();
+  syncNetworkSettings();
   renderModelCatalog();
 }
 
@@ -641,13 +690,14 @@ function renderModelCatalog(): void {
     const progress = download?.totalBytes
       ? Math.min(1, download.downloadedBytes / download.totalBytes)
       : null;
+    const source = download?.source ? ` · ${download.source}` : "";
     const state = download?.status === "done"
-      ? "已下载并设为默认"
+      ? `已下载并设为默认${source}`
       : download?.status === "failed"
-        ? `失败：${download.error ?? "未知错误"}`
+        ? `失败：${download.error ?? "未知错误"}${source}`
         : download?.status === "downloading"
-          ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}`
-          : download?.status === "queued" ? "等待下载" : "";
+          ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}${source}`
+          : download?.status === "queued" ? `等待下载${source}` : "";
     return `<article class="model-card">
       <div><strong>${escapeHtml(model.name)}</strong><span>${escapeHtml(model.sizeLabel)} · ${escapeHtml(model.recommendedFor)}</span></div>
       ${progress === null ? "" : `<progress max="1" value="${progress}"></progress>`}
@@ -685,7 +735,7 @@ async function refreshTranslationStatus(): Promise<void> {
 }
 
 async function saveSettings(finishOnboarding: boolean): Promise<void> {
-  if (!settingsWhisperModel || !settingsVadModel || !settingsProvider || !settingsApiKey) return;
+  if (!settingsWhisperModel || !settingsVadModel || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return;
   if (finishOnboarding && !settingsWhisperModel.value.trim()) {
     if (settingsMessage) settingsMessage.textContent = "请先选择或下载一个 Whisper 模型。";
     settingsWhisperModel.focus();
@@ -700,6 +750,9 @@ async function saveSettings(finishOnboarding: boolean): Promise<void> {
         translationProviderId: settingsProvider.value,
         apiKey: settingsApiKey.value.trim() || null,
         clearApiKey: settingsClearApiKey?.checked ?? false,
+        networkProxyMode: settingsProxyMode.value,
+        networkProxyUrl: settingsProxyUrl.value.trim() || null,
+        modelMirrorUrl: settingsModelMirror.value.trim() || null,
         onboardingCompleted: finishOnboarding || desktopSettings?.onboardingCompleted || false,
       },
     });
@@ -709,6 +762,31 @@ async function saveSettings(finishOnboarding: boolean): Promise<void> {
     if (finishOnboarding && !settings.needsOnboarding) settingsDialog?.close();
   } catch (error) {
     if (settingsMessage) settingsMessage.textContent = `保存失败：${String(error)}`;
+  }
+}
+
+async function testNetworkConnection(): Promise<void> {
+  if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !testNetworkButton || !networkTestResults) return;
+  testNetworkButton.disabled = true;
+  networkTestResults.innerHTML = "<span>正在测试模型来源…</span>";
+  try {
+    const checks = await invoke<NetworkSourceCheck[]>("test_network_connection", {
+      request: {
+        proxyMode: settingsProxyMode.value,
+        proxyUrl: settingsProxyUrl.value.trim() || null,
+        modelMirrorUrl: settingsModelMirror.value.trim() || null,
+      },
+    });
+    networkTestResults.innerHTML = checks.map((check) => {
+      const detail = check.ok
+        ? `${check.status ?? "已连接"}${check.resolvedHost ? ` · ${check.resolvedHost}` : ""}`
+        : check.error ?? "连接失败";
+      return `<div class="${check.ok ? "success" : "warning"}"><strong>${escapeHtml(check.label)}</strong><span>${escapeHtml(String(detail))}</span></div>`;
+    }).join("");
+  } catch (error) {
+    networkTestResults.innerHTML = `<div class="warning"><strong>配置无效</strong><span>${escapeHtml(String(error))}</span></div>`;
+  } finally {
+    testNetworkButton.disabled = false;
   }
 }
 
@@ -725,7 +803,7 @@ async function chooseSettingsModel(kind: "whisper" | "vad"): Promise<void> {
 
 async function startModelDownload(modelId: string): Promise<void> {
   if (!modelId) return;
-  if (modelDownloadMessage) modelDownloadMessage.textContent = "正在连接 whisper.cpp 官方模型来源…";
+  if (modelDownloadMessage) modelDownloadMessage.textContent = "正在按已保存的配置连接模型来源…";
   try {
     const state = await invoke<ModelDownloadState>("start_model_download", { modelId });
     modelDownloads = modelDownloads.filter((download) => download.modelId !== modelId);
@@ -2033,6 +2111,8 @@ document.querySelector<HTMLButtonElement>("#close-settings")?.addEventListener("
 document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
 settingsProvider?.addEventListener("change", syncProviderSettings);
+settingsProxyMode?.addEventListener("change", syncNetworkSettings);
+testNetworkButton?.addEventListener("click", () => void testNetworkConnection());
 settingsForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveSettings(false);

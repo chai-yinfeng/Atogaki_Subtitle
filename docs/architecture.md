@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-08-05_
+_最后更新：2026-08-06_
 
 ## 仓库组织
 
@@ -44,7 +44,7 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService` 与 `LocalRenderService`：前者负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
-`DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。`ModelDownloadService` 每次只运行一个下载，写入应用管理目录中的 `.part` 文件，校验后原子安装并更新模型设置；UI 只轮询进度，不直接访问网络或模型文件。
+`DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。模型下载与 DeepL 共用可热切换的网络配置：跟随启动环境、强制直连或自定义 HTTP 代理；模型还可使用用户提供的 HTTPS 镜像根地址。`ModelDownloadService` 每次只运行一个下载，按镜像到官方源回退，写入应用管理目录中的 `.part` 文件，校验固定 SHA-256 后原子安装并更新模型设置；UI 只轮询进度，不直接访问网络或模型文件。
 
 正式桌面 App 把固定版本的 `whisper-cli`、`ffmpeg` 和 `ffprobe` 作为按平台/CPU 架构生成的 Tauri sidecar 放在主程序同目录；Finder 启动不依赖 shell、Homebrew 或用户 `PATH`。模型仍按设备下载到应用数据目录或由用户选择，不进入 Bundle。开发环境可用 `ATOGAKI_WHISPER_CLI`、`ATOGAKI_FFMPEG` 和 `ATOGAKI_FFPROBE` 覆盖 sidecar。macOS FFmpeg 从固定源码构建 libass 字体栈与 LGPL 配置，发布物附带许可证和构建清单，不包含 libx264。
 
@@ -59,7 +59,7 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 - 媒体、模型、任务产物：默认本地文件系统。
 - 任务元数据、字幕段、词表与编辑状态：桌面 MVP 使用 SQLite；生成快照首次导入后，人工编辑和 SQLite 生成的机器译文以 SQLite 为准，后续快照同步不会用旧 `segments.json` 清空它们。
 - 密钥：通过统一凭据接口写入 macOS Keychain、Windows Credential Manager 或 Linux Secret Service，不写入 SQLite、任务 JSON 或日志；`DEEPL_AUTH_KEY` 仅作为兼容环境变量回退，且不会被自动迁移或回显。
-- 桌面设置：模型路径、翻译 provider ID 和引导状态写入 SQLite；模型二进制位于用户选择的位置或应用数据目录的 `models/`，不打入 App Bundle。
+- 桌面设置：模型路径、翻译 provider ID、引导状态、无凭据代理配置与可选镜像地址写入 SQLite；模型二进制位于用户选择的位置或应用数据目录的 `models/`，不打入 App Bundle。
 - `status.json`：保留为任务产物与故障恢复副本，不作为唯一长期数据库。
 
 ## 核心数据约定

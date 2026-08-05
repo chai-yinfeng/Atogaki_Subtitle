@@ -5,7 +5,11 @@ use atogaki_subtitle::{
     application::{
         MutableTranslationProvider, TranslationProvider, UnconfiguredTranslationProvider,
     },
-    infrastructure::{deepl::DeepLTranslationProvider, local_db::LocalDatabase},
+    infrastructure::{
+        deepl::DeepLTranslationProvider,
+        local_db::LocalDatabase,
+        network::{NetworkClientConfig, normalize_https_endpoint},
+    },
 };
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +19,9 @@ const ONBOARDING_COMPLETED: &str = "desktop.onboarding_completed";
 const WHISPER_MODEL_PATH: &str = "recognition.whisper_model_path";
 const VAD_MODEL_PATH: &str = "recognition.vad_model_path";
 const TRANSLATION_PROVIDER: &str = "translation.provider";
+const NETWORK_PROXY_MODE: &str = "network.proxy_mode";
+const NETWORK_PROXY_URL: &str = "network.proxy_url";
+const MODEL_MIRROR_URL: &str = "network.model_mirror_url";
 const DEEPL_PROVIDER_ID: &str = "deepl";
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +39,9 @@ pub struct DesktopSettings {
     pub credential_store: String,
     pub credential_error: Option<String>,
     pub models_directory: String,
+    pub network_proxy_mode: String,
+    pub network_proxy_url: Option<String>,
+    pub model_mirror_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,10 +51,19 @@ pub struct SaveDesktopSettingsRequest {
     pub vad_model_path: Option<String>,
     pub translation_provider_id: String,
     pub api_key: Option<String>,
+    pub network_proxy_mode: String,
+    pub network_proxy_url: Option<String>,
+    pub model_mirror_url: Option<String>,
     #[serde(default)]
     pub clear_api_key: bool,
     #[serde(default)]
     pub onboarding_completed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadNetworkSettings {
+    pub client: NetworkClientConfig,
+    pub model_mirror_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,7 +118,11 @@ impl DesktopSettingsService {
     pub async fn initialize(&self) -> Result<DesktopSettings> {
         std::fs::create_dir_all(&self.models_directory)?;
         let settings = self.load().await?;
-        self.replace_provider(&settings.translation_provider_id)?;
+        let network = NetworkClientConfig::new(
+            &settings.network_proxy_mode,
+            settings.network_proxy_url.clone(),
+        )?;
+        self.replace_provider(&settings.translation_provider_id, &network)?;
         Ok(settings)
     }
 
@@ -143,6 +166,7 @@ impl DesktopSettingsService {
         };
         let whisper_model_ready = whisper_model.as_ref().is_some_and(|path| path.is_file());
         let vad_model_ready = vad_model.as_ref().is_some_and(|path| path.is_file());
+        let download_network = self.download_network_settings().await?;
 
         Ok(DesktopSettings {
             onboarding_completed,
@@ -157,6 +181,12 @@ impl DesktopSettingsService {
             credential_store: self.credentials.backend_name().to_string(),
             credential_error,
             models_directory: self.models_directory.display().to_string(),
+            network_proxy_mode: download_network.client.proxy_mode().as_str().to_string(),
+            network_proxy_url: download_network
+                .client
+                .custom_proxy_url()
+                .map(str::to_string),
+            model_mirror_url: download_network.model_mirror_url,
         })
     }
 
@@ -166,6 +196,11 @@ impl DesktopSettingsService {
         let vad_model = normalized_optional_path(request.vad_model_path);
         validate_optional_model(&whisper_model, "Whisper")?;
         validate_optional_model(&vad_model, "VAD")?;
+        let network = NetworkClientConfig::new(
+            &request.network_proxy_mode,
+            request.network_proxy_url.clone(),
+        )?;
+        let model_mirror_url = normalize_https_endpoint(request.model_mirror_url.clone())?;
 
         save_optional_path(&self.database, WHISPER_MODEL_PATH, whisper_model.as_ref()).await?;
         save_optional_path(&self.database, VAD_MODEL_PATH, vad_model.as_ref()).await?;
@@ -182,6 +217,21 @@ impl DesktopSettingsService {
                 },
             )
             .await?;
+        self.database
+            .set_setting(NETWORK_PROXY_MODE, network.proxy_mode().as_str())
+            .await?;
+        save_optional_string(
+            &self.database,
+            NETWORK_PROXY_URL,
+            network.custom_proxy_url(),
+        )
+        .await?;
+        save_optional_string(
+            &self.database,
+            MODEL_MIRROR_URL,
+            model_mirror_url.as_deref(),
+        )
+        .await?;
 
         if request.clear_api_key {
             self.credentials.delete(DEEPL_PROVIDER_ID)?;
@@ -190,8 +240,23 @@ impl DesktopSettingsService {
             self.credentials.set(DEEPL_PROVIDER_ID, &secret)?;
         }
 
-        self.replace_provider(&request.translation_provider_id)?;
+        self.replace_provider(&request.translation_provider_id, &network)?;
         self.load().await
+    }
+
+    pub async fn download_network_settings(&self) -> Result<DownloadNetworkSettings> {
+        let proxy_mode = self
+            .database
+            .get_setting(NETWORK_PROXY_MODE)
+            .await?
+            .unwrap_or_else(|| "environment".to_string());
+        let proxy_url = self.database.get_setting(NETWORK_PROXY_URL).await?;
+        let model_mirror_url =
+            normalize_https_endpoint(self.database.get_setting(MODEL_MIRROR_URL).await?)?;
+        Ok(DownloadNetworkSettings {
+            client: NetworkClientConfig::new(&proxy_mode, proxy_url)?,
+            model_mirror_url,
+        })
     }
 
     pub async fn set_downloaded_model(&self, kind: &str, path: &std::path::Path) -> Result<()> {
@@ -205,7 +270,7 @@ impl DesktopSettingsService {
             .await
     }
 
-    fn replace_provider(&self, provider_id: &str) -> Result<()> {
+    fn replace_provider(&self, provider_id: &str, network: &NetworkClientConfig) -> Result<()> {
         let provider: Arc<dyn TranslationProvider> = match provider_id {
             "none" => Arc::new(UnconfiguredTranslationProvider),
             DEEPL_PROVIDER_ID => {
@@ -215,7 +280,7 @@ impl DesktopSettingsService {
                     .ok()
                     .flatten()
                     .or_else(|| self.environment_deepl_key.clone());
-                Arc::new(DeepLTranslationProvider::new(key))
+                Arc::new(DeepLTranslationProvider::with_network_config(key, network)?)
             }
             _ => return Err(anyhow!("unsupported translation provider: {provider_id}")),
         };
@@ -259,6 +324,18 @@ async fn save_optional_path(
 ) -> Result<()> {
     if let Some(path) = path {
         database.set_setting(key, &path.display().to_string()).await
+    } else {
+        database.delete_setting(key).await
+    }
+}
+
+async fn save_optional_string(
+    database: &LocalDatabase,
+    key: &str,
+    value: Option<&str>,
+) -> Result<()> {
+    if let Some(value) = value {
+        database.set_setting(key, value).await
     } else {
         database.delete_setting(key).await
     }
@@ -342,6 +419,9 @@ mod tests {
                 vad_model_path: None,
                 translation_provider_id: "deepl".to_string(),
                 api_key: Some("test-secret:fx".to_string()),
+                network_proxy_mode: "custom".to_string(),
+                network_proxy_url: Some("http://127.0.0.1:7897".to_string()),
+                model_mirror_url: Some("https://mirror.example/hf/".to_string()),
                 clear_api_key: false,
                 onboarding_completed: true,
             })
@@ -351,6 +431,15 @@ mod tests {
         assert!(!saved.needs_onboarding);
         assert!(saved.translation_api_key_configured);
         assert_eq!(saved.translation_api_key_source.as_deref(), Some("system"));
+        assert_eq!(saved.network_proxy_mode, "custom");
+        assert_eq!(
+            saved.network_proxy_url.as_deref(),
+            Some("http://127.0.0.1:7897")
+        );
+        assert_eq!(
+            saved.model_mirror_url.as_deref(),
+            Some("https://mirror.example/hf")
+        );
         assert_eq!(
             credentials.secret.lock().unwrap().as_deref(),
             Some("test-secret:fx")

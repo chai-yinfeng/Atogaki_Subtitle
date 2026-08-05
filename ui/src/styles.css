@@ -130,6 +130,16 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .settings-section-heading > span { text-align: right; }
 .settings-section-heading .warning, .settings-message.warning { color: #a54632; }
 .settings-path-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.network-settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.disabled-field { opacity: .52; }
+.network-test-row { display: flex; align-items: center; gap: 12px; }
+.network-test-row span { color: #70736b; font-size: 10px; line-height: 1.5; }
+.network-test-results { display: grid; gap: 6px; }
+.network-test-results:empty { display: none; }
+.network-test-results > div { display: flex; justify-content: space-between; gap: 12px; border: 1px solid #ddd5c7; border-radius: 8px; padding: 8px 10px; background: #fffdf7; }
+.network-test-results span { color: #70736b; font-size: 10px; overflow-wrap: anywhere; text-align: right; }
+.network-test-results .success strong { color: #2e5d52; }
+.network-test-results .warning strong, .network-test-results .warning span { color: #a54632; }
 .settings-section label { display: grid; gap: 6px; color: #62655e; font-size: 12px; font-weight: 700; }
 .settings-section input:not([type="checkbox"]), .settings-section select { width: 100%; border: 1px solid #d3ccbd; border-radius: 8px; padding: 10px; color: #30332d; background: #fffdf7; }
 .settings-path-row button { align-self: end; }
@@ -240,7 +250,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
   .video-render-row { grid-template-columns: 1fr; }
   .video-render-row > button { justify-self: start; }
   .header-actions { width: 100%; justify-content: flex-end; }
-  .settings-path-row, .model-catalog { grid-template-columns: 1fr; }
+  .settings-path-row, .network-settings-grid, .model-catalog { grid-template-columns: 1fr; }
   .settings-path-row button { justify-self: start; }
   .settings-footer { align-items: stretch; flex-direction: column; }
   .settings-footer > div { justify-content: flex-end; }
