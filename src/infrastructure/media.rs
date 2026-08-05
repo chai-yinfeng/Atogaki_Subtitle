@@ -20,11 +20,12 @@ use tokio::{
 use crate::{domain::render::RenderOptions, interface::cli::RecordArgs};
 
 const VIDEOTOOLBOX_QUALITY: u8 = 65;
+const MPEG4_QUALITY: u8 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HardSubtitleEncoder {
     VideoToolbox,
-    Libx264,
+    Mpeg4,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -33,7 +34,7 @@ pub struct MediaCapabilities {
     pub version: String,
     pub ass_filter: bool,
     pub videotoolbox_encoder: bool,
-    pub libx264_encoder: bool,
+    pub mpeg4_encoder: bool,
     pub ready_for_hard_subtitles: bool,
 }
 
@@ -47,7 +48,7 @@ pub struct MediaProbe {
 #[serde(rename_all = "snake_case")]
 pub enum RenderEncoder {
     VideoToolbox,
-    Libx264,
+    Mpeg4,
     SubtitleMux,
 }
 
@@ -117,15 +118,15 @@ pub async fn inspect_capabilities(ffmpeg: &Path) -> Result<MediaCapabilities> {
         .to_string();
     let ass_filter = supports_filter(ffmpeg, "ass").await?;
     let videotoolbox_encoder = supports_encoder(ffmpeg, "h264_videotoolbox").await?;
-    let libx264_encoder = supports_encoder(ffmpeg, "libx264").await?;
+    let mpeg4_encoder = supports_encoder(ffmpeg, "mpeg4").await?;
 
     Ok(MediaCapabilities {
         binary_path: ffmpeg.display().to_string(),
         version,
         ass_filter,
         videotoolbox_encoder,
-        libx264_encoder,
-        ready_for_hard_subtitles: ass_filter && (videotoolbox_encoder || libx264_encoder),
+        mpeg4_encoder,
+        ready_for_hard_subtitles: ass_filter && (videotoolbox_encoder || mpeg4_encoder),
     })
 }
 
@@ -133,7 +134,7 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
     if !input.is_file() {
         anyhow::bail!("input file does not exist: {}", input.display());
     }
-    let ffprobe = ffmpeg.with_file_name("ffprobe");
+    let ffprobe = ffprobe_path(ffmpeg);
     let duration_output = Command::new(&ffprobe)
         .args([
             "-v",
@@ -189,6 +190,35 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
             .trim()
             .is_empty(),
     })
+}
+
+fn ffprobe_path(ffmpeg: &Path) -> PathBuf {
+    if let Some(configured) = std::env::var_os("ATOGAKI_FFPROBE").filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(configured);
+    }
+
+    paired_ffprobe_path(ffmpeg)
+}
+
+fn paired_ffprobe_path(ffmpeg: &Path) -> PathBuf {
+    let plain_name = if cfg!(target_os = "windows") {
+        "ffprobe.exe"
+    } else {
+        "ffprobe"
+    };
+    let plain = ffmpeg.with_file_name(plain_name);
+    if plain.is_file() {
+        return plain;
+    }
+
+    let Some(ffmpeg_name) = ffmpeg.file_name().and_then(|name| name.to_str()) else {
+        return plain;
+    };
+    let Some(target_suffix) = ffmpeg_name.strip_prefix("ffmpeg-") else {
+        return plain;
+    };
+    ffmpeg.with_file_name(format!("ffprobe-{target_suffix}"))
 }
 
 pub async fn list_capture_devices(ffmpeg: &Path) -> Result<()> {
@@ -304,7 +334,7 @@ pub async fn render_subtitles_with_progress(
 
     if !supports_filter(ffmpeg, "ass").await? {
         anyhow::bail!(
-            "hard subtitle rendering requires ffmpeg with the libass/ass filter; select soft subtitles explicitly or configure ffmpeg-full"
+            "hard subtitle rendering requires the bundled FFmpeg sidecar with the libass/ass filter; select soft subtitles explicitly if the sidecar is unavailable"
         );
     }
     let execution = RenderExecution {
@@ -312,7 +342,7 @@ pub async fn render_subtitles_with_progress(
         progress_sender,
         cancelled,
     };
-    burn_ass(ffmpeg, input, ass, output, options, &execution).await
+    burn_ass(ffmpeg, input, ass, output, &execution).await
 }
 
 async fn burn_ass(
@@ -320,12 +350,11 @@ async fn burn_ass(
     input: &Path,
     ass: &Path,
     output: &Path,
-    options: &RenderOptions,
     execution: &RenderExecution,
 ) -> Result<RenderOutcome> {
     let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
     let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
-    burn_ass_with_encoder(ffmpeg, input, output, &filter, options, execution).await
+    burn_ass_with_encoder(ffmpeg, input, output, &filter, execution).await
 }
 
 async fn burn_ass_with_encoder(
@@ -333,10 +362,11 @@ async fn burn_ass_with_encoder(
     input: &Path,
     output: &Path,
     filter: &str,
-    options: &RenderOptions,
     execution: &RenderExecution,
 ) -> Result<RenderOutcome> {
-    let mut hardware_fallback_reason = None;
+    let mut hardware_fallback_reason = Some(
+        "VideoToolbox is unavailable; using the bundled LGPL MPEG-4 software encoder".to_string(),
+    );
     if supports_encoder(ffmpeg, "h264_videotoolbox").await? {
         eprintln!("ffmpeg render: using VideoToolbox hardware H.264 encoder");
         let result = run_burn_command(
@@ -344,7 +374,6 @@ async fn burn_ass_with_encoder(
             input,
             output,
             filter,
-            options,
             EncodingSelection {
                 video: HardSubtitleEncoder::VideoToolbox,
                 audio: AudioEncoder::Copy,
@@ -371,7 +400,6 @@ async fn burn_ass_with_encoder(
                 input,
                 output,
                 filter,
-                options,
                 EncodingSelection {
                     video: HardSubtitleEncoder::VideoToolbox,
                     audio: AudioEncoder::Aac,
@@ -394,7 +422,7 @@ async fn burn_ass_with_encoder(
             fallback_error = aac_error.to_string();
         }
         eprintln!(
-            "VideoToolbox render failed; retrying with libx264. Original failure: {}",
+            "VideoToolbox render failed; retrying with the LGPL MPEG-4 encoder. Original failure: {}",
             fallback_error
         );
         hardware_fallback_reason = Some(format!(
@@ -403,20 +431,22 @@ async fn burn_ass_with_encoder(
         ));
     }
 
-    if !supports_encoder(ffmpeg, "libx264").await? {
+    if !supports_encoder(ffmpeg, "mpeg4").await? {
+        let prior = hardware_fallback_reason
+            .as_deref()
+            .unwrap_or("VideoToolbox did not produce an output");
         anyhow::bail!(
-            "ffmpeg supports neither h264_videotoolbox nor libx264 for subtitle rendering"
+            "no usable video encoder remains after {prior}; the configured ffmpeg is missing the LGPL MPEG-4 software encoder"
         );
     }
-    eprintln!("ffmpeg render: using libx264 software encoder");
+    eprintln!("ffmpeg render: using the LGPL MPEG-4 software encoder");
     let result = run_burn_command(
         ffmpeg,
         input,
         output,
         filter,
-        options,
         EncodingSelection {
-            video: HardSubtitleEncoder::Libx264,
+            video: HardSubtitleEncoder::Mpeg4,
             audio: AudioEncoder::Copy,
         },
         execution,
@@ -425,33 +455,52 @@ async fn burn_ass_with_encoder(
     match result {
         Ok(()) => Ok(render_outcome(
             output,
-            HardSubtitleEncoder::Libx264,
+            HardSubtitleEncoder::Mpeg4,
             AudioEncoder::Copy,
             hardware_fallback_reason.clone(),
         )),
         Err(error) if error.downcast_ref::<RenderCancelled>().is_some() => Err(error),
         Err(error) if audio_copy_failed(&error.to_string()) => {
-            run_burn_command(
+            let copy_error = error.to_string();
+            let aac_result = run_burn_command(
                 ffmpeg,
                 input,
                 output,
                 filter,
-                options,
                 EncodingSelection {
-                    video: HardSubtitleEncoder::Libx264,
+                    video: HardSubtitleEncoder::Mpeg4,
                     audio: AudioEncoder::Aac,
                 },
                 execution,
             )
-            .await?;
-            Ok(render_outcome(
-                output,
-                HardSubtitleEncoder::Libx264,
-                AudioEncoder::Aac,
-                hardware_fallback_reason,
+            .await;
+            match aac_result {
+                Ok(()) => Ok(render_outcome(
+                    output,
+                    HardSubtitleEncoder::Mpeg4,
+                    AudioEncoder::Aac,
+                    hardware_fallback_reason,
+                )),
+                Err(error) if error.downcast_ref::<RenderCancelled>().is_some() => Err(error),
+                Err(aac_error) => {
+                    let prior = hardware_fallback_reason
+                        .as_deref()
+                        .unwrap_or("VideoToolbox did not produce an output");
+                    Err(anyhow::anyhow!(
+                        "MPEG-4 software fallback failed after {prior}; copied-audio attempt: {}; AAC retry: {aac_error:#}",
+                        summarize_render_error(&copy_error)
+                    ))
+                }
+            }
+        }
+        Err(error) => {
+            let prior = hardware_fallback_reason
+                .as_deref()
+                .unwrap_or("VideoToolbox did not produce an output");
+            Err(anyhow::anyhow!(
+                "MPEG-4 software fallback failed after {prior}: {error:#}"
             ))
         }
-        Err(error) => Err(error),
     }
 }
 
@@ -463,7 +512,7 @@ fn render_outcome(
 ) -> RenderOutcome {
     let (encoder, hardware_accelerated) = match encoder {
         HardSubtitleEncoder::VideoToolbox => (RenderEncoder::VideoToolbox, true),
-        HardSubtitleEncoder::Libx264 => (RenderEncoder::Libx264, false),
+        HardSubtitleEncoder::Mpeg4 => (RenderEncoder::Mpeg4, false),
     };
     RenderOutcome {
         encoder,
@@ -483,7 +532,6 @@ async fn run_burn_command(
     input: &Path,
     output: &Path,
     filter: &str,
-    options: &RenderOptions,
     encoding: EncodingSelection,
     execution: &RenderExecution,
 ) -> Result<()> {
@@ -492,7 +540,6 @@ async fn run_burn_command(
         input,
         output,
         filter,
-        options,
         encoding.video,
         encoding.audio,
     ));
@@ -510,7 +557,6 @@ fn burn_args(
     input: &Path,
     output: &Path,
     filter: &str,
-    options: &RenderOptions,
     encoder: HardSubtitleEncoder,
     audio_encoder: AudioEncoder,
 ) -> Vec<OsString> {
@@ -534,13 +580,11 @@ fn burn_args(
             "-pix_fmt".into(),
             "yuv420p".into(),
         ]),
-        HardSubtitleEncoder::Libx264 => args.extend([
+        HardSubtitleEncoder::Mpeg4 => args.extend([
             "-c:v".into(),
-            "libx264".into(),
-            "-preset".into(),
-            options.video_preset.clone().into(),
-            "-crf".into(),
-            options.video_crf.to_string().into(),
+            "mpeg4".into(),
+            "-q:v".into(),
+            MPEG4_QUALITY.to_string().into(),
             "-pix_fmt".into(),
             "yuv420p".into(),
         ]),
@@ -551,6 +595,8 @@ fn burn_args(
         AudioEncoder::Aac => args.extend(["aac".into(), "-b:a".into(), "192k".into()]),
     }
     args.extend([
+        "-movflags".into(),
+        "+faststart".into(),
         "-progress".into(),
         "pipe:1".into(),
         "-nostats".into(),
@@ -767,30 +813,31 @@ fn escape_filter_path(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioEncoder, HardSubtitleEncoder, audio_copy_failed, burn_args};
-    use crate::domain::render::RenderOptions;
+    use super::{
+        AudioEncoder, HardSubtitleEncoder, audio_copy_failed, burn_args, paired_ffprobe_path,
+    };
     use std::path::Path;
-
-    fn options() -> RenderOptions {
-        RenderOptions {
-            video_crf: 20,
-            video_preset: "medium".to_string(),
-            soft_subtitles: false,
-        }
-    }
 
     fn string_args(encoder: HardSubtitleEncoder) -> Vec<String> {
         burn_args(
             Path::new("input.mp4"),
             Path::new("output.mp4"),
             "ass=subtitle.ass",
-            &options(),
             encoder,
             AudioEncoder::Copy,
         )
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect()
+    }
+
+    #[test]
+    fn target_suffixed_ffmpeg_uses_the_matching_ffprobe_sidecar() {
+        let ffmpeg = Path::new("/tmp/atogaki-no-plain-probe/ffmpeg-aarch64-apple-darwin");
+        assert_eq!(
+            paired_ffprobe_path(ffmpeg),
+            Path::new("/tmp/atogaki-no-plain-probe/ffprobe-aarch64-apple-darwin")
+        );
     }
 
     #[test]
@@ -807,12 +854,12 @@ mod tests {
     }
 
     #[test]
-    fn software_fallback_keeps_configured_crf_and_preset() {
-        let args = string_args(HardSubtitleEncoder::Libx264);
+    fn software_fallback_uses_the_lgpl_mpeg4_encoder() {
+        let args = string_args(HardSubtitleEncoder::Mpeg4);
 
-        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
-        assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
-        assert!(args.windows(2).any(|pair| pair == ["-preset", "medium"]));
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "mpeg4"]));
+        assert!(args.windows(2).any(|pair| pair == ["-q:v", "3"]));
+        assert!(!args.iter().any(|argument| argument == "libx264"));
     }
 
     #[test]

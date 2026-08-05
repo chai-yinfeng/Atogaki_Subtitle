@@ -102,10 +102,10 @@ impl LocalRenderService {
         let capabilities = self.capabilities().await?;
         if !capabilities.ready_for_hard_subtitles {
             bail!(
-                "configured ffmpeg cannot burn subtitles: libass={}, VideoToolbox={}, libx264={}",
+                "configured ffmpeg cannot burn subtitles: libass={}, VideoToolbox={}, MPEG-4={}",
                 capabilities.ass_filter,
                 capabilities.videotoolbox_encoder,
-                capabilities.libx264_encoder
+                capabilities.mpeg4_encoder
             );
         }
         let probe = media::probe_media(&self.ffmpeg, &input_path).await?;
@@ -277,7 +277,7 @@ async fn run_render_worker(
                 } else {
                     let encoder = match outcome.encoder {
                         RenderEncoder::VideoToolbox => "videotoolbox",
-                        RenderEncoder::Libx264 => "libx264",
+                        RenderEncoder::Mpeg4 => "mpeg4",
                         RenderEncoder::SubtitleMux => "subtitle_mux",
                     };
                     let _ = database
@@ -426,12 +426,12 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires the local ffmpeg-full binary and VideoToolbox"]
-    async fn ffmpeg_full_renders_a_persisted_sqlite_workspace() {
+    #[ignore = "requires a built LGPL FFmpeg sidecar"]
+    async fn lgpl_sidecar_renders_a_persisted_sqlite_workspace() {
         let ffmpeg = desktop_ffmpeg_path();
         assert!(
             ffmpeg.is_file(),
-            "missing ffmpeg-full at {}",
+            "missing FFmpeg sidecar at {}",
             ffmpeg.display()
         );
         let root =
@@ -446,7 +446,7 @@ mod tests {
                 "-i",
                 "color=c=navy:s=640x360:d=1",
                 "-c:v",
-                "libx264",
+                "mpeg4",
                 "-pix_fmt",
                 "yuv420p",
             ])
@@ -500,12 +500,12 @@ mod tests {
         let finished = finished.expect("video render did not finish within ten seconds");
         assert_eq!(finished.status, "done", "{:?}", finished.error_message);
         assert_eq!(finished.progress, 1.0);
-        if finished.encoder.as_deref() == Some("libx264") {
+        if finished.encoder.as_deref() == Some("mpeg4") {
             assert!(
                 finished
                     .fallback_reason
                     .as_deref()
-                    .is_some_and(|reason| reason.contains("VideoToolbox failed"))
+                    .is_some_and(|reason| reason.contains("VideoToolbox"))
             );
         }
         assert!(output.is_file());

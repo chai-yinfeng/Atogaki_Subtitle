@@ -3,3 +3,6 @@
 .DS_Store
 
 .idea
+
+/src-tauri/binaries/*
+!/src-tauri/binaries/README.md

@@ -16,6 +16,7 @@ _最后更新：2026-08-05_
 - [x] SQLite 本地迁移、任务/字幕段快照同步和桌面任务列表索引。
 - [x] 为任务目录、选项转换、分段与导出添加离线可运行的测试。
 - [x] 明确并实现本地配置、模型下载和跨平台系统密钥存储策略。
+- [x] macOS App 内置固定版本的 whisper/FFmpeg sidecar；FFmpeg 使用 LGPL 构建并实现 VideoToolbox → MPEG-4 → 明确失败的三级结果。
 
 ## 1. 桌面离线 MVP
 
@@ -68,16 +69,16 @@ _最后更新：2026-08-05_
 ## 当前技术债清单
 
 - 当前 Web API 和 Postgres schema 是早期探索，不应驱动桌面 MVP 的设计。
-- 桌面 ffmpeg 优先读取 `ATOGAKI_FFMPEG`，否则直接解析 Homebrew `ffmpeg-full`，最后才回退 `PATH`；烧录界面显示二进制、libass、可用编码器、最终编码器和硬件回退原因。Whisper/VAD 模型已有统一设置和下载入口；Whisper CLI 与 ffmpeg 的 sidecar 打包、签名及不同 CPU 架构产物仍待完成。
+- macOS Apple Silicon 已能从固定源码生成 whisper.cpp v1.8.6 与 FFmpeg 8.1.2 sidecar，随 `.app` 打包并在无 Atogaki 环境变量时运行；FFmpeg 为无 libx264 的 LGPL 构建，libass 字体栈同样从固定源码静态链接。正式分发仍需补 x86_64/Windows 构建机、签名/公证、安装包和对应源码归档发布。
 - 当前识别与翻译选项已可配置；UI 在 MVP 中只暴露日语到简中的默认组合。
 - 当前字幕 JSON 已有稳定段 ID、来源编辑状态与翻译过期状态；细粒度编辑历史仍待实现。
 - 应用启动时会把遗留的非终态识别任务标记为中断失败，并允许以新 UUID 从冻结选项、词表和当前可用模型重试；尚未实现下载断点续传和识别阶段内的检查点续跑。
 - 首页任务、活动任务详情和烧录进度已自动轮询；音频提取与 Whisper 阶段仍没有细粒度百分比，后续应增加阶段耗时与更明确的运行反馈。
 - 系统 WebView 不能播放所有 ffmpeg 支持的容器或编码；当前失败时回退任务 `audio.wav`，后续需按需生成视频代理文件。
 - 桌面 DeepL 单段/批量翻译与重启持久化已通过真实 API 窗口回归；`LocalWorkspaceService` 已改为注入可热切换的通用翻译 provider。DeepL key 写入系统凭据库（macOS Keychain、Windows Credential Manager 或 Linux Secret Service），`DEEPL_AUTH_KEY` 仅作兼容回退。增加 Google Translate 或 LLM 前仍应记录每次翻译的 provider/model，并设计各 provider 的端点和模型设置。
-- 桌面 SRT/ASS 与带字幕 MP4 均从 SQLite 当前工作区派生；视频烧录使用独立 SQLite 记录和不可变 ASS 快照，支持取消、安全覆盖与 Finder 定位。应用重启时未完成烧录会标记失败，尚不自动恢复。
+- 桌面 SRT/ASS 与带字幕 MP4 均从 SQLite 当前工作区派生；视频烧录使用独立 SQLite 记录和不可变 ASS 快照，支持取消、安全覆盖与 Finder 定位。VideoToolbox 运行时失败会记录原始错误并回退内置 MPEG-4；两者均失败才标记任务失败。应用重启时未完成烧录会标记失败，尚不自动恢复。
 - 识别词表已支持核心、任务内容包和仅修正；Yorushika 内置词表当前以人物为核心、作品分为内容包，并为人名常见的平假名识别结果提供不占 prompt 的回退修正。最终 prompt 会预览并保存，但精确 tokenizer 预算和真实节目质量仍需继续评估；DeepL 已使用局部字幕上下文，中文翻译术语表尚未接入。
-- 当前本地回归已覆盖 Rust 核心、SQLite、前端生产构建、Tauri 编译，以及隔离数据目录下的打包 App 真实窗口；仍需建立持续集成基线和可重复的窗口自动化。
+- 当前本地回归已覆盖 Rust 核心、SQLite、前端生产构建、Tauri 编译，以及隔离数据目录下无 Atogaki/DeepL 环境变量的打包 App 真实窗口；已用真实视频验证内置 Whisper/VAD、libass 与 MPEG-4 回退。仍需建立持续集成基线和跨平台可重复窗口自动化。
 - macOS 原生文件面板曾在未打包的 `cargo run` 进程中触发 XPC 中断；桌面端已改用 Rust 主事件循环的非阻塞选择接口，并保留可直接粘贴路径的降级入口。未签名 `.app` 的媒体/模型选择、字幕目录选择和视频保存面板已回归，正式分发仍需补充签名、公证与安装后权限引导。
 - 真实窗口回归可通过绝对路径 `ATOGAKI_DATA_DIR` 隔离 SQLite、任务目录、词表与烧录快照；正式应用数据目录仍是未设置该变量时的默认路径。
 - 打包 WebView 中原生 `window.prompt`/`window.confirm` 无法作为可靠交互边界；词表修正和所有覆盖、删除、批量重译、烧录取消已使用应用内对话框。

@@ -14,7 +14,7 @@ use atogaki_subtitle::{
     },
     domain::subtitle::SubtitleTrack,
     infrastructure::{
-        config::{AppConfig, desktop_ffmpeg_path},
+        config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
             LocalRenderJobRecord, LocalSubtitleSegmentRecord,
@@ -764,9 +764,7 @@ fn main() {
                 .unwrap_or(app.path().app_data_dir()?);
             let config = AppConfig {
                 ffmpeg: desktop_ffmpeg_path(),
-                whisper_cli: std::env::var_os("ATOGAKI_WHISPER_CLI")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("whisper-cli")),
+                whisper_cli: desktop_whisper_cli_path(),
                 deepl_auth_key: std::env::var("DEEPL_AUTH_KEY").ok(),
             };
             let database = tauri::async_runtime::block_on(LocalDatabase::open(

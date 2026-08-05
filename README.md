@@ -18,8 +18,8 @@ The CLI and future Web API should call the application layer instead of invoking
 ## Requirements
 
 - Rust toolchain
-- `ffmpeg`（桌面硬字幕烧录需要带 libass；macOS 推荐 `ffmpeg-full`）
-- `whisper-cli` from whisper.cpp
+- CLI 开发需要可用的 `ffmpeg` 与 whisper.cpp `whisper-cli`
+- 打包桌面 App 先运行 `./scripts/build-sidecars-macos.sh`，生成内置的 LGPL FFmpeg/ffprobe 与 whisper-cli sidecar
 - A local Whisper model, for example `ggml-medium.bin`
 - DeepL API key for translation
 
@@ -27,13 +27,11 @@ Useful environment variables:
 
 ```bash
 export DEEPL_AUTH_KEY="your-key"
-export ATOGAKI_FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"
+export ATOGAKI_FFMPEG="/path/to/ffmpeg"
 export ATOGAKI_WHISPER_CLI="/opt/homebrew/bin/whisper-cli"
 export ATOGAKI_WHISPER_MODEL="/Users/black_magic/Models/whisper/ggml-medium.bin"
 export ATOGAKI_VAD_MODEL="/Users/black_magic/Models/whisper/ggml-silero-v6.2.0.bin"
 export ATOGAKI_GLOSSARY="/Users/black_magic/Desktop/Coding_projects/Atogaki_Sub/assets/glossaries/yorushika.txt"
-export ATOGAKI_RENDER_CRF="20"
-export ATOGAKI_RENDER_PRESET="medium"
 ```
 
 ## Quick Start
@@ -60,7 +58,7 @@ cargo run -- process input.mp4 \
 
 Whisper tries the GPU/Metal backend by default and automatically retries once with `--no-gpu` when the failure looks GPU-related. Pass `--no-gpu` to force CPU mode from the start.
 
-The desktop application resolves tools from `ATOGAKI_FFMPEG` and `ATOGAKI_WHISPER_CLI` before falling back to `PATH`. When multiple Homebrew ffmpeg formulae are installed, verify the configured binary itself rather than the `ffmpeg` shell symlink. Hard-subtitle rendering prefers the real `h264_videotoolbox` hardware encoder and falls back visibly to libx264; CRF and preset settings apply only to that software fallback.
+The packaged desktop application uses `ffmpeg`, `ffprobe`, and `whisper-cli` from its App Bundle. `ATOGAKI_FFMPEG`, `ATOGAKI_FFPROBE`, and `ATOGAKI_WHISPER_CLI` remain explicit development overrides. Hard-subtitle rendering tries real `h264_videotoolbox`, falls back visibly to FFmpeg's native LGPL `mpeg4` encoder, and fails only if both layers fail. The distributed FFmpeg does not contain libx264.
 
 Glossary files can be passed with `--glossary` or `ATOGAKI_GLOSSARY`. Plain lines are fed into Whisper's initial prompt as likely proper nouns. Lines in `wrong => correct` form are also applied as conservative text replacements after ASR.
 For a canonical spelling whose Japanese reading differs, use the reading on the left, for example
@@ -86,6 +84,7 @@ Build and check the desktop MVP:
 ```bash
 npm --prefix ui install
 npm --prefix ui run build
+./scripts/build-sidecars-macos.sh
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
@@ -141,7 +140,7 @@ Process a media file end-to-end:
 cargo run -- process input.mp4 --model /path/to/model.bin
 ```
 
-Process and render subtitles into a video. If your `ffmpeg` has libass, this burns styled ASS subtitles with `libx264 -crf 20 -preset medium` by default. Otherwise it muxes bilingual SRT as a soft subtitle track.
+Process and render subtitles into a video. With the bundled FFmpeg this burns styled ASS subtitles using VideoToolbox when available and native MPEG-4 as the software fallback. Otherwise, select soft subtitles explicitly to mux bilingual SRT.
 
 ```bash
 cargo run -- process input.mp4 \
@@ -149,7 +148,7 @@ cargo run -- process input.mp4 \
   --render-output output.mp4
 ```
 
-Hard-subtitle rendering must re-encode the video because subtitles become pixels in the video stream. The default is `libx264 -crf 20 -preset medium`. Lower CRF values are larger and cleaner; higher values are smaller and softer.
+Hard-subtitle rendering must re-encode the video because subtitles become pixels in the video stream. Legacy `--video-crf` and `--video-preset` options remain accepted for CLI compatibility but do not control the fixed-quality LGPL MPEG-4 fallback.
 
 ```bash
 cargo run -- render input.mp4 atogaki_jobs/job-... \

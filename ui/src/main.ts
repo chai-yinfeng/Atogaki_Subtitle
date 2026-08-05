@@ -166,7 +166,7 @@ type MediaCapabilities = {
   version: string;
   ass_filter: boolean;
   videotoolbox_encoder: boolean;
-  libx264_encoder: boolean;
+  mpeg4_encoder: boolean;
   ready_for_hard_subtitles: boolean;
 };
 
@@ -357,7 +357,7 @@ app.innerHTML = `
         <div><p class="eyebrow">BURN SUBTITLES</p><h2>导出带字幕视频</h2></div>
         <button id="close-video-render" type="button" class="secondary">关闭</button>
       </div>
-      <div id="media-capabilities" class="media-capabilities">正在检查 ffmpeg-full…</div>
+      <div id="media-capabilities" class="media-capabilities">正在检查内置 FFmpeg sidecar…</div>
       <div class="video-render-form">
         <label>字幕内容
           <select id="video-subtitle-track">
@@ -370,7 +370,7 @@ app.innerHTML = `
           <input id="video-output-path" placeholder="选择 MP4 保存位置，或粘贴完整路径" />
         </label>
         <button id="choose-video-output" type="button" class="secondary">选择位置</button>
-        <p>提交时会把 SQLite 当前字幕冻结为本次 ASS 快照；默认优先 VideoToolbox，失败时明确回退到 libx264。</p>
+        <p>提交时会把 SQLite 当前字幕冻结为本次 ASS 快照；默认优先 VideoToolbox，失败时回退到内置 LGPL MPEG-4 软件编码。</p>
       </div>
       <div class="video-render-footer">
         <span id="video-render-message" role="status"></span>
@@ -1501,7 +1501,7 @@ function renderVideoRenderHistory(): void {
   videoRenderList.innerHTML = videoRenders
     .map((render) => {
       const details = render.status === "done"
-        ? `${render.encoder === "videotoolbox" ? "VideoToolbox" : "libx264"} · 音频 ${render.audio_encoder ?? "未知"}${render.fallback_reason ? ` · ${render.fallback_reason}` : ""}`
+        ? `${render.encoder === "videotoolbox" ? "VideoToolbox" : render.encoder === "mpeg4" ? "MPEG-4 软件编码" : render.encoder ?? "未知编码器"} · 音频 ${render.audio_encoder ?? "未知"}${render.fallback_reason ? ` · ${render.fallback_reason}` : ""}`
         : render.error_message ?? videoTrackLabel(render.subtitle_track);
       const actions = render.status === "queued" || render.status === "running"
         ? `<button type="button" class="danger" data-cancel-render="${escapeHtml(render.id)}">取消</button>`
@@ -1545,18 +1545,17 @@ async function refreshVideoRenders(): Promise<void> {
 function renderMediaCapabilities(): void {
   if (!mediaCapabilitiesHost) return;
   if (!mediaCapabilities) {
-    mediaCapabilitiesHost.textContent = "正在检查 ffmpeg-full…";
+    mediaCapabilitiesHost.textContent = "正在检查内置 FFmpeg sidecar…";
     mediaCapabilitiesHost.classList.remove("warning");
     return;
   }
   if (submitVideoRenderButton) {
     submitVideoRenderButton.disabled = videoRenderSubmitting || !mediaCapabilities.ready_for_hard_subtitles;
   }
-  const encoder = mediaCapabilities.videotoolbox_encoder
-    ? "VideoToolbox 可用"
-    : mediaCapabilities.libx264_encoder
-      ? "仅 libx264"
-      : "没有可用 H.264 编码器";
+  const encoder = [
+    mediaCapabilities.videotoolbox_encoder ? "VideoToolbox 可用" : "VideoToolbox 不可用",
+    mediaCapabilities.mpeg4_encoder ? "MPEG-4 回退可用" : "MPEG-4 回退缺失",
+  ].join(" · ");
   mediaCapabilitiesHost.innerHTML = `<strong>${mediaCapabilities.ready_for_hard_subtitles ? "烧录环境就绪" : "烧录环境不可用"}</strong><span>${escapeHtml(encoder)} · libass ${mediaCapabilities.ass_filter ? "可用" : "缺失"}</span><code>${escapeHtml(mediaCapabilities.binary_path)}</code><small>${escapeHtml(mediaCapabilities.version)}</small>`;
   mediaCapabilitiesHost.classList.toggle("warning", !mediaCapabilities.ready_for_hard_subtitles);
 }

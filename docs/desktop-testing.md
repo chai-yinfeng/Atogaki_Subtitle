@@ -18,11 +18,19 @@ npm --prefix ui run build
 cargo check --manifest-path src-tauri/Cargo.toml --offline
 ```
 
+首次打包或 sidecar 版本变化时，先在对应 macOS/CPU 架构运行：
+
+```bash
+./scripts/build-sidecars-macos.sh
+```
+
+脚本固定并校验 whisper.cpp、FFmpeg、libass 字体栈的源码，生成 Tauri 所需的 target-suffixed `ffmpeg`、`ffprobe`、`whisper-cli`，拒绝 GPL/nonfree/libx264 配置和 Homebrew 动态库依赖。网络异常时可先在交互式 zsh 执行 `proxy_on`，但代理地址和凭据不得写入仓库或日志。
+
 `cargo check` 能验证 Rust/Tauri 命令和配置，但不能发现窗口启动时的 runtime、SQLite 路径或系统 WebView 问题，因此还必须执行下面的冒烟测试。
 
 ## 启动真实窗口
 
-首次启动可以在设置引导中选择或下载 Whisper/VAD 模型并配置翻译。环境变量继续供 CLI、自动化和旧开发环境兼容；确保 `ffmpeg` 和 `whisper-cli` 在 `PATH`，或显式设置：
+首次启动可以在设置引导中选择或下载 Whisper/VAD 模型并配置翻译。打包 App 默认使用 Bundle 内的 sidecar，不需要 Homebrew、shell `PATH` 或 Atogaki 环境变量。以下覆盖只供 `cargo run`、CLI、自动化和故障注入：
 
 ```bash
 export ATOGAKI_FFMPEG="/path/to/ffmpeg"
@@ -41,16 +49,16 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。本地无需签名的 App Bundle 可用 `tauri build --bundles app --no-sign` 生成，再从 `src-tauri/target/release/bundle/macos/Atogaki.app` 启动。
 
-桌面端优先使用 `ATOGAKI_FFMPEG` 和 `ATOGAKI_WHISPER_CLI`，不一定等同于终端中 `PATH` 找到的程序。进入视频烧录测试前可检查实际配置的 ffmpeg 是否能启动并包含 libass；Whisper 帮助信息的启动日志应列出 Metal 后端，且任务的 `recognition-options.json` 中 `no_gpu` 默认为 `false`：
+桌面端优先使用显式的 `ATOGAKI_FFMPEG`、`ATOGAKI_FFPROBE` 和 `ATOGAKI_WHISPER_CLI` 开发覆盖，否则使用与主程序同目录的 sidecar。进入视频烧录测试前可检查目标 ffmpeg 是否能启动并包含 libass；Whisper 帮助信息的启动日志应列出 Metal 后端，且任务的 `recognition-options.json` 中 `no_gpu` 默认为 `false`：
 
 ```bash
 "${ATOGAKI_FFMPEG:-ffmpeg}" -version
 "${ATOGAKI_FFMPEG:-ffmpeg}" -hide_banner -filters | rg ' ass '
-"${ATOGAKI_FFMPEG:-ffmpeg}" -hide_banner -encoders | rg 'h264_(videotoolbox)|libx264'
+"${ATOGAKI_FFMPEG:-ffmpeg}" -hide_banner -encoders | rg 'h264_videotoolbox|mpeg4|libx264'
 "${ATOGAKI_WHISPER_CLI:-whisper-cli}" --help
 ```
 
-未设置 `ATOGAKI_FFMPEG` 时，macOS 桌面端会优先查找 `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg`，因此从 Finder 启动也不依赖 zsh 的 `PATH`。
+正式 sidecar 必须同时看到 `h264_videotoolbox`、`mpeg4` 和 `ass`，且不能看到 `libx264`。源码态 `cargo run` 找不到同目录 sidecar 时仍会回退 Homebrew/PATH，方便开发，但这不是正式分发路径。
 
 模型选择器会优先打开 `ATOGAKI_WHISPER_MODEL` 或 `ATOGAKI_VAD_MODEL` 所在目录；未配置时，如果 `~/Models` 存在则从该目录打开。启动环境中配置的模型路径会自动填入；若 Whisper 模型所在目录包含文件名带 `silero` 的 `.bin`，也会自动选择首个候选 VAD 模型。所有路径输入框都允许直接粘贴完整路径，作为原生文件面板不可用时的降级方式。设置页下载使用 whisper.cpp 官方模型来源；文件先进入应用数据目录 `models/` 下的 `.part`，校验完成后才原子安装。失败或下次启动会清理该目录中的未完成文件。
 
@@ -88,15 +96,21 @@ cargo run --manifest-path src-tauri/Cargo.toml
 17. 修改日文但保留旧中文并保存；导出应拒绝，并提示先处理待重译字幕。
 18. 重译后点击“导出字幕…”，选择一个目录；应生成以任务显示名称为前缀的 `.ja.srt`、`.zh.srt`、`.bilingual.srt` 和 `.bilingual.ass`，内容来自 SQLite 人工编辑后的状态。
 19. 再次导出到同一目录，应列出冲突文件并要求确认；取消后原文件保持不变，确认后才覆盖。导出成功后点击“在 Finder 中显示”，应选中双语 ASS 文件。
-20. 点击“导出带字幕视频…”，确认能力面板显示实际 `ffmpeg-full`、libass 和可用编码器。分别选择日中双语、仅中文或仅日文以及 MP4 输出位置。
+20. 点击“导出带字幕视频…”，确认能力面板显示 App Bundle 内的 `ffmpeg` 绝对路径、libass、VideoToolbox 和 MPEG-4 回退。分别选择日中双语、仅中文或仅日文以及 MP4 输出位置。
 21. 提交后进度应增加；关闭弹窗不影响烧录。取消后记录应变为“已取消”，目标目录不应留下 `.partial.mp4`。
-22. 完成后记录应显示最终编码器和音频处理方式；VideoToolbox 运行时失败时，应显示回退原因与 `libx264`。点击“在 Finder 中显示”应选中最终 MP4。
+22. 完成后记录应显示最终编码器和音频处理方式；VideoToolbox 运行时失败时，应显示原始回退原因与 “MPEG-4 软件编码”。点击“在 Finder 中显示”应选中最终 MP4。若 MPEG-4 也失败，任务才失败，并保留本次 ASS 快照和错误记录。
 23. 任务目录 `renders/` 应保存本次不可变 ASS 快照；烧录期间继续编辑 SQLite 字幕只影响下次提交。
 24. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
 
 每轮真实窗口回归还应确认首页显示的数据目录等于本轮 `ATOGAKI_DATA_DIR`，并在结束后检查系统正式应用数据目录未产生本轮测试任务。
 
 ## 最近一次打包窗口回归
+
+2026-08-05 使用固定版本 Apple Silicon sidecar 与全新 `/tmp` 数据目录，在清除 `ATOGAKI_*` 和 `DEEPL_AUTH_KEY` 的进程环境后启动未签名 `Atogaki.app`：
+
+- 首次引导显示空配置和隔离模型目录；通过界面选择现有 medium/VAD 模型后，App 使用 Bundle 内 `whisper-cli` 对 `湖吉の庭 Vol1.mp4` 的 12 秒只读片段完成 Metal/VAD 转写，得到 1 段 `こんばんは`，任务状态为 `done`。
+- 视频能力面板显示的二进制是 `Atogaki.app/Contents/MacOS/ffmpeg`，而非 Homebrew；随包的许可证与构建清单位于 `Contents/Resources/third-party/`。
+- 当前机器能枚举 VideoToolbox，但实际创建硬件会话返回 `-12908`。持久化烧录服务正确记录失败并自动回退内置 MPEG-4；真实 1280×720 视频使用正式 Hiragino 日中 ASS 样式烧录成功，ffprobe 确认为 MPEG-4 视频、AAC 音频。该回归明确覆盖“编码器存在但运行时不可用”的路径。
 
 2026-08-05 针对启动配置又使用新的隔离数据目录完成一轮打包窗口回归：首次引导正确显示已有 Whisper/VAD 路径、应用管理模型目录和 macOS Keychain 后端；将 provider 切换为关闭后立即生效并在重启后保持。通过交互式 zsh 的 `proxy_on` 环境，从 whisper.cpp 官方来源下载 Silero VAD 成功，885,098 字节文件自动设为默认且没有残留 `.part`。隔离 SQLite 只包含模型路径、provider ID 和引导状态，没有 API key；本轮没有写入、覆盖或删除真实 Keychain 凭据。中断识别与派生重试由 Rust 集成测试覆盖，本轮没有重复提交完整视频识别。
 
@@ -113,7 +127,8 @@ cargo run --manifest-path src-tauri/Cargo.toml
 真实一秒视频烧录回归可单独运行：
 
 ```bash
-cargo test ffmpeg_full_renders_a_persisted_sqlite_workspace -- --ignored --nocapture
+ATOGAKI_FFMPEG="$PWD/src-tauri/binaries/ffmpeg-$(rustc --print host-tuple)" \
+  cargo test lgpl_sidecar_renders_a_persisted_sqlite_workspace -- --ignored --nocapture
 ```
 
 该测试会经过 SQLite 字幕快照、持久化烧录队列、libass 和最终 MP4 安装，并在结束后清理临时目录。

@@ -14,7 +14,7 @@
 - 桌面端使用单个有界 worker 执行烧录，避免多个 FFmpeg 任务争用 VideoToolbox、CPU 和磁盘。
 - FFmpeg 通过 `-progress pipe:1` 报告进度；取消会终止子进程并清理临时输出。
 - 输出先写到目标目录中的隐藏临时 MP4，成功后再安装到最终路径。覆盖已有文件时先保留临时备份，安装失败则恢复原文件。
-- H.264 仍遵循 ADR 0005：优先 VideoToolbox，失败后回退 libx264。MP4 不接受源音频编码时，在同一视频编码路径上从 stream copy 回退到 AAC。
+- 视频编码遵循 ADR 0009：优先 VideoToolbox，失败后回退 LGPL FFmpeg 原生 MPEG-4；两者均失败时保留 ASS 快照与错误记录。MP4 不接受源音频编码时，在同一视频编码路径上从 stream copy 回退到 AAC。
 - 应用异常退出后，未完成记录在下次启动时标记为失败，不自动重跑；自动恢复留到有真实需求时再设计。
 
 ## 影响

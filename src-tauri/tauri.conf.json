@@ -27,5 +27,15 @@
         "scope": []
       }
     }
+  },
+  "bundle": {
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/ffprobe",
+      "binaries/whisper-cli"
+    ],
+    "resources": [
+      "third-party/**/*"
+    ]
   }
 }

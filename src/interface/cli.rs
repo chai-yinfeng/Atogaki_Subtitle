@@ -193,7 +193,7 @@ pub struct RenderArgsCommon {
         long,
         env = "ATOGAKI_RENDER_CRF",
         default_value_t = 20,
-        help = "libx264 fallback CRF for hard-subtitle rendering; lower means larger and cleaner"
+        help = "Legacy compatibility value; the LGPL MPEG-4 fallback currently uses a fixed quality"
     )]
     pub video_crf: u8,
 
@@ -201,7 +201,7 @@ pub struct RenderArgsCommon {
         long,
         env = "ATOGAKI_RENDER_PRESET",
         default_value = "medium",
-        help = "libx264 fallback preset for hard-subtitle rendering"
+        help = "Legacy compatibility value; the LGPL MPEG-4 fallback does not use x264 presets"
     )]
     pub video_preset: String,
 
