@@ -78,6 +78,12 @@ impl LocalRenderService {
     pub async fn submit(&self, request: LocalRenderRequest) -> Result<LocalRenderJobRecord> {
         validate_output_path(&request.output_path, request.overwrite_existing)?;
         let workspace = self.workspace.get_job(&request.source_job_id).await?;
+        if workspace.job.status != "done" {
+            bail!(
+                "source task must be done before rendering video; current status is {}",
+                workspace.job.status
+            );
+        }
         let input_path = workspace
             .job
             .input_path
@@ -275,7 +281,12 @@ async fn run_render_worker(
                         RenderEncoder::SubtitleMux => "subtitle_mux",
                     };
                     let _ = database
-                        .finish_render(&render_id, encoder, &outcome.audio_encoder)
+                        .finish_render(
+                            &render_id,
+                            encoder,
+                            &outcome.audio_encoder,
+                            outcome.fallback_reason.as_deref(),
+                        )
                         .await;
                 }
             }
@@ -379,9 +390,20 @@ fn install_rendered_output(
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, process::Command, time::Duration};
 
-    use super::{install_rendered_output, temporary_output_path, validate_output_path};
+    use super::{
+        LocalRenderRequest, LocalRenderService, install_rendered_output, temporary_output_path,
+        validate_output_path,
+    };
+    use crate::{
+        application::{
+            LocalWorkspaceService, job_manifest::JobManifest, job_snapshot::JobSnapshot,
+            job_status::JobStatus,
+        },
+        domain::{TranscriptSegment, subtitle::SubtitleTrack},
+        infrastructure::{config::desktop_ffmpeg_path, job_store::Job, local_db::LocalDatabase},
+    };
 
     #[test]
     fn completed_render_replaces_an_existing_output_without_exposing_partial_data() {
@@ -400,6 +422,96 @@ mod tests {
 
         assert_eq!(fs::read(&output).unwrap(), b"new");
         assert!(!temporary.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the local ffmpeg-full binary and VideoToolbox"]
+    async fn ffmpeg_full_renders_a_persisted_sqlite_workspace() {
+        let ffmpeg = desktop_ffmpeg_path();
+        assert!(
+            ffmpeg.is_file(),
+            "missing ffmpeg-full at {}",
+            ffmpeg.display()
+        );
+        let root =
+            std::env::temp_dir().join(format!("atogaki-real-render-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let input = root.join("input.mp4");
+        let generated = Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=navy:s=640x360:d=1",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert!(generated.status.success());
+
+        let job = Job::create_in(&root.join("jobs")).unwrap();
+        let mut manifest = JobManifest::new(&job, Some(input.clone()), None);
+        manifest.mark(JobStatus::Done);
+        let mut segment = TranscriptSegment::new(0, 900, "テスト字幕".to_string());
+        segment.set_translation(Some("测试字幕".to_string()));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![segment],
+            })
+            .await
+            .unwrap();
+        let workspace = LocalWorkspaceService::new(database.clone());
+        let service = LocalRenderService::start(ffmpeg, database.clone(), workspace)
+            .await
+            .unwrap();
+        let output = root.join("rendered.mp4");
+        service
+            .submit(LocalRenderRequest {
+                source_job_id: manifest.job_id.clone(),
+                output_path: output.clone(),
+                subtitle_track: SubtitleTrack::Bilingual,
+                overwrite_existing: false,
+            })
+            .await
+            .unwrap();
+
+        let mut finished = None;
+        for _ in 0..200 {
+            let current = service.list(&manifest.job_id).await.unwrap();
+            if current
+                .first()
+                .is_some_and(|render| matches!(render.status.as_str(), "done" | "failed"))
+            {
+                finished = current.into_iter().next();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let finished = finished.expect("video render did not finish within ten seconds");
+        assert_eq!(finished.status, "done", "{:?}", finished.error_message);
+        assert_eq!(finished.progress, 1.0);
+        if finished.encoder.as_deref() == Some("libx264") {
+            assert!(
+                finished
+                    .fallback_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("VideoToolbox failed"))
+            );
+        }
+        assert!(output.is_file());
+
+        drop(service);
+        drop(database);
         fs::remove_dir_all(root).unwrap();
     }
 }

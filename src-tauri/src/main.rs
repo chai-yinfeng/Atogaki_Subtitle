@@ -3,18 +3,19 @@ use std::path::PathBuf;
 use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
-        LocalGlossaryService, LocalGlossaryTermDraft, LocalSubtitleExport,
-        LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
-        TranscriptionOptions,
+        LocalGlossaryService, LocalGlossaryTermDraft, LocalRenderRequest, LocalRenderService,
+        LocalSubtitleExport, LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus,
+        LocalWorkspaceService, TranscriptionOptions,
         job_spec::TranscribeSpec,
     },
+    domain::subtitle::SubtitleTrack,
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path},
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
-            LocalSubtitleSegmentRecord,
+            LocalRenderJobRecord, LocalSubtitleSegmentRecord,
         },
-        media::{self, MediaCapabilities},
+        media::MediaCapabilities,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -23,15 +24,17 @@ use tauri_plugin_dialog::DialogExt;
 
 struct DesktopState {
     data_dir: PathBuf,
-    ffmpeg: PathBuf,
     task_service: LocalTaskService,
     workspace_service: LocalWorkspaceService,
     glossary_service: LocalGlossaryService,
+    render_service: LocalRenderService,
 }
 
 #[tauri::command]
 async fn media_capabilities(state: State<'_, DesktopState>) -> Result<MediaCapabilities, String> {
-    media::inspect_capabilities(&state.ffmpeg)
+    state
+        .render_service
+        .capabilities()
         .await
         .map_err(|error| error.to_string())
 }
@@ -92,6 +95,22 @@ struct SubtitleExportRequest {
 struct SubtitleExportPlanRequest {
     job_id: String,
     output_directory: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoRenderRequest {
+    source_job_id: String,
+    output_path: String,
+    subtitle_track: SubtitleTrack,
+    overwrite_existing: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoOutputSelection {
+    path: String,
+    already_exists: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -352,6 +371,47 @@ async fn preview_workspace_subtitle_export(
 }
 
 #[tauri::command]
+async fn submit_video_render(
+    state: State<'_, DesktopState>,
+    request: VideoRenderRequest,
+) -> Result<LocalRenderJobRecord, String> {
+    state
+        .render_service
+        .submit(LocalRenderRequest {
+            source_job_id: request.source_job_id,
+            output_path: PathBuf::from(request.output_path),
+            subtitle_track: request.subtitle_track,
+            overwrite_existing: request.overwrite_existing,
+        })
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_video_renders(
+    state: State<'_, DesktopState>,
+    source_job_id: String,
+) -> Result<Vec<LocalRenderJobRecord>, String> {
+    state
+        .render_service
+        .list(&source_job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn cancel_video_render(
+    state: State<'_, DesktopState>,
+    render_id: String,
+) -> Result<LocalRenderJobRecord, String> {
+    state
+        .render_service
+        .cancel(&render_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn pick_media_file(app: AppHandle) -> Result<Option<String>, String> {
     pick_local_file(
         &app,
@@ -418,12 +478,60 @@ async fn pick_subtitle_export_directory(
 }
 
 #[tauri::command]
+async fn pick_video_output_file(
+    app: AppHandle,
+    initial_directory: Option<String>,
+    suggested_name: String,
+) -> Result<Option<VideoOutputSelection>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let mut picker = app
+        .dialog()
+        .file()
+        .set_title("导出带字幕视频")
+        .add_filter("MP4 视频", &["mp4"])
+        .set_file_name(suggested_name);
+    let initial_directory = initial_directory
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .or_else(|| app.path().download_dir().ok().filter(|path| path.is_dir()));
+    if let Some(directory) = initial_directory {
+        picker = picker.set_directory(directory);
+    }
+    picker.save_file(move |selection| {
+        let _ = sender.send(selection);
+    });
+
+    receiver
+        .await
+        .map_err(|_| "视频保存面板意外关闭，请重试。".to_owned())?
+        .map(|selection| {
+            selection
+                .into_path()
+                .map(|path| VideoOutputSelection {
+                    already_exists: path.exists(),
+                    path: path.display().to_string(),
+                })
+                .map_err(|error| format!("无法读取视频输出路径：{error}"))
+        })
+        .transpose()
+}
+
+#[tauri::command]
 fn reveal_exported_subtitle(path: String) -> Result<(), String> {
+    reveal_in_finder(path, "导出文件")
+}
+
+#[tauri::command]
+fn reveal_rendered_video(path: String) -> Result<(), String> {
+    reveal_in_finder(path, "烧录视频")
+}
+
+fn reveal_in_finder(path: String, label: &str) -> Result<(), String> {
     let path = PathBuf::from(path)
         .canonicalize()
-        .map_err(|error| format!("无法定位导出文件：{error}"))?;
+        .map_err(|error| format!("无法定位{label}：{error}"))?;
     if !path.is_file() {
-        return Err(format!("导出文件不存在：{}", path.display()));
+        return Err(format!("{label}不存在：{}", path.display()));
     }
 
     #[cfg(target_os = "macos")]
@@ -591,13 +699,18 @@ fn main() {
                 )
             })?;
             let workspace_service =
-                LocalWorkspaceService::with_deepl(database, config.deepl_auth_key.clone());
+                LocalWorkspaceService::with_deepl(database.clone(), config.deepl_auth_key.clone());
+            let render_service = tauri::async_runtime::block_on(LocalRenderService::start(
+                config.ffmpeg.clone(),
+                database,
+                workspace_service.clone(),
+            ))?;
             app.manage(DesktopState {
                 data_dir,
-                ffmpeg: config.ffmpeg,
                 task_service,
                 workspace_service,
                 glossary_service,
+                render_service,
             });
             Ok(())
         })
@@ -611,10 +724,12 @@ fn main() {
             get_job_detail,
             list_glossaries,
             list_jobs,
+            list_video_renders,
             media_capabilities,
             pick_media_file,
             pick_model_file,
             pick_subtitle_export_directory,
+            pick_video_output_file,
             pick_vad_model_file,
             apply_glossary_to_workspace,
             preview_glossary_application,
@@ -622,9 +737,12 @@ fn main() {
             preview_workspace_subtitle_export,
             recognition_defaults,
             reveal_exported_subtitle,
+            reveal_rendered_video,
             rename_job,
             save_glossary,
             submit_transcription,
+            submit_video_render,
+            cancel_video_render,
             translate_all_subtitles,
             translate_subtitle,
             translation_status,

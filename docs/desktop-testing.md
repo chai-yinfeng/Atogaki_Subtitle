@@ -1,6 +1,6 @@
 # 桌面界面测试
 
-_最后更新：2026-08-04_
+_最后更新：2026-08-05_
 
 ## 构建回归
 
@@ -45,6 +45,8 @@ cargo run --manifest-path src-tauri/Cargo.toml
 "${ATOGAKI_WHISPER_CLI:-whisper-cli}" --help
 ```
 
+未设置 `ATOGAKI_FFMPEG` 时，macOS 桌面端会优先查找 `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg`，因此从 Finder 启动也不依赖 zsh 的 `PATH`。
+
 模型选择器会优先打开 `ATOGAKI_WHISPER_MODEL` 或 `ATOGAKI_VAD_MODEL` 所在目录；未配置时，如果 `~/Models` 存在则从该目录打开。启动环境中配置的模型路径会自动填入；若 Whisper 模型所在目录包含文件名带 `silero` 的 `.bin`，也会自动选择首个候选 VAD 模型。所有路径输入框都允许直接粘贴完整路径，作为原生文件面板不可用时的降级方式。
 
 如果将来安装 Tauri CLI 并恢复热更新模式，应由 `tauri dev` 同时启动 Vite，再重新配置 `beforeDevCommand` 与 `devUrl`；不要把该配置与普通 `cargo run` 的使用说明混在一起。
@@ -72,12 +74,23 @@ cargo run --manifest-path src-tauri/Cargo.toml
 17. 修改日文但保留旧中文并保存；导出应拒绝，并提示先处理待重译字幕。
 18. 重译后点击“导出字幕…”，选择一个目录；应生成以任务显示名称为前缀的 `.ja.srt`、`.zh.srt`、`.bilingual.srt` 和 `.bilingual.ass`，内容来自 SQLite 人工编辑后的状态。
 19. 再次导出到同一目录，应列出冲突文件并要求确认；取消后原文件保持不变，确认后才覆盖。导出成功后点击“在 Finder 中显示”，应选中双语 ASS 文件。
-20. 任务目录中的 `ja.srt`、`zh.srt`、`bilingual.srt` 和 `bilingual.ass` 也应同步刷新，供后续视频烧录使用。
-21. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
+20. 点击“导出带字幕视频…”，确认能力面板显示实际 `ffmpeg-full`、libass 和可用编码器。分别选择日中双语、仅中文或仅日文以及 MP4 输出位置。
+21. 提交后进度应增加；关闭弹窗不影响烧录。取消后记录应变为“已取消”，目标目录不应留下 `.partial.mp4`。
+22. 完成后记录应显示最终编码器和音频处理方式；VideoToolbox 运行时失败时，应显示回退原因与 `libx264`。点击“在 Finder 中显示”应选中最终 MP4。
+23. 任务目录 `renders/` 应保存本次不可变 ASS 快照；烧录期间继续编辑 SQLite 字幕只影响下次提交。
+24. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
+
+真实一秒视频烧录回归可单独运行：
+
+```bash
+cargo test ffmpeg_full_renders_a_persisted_sqlite_workspace -- --ignored --nocapture
+```
+
+该测试会经过 SQLite 字幕快照、持久化烧录队列、libass 和最终 MP4 安装，并在结束后清理临时目录。
 
 ## 当前测试边界
 
 - macOS WebView 通常可以直接播放 MP4/MOV 和常见音频；MKV、部分 WebM 或特殊编码可能失败，此时只保证 `audio.wav` 回听。
 - 桌面翻译使用 DeepL 云端 API，会发送当前日文字幕；单段和全部重译还会发送 SQLite 中前后约 30 秒的日文作为局部上下文。API key 只从启动环境读取，设置界面和 Keychain 存储尚未实现。
-- 桌面 SRT/ASS 导出已使用 SQLite，并支持选择目标目录、覆盖确认与 Finder 定位；现有 CLI `translate`/`export` 仍读取任务 JSON，两条入口的数据源不同，不要用 CLI 命令验证桌面人工编辑。
+- 桌面 SRT/ASS 与 MP4 烧录均使用 SQLite，并支持选择目标位置、覆盖确认与 Finder 定位；现有 CLI `translate`/`export` 仍读取任务 JSON，两条入口的数据源不同，不要用 CLI 命令验证桌面人工编辑。
 - 开发态 `cargo run` 二进制不是注册安装的 `.app`，部分 macOS GUI 自动化工具无法枚举它；打包阶段需要补充可重复的窗口自动化测试。

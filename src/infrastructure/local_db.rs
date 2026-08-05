@@ -108,6 +108,7 @@ pub struct LocalRenderJobRecord {
     pub progress: f64,
     pub encoder: Option<String>,
     pub audio_encoder: Option<String>,
+    pub fallback_reason: Option<String>,
     pub error_message: Option<String>,
     pub created_at_unix: i64,
     pub updated_at_unix: i64,
@@ -279,7 +280,8 @@ impl LocalDatabase {
     pub async fn list_render_jobs(&self, source_job_id: &str) -> Result<Vec<LocalRenderJobRecord>> {
         sqlx::query_as::<_, LocalRenderJobRecord>(
             "SELECT id, source_job_id, input_path, subtitle_path, output_path,
-                subtitle_track, status, progress, encoder, audio_encoder, error_message,
+                subtitle_track, status, progress, encoder, audio_encoder, fallback_reason,
+                error_message,
                 created_at_unix, updated_at_unix
              FROM local_render_jobs
              WHERE source_job_id = ?
@@ -294,7 +296,8 @@ impl LocalDatabase {
     pub async fn get_render_job(&self, render_id: &str) -> Result<Option<LocalRenderJobRecord>> {
         sqlx::query_as::<_, LocalRenderJobRecord>(
             "SELECT id, source_job_id, input_path, subtitle_path, output_path,
-                subtitle_track, status, progress, encoder, audio_encoder, error_message,
+                subtitle_track, status, progress, encoder, audio_encoder, fallback_reason,
+                error_message,
                 created_at_unix, updated_at_unix
              FROM local_render_jobs
              WHERE id = ?",
@@ -306,7 +309,7 @@ impl LocalDatabase {
     }
 
     pub async fn mark_render_running(&self, render_id: &str) -> Result<()> {
-        self.update_render_state(render_id, "running", None, None, None)
+        self.update_render_state(render_id, "running", None, None, None, None)
             .await
     }
 
@@ -334,18 +337,26 @@ impl LocalDatabase {
         render_id: &str,
         encoder: &str,
         audio_encoder: &str,
+        fallback_reason: Option<&str>,
     ) -> Result<()> {
-        self.update_render_state(render_id, "done", Some(encoder), Some(audio_encoder), None)
-            .await
+        self.update_render_state(
+            render_id,
+            "done",
+            Some(encoder),
+            Some(audio_encoder),
+            fallback_reason,
+            None,
+        )
+        .await
     }
 
     pub async fn fail_render(&self, render_id: &str, error: &str) -> Result<()> {
-        self.update_render_state(render_id, "failed", None, None, Some(error))
+        self.update_render_state(render_id, "failed", None, None, None, Some(error))
             .await
     }
 
     pub async fn cancel_render(&self, render_id: &str) -> Result<()> {
-        self.update_render_state(render_id, "cancelled", None, None, None)
+        self.update_render_state(render_id, "cancelled", None, None, None, None)
             .await
     }
 
@@ -369,13 +380,15 @@ impl LocalDatabase {
         status: &str,
         encoder: Option<&str>,
         audio_encoder: Option<&str>,
+        fallback_reason: Option<&str>,
         error_message: Option<&str>,
     ) -> Result<()> {
         let result = sqlx::query(
             "UPDATE local_render_jobs
              SET status = ?, progress = CASE WHEN ? = 'done' THEN 1 ELSE progress END,
                  encoder = COALESCE(?, encoder),
-                 audio_encoder = COALESCE(?, audio_encoder), error_message = ?,
+                 audio_encoder = COALESCE(?, audio_encoder),
+                 fallback_reason = COALESCE(?, fallback_reason), error_message = ?,
                  updated_at_unix = ?
              WHERE id = ?",
         )
@@ -383,6 +396,7 @@ impl LocalDatabase {
         .bind(status)
         .bind(encoder)
         .bind(audio_encoder)
+        .bind(fallback_reason)
         .bind(error_message)
         .bind(chrono::Utc::now().timestamp())
         .bind(render_id)
@@ -1272,7 +1286,7 @@ mod tests {
             .await
             .unwrap();
         database
-            .finish_render(&render.id, "videotoolbox", "copy")
+            .finish_render(&render.id, "videotoolbox", "copy", None)
             .await
             .unwrap();
         let finished = database.list_render_jobs(&manifest.job_id).await.unwrap();

@@ -56,6 +56,7 @@ pub struct RenderOutcome {
     pub encoder: RenderEncoder,
     pub hardware_accelerated: bool,
     pub audio_encoder: String,
+    pub fallback_reason: Option<String>,
     pub output_path: String,
 }
 
@@ -292,6 +293,7 @@ pub async fn render_subtitles_with_progress(
             encoder: RenderEncoder::SubtitleMux,
             hardware_accelerated: false,
             audio_encoder: "copy".to_string(),
+            fallback_reason: None,
             output_path: output.display().to_string(),
         });
     }
@@ -334,6 +336,7 @@ async fn burn_ass_with_encoder(
     options: &RenderOptions,
     execution: &RenderExecution,
 ) -> Result<RenderOutcome> {
+    let mut hardware_fallback_reason = None;
     if supports_encoder(ffmpeg, "h264_videotoolbox").await? {
         eprintln!("ffmpeg render: using VideoToolbox hardware H.264 encoder");
         let result = run_burn_command(
@@ -354,12 +357,14 @@ async fn burn_ass_with_encoder(
                 output,
                 HardSubtitleEncoder::VideoToolbox,
                 AudioEncoder::Copy,
+                None,
             ));
         }
         let error = result.unwrap_err();
         if error.downcast_ref::<RenderCancelled>().is_some() {
             return Err(error);
         }
+        let mut fallback_error = error.to_string();
         if audio_copy_failed(&error.to_string()) {
             let aac_result = run_burn_command(
                 ffmpeg,
@@ -379,17 +384,23 @@ async fn burn_ass_with_encoder(
                     output,
                     HardSubtitleEncoder::VideoToolbox,
                     AudioEncoder::Aac,
+                    None,
                 ));
             }
             let aac_error = aac_result.unwrap_err();
             if aac_error.downcast_ref::<RenderCancelled>().is_some() {
                 return Err(aac_error);
             }
+            fallback_error = aac_error.to_string();
         }
         eprintln!(
             "VideoToolbox render failed; retrying with libx264. Original failure: {}",
-            error
+            fallback_error
         );
+        hardware_fallback_reason = Some(format!(
+            "VideoToolbox failed: {}",
+            summarize_render_error(&fallback_error)
+        ));
     }
 
     if !supports_encoder(ffmpeg, "libx264").await? {
@@ -416,6 +427,7 @@ async fn burn_ass_with_encoder(
             output,
             HardSubtitleEncoder::Libx264,
             AudioEncoder::Copy,
+            hardware_fallback_reason.clone(),
         )),
         Err(error) if error.downcast_ref::<RenderCancelled>().is_some() => Err(error),
         Err(error) if audio_copy_failed(&error.to_string()) => {
@@ -436,6 +448,7 @@ async fn burn_ass_with_encoder(
                 output,
                 HardSubtitleEncoder::Libx264,
                 AudioEncoder::Aac,
+                hardware_fallback_reason,
             ))
         }
         Err(error) => Err(error),
@@ -446,6 +459,7 @@ fn render_outcome(
     output: &Path,
     encoder: HardSubtitleEncoder,
     audio_encoder: AudioEncoder,
+    fallback_reason: Option<String>,
 ) -> RenderOutcome {
     let (encoder, hardware_accelerated) = match encoder {
         HardSubtitleEncoder::VideoToolbox => (RenderEncoder::VideoToolbox, true),
@@ -459,6 +473,7 @@ fn render_outcome(
             AudioEncoder::Aac => "aac",
         }
         .to_string(),
+        fallback_reason,
         output_path: output.display().to_string(),
     }
 }
@@ -550,6 +565,22 @@ fn audio_copy_failed(message: &str) -> bool {
         || message.contains("could not find tag for codec")
         || message.contains("codec not supported in container")
         || message.contains("incompatible with output codec")
+}
+
+fn summarize_render_error(message: &str) -> String {
+    let preferred = [
+        "Cannot create compression session",
+        "Error while opening encoder",
+        "Could not find tag for codec",
+        "not currently supported in container",
+    ];
+    let line = preferred
+        .iter()
+        .find_map(|pattern| message.lines().find(|line| line.contains(pattern)))
+        .or_else(|| message.lines().find(|line| !line.trim().is_empty()))
+        .unwrap_or("unknown ffmpeg error")
+        .trim();
+    line.chars().take(240).collect()
 }
 
 async fn mux_srt_soft_subtitle(

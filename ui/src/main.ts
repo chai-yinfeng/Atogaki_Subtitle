@@ -124,6 +124,37 @@ type SubtitleExportPlan = {
   existing_files: string[];
 };
 
+type MediaCapabilities = {
+  binary_path: string;
+  version: string;
+  ass_filter: boolean;
+  videotoolbox_encoder: boolean;
+  libx264_encoder: boolean;
+  ready_for_hard_subtitles: boolean;
+};
+
+type VideoRender = {
+  id: string;
+  source_job_id: string;
+  input_path: string;
+  subtitle_path: string;
+  output_path: string;
+  subtitle_track: "japanese" | "chinese" | "bilingual";
+  status: "queued" | "running" | "done" | "failed" | "cancelled";
+  progress: number;
+  encoder: string | null;
+  audio_encoder: string | null;
+  fallback_reason: string | null;
+  error_message: string | null;
+  created_at_unix: number;
+  updated_at_unix: number;
+};
+
+type VideoOutputSelection = {
+  path: string;
+  alreadyExists: boolean;
+};
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("missing app root");
 
@@ -192,6 +223,7 @@ app.innerHTML = `
         <div class="workspace-action-buttons">
           <button id="translate-all" type="button">全部翻译／重译</button>
           <button id="export-subtitles" type="button" class="secondary">导出字幕…</button>
+          <button id="render-video" type="button" class="secondary">导出带字幕视频…</button>
           <button id="reveal-export" type="button" class="secondary hidden">在 Finder 中显示</button>
         </div>
         <div class="workspace-glossary-row">
@@ -256,6 +288,35 @@ app.innerHTML = `
         <div class="rename-job-footer"><span id="rename-job-message" role="status"></span><button type="submit">保存名称</button></div>
       </form>
     </dialog>
+    <dialog id="video-render-dialog" class="video-render-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">BURN SUBTITLES</p><h2>导出带字幕视频</h2></div>
+        <button id="close-video-render" type="button" class="secondary">关闭</button>
+      </div>
+      <div id="media-capabilities" class="media-capabilities">正在检查 ffmpeg-full…</div>
+      <div class="video-render-form">
+        <label>字幕内容
+          <select id="video-subtitle-track">
+            <option value="bilingual">日中双语（推荐）</option>
+            <option value="chinese">仅中文</option>
+            <option value="japanese">仅日文</option>
+          </select>
+        </label>
+        <label>输出视频
+          <input id="video-output-path" placeholder="选择 MP4 保存位置，或粘贴完整路径" />
+        </label>
+        <button id="choose-video-output" type="button" class="secondary">选择位置</button>
+        <p>提交时会把 SQLite 当前字幕冻结为本次 ASS 快照；默认优先 VideoToolbox，失败时明确回退到 libx264。</p>
+      </div>
+      <div class="video-render-footer">
+        <span id="video-render-message" role="status"></span>
+        <button id="submit-video-render" type="button">开始烧录</button>
+      </div>
+      <section class="video-render-history" aria-labelledby="video-render-history-title">
+        <div class="section-heading"><h2 id="video-render-history-title">本任务烧录记录</h2><span id="video-render-count"></span></div>
+        <div id="video-render-list" class="video-render-list"></div>
+      </section>
+    </dialog>
   </main>
 `;
 
@@ -287,6 +348,7 @@ const currentZh = document.querySelector<HTMLParagraphElement>("#current-zh");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
+const renderVideoButton = document.querySelector<HTMLButtonElement>("#render-video");
 const revealExportButton = document.querySelector<HTMLButtonElement>("#reveal-export");
 const workspaceActionMessage = document.querySelector<HTMLParagraphElement>("#workspace-action-message");
 const workspaceGlossary = document.querySelector<HTMLSelectElement>("#workspace-glossary");
@@ -302,6 +364,14 @@ const renameJobDialog = document.querySelector<HTMLDialogElement>("#rename-job-d
 const renameJobForm = document.querySelector<HTMLFormElement>("#rename-job-form");
 const renameJobInput = document.querySelector<HTMLInputElement>("#rename-job-input");
 const renameJobMessage = document.querySelector<HTMLSpanElement>("#rename-job-message");
+const videoRenderDialog = document.querySelector<HTMLDialogElement>("#video-render-dialog");
+const mediaCapabilitiesHost = document.querySelector<HTMLDivElement>("#media-capabilities");
+const videoSubtitleTrack = document.querySelector<HTMLSelectElement>("#video-subtitle-track");
+const videoOutputPath = document.querySelector<HTMLInputElement>("#video-output-path");
+const videoRenderMessage = document.querySelector<HTMLSpanElement>("#video-render-message");
+const submitVideoRenderButton = document.querySelector<HTMLButtonElement>("#submit-video-render");
+const videoRenderList = document.querySelector<HTMLDivElement>("#video-render-list");
+const videoRenderCount = document.querySelector<HTMLSpanElement>("#video-render-count");
 
 let refreshing = false;
 let activeDetail: JobDetail | null = null;
@@ -315,6 +385,10 @@ let pendingGlossaryPreview: GlossaryPreview | null = null;
 let renamingJob: LocalJob | null = null;
 let taskGlossaryConfigurationId: string | null = null;
 let selectedTaskContentGroups = new Set<string>();
+let mediaCapabilities: MediaCapabilities | null = null;
+let videoRenders: VideoRender[] = [];
+let selectedVideoOutputAlreadyExists = false;
+let videoRenderSubmitting = false;
 let translationStatus: TranslationStatus = {
   provider: "DeepL",
   configured: false,
@@ -471,6 +545,12 @@ function updateTranslationControls(): void {
     translateAllButton.disabled = workspaceActionBusy || !hasSegments || !translationStatus.configured;
   }
   if (exportButton) exportButton.disabled = workspaceActionBusy || !hasSegments;
+  if (renderVideoButton) {
+    const inputPath = activeDetail?.job.input_path;
+    renderVideoButton.disabled =
+      workspaceActionBusy || !hasSegments || !inputPath || isAudioPath(inputPath);
+    renderVideoButton.title = inputPath && isAudioPath(inputPath) ? "音频任务不能烧录视频" : "";
+  }
   if (revealExportButton) {
     revealExportButton.disabled = workspaceActionBusy || !lastExportedSubtitlePath;
   }
@@ -644,6 +724,7 @@ function renderWorkspace(detail: JobDetail): void {
   renderSubtitleList(detail.segments);
   updateActiveSubtitle(0);
   updateTranslationControls();
+  void refreshVideoRenders();
 }
 
 function isAudioPath(path: string): boolean {
@@ -991,6 +1072,227 @@ async function revealExportedSubtitle(): Promise<void> {
   }
 }
 
+function videoTrackLabel(track: VideoRender["subtitle_track"]): string {
+  if (track === "japanese") return "仅日文";
+  if (track === "chinese") return "仅中文";
+  return "日中双语";
+}
+
+function videoRenderStatusLabel(render: VideoRender): string {
+  if (render.status === "queued") return "等待烧录";
+  if (render.status === "running") return `烧录中 ${Math.round(render.progress * 100)}%`;
+  if (render.status === "done") return "已完成";
+  if (render.status === "cancelled") return "已取消";
+  return "失败";
+}
+
+function suggestedVideoName(): string {
+  const raw = activeDetail ? displayName(activeDetail.job) : "Atogaki";
+  const safe = raw
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 100) || "Atogaki";
+  const track = videoSubtitleTrack?.value ?? "bilingual";
+  return `${safe}.${track}.mp4`;
+}
+
+function renderVideoRenderHistory(): void {
+  if (!videoRenderList || !videoRenderCount) return;
+  videoRenderCount.textContent = `${videoRenders.length} 条`;
+  if (videoRenders.length === 0) {
+    videoRenderList.innerHTML = `<div class="empty-state">还没有烧录记录。</div>`;
+    return;
+  }
+  videoRenderList.innerHTML = videoRenders
+    .map((render) => {
+      const details = render.status === "done"
+        ? `${render.encoder === "videotoolbox" ? "VideoToolbox" : "libx264"} · 音频 ${render.audio_encoder ?? "未知"}${render.fallback_reason ? ` · ${render.fallback_reason}` : ""}`
+        : render.error_message ?? videoTrackLabel(render.subtitle_track);
+      const actions = render.status === "queued" || render.status === "running"
+        ? `<button type="button" class="danger" data-cancel-render="${escapeHtml(render.id)}">取消</button>`
+        : render.status === "done"
+          ? `<button type="button" class="secondary" data-reveal-render="${escapeHtml(render.output_path)}">在 Finder 中显示</button>`
+          : "";
+      return `<article class="video-render-row">
+        <div class="video-render-row-main">
+          <strong>${escapeHtml(videoRenderStatusLabel(render))}</strong>
+          <span>${escapeHtml(details)}</span>
+          <code>${escapeHtml(render.output_path)}</code>
+          ${render.status === "running" ? `<progress max="1" value="${render.progress}"></progress>` : ""}
+        </div>
+        ${actions}
+      </article>`;
+    })
+    .join("");
+  videoRenderList.querySelectorAll<HTMLButtonElement>("[data-cancel-render]").forEach((button) => {
+    button.addEventListener("click", () => void cancelVideoRender(button.dataset.cancelRender ?? ""));
+  });
+  videoRenderList.querySelectorAll<HTMLButtonElement>("[data-reveal-render]").forEach((button) => {
+    button.addEventListener("click", () => void revealRenderedVideo(button.dataset.revealRender ?? ""));
+  });
+}
+
+async function refreshVideoRenders(): Promise<void> {
+  const jobId = activeDetail?.job.job_id;
+  if (!jobId) return;
+  try {
+    const renders = await invoke<VideoRender[]>("list_video_renders", { sourceJobId: jobId });
+    if (activeDetail?.job.job_id !== jobId) return;
+    videoRenders = renders;
+    renderVideoRenderHistory();
+  } catch (error) {
+    if (videoRenderDialog?.open && videoRenderMessage) {
+      videoRenderMessage.textContent = `无法读取烧录记录：${String(error)}`;
+    }
+  }
+}
+
+function renderMediaCapabilities(): void {
+  if (!mediaCapabilitiesHost) return;
+  if (!mediaCapabilities) {
+    mediaCapabilitiesHost.textContent = "正在检查 ffmpeg-full…";
+    mediaCapabilitiesHost.classList.remove("warning");
+    return;
+  }
+  if (submitVideoRenderButton) {
+    submitVideoRenderButton.disabled = videoRenderSubmitting || !mediaCapabilities.ready_for_hard_subtitles;
+  }
+  const encoder = mediaCapabilities.videotoolbox_encoder
+    ? "VideoToolbox 可用"
+    : mediaCapabilities.libx264_encoder
+      ? "仅 libx264"
+      : "没有可用 H.264 编码器";
+  mediaCapabilitiesHost.innerHTML = `<strong>${mediaCapabilities.ready_for_hard_subtitles ? "烧录环境就绪" : "烧录环境不可用"}</strong><span>${escapeHtml(encoder)} · libass ${mediaCapabilities.ass_filter ? "可用" : "缺失"}</span><code>${escapeHtml(mediaCapabilities.binary_path)}</code><small>${escapeHtml(mediaCapabilities.version)}</small>`;
+  mediaCapabilitiesHost.classList.toggle("warning", !mediaCapabilities.ready_for_hard_subtitles);
+}
+
+async function openVideoRenderDialog(): Promise<void> {
+  if (!activeDetail || workspaceActionBusy) return;
+  if (hasUnsavedSubtitleEdits()) {
+    setWorkspaceAction("请先保存各段尚未保存的修改，再烧录视频。", true);
+    return;
+  }
+  const staleCount = activeDetail.segments.filter((segment) => segment.translation_stale).length;
+  if (staleCount > 0) {
+    setWorkspaceAction(`有 ${staleCount} 段中文已过期，请重译或修正后再烧录。`, true);
+    return;
+  }
+  if (!activeDetail.job.input_path || isAudioPath(activeDetail.job.input_path)) {
+    setWorkspaceAction("当前任务没有可烧录的视频源。", true);
+    return;
+  }
+  if (videoRenderMessage) videoRenderMessage.textContent = "";
+  if (videoOutputPath && !videoOutputPath.value) videoOutputPath.placeholder = suggestedVideoName();
+  selectedVideoOutputAlreadyExists = false;
+  if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
+  videoRenderDialog?.showModal();
+  renderMediaCapabilities();
+  await Promise.all([
+    invoke<MediaCapabilities>("media_capabilities")
+      .then((capabilities) => {
+        mediaCapabilities = capabilities;
+        renderMediaCapabilities();
+      })
+      .catch((error) => {
+        mediaCapabilities = null;
+        if (mediaCapabilitiesHost) {
+          mediaCapabilitiesHost.textContent = `ffmpeg 检查失败：${String(error)}`;
+          mediaCapabilitiesHost.classList.add("warning");
+        }
+        if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
+      }),
+    refreshVideoRenders(),
+  ]);
+}
+
+async function chooseVideoOutput(): Promise<void> {
+  if (!activeDetail || videoRenderSubmitting) return;
+  const inputPath = activeDetail.job.input_path;
+  const separator = inputPath ? Math.max(inputPath.lastIndexOf("/"), inputPath.lastIndexOf("\\")) : -1;
+  const initialDirectory = inputPath && separator > 0 ? inputPath.slice(0, separator) : null;
+  if (videoRenderMessage) videoRenderMessage.textContent = "正在打开视频保存面板…";
+  try {
+    const selection = await invoke<VideoOutputSelection | null>("pick_video_output_file", {
+      initialDirectory,
+      suggestedName: suggestedVideoName(),
+    });
+    if (!selection) {
+      if (videoRenderMessage) videoRenderMessage.textContent = "已取消选择。";
+      return;
+    }
+    if (videoOutputPath) videoOutputPath.value = selection.path;
+    selectedVideoOutputAlreadyExists = selection.alreadyExists;
+    if (videoRenderMessage) {
+      videoRenderMessage.textContent = selection.alreadyExists
+        ? "目标文件已经存在，开始前会再次确认覆盖。"
+        : "已选择输出位置。";
+    }
+  } catch (error) {
+    if (videoRenderMessage) videoRenderMessage.textContent = `无法选择输出位置：${String(error)}`;
+  }
+}
+
+async function submitVideoRender(): Promise<void> {
+  if (!activeDetail || !videoOutputPath || !videoSubtitleTrack || videoRenderSubmitting) return;
+  const outputPath = videoOutputPath.value.trim();
+  if (!outputPath.toLowerCase().endsWith(".mp4")) {
+    if (videoRenderMessage) videoRenderMessage.textContent = "输出路径必须以 .mp4 结尾。";
+    return;
+  }
+  let overwriteExisting = false;
+  if (selectedVideoOutputAlreadyExists) {
+    overwriteExisting = window.confirm("目标视频已经存在。烧录成功后用新视频安全替换它吗？");
+    if (!overwriteExisting) {
+      if (videoRenderMessage) videoRenderMessage.textContent = "已取消，现有视频不会被修改。";
+      return;
+    }
+  }
+  videoRenderSubmitting = true;
+  if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
+  if (videoRenderMessage) videoRenderMessage.textContent = "正在冻结 SQLite 字幕并创建烧录任务…";
+  try {
+    const render = await invoke<VideoRender>("submit_video_render", {
+      request: {
+        sourceJobId: activeDetail.job.job_id,
+        outputPath,
+        subtitleTrack: videoSubtitleTrack.value,
+        overwriteExisting,
+      },
+    });
+    selectedVideoOutputAlreadyExists = false;
+    if (videoRenderMessage) {
+      videoRenderMessage.textContent = `已提交：${videoTrackLabel(render.subtitle_track)}，可关闭窗口继续校对。`;
+    }
+    await refreshVideoRenders();
+  } catch (error) {
+    if (videoRenderMessage) videoRenderMessage.textContent = `提交失败：${String(error)}`;
+  } finally {
+    videoRenderSubmitting = false;
+    if (submitVideoRenderButton) {
+      submitVideoRenderButton.disabled = mediaCapabilities?.ready_for_hard_subtitles === false;
+    }
+  }
+}
+
+async function cancelVideoRender(renderId: string): Promise<void> {
+  if (!renderId || !window.confirm("取消这次视频烧录？已完成的源任务和字幕不会改变。")) return;
+  try {
+    await invoke<VideoRender>("cancel_video_render", { renderId });
+    if (videoRenderMessage) videoRenderMessage.textContent = "已请求取消，正在停止 FFmpeg 并清理临时文件。";
+    await refreshVideoRenders();
+  } catch (error) {
+    if (videoRenderMessage) videoRenderMessage.textContent = `取消失败：${String(error)}`;
+  }
+}
+
+async function revealRenderedVideo(path: string): Promise<void> {
+  try {
+    await invoke("reveal_rendered_video", { path });
+  } catch (error) {
+    if (videoRenderMessage) videoRenderMessage.textContent = `Finder 定位失败：${String(error)}`;
+  }
+}
+
 function addGlossaryTermRow(
   sourceText = "",
   targetText = "",
@@ -1305,7 +1607,17 @@ document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("c
 });
 translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
 exportButton?.addEventListener("click", () => void exportSubtitles());
+renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
 revealExportButton?.addEventListener("click", () => void revealExportedSubtitle());
+document.querySelector<HTMLButtonElement>("#close-video-render")?.addEventListener("click", () => videoRenderDialog?.close());
+document.querySelector<HTMLButtonElement>("#choose-video-output")?.addEventListener("click", () => void chooseVideoOutput());
+submitVideoRenderButton?.addEventListener("click", () => void submitVideoRender());
+videoOutputPath?.addEventListener("input", () => {
+  selectedVideoOutputAlreadyExists = false;
+});
+videoSubtitleTrack?.addEventListener("change", () => {
+  if (videoOutputPath && !videoOutputPath.value) videoOutputPath.placeholder = suggestedVideoName();
+});
 document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());
 document.querySelector<HTMLButtonElement>("#close-glossaries")?.addEventListener("click", () => glossaryDialog?.close());
 document.querySelector<HTMLButtonElement>("#new-glossary")?.addEventListener("click", () => void editGlossary(null));
@@ -1431,3 +1743,8 @@ void invoke<TranslationStatus>("translation_status")
 void refreshGlossaries();
 void refresh();
 window.setInterval(() => void refresh(), 2_000);
+window.setInterval(() => {
+  if (activeDetail && videoRenders.some((render) => render.status === "queued" || render.status === "running")) {
+    void refreshVideoRenders();
+  }
+}, 1_000);
