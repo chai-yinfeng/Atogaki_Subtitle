@@ -1,4 +1,4 @@
-use std::{ffi::OsString, path::PathBuf};
+use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
 use atogaki_subtitle::{
     application::{
@@ -10,6 +10,7 @@ use atogaki_subtitle::{
     domain::subtitle::SubtitleTrack,
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path},
+        deepl::DeepLTranslationProvider,
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
             LocalRenderJobRecord, LocalSubtitleSegmentRecord,
@@ -720,8 +721,10 @@ fn main() {
                     database.clone(),
                 )
             })?;
+            let translation_provider =
+                Arc::new(DeepLTranslationProvider::new(config.deepl_auth_key.clone()));
             let workspace_service =
-                LocalWorkspaceService::with_deepl(database.clone(), config.deepl_auth_key.clone());
+                LocalWorkspaceService::with_provider(database.clone(), translation_provider);
             let render_service = tauri::async_runtime::block_on(LocalRenderService::start(
                 config.ffmpeg.clone(),
                 database,

@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-08-04_
+_最后更新：2026-08-05_
 
 ## 仓库组织
 
@@ -35,11 +35,11 @@ Atogaki_Sub/
        └─ infrastructure：文件系统、SQLite、ffmpeg、ASR、翻译服务
 ```
 
-UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中的用例并订阅任务状态。当前 CLI 同样是该应用层的一个适配器。
+UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `application` 中的用例并订阅任务状态。当前 CLI 同样是该应用层的一个适配器。
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
-当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService` 与 `LocalRenderService`：前者负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用 DeepL 翻译和导出；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
+当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService` 与 `LocalRenderService`：前者负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
 `LocalGlossaryService` 管理 SQLite 词表、任务范围 prompt 预览、差异预览和对工作区的应用。词条分为始终提示的“核心”、按任务选择的“内容包”和不占 prompt 的“仅修正”。新任务选择词表和内容包后，`LocalTaskService` 会在排队前把解析后的词条冻结为任务目录中的 `recognition-glossary.txt`，把最终 prompt 写入 `whisper-prompt.txt`，再将快照路径交给 Whisper。带规范写法的核心或内容词条会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化；仅修正规则只执行后一阶段。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
 
@@ -60,7 +60,8 @@ UI 不直接启动 ffmpeg、Whisper 或 DeepL。它只调用 `application` 中�
 - SQLite 另外记录中文是否人工编辑；只修改日文时保留原译文并标记为过期，同时修改中文时视为已人工校正。
 - SQLite 词表是可编辑主数据；每个转写任务使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新日文并把已有中文标记为过期。
 - 词表分类只存在于 SQLite 主数据和桌面应用层；处理核心读取已解析的文本快照，避免把 UI 的内容包概念耦合进 Whisper 适配器。
-- DeepL 翻译保持字幕段与 `text` 一一对应。全部重译按 12 段分批，单段和批量请求都会从 SQLite 当前日文读取前后 30 秒、最多 2000 字的共享局部上下文；返回全部结果后，应用使用带原文校验的 SQLite 事务一次性写入。翻译期间若日文已被修改，本次结果整体拒绝，避免译文错配。
+- 翻译 provider 接收有序的字幕文本和可选上下文，并必须返回数量、顺序一一对应的译文。应用层保留稳定段 ID，校验返回数量，并在所有批次完成后使用带原文校验的 SQLite 事务一次性写入；翻译期间若日文已被修改，本次结果整体拒绝，避免译文错配。
+- 当前 DeepL provider 按 12 段分批；单段和批量请求都会从 SQLite 当前日文读取前后 30 秒、最多 2000 字的共享局部上下文。上下文用于消歧，但每个字幕段仍是独立翻译单元，不负责修复 ASR 跨段断句。
 - 桌面 SRT/ASS 是 SQLite 工作区的派生输出。每次用户导出会先刷新任务目录内的固定名称投影，再将日文、中文和双语 SRT/ASS 复制到用户选择的目录；目标文件使用经过文件系统安全化的任务显示名称作为前缀，已存在时必须由界面显式确认覆盖。存在过期译文时拒绝导出；缺失中文时允许导出并显式报告缺失段数。
 - 桌面视频烧录是独立派生任务。提交时把 SQLite 当前日文、中文或双语内容冻结到任务目录 `renders/` 的 ASS 快照，再写入 `local_render_jobs` 并交给单 worker；最终 MP4 写到用户选择的位置。进度、取消、VideoToolbox 回退原因和实际编码器均持久化，临时文件不会直接暴露为最终输出。
 - 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。

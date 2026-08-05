@@ -1,10 +1,66 @@
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 use anyhow::{Context, Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::{application::TranslationOptions, domain::TranscriptSegment};
+use crate::{
+    application::{
+        TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
+    },
+    domain::TranscriptSegment,
+};
+
+#[derive(Clone)]
+pub struct DeepLTranslationProvider {
+    auth_key: Option<String>,
+}
+
+impl DeepLTranslationProvider {
+    pub fn new(auth_key: Option<String>) -> Self {
+        Self {
+            auth_key: auth_key.filter(|key| !key.trim().is_empty()),
+        }
+    }
+}
+
+impl fmt::Debug for DeepLTranslationProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DeepLTranslationProvider")
+            .field("configured", &self.auth_key.is_some())
+            .finish()
+    }
+}
+
+impl TranslationProvider for DeepLTranslationProvider {
+    fn status(&self) -> TranslationProviderStatus {
+        TranslationProviderStatus {
+            id: "deepl".to_string(),
+            name: "DeepL".to_string(),
+            configured: self.auth_key.is_some(),
+            model: None,
+            configuration_hint: self.auth_key.is_none().then(|| {
+                "请设置 DEEPL_AUTH_KEY 并重启应用；后续将迁移到设置与 Keychain。".to_string()
+            }),
+        }
+    }
+
+    fn translate<'a>(
+        &'a self,
+        options: &'a TranslationOptions,
+        texts: &'a [String],
+        context: Option<&'a str>,
+    ) -> TranslationFuture<'a> {
+        Box::pin(async move {
+            let auth_key = self
+                .auth_key
+                .as_deref()
+                .ok_or_else(|| anyhow!("DeepL API key is not configured"))?;
+            translate_texts_with_context(auth_key, options, texts, context).await
+        })
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct DeepLResponse {
@@ -141,8 +197,30 @@ fn deepl_endpoint(auth_key: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{deepl_endpoint, translate_texts, translation_form};
-    use crate::application::TranslationOptions;
+    use super::{DeepLTranslationProvider, deepl_endpoint, translate_texts, translation_form};
+    use crate::application::{TranslationOptions, TranslationProvider};
+
+    #[test]
+    fn provider_status_reports_configuration_without_exposing_the_key() {
+        let provider = DeepLTranslationProvider::new(Some("secret-key:fx".to_string()));
+        let status = provider.status();
+
+        assert_eq!(status.id, "deepl");
+        assert_eq!(status.name, "DeepL");
+        assert!(status.configured);
+        assert_eq!(status.model, None);
+        assert_eq!(status.configuration_hint, None);
+        assert!(!format!("{provider:?}").contains("secret-key"));
+    }
+
+    #[test]
+    fn blank_key_leaves_the_provider_unconfigured() {
+        let provider = DeepLTranslationProvider::new(Some("  ".to_string()));
+        let status = provider.status();
+
+        assert!(!status.configured);
+        assert!(status.configuration_hint.is_some());
+    }
 
     #[test]
     fn selects_the_endpoint_for_free_and_pro_keys() {

@@ -11,10 +11,9 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 
 use crate::{
-    application::TranslationOptions,
+    application::{TranslationOptions, TranslationProvider, UnconfiguredTranslationProvider},
     domain::{TranscriptSegment, subtitle},
     infrastructure::{
-        deepl,
         job_store::Job,
         local_db::{
             LocalDatabase, LocalJobRecord, LocalMachineTranslation, LocalSubtitleSegmentRecord,
@@ -34,8 +33,11 @@ pub struct LocalWorkspaceJob {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalTranslationStatus {
-    pub provider: &'static str,
+    pub provider_id: String,
+    pub provider: String,
     pub configured: bool,
+    pub model: Option<String>,
+    pub configuration_hint: Option<String>,
     pub source_language: String,
     pub target_language: String,
 }
@@ -69,28 +71,35 @@ pub struct LocalSubtitleExportPlan {
 #[derive(Debug, Clone)]
 pub struct LocalWorkspaceService {
     database: LocalDatabase,
-    deepl_auth_key: Option<String>,
+    translation_provider: Arc<dyn TranslationProvider>,
     translation_lock: Arc<Mutex<()>>,
 }
 
 impl LocalWorkspaceService {
     pub fn new(database: LocalDatabase) -> Self {
-        Self::with_deepl(database, None)
+        Self::with_provider(database, Arc::new(UnconfiguredTranslationProvider))
     }
 
-    pub fn with_deepl(database: LocalDatabase, deepl_auth_key: Option<String>) -> Self {
+    pub fn with_provider(
+        database: LocalDatabase,
+        translation_provider: Arc<dyn TranslationProvider>,
+    ) -> Self {
         Self {
             database,
-            deepl_auth_key: deepl_auth_key.filter(|key| !key.trim().is_empty()),
+            translation_provider,
             translation_lock: Arc::new(Mutex::new(())),
         }
     }
 
     pub fn translation_status(&self) -> LocalTranslationStatus {
         let options = TranslationOptions::default();
+        let provider = self.translation_provider.status();
         LocalTranslationStatus {
-            provider: "DeepL",
-            configured: self.deepl_auth_key.is_some(),
+            provider_id: provider.id,
+            provider: provider.name,
+            configured: provider.configured,
+            model: provider.model,
+            configuration_hint: provider.configuration_hint,
             source_language: options.source_language,
             target_language: options.target_language,
         }
@@ -294,9 +303,17 @@ impl LocalWorkspaceService {
         context_segments: &[LocalSubtitleSegmentRecord],
         segments_to_translate: &[LocalSubtitleSegmentRecord],
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
-        let auth_key = self.deepl_auth_key.as_deref().ok_or_else(|| {
-            anyhow!("DeepL API key missing. Set DEEPL_AUTH_KEY and restart Atogaki")
-        })?;
+        let provider = self.translation_provider.status();
+        if !provider.configured {
+            return Err(anyhow!(
+                "{} is not configured. {}",
+                provider.name,
+                provider
+                    .configuration_hint
+                    .as_deref()
+                    .unwrap_or("Configure the translation provider and restart Atogaki")
+            ));
+        }
         let options = TranslationOptions::default();
         let mut updates = Vec::with_capacity(segments_to_translate.len());
         for batch in segments_to_translate.chunks(TRANSLATION_BATCH_SIZE) {
@@ -305,14 +322,24 @@ impl LocalWorkspaceService {
                 .map(|segment| segment.ja_text.clone())
                 .collect::<Vec<_>>();
             let context = translation_context(context_segments, batch);
-            let translated = deepl::translate_texts_with_context(
-                auth_key,
-                &options,
-                &source_texts,
-                context.as_deref(),
-            )
-            .await
-            .context("failed to translate SQLite subtitle workspace")?;
+            let translated = self
+                .translation_provider
+                .translate(&options, &source_texts, context.as_deref())
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to translate SQLite subtitle workspace with {}",
+                        provider.name
+                    )
+                })?;
+            if translated.len() != batch.len() {
+                return Err(anyhow!(
+                    "{} returned {} translations for {} subtitle segments",
+                    provider.name,
+                    translated.len(),
+                    batch.len()
+                ));
+            }
             updates.extend(
                 batch
                     .iter()
@@ -512,17 +539,74 @@ fn workspace_segments(records: &[LocalSubtitleSegmentRecord]) -> Result<Vec<Tran
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{
+        fs,
+        sync::{Arc, Mutex as StdMutex},
+    };
 
     use super::{LocalWorkspaceService, TRANSLATION_CONTEXT_MAX_CHARS, translation_context};
     use crate::{
-        application::{job_manifest::JobManifest, job_snapshot::JobSnapshot},
+        application::{
+            TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
+            job_manifest::JobManifest, job_snapshot::JobSnapshot,
+        },
         domain::TranscriptSegment,
         infrastructure::{
             job_store::Job,
             local_db::{LocalDatabase, LocalSubtitleSegmentRecord},
         },
     };
+
+    #[derive(Debug, Clone)]
+    struct FakeTranslationProvider {
+        requests: Arc<StdMutex<Vec<(Vec<String>, Option<String>)>>>,
+        omit_last_result: bool,
+    }
+
+    impl FakeTranslationProvider {
+        fn new(omit_last_result: bool) -> Self {
+            Self {
+                requests: Arc::new(StdMutex::new(Vec::new())),
+                omit_last_result,
+            }
+        }
+    }
+
+    impl TranslationProvider for FakeTranslationProvider {
+        fn status(&self) -> TranslationProviderStatus {
+            TranslationProviderStatus {
+                id: "fake".to_string(),
+                name: "Fake Translate".to_string(),
+                configured: true,
+                model: Some("deterministic-v1".to_string()),
+                configuration_hint: None,
+            }
+        }
+
+        fn translate<'a>(
+            &'a self,
+            _options: &'a TranslationOptions,
+            texts: &'a [String],
+            context: Option<&'a str>,
+        ) -> TranslationFuture<'a> {
+            let source_texts = texts.to_vec();
+            self.requests
+                .lock()
+                .unwrap()
+                .push((source_texts.clone(), context.map(str::to_string)));
+            let omit_last_result = self.omit_last_result;
+            Box::pin(async move {
+                let mut translated = source_texts
+                    .into_iter()
+                    .map(|text| format!("译：{text}"))
+                    .collect::<Vec<_>>();
+                if omit_last_result {
+                    translated.pop();
+                }
+                Ok(translated)
+            })
+        }
+    }
 
     fn subtitle_record(
         index: i64,
@@ -575,6 +659,94 @@ mod tests {
 
         assert_eq!(context.chars().count(), TRANSLATION_CONTEXT_MAX_CHARS);
         assert!(context.contains("当前中心"));
+    }
+
+    #[tokio::test]
+    async fn injected_translation_provider_receives_ordered_text_and_context() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-provider-injection-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let first = TranscriptSegment::new(0, 1_000, "前半句".to_string());
+        let second = TranscriptSegment::new(1_000, 2_000, "后半句".to_string());
+        let manifest = JobManifest::new(&job, None, None);
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first.clone(), second.clone()],
+            })
+            .await
+            .unwrap();
+        let provider = Arc::new(FakeTranslationProvider::new(false));
+        let service = LocalWorkspaceService::with_provider(database.clone(), provider.clone());
+
+        let status = service.translation_status();
+        assert_eq!(status.provider_id, "fake");
+        assert_eq!(status.provider, "Fake Translate");
+        assert_eq!(status.model.as_deref(), Some("deterministic-v1"));
+
+        let translated = service.translate_all(&manifest.job_id).await.unwrap();
+        assert_eq!(translated[0].id, first.id);
+        assert_eq!(translated[0].zh_text.as_deref(), Some("译：前半句"));
+        assert_eq!(translated[1].id, second.id);
+        assert_eq!(translated[1].zh_text.as_deref(), Some("译：后半句"));
+
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].0, ["前半句", "后半句"]);
+        let context = requests[0].1.as_deref().unwrap();
+        assert!(context.contains("前半句"));
+        assert!(context.contains("后半句"));
+        drop(requests);
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn provider_result_count_mismatch_does_not_partially_update_sqlite() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-provider-count-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let first = TranscriptSegment::new(0, 1_000, "第一段".to_string());
+        let second = TranscriptSegment::new(1_000, 2_000, "第二段".to_string());
+        let manifest = JobManifest::new(&job, None, None);
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first, second],
+            })
+            .await
+            .unwrap();
+        let service = LocalWorkspaceService::with_provider(
+            database.clone(),
+            Arc::new(FakeTranslationProvider::new(true)),
+        );
+
+        let error = service.translate_all(&manifest.job_id).await.unwrap_err();
+        assert!(error.to_string().contains("returned 1 translations for 2"));
+        assert!(
+            database
+                .list_segments(&manifest.job_id)
+                .await
+                .unwrap()
+                .iter()
+                .all(|segment| segment.zh_text.is_none())
+        );
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

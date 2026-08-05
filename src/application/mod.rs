@@ -9,6 +9,7 @@ pub mod local_task_service;
 pub mod local_workspace_service;
 pub mod transcription_options;
 pub mod translation_options;
+pub mod translation_provider;
 
 pub use job_runner::JobRunner;
 pub use job_snapshot::JobSnapshot;
@@ -24,3 +25,7 @@ pub use local_workspace_service::{
 };
 pub use transcription_options::TranscriptionOptions;
 pub use translation_options::TranslationOptions;
+pub use translation_provider::{
+    TranslationFuture, TranslationProvider, TranslationProviderStatus,
+    UnconfiguredTranslationProvider,
+};

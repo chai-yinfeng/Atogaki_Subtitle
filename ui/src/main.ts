@@ -95,8 +95,11 @@ type JobDetail = {
 };
 
 type TranslationStatus = {
+  provider_id: string;
   provider: string;
   configured: boolean;
+  model: string | null;
+  configuration_hint: string | null;
   source_language: string;
   target_language: string;
 };
@@ -429,8 +432,11 @@ let videoRenders: VideoRender[] = [];
 let selectedVideoOutputAlreadyExists = false;
 let videoRenderSubmitting = false;
 let translationStatus: TranslationStatus = {
-  provider: "DeepL",
+  provider_id: "none",
+  provider: "翻译服务",
   configured: false,
+  model: null,
+  configuration_hint: "请在设置中选择并配置翻译服务。",
   source_language: "ja",
   target_language: "zh-hans",
 };
@@ -603,9 +609,10 @@ function renderGlossaryList(): void {
 function updateTranslationControls(): void {
   const hasSegments = (activeDetail?.segments.length ?? 0) > 0;
   if (translationStatusText) {
+    const model = translationStatus.model ? ` · ${translationStatus.model}` : "";
     translationStatusText.textContent = translationStatus.configured
-      ? `${translationStatus.provider} 已配置 · 日文会发送到云端翻译为简体中文`
-      : `未配置 ${translationStatus.provider}；请设置 DEEPL_AUTH_KEY 后重启应用`;
+      ? `${translationStatus.provider}${model} 已配置 · 日文会发送到云端翻译为简体中文`
+      : `未配置 ${translationStatus.provider}；${translationStatus.configuration_hint ?? "请完成翻译服务配置"}`;
     translationStatusText.classList.toggle("warning", !translationStatus.configured);
   }
   if (translateAllButton) {
@@ -968,7 +975,7 @@ async function translateSegment(
 ): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
   setWorkspaceBusy(true);
-  state.textContent = "正在保存并发送本段到 DeepL…";
+  state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
   state.classList.remove("warning");
   try {
     const saved = await persistSegment(segment.id, ja.value, zh.value);
@@ -978,7 +985,7 @@ async function translateSegment(
       segmentId: segment.id,
     });
     replaceActiveSegment(translated);
-    setWorkspaceAction("本段中文已由 DeepL 更新并保存到 SQLite。");
+    setWorkspaceAction(`本段中文已由 ${translationStatus.provider} 更新并保存到 SQLite。`);
     renderSubtitleList(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
   } catch (error) {
@@ -1044,14 +1051,14 @@ async function translateAllSubtitles(): Promise<void> {
   }
   const confirmed = await confirmAction({
     title: "全部翻译／重译？",
-    message: `将把 ${activeDetail.segments.length} 段日文发送到 DeepL，并覆盖现有中文，包括人工修改。`,
+    message: `将把 ${activeDetail.segments.length} 段日文发送到 ${translationStatus.provider}，并覆盖现有中文，包括人工修改。`,
     confirmLabel: "发送并覆盖",
     danger: true,
   });
   if (!confirmed) return;
 
   setWorkspaceBusy(true);
-  setWorkspaceAction(`正在通过 DeepL 翻译 ${activeDetail.segments.length} 段字幕…`);
+  setWorkspaceAction(`正在通过 ${translationStatus.provider} 翻译 ${activeDetail.segments.length} 段字幕…`);
   try {
     activeDetail.segments = await invoke<SubtitleSegment[]>("translate_all_subtitles", {
       jobId: activeDetail.job.job_id,
