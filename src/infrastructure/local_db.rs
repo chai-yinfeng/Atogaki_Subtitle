@@ -96,6 +96,33 @@ pub struct LocalMachineTranslation {
     pub translated_text: String,
 }
 
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct LocalRenderJobRecord {
+    pub id: String,
+    pub source_job_id: String,
+    pub input_path: String,
+    pub subtitle_path: String,
+    pub output_path: String,
+    pub subtitle_track: String,
+    pub status: String,
+    pub progress: f64,
+    pub encoder: Option<String>,
+    pub audio_encoder: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at_unix: i64,
+    pub updated_at_unix: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewLocalRenderJob {
+    pub id: String,
+    pub source_job_id: String,
+    pub input_path: String,
+    pub subtitle_path: String,
+    pub output_path: String,
+    pub subtitle_track: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct LocalGlossaryCorrection {
     pub segment_id: String,
@@ -220,6 +247,152 @@ impl LocalDatabase {
         .fetch_optional(&self.pool)
         .await
         .context("failed to read local task")
+    }
+
+    pub async fn create_render_job(
+        &self,
+        render: NewLocalRenderJob,
+    ) -> Result<LocalRenderJobRecord> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "INSERT INTO local_render_jobs (
+                id, source_job_id, input_path, subtitle_path, output_path,
+                subtitle_track, status, progress, created_at_unix, updated_at_unix
+             ) VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)",
+        )
+        .bind(&render.id)
+        .bind(&render.source_job_id)
+        .bind(&render.input_path)
+        .bind(&render.subtitle_path)
+        .bind(&render.output_path)
+        .bind(&render.subtitle_track)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .context("failed to create local video render")?;
+        self.get_render_job(&render.id)
+            .await?
+            .ok_or_else(|| anyhow!("created local video render disappeared: {}", render.id))
+    }
+
+    pub async fn list_render_jobs(&self, source_job_id: &str) -> Result<Vec<LocalRenderJobRecord>> {
+        sqlx::query_as::<_, LocalRenderJobRecord>(
+            "SELECT id, source_job_id, input_path, subtitle_path, output_path,
+                subtitle_track, status, progress, encoder, audio_encoder, error_message,
+                created_at_unix, updated_at_unix
+             FROM local_render_jobs
+             WHERE source_job_id = ?
+             ORDER BY created_at_unix DESC, id DESC",
+        )
+        .bind(source_job_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list local video renders")
+    }
+
+    pub async fn get_render_job(&self, render_id: &str) -> Result<Option<LocalRenderJobRecord>> {
+        sqlx::query_as::<_, LocalRenderJobRecord>(
+            "SELECT id, source_job_id, input_path, subtitle_path, output_path,
+                subtitle_track, status, progress, encoder, audio_encoder, error_message,
+                created_at_unix, updated_at_unix
+             FROM local_render_jobs
+             WHERE id = ?",
+        )
+        .bind(render_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to read local video render")
+    }
+
+    pub async fn mark_render_running(&self, render_id: &str) -> Result<()> {
+        self.update_render_state(render_id, "running", None, None, None)
+            .await
+    }
+
+    pub async fn update_render_progress(&self, render_id: &str, progress: f64) -> Result<()> {
+        let progress = progress.clamp(0.0, 0.99);
+        let result = sqlx::query(
+            "UPDATE local_render_jobs
+             SET progress = MAX(progress, ?), updated_at_unix = ?
+             WHERE id = ? AND status = 'running'",
+        )
+        .bind(progress)
+        .bind(chrono::Utc::now().timestamp())
+        .bind(render_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to update local video render progress")?;
+        if result.rows_affected() > 1 {
+            return Err(anyhow!("updated multiple local video renders: {render_id}"));
+        }
+        Ok(())
+    }
+
+    pub async fn finish_render(
+        &self,
+        render_id: &str,
+        encoder: &str,
+        audio_encoder: &str,
+    ) -> Result<()> {
+        self.update_render_state(render_id, "done", Some(encoder), Some(audio_encoder), None)
+            .await
+    }
+
+    pub async fn fail_render(&self, render_id: &str, error: &str) -> Result<()> {
+        self.update_render_state(render_id, "failed", None, None, Some(error))
+            .await
+    }
+
+    pub async fn cancel_render(&self, render_id: &str) -> Result<()> {
+        self.update_render_state(render_id, "cancelled", None, None, None)
+            .await
+    }
+
+    pub async fn interrupt_unfinished_renders(&self) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE local_render_jobs
+             SET status = 'failed', error_message = 'Atogaki exited before this render completed',
+                 updated_at_unix = ?
+             WHERE status IN ('queued', 'running')",
+        )
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await
+        .context("failed to recover interrupted local video renders")?;
+        Ok(result.rows_affected())
+    }
+
+    async fn update_render_state(
+        &self,
+        render_id: &str,
+        status: &str,
+        encoder: Option<&str>,
+        audio_encoder: Option<&str>,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE local_render_jobs
+             SET status = ?, progress = CASE WHEN ? = 'done' THEN 1 ELSE progress END,
+                 encoder = COALESCE(?, encoder),
+                 audio_encoder = COALESCE(?, audio_encoder), error_message = ?,
+                 updated_at_unix = ?
+             WHERE id = ?",
+        )
+        .bind(status)
+        .bind(status)
+        .bind(encoder)
+        .bind(audio_encoder)
+        .bind(error_message)
+        .bind(chrono::Utc::now().timestamp())
+        .bind(render_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to update local video render state")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("local video render not found: {render_id}"));
+        }
+        Ok(())
     }
 
     pub async fn rename_job(
@@ -964,7 +1137,9 @@ fn normalized_glossary_terms(
 mod tests {
     use std::fs;
 
-    use super::{LocalDatabase, LocalGlossaryTermInput, LocalMachineTranslation};
+    use super::{
+        LocalDatabase, LocalGlossaryTermInput, LocalMachineTranslation, NewLocalRenderJob,
+    };
     use crate::{
         application::{
             job_manifest::JobManifest, job_snapshot::JobSnapshot, job_status::JobStatus,
@@ -1045,6 +1220,65 @@ mod tests {
         assert_eq!(preserved[0].zh_text.as_deref(), Some("人工翻译"));
         assert!(preserved[0].source_edited);
         assert!(preserved[0].translation_edited);
+
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn persists_video_render_progress_separately_from_source_tasks() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-local-render-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let manifest = JobManifest::new(&job, Some(root.join("input.mov")), None);
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![],
+            })
+            .await
+            .unwrap();
+
+        let render = database
+            .create_render_job(NewLocalRenderJob {
+                id: "render-one".to_string(),
+                source_job_id: manifest.job_id.clone(),
+                input_path: root.join("input.mov").display().to_string(),
+                subtitle_path: root.join("render.ass").display().to_string(),
+                output_path: root.join("output.mp4").display().to_string(),
+                subtitle_track: "bilingual".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(render.status, "queued");
+        assert_eq!(
+            database
+                .get_job(&manifest.job_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "created"
+        );
+
+        database.mark_render_running(&render.id).await.unwrap();
+        database
+            .update_render_progress(&render.id, 0.42)
+            .await
+            .unwrap();
+        database
+            .finish_render(&render.id, "videotoolbox", "copy")
+            .await
+            .unwrap();
+        let finished = database.list_render_jobs(&manifest.job_id).await.unwrap();
+        assert_eq!(finished[0].status, "done");
+        assert_eq!(finished[0].progress, 1.0);
+        assert_eq!(finished[0].encoder.as_deref(), Some("videotoolbox"));
 
         drop(database);
         fs::remove_dir_all(root).unwrap();

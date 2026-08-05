@@ -1,10 +1,12 @@
 use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::domain::TranscriptSegment;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SubtitleTrack {
     Japanese,
     Chinese,
@@ -57,6 +59,14 @@ pub fn write_srt(path: &Path, segments: &[TranscriptSegment], track: SubtitleTra
 }
 
 pub fn write_ass(path: &Path, segments: &[TranscriptSegment]) -> Result<()> {
+    write_ass_track(path, segments, SubtitleTrack::Bilingual)
+}
+
+pub fn write_ass_track(
+    path: &Path,
+    segments: &[TranscriptSegment],
+    track: SubtitleTrack,
+) -> Result<()> {
     let mut out = String::from(
         "[Script Info]\n\
          ScriptType: v4.00+\n\
@@ -73,13 +83,17 @@ pub fn write_ass(path: &Path, segments: &[TranscriptSegment]) -> Result<()> {
     );
 
     for seg in segments {
-        out.push_str(&format!(
-            "Dialogue: 0,{},{},Japanese,,0,0,0,,{}\n",
-            format_ass_time(seg.start_ms),
-            format_ass_time(seg.end_ms),
-            escape_ass(&seg.ja_text)
-        ));
-        if let Some(zh) = seg.zh_text.as_deref().filter(|s| !s.trim().is_empty()) {
+        if matches!(track, SubtitleTrack::Japanese | SubtitleTrack::Bilingual) {
+            out.push_str(&format!(
+                "Dialogue: 0,{},{},Japanese,,0,0,0,,{}\n",
+                format_ass_time(seg.start_ms),
+                format_ass_time(seg.end_ms),
+                escape_ass(&seg.ja_text)
+            ));
+        }
+        if matches!(track, SubtitleTrack::Chinese | SubtitleTrack::Bilingual)
+            && let Some(zh) = seg.zh_text.as_deref().filter(|s| !s.trim().is_empty())
+        {
             out.push_str(&format!(
                 "Dialogue: 1,{},{},Chinese,,0,0,0,,{}\n",
                 format_ass_time(seg.start_ms),

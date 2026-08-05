@@ -197,6 +197,45 @@ impl LocalWorkspaceService {
         })
     }
 
+    /// Freeze the current SQLite subtitle text into an ASS file for a video
+    /// render. The snapshot is immutable for that render even if the workspace
+    /// is edited while it is queued or running.
+    pub async fn export_ass_snapshot(
+        &self,
+        job_id: &str,
+        output: &Path,
+        track: subtitle::SubtitleTrack,
+    ) -> Result<usize> {
+        let workspace = self.get_job(job_id).await?;
+        let stale_count = workspace
+            .segments
+            .iter()
+            .filter(|segment| segment.translation_stale)
+            .count();
+        if stale_count > 0 {
+            return Err(anyhow!(
+                "{stale_count} subtitle translation(s) are stale; retranslate them before rendering"
+            ));
+        }
+        if workspace.segments.is_empty() {
+            return Err(anyhow!(
+                "cannot render a workspace without subtitle segments"
+            ));
+        }
+        let segments = workspace_segments(&workspace.segments)?;
+        let missing_translation_count = segments
+            .iter()
+            .filter(|segment| {
+                segment
+                    .zh_text
+                    .as_deref()
+                    .is_none_or(|text| text.trim().is_empty())
+            })
+            .count();
+        subtitle::write_ass_track(output, &segments, track)?;
+        Ok(missing_translation_count)
+    }
+
     pub async fn subtitle_export_plan(
         &self,
         job_id: &str,
