@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.chai-yinfeng.atogaki",
   "build": {
-    "beforeBuildCommand": "npm --prefix ../ui run build",
+    "beforeBuildCommand": {
+      "script": "npm run build",
+      "cwd": "../ui"
+    },
     "frontendDist": "../ui/dist"
   },
   "app": {

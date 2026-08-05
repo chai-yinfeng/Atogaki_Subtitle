@@ -39,6 +39,8 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 当前直接使用 `cargo run` 时加载的是最近一次 `ui/dist`，所以修改前端后必须先运行前端构建。`tauri.conf.json` 刻意不配置 `devUrl`，避免普通 `cargo run` 在没有同时启动 Vite server 时显示白屏。开发窗口启动后，首页会显示实际的应用数据目录和 SQLite 任务列表。
 
+打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。本地无需签名的 App Bundle 可用 `tauri build --bundles app --no-sign` 生成，再从 `src-tauri/target/release/bundle/macos/Atogaki.app` 启动。
+
 桌面端优先使用 `ATOGAKI_FFMPEG` 和 `ATOGAKI_WHISPER_CLI`，不一定等同于终端中 `PATH` 找到的程序。进入视频烧录测试前可检查实际配置的 ffmpeg 是否能启动并包含 libass；Whisper 帮助信息的启动日志应列出 Metal 后端，且任务的 `recognition-options.json` 中 `no_gpu` 默认为 `false`：
 
 ```bash
@@ -84,6 +86,17 @@ cargo run --manifest-path src-tauri/Cargo.toml
 24. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
 
 每轮真实窗口回归还应确认首页显示的数据目录等于本轮 `ATOGAKI_DATA_DIR`，并在结束后检查系统正式应用数据目录未产生本轮测试任务。
+
+## 最近一次打包窗口回归
+
+2026-08-05 使用未签名的 `Atogaki.app`、独立临时数据/导出目录和 `湖吉の庭 Vol1.mp4` 完成了一轮真实窗口回归：
+
+- 45 秒片段生成 6 段字幕，完整 268.5 秒视频生成 63 段字幕；两者均启用 Silero VAD、Metal Whisper、Yorushika 任务词表与不可变 prompt/修正规则快照。
+- 已验证媒体播放、当前句同步、时间码跳转、SQLite 日中字幕编辑、待重译阻断、四种字幕文件导出、VideoToolbox 双语视频烧录、任务重命名和重启持久化。
+- 打包 App 中浏览器原生 `window.prompt` 不会可靠显示；“修正加入词表”已改为应用内对话框，并在隔离词表中验证保存成功。旧任务词表快照保持不变，新任务只读取提交时的最新规则。
+- 完整视频从 Desktop 原路径只读处理成功，源文件大小和修改时间未改变。执行期间窗口可继续刷新和操作，但任务卡片目前不会自动轮询，音频提取与 Whisper 阶段也没有百分比进度。
+
+DeepL 翻译会把测试字幕发送到云端，因此本轮只验证“已配置”状态，没有在未取得明确外发许可时点击翻译。任务/词表删除和已有导出文件覆盖同样未在真实窗口中执行破坏性确认；这些路径仍由隔离的 Rust/SQLite 自动化测试覆盖。
 
 真实一秒视频烧录回归可单独运行：
 

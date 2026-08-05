@@ -5,8 +5,7 @@ use atogaki_subtitle::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
         LocalGlossaryService, LocalGlossaryTermDraft, LocalRenderRequest, LocalRenderService,
         LocalSubtitleExport, LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus,
-        LocalWorkspaceService, TranscriptionOptions,
-        job_spec::TranscribeSpec,
+        LocalWorkspaceService, TranscriptionOptions, job_spec::TranscribeSpec,
     },
     domain::subtitle::SubtitleTrack,
     infrastructure::{
@@ -216,11 +215,7 @@ async fn save_glossary(
 ) -> Result<LocalGlossaryDetail, String> {
     state
         .glossary_service
-        .save(
-            request.glossary_id.as_deref(),
-            request.name,
-            request.terms,
-        )
+        .save(request.glossary_id.as_deref(), request.name, request.terms)
         .await
         .map_err(|error| error.to_string())
 }
@@ -362,10 +357,7 @@ async fn preview_workspace_subtitle_export(
 ) -> Result<LocalSubtitleExportPlan, String> {
     state
         .workspace_service
-        .subtitle_export_plan(
-            &request.job_id,
-            &PathBuf::from(request.output_directory),
-        )
+        .subtitle_export_plan(&request.job_id, &PathBuf::from(request.output_directory))
         .await
         .map_err(|error| error.to_string())
 }

@@ -288,6 +288,18 @@ app.innerHTML = `
         <div class="rename-job-footer"><span id="rename-job-message" role="status"></span><button type="submit">保存名称</button></div>
       </form>
     </dialog>
+    <dialog id="glossary-correction-dialog" class="rename-job-dialog glossary-correction-dialog">
+      <form id="glossary-correction-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">ADD CORRECTION</p><h2>修正加入词表</h2></div>
+          <button id="cancel-glossary-correction" type="button" class="secondary">取消</button>
+        </div>
+        <label>常见误识别<input id="glossary-correction-source" maxlength="200" autocomplete="off" required /></label>
+        <label>规范写法<input id="glossary-correction-target" maxlength="200" autocomplete="off" required /></label>
+        <p>规则只用于识别后的文本规范化，不会进入 Whisper prompt；当前字幕修改仍需单独保存。</p>
+        <div class="rename-job-footer"><span id="glossary-correction-message" role="status"></span><button type="submit">加入词表</button></div>
+      </form>
+    </dialog>
     <dialog id="video-render-dialog" class="video-render-dialog">
       <div class="dialog-heading">
         <div><p class="eyebrow">BURN SUBTITLES</p><h2>导出带字幕视频</h2></div>
@@ -364,6 +376,11 @@ const renameJobDialog = document.querySelector<HTMLDialogElement>("#rename-job-d
 const renameJobForm = document.querySelector<HTMLFormElement>("#rename-job-form");
 const renameJobInput = document.querySelector<HTMLInputElement>("#rename-job-input");
 const renameJobMessage = document.querySelector<HTMLSpanElement>("#rename-job-message");
+const glossaryCorrectionDialog = document.querySelector<HTMLDialogElement>("#glossary-correction-dialog");
+const glossaryCorrectionForm = document.querySelector<HTMLFormElement>("#glossary-correction-form");
+const glossaryCorrectionSource = document.querySelector<HTMLInputElement>("#glossary-correction-source");
+const glossaryCorrectionTarget = document.querySelector<HTMLInputElement>("#glossary-correction-target");
+const glossaryCorrectionMessage = document.querySelector<HTMLSpanElement>("#glossary-correction-message");
 const videoRenderDialog = document.querySelector<HTMLDialogElement>("#video-render-dialog");
 const mediaCapabilitiesHost = document.querySelector<HTMLDivElement>("#media-capabilities");
 const videoSubtitleTrack = document.querySelector<HTMLSelectElement>("#video-subtitle-track");
@@ -383,6 +400,10 @@ let glossaries: Glossary[] = [];
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
 let renamingJob: LocalJob | null = null;
+let pendingGlossaryCorrection: {
+  glossaryId: string;
+  state: HTMLSpanElement;
+} | null = null;
 let taskGlossaryConfigurationId: string | null = null;
 let selectedTaskContentGroups = new Set<string>();
 let mediaCapabilities: MediaCapabilities | null = null;
@@ -1470,26 +1491,41 @@ async function deleteGlossaryEditor(): Promise<void> {
   }
 }
 
-async function captureGlossaryCorrection(
+function captureGlossaryCorrection(
   segment: SubtitleSegment,
   ja: HTMLTextAreaElement,
   state: HTMLSpanElement,
-): Promise<void> {
+): void {
   const glossaryId = workspaceGlossary?.value;
   if (!glossaryId) {
     setWorkspaceAction("请先在工作区选择一个词表。", true);
     return;
   }
-  const sourceText = window.prompt("常见误识别（可缩短为需要替换的词）", segment.ja_text)?.trim();
-  if (!sourceText) return;
-  const targetText = window.prompt("规范写法", ja.value.trim())?.trim();
-  if (!targetText) return;
+  pendingGlossaryCorrection = { glossaryId, state };
+  if (glossaryCorrectionSource) glossaryCorrectionSource.value = segment.ja_text;
+  if (glossaryCorrectionTarget) glossaryCorrectionTarget.value = ja.value.trim();
+  if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
+  glossaryCorrectionDialog?.showModal();
+  glossaryCorrectionSource?.focus();
+  glossaryCorrectionSource?.select();
+}
+
+async function saveGlossaryCorrection(): Promise<void> {
+  if (!pendingGlossaryCorrection || !glossaryCorrectionSource || !glossaryCorrectionTarget) return;
+  const { glossaryId, state } = pendingGlossaryCorrection;
+  const sourceText = glossaryCorrectionSource.value.trim();
+  const targetText = glossaryCorrectionTarget.value.trim();
+  if (!sourceText || !targetText) {
+    if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "请填写误识别和规范写法。";
+    return;
+  }
   if (sourceText === targetText) {
-    setWorkspaceAction("误识别与规范写法相同，没有创建规则。", true);
+    if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "误识别与规范写法相同，没有创建规则。";
     return;
   }
 
   state.textContent = "正在加入识别词表…";
+  if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "正在保存…";
   try {
     const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
     const terms = detail.terms.map((term) => ({
@@ -1501,6 +1537,7 @@ async function captureGlossaryCorrection(
     if (terms.some((term) => term.sourceText === sourceText && term.targetText === targetText)) {
       setWorkspaceAction("这条修正规则已经存在于词表中。", true);
       state.textContent = "这条修正规则已经存在";
+      glossaryCorrectionDialog?.close();
       return;
     }
     terms.push({ sourceText, targetText, promptScope: "correction_only", contentGroup: null });
@@ -1514,10 +1551,13 @@ async function captureGlossaryCorrection(
     await refreshGlossaries();
     if (workspaceGlossary) workspaceGlossary.value = glossaryId;
     setWorkspaceAction(`已把“${sourceText} → ${targetText}”加入 ${detail.glossary.name}。字幕修改仍需单独保存。`);
-    state.textContent = "修正规则已加入词表；本段有未保存修改";
+    state.textContent = "修正规则已加入词表；字幕修改需单独保存";
+    state.classList.remove("warning");
+    glossaryCorrectionDialog?.close();
   } catch (error) {
     state.textContent = `加入词表失败：${String(error)}`;
     state.classList.add("warning");
+    if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = `保存失败：${String(error)}`;
   }
 }
 
@@ -1640,6 +1680,17 @@ document.querySelector<HTMLButtonElement>("#cancel-rename-job")?.addEventListene
 renameJobDialog?.addEventListener("close", () => {
   renamingJob = null;
   if (renameJobMessage) renameJobMessage.textContent = "";
+});
+glossaryCorrectionForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveGlossaryCorrection();
+});
+document.querySelector<HTMLButtonElement>("#cancel-glossary-correction")?.addEventListener("click", () => {
+  glossaryCorrectionDialog?.close();
+});
+glossaryCorrectionDialog?.addEventListener("close", () => {
+  pendingGlossaryCorrection = null;
+  if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
 });
 
 async function chooseFile(kind: "media" | "model" | "vad"): Promise<void> {
