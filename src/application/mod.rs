@@ -26,6 +26,6 @@ pub use local_workspace_service::{
 pub use transcription_options::TranscriptionOptions;
 pub use translation_options::TranslationOptions;
 pub use translation_provider::{
-    TranslationFuture, TranslationProvider, TranslationProviderStatus,
+    MutableTranslationProvider, TranslationFuture, TranslationProvider, TranslationProviderStatus,
     UnconfiguredTranslationProvider,
 };

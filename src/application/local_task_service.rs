@@ -223,6 +223,211 @@ impl LocalTaskService {
         database.rename_job(job_id, display_name).await
     }
 
+    /// Converts non-terminal task state left by an earlier application session
+    /// into an explicit, retryable failure. Automatically resuming an external
+    /// ffmpeg/Whisper process is unsafe because its process state cannot be
+    /// reconstructed after the desktop application exits.
+    pub async fn recover_interrupted_jobs(&self) -> Result<usize> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("task recovery requires SQLite persistence"))?;
+        let mut recovered = 0;
+        for record in database.list_jobs().await? {
+            if matches!(record.status.as_str(), "done" | "failed") {
+                continue;
+            }
+            let job = match Job::open(PathBuf::from(&record.storage_dir)) {
+                Ok(job) => job,
+                Err(error) => {
+                    eprintln!(
+                        "[task-service] cannot recover missing task directory {}: {error:#}",
+                        record.storage_dir
+                    );
+                    database
+                        .mark_job_failed(
+                            &record.job_id,
+                            "Atogaki 上次退出时任务尚未完成，且任务目录已不存在，无法重试。",
+                        )
+                        .await?;
+                    recovered += 1;
+                    continue;
+                }
+            };
+            let mut manifest = match job.read_manifest_if_exists() {
+                Ok(Some(manifest)) => manifest,
+                Ok(None) => {
+                    database
+                        .mark_job_failed(
+                            &record.job_id,
+                            "Atogaki 上次退出时任务尚未完成，但任务状态文件缺失，旧目录已保留。",
+                        )
+                        .await?;
+                    recovered += 1;
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[task-service] cannot read task state {}: {error:#}",
+                        job.status_json.display()
+                    );
+                    database
+                        .mark_job_failed(
+                            &record.job_id,
+                            "Atogaki 上次退出时任务尚未完成，但任务状态文件已损坏，旧目录已保留。",
+                        )
+                        .await?;
+                    recovered += 1;
+                    continue;
+                }
+            };
+            if matches!(manifest.status, JobStatus::Done | JobStatus::Failed) {
+                database
+                    .sync_snapshot(&JobSnapshot {
+                        manifest,
+                        segments: job.read_segments().unwrap_or_default(),
+                    })
+                    .await?;
+                continue;
+            }
+            manifest.fail(
+                "Atogaki 上次退出时任务尚未完成。旧任务数据已保留，可点击“重试”创建一个新任务。",
+            );
+            if let Err(error) = job.write_manifest(&manifest) {
+                eprintln!(
+                    "[task-service] cannot persist recovered task state {}: {error:#}",
+                    job.status_json.display()
+                );
+                database
+                    .mark_job_failed(
+                        &record.job_id,
+                        "Atogaki 上次退出时任务尚未完成，且无法更新任务状态文件；旧目录已保留。",
+                    )
+                    .await?;
+                recovered += 1;
+                continue;
+            }
+            database
+                .sync_snapshot(&JobSnapshot {
+                    manifest,
+                    segments: job.read_segments().unwrap_or_default(),
+                })
+                .await?;
+            recovered += 1;
+        }
+        Ok(recovered)
+    }
+
+    /// Creates a new transcription task from a failed task's immutable input,
+    /// recognition options, and glossary snapshot. The failed directory remains
+    /// untouched for diagnosis and any partial artifacts are never overwritten.
+    pub async fn retry_persisted_job(
+        &self,
+        job_id: &str,
+        whisper_model_override: Option<PathBuf>,
+        vad_model_override: Option<PathBuf>,
+    ) -> Result<JobSnapshot> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("task retry requires SQLite persistence"))?;
+        let previous = database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        if previous.status != "failed" {
+            bail!(
+                "only failed tasks can be retried; task {job_id} is {}",
+                previous.status
+            );
+        }
+        let previous_job = Job::open(PathBuf::from(&previous.storage_dir))?;
+        let manifest = previous_job
+            .read_manifest_if_exists()?
+            .ok_or_else(|| anyhow!("failed task is missing status.json"))?;
+        let input = manifest
+            .input
+            .ok_or_else(|| anyhow!("failed task does not record its source media"))?;
+        if !input.is_file() {
+            bail!("source media no longer exists: {}", input.display());
+        }
+        let mut transcription = previous_job.read_recognition_options()?;
+        if !transcription.model.is_file() {
+            transcription.model = whisper_model_override
+                .filter(|path| path.is_file())
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Whisper model no longer exists: {}; configure an available model before retrying",
+                        transcription.model.display()
+                    )
+                })?;
+        }
+        if let Some(missing_vad_model) = transcription
+            .vad_model
+            .as_ref()
+            .filter(|path| !path.is_file())
+        {
+            transcription.vad_model = Some(
+                vad_model_override
+                    .filter(|path| path.is_file())
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "VAD model no longer exists: {}; configure an available VAD model before retrying",
+                            missing_vad_model.display()
+                        )
+                    })?,
+            );
+        }
+
+        let job = self.create_queued_job(Some(input.clone()), None).await?;
+        if let Some(previous_glossary) = transcription
+            .glossary
+            .as_deref()
+            .filter(|path| path.is_file())
+        {
+            let snapshot_path = job.dir.join("recognition-glossary.txt");
+            fs::copy(previous_glossary, &snapshot_path).with_context(|| {
+                format!(
+                    "failed to copy recognition glossary snapshot {}",
+                    previous_glossary.display()
+                )
+            })?;
+            transcription.glossary = Some(snapshot_path.clone());
+            if let (Some(glossary_id), Some(glossary_name)) = (
+                previous.glossary_id.as_deref(),
+                previous.glossary_name.as_deref(),
+            ) && database.get_glossary(glossary_id).await?.is_some()
+            {
+                database
+                    .assign_job_glossary(
+                        job.id().as_str(),
+                        glossary_id,
+                        glossary_name,
+                        &snapshot_path,
+                    )
+                    .await?;
+            }
+        }
+        let prompt = crate::domain::glossary::build_whisper_prompt(&transcription)?;
+        job.write_whisper_prompt(prompt.as_deref())?;
+        job.write_recognition_options(&transcription)?;
+        let job_dir = job.dir.clone();
+        let snapshot = self
+            .enqueue(
+                job,
+                QueuedTask::Transcribe {
+                    job_dir: job_dir.clone(),
+                    spec: TranscribeSpec {
+                        input,
+                        output_dir: Some(job_dir),
+                        transcription,
+                    },
+                },
+            )
+            .await?;
+        Ok(snapshot)
+    }
+
     pub async fn delete_persisted_job(&self, job_id: &str) -> Result<()> {
         let database = self
             .database
@@ -520,6 +725,77 @@ mod tests {
         )
         .unwrap();
         assert!(prompt.contains("ナブナ（表記: n-buna）"));
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn interrupted_task_is_failed_and_retry_creates_a_new_preserved_job() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-task-recovery-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let (sender, _receiver) = mpsc::channel(2);
+        let service = LocalTaskService {
+            sender,
+            jobs_dir: root.join("jobs"),
+            database: Some(database.clone()),
+        };
+        let input = root.join("input.mp4");
+        let model = root.join("ggml-small.bin");
+        fs::write(&input, b"media placeholder").unwrap();
+        fs::write(&model, b"model placeholder").unwrap();
+        let job = service
+            .create_queued_job(Some(input.clone()), None)
+            .await
+            .unwrap();
+        job.write_recognition_options(&TranscriptionOptions::japanese(model.clone()))
+            .unwrap();
+        let corrupt_job = service.create_queued_job(None, None).await.unwrap();
+        fs::write(&corrupt_job.status_json, b"not valid json").unwrap();
+
+        assert_eq!(service.recover_interrupted_jobs().await.unwrap(), 2);
+        let interrupted = database.get_job(&job.id()).await.unwrap().unwrap();
+        assert_eq!(interrupted.status, "failed");
+        assert!(interrupted.error_message.unwrap().contains("上次退出"));
+        let corrupt = database.get_job(&corrupt_job.id()).await.unwrap().unwrap();
+        assert_eq!(corrupt.status, "failed");
+        assert!(corrupt.error_message.unwrap().contains("状态文件已损坏"));
+
+        let retried = service
+            .retry_persisted_job(&job.id(), None, None)
+            .await
+            .unwrap();
+        assert_ne!(retried.manifest.job_id, job.id());
+        assert_eq!(retried.manifest.status.as_str(), "queued");
+        assert_eq!(retried.manifest.input.as_deref(), Some(input.as_path()));
+        let retried_job = crate::infrastructure::job_store::Job::open(
+            root.join("jobs").join(&retried.manifest.job_id),
+        )
+        .unwrap();
+        assert_eq!(retried_job.read_recognition_options().unwrap().model, model);
+        assert!(job.dir.is_dir());
+
+        let replacement_model = root.join("ggml-medium.bin");
+        fs::write(&replacement_model, b"replacement model placeholder").unwrap();
+        fs::remove_file(&model).unwrap();
+        let retried_again = service
+            .retry_persisted_job(&job.id(), Some(replacement_model.clone()), None)
+            .await
+            .unwrap();
+        let retried_again_job = crate::infrastructure::job_store::Job::open(
+            root.join("jobs").join(&retried_again.manifest.job_id),
+        )
+        .unwrap();
+        assert_eq!(
+            retried_again_job.read_recognition_options().unwrap().model,
+            replacement_model
+        );
 
         drop(service);
         drop(database);

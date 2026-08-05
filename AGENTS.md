@@ -9,6 +9,7 @@
 ## Implementation and verification
 
 - Keep commits small and cohesive. Run the relevant regression checks before each commit; at minimum run `cargo fmt --check`, `git diff --check`, and applicable tests.
+- If dependency downloads fail with DNS errors or sustained low-speed timeouts, retry from interactive zsh after running the existing `proxy_on` helper from `.zshrc`. Never record or print proxy credentials or endpoints in project files or logs.
 - If a check is blocked by the environment, record the command, blocker, and remaining risk in the handoff.
 - Stage only files belonging to the current change. Do not include pre-existing unrelated changes in a commit.
 - Push a completed cohesive milestone after its commit, unless the remote is unavailable or the user asks otherwise. Never force-push without explicit approval.

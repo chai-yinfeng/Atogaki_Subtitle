@@ -658,7 +658,9 @@ async fn run_render_command(
         return Err(RenderCancelled.into());
     }
 
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = cmd
         .spawn()
         .with_context(|| format!("failed to start {name}"))?;
@@ -738,6 +740,7 @@ async fn run_render_command(
 }
 
 async fn run_checked(mut cmd: Command, name: &str) -> Result<()> {
+    cmd.kill_on_drop(true);
     let output = cmd
         .output()
         .await

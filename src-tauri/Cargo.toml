@@ -9,8 +9,13 @@ rust-version = "1.85"
 tauri-build = "2.6.3"
 
 [dependencies]
+anyhow = "1.0.100"
 atogaki-subtitle = { path = ".." }
+futures-util = "0.3.31"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "stream"] }
 serde = { version = "1", features = ["derive"] }
+sha1 = "0.10.6"
 tauri = { version = "2.11.5", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2.7.2"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["fs", "io-util", "sync"] }

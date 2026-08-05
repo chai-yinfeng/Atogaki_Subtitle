@@ -1,3 +1,7 @@
+mod credential_store;
+mod desktop_settings;
+mod model_download;
+
 use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
 use atogaki_subtitle::{
@@ -5,12 +9,12 @@ use atogaki_subtitle::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
         LocalGlossaryService, LocalGlossaryTermDraft, LocalRenderRequest, LocalRenderService,
         LocalSubtitleExport, LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus,
-        LocalWorkspaceService, TranscriptionOptions, job_spec::TranscribeSpec,
+        LocalWorkspaceService, MutableTranslationProvider, TranscriptionOptions,
+        UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
     },
     domain::subtitle::SubtitleTrack,
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path},
-        deepl::DeepLTranslationProvider,
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
             LocalRenderJobRecord, LocalSubtitleSegmentRecord,
@@ -22,12 +26,19 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
+use crate::{
+    desktop_settings::{DesktopSettings, DesktopSettingsService, SaveDesktopSettingsRequest},
+    model_download::{ModelCatalogItem, ModelDownloadService, ModelDownloadState},
+};
+
 struct DesktopState {
     data_dir: PathBuf,
     task_service: LocalTaskService,
     workspace_service: LocalWorkspaceService,
     glossary_service: LocalGlossaryService,
     render_service: LocalRenderService,
+    settings_service: DesktopSettingsService,
+    model_download_service: ModelDownloadService,
 }
 
 #[tauri::command]
@@ -127,6 +138,25 @@ async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<LocalJobRecord>
         .task_service
         .list_persisted_jobs()
         .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn retry_job(state: State<'_, DesktopState>, job_id: String) -> Result<String, String> {
+    let settings = state
+        .settings_service
+        .load()
+        .await
+        .map_err(|error| error.to_string())?;
+    state
+        .task_service
+        .retry_persisted_job(
+            &job_id,
+            settings.whisper_model_path.map(PathBuf::from),
+            settings.vad_model_path.map(PathBuf::from),
+        )
+        .await
+        .map(|snapshot| snapshot.manifest.job_id)
         .map_err(|error| error.to_string())
 }
 
@@ -545,12 +575,63 @@ fn reveal_in_finder(path: String, label: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn recognition_defaults(app: AppHandle) -> DesktopRecognitionDefaults {
-    DesktopRecognitionDefaults {
-        whisper_model_path: configured_file("ATOGAKI_WHISPER_MODEL")
-            .map(|path| path.display().to_string()),
-        vad_model_path: default_vad_model(&app).map(|path| path.display().to_string()),
-    }
+async fn recognition_defaults(
+    state: State<'_, DesktopState>,
+) -> Result<DesktopRecognitionDefaults, String> {
+    state
+        .settings_service
+        .load()
+        .await
+        .map(|settings| DesktopRecognitionDefaults {
+            whisper_model_path: settings.whisper_model_path,
+            vad_model_path: settings.vad_model_path,
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn desktop_settings(state: State<'_, DesktopState>) -> Result<DesktopSettings, String> {
+    state
+        .settings_service
+        .load()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_desktop_settings(
+    state: State<'_, DesktopState>,
+    request: SaveDesktopSettingsRequest,
+) -> Result<DesktopSettings, String> {
+    state
+        .settings_service
+        .save(request)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn model_catalog(state: State<'_, DesktopState>) -> Vec<ModelCatalogItem> {
+    state.model_download_service.catalog()
+}
+
+#[tauri::command]
+async fn start_model_download(
+    state: State<'_, DesktopState>,
+    model_id: String,
+) -> Result<ModelDownloadState, String> {
+    state
+        .model_download_service
+        .start(&model_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn model_download_states(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<ModelDownloadState>, String> {
+    Ok(state.model_download_service.states().await)
 }
 
 #[tauri::command]
@@ -629,27 +710,6 @@ fn configured_file(name: &str) -> Option<PathBuf> {
         .filter(|path| path.is_file())
 }
 
-fn default_vad_model(app: &AppHandle) -> Option<PathBuf> {
-    configured_file("ATOGAKI_VAD_MODEL").or_else(|| {
-        let directory = model_picker_directory(app)?;
-        let mut candidates = std::fs::read_dir(directory)
-            .ok()?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.is_file()
-                    && path.extension().and_then(|extension| extension.to_str()) == Some("bin")
-                    && path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| name.to_ascii_lowercase().contains("silero"))
-            })
-            .collect::<Vec<_>>();
-        candidates.sort();
-        candidates.into_iter().next()
-    })
-}
-
 fn desktop_transcription_options(
     request: &SubmitTranscriptionRequest,
 ) -> Result<TranscriptionOptions, String> {
@@ -712,6 +772,18 @@ fn main() {
             let database = tauri::async_runtime::block_on(LocalDatabase::open(
                 data_dir.join("atogaki.sqlite"),
             ))?;
+            let translation_provider =
+                MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider));
+            let models_directory = data_dir.join("models");
+            let settings_service = DesktopSettingsService::new(
+                database.clone(),
+                translation_provider.clone(),
+                models_directory.clone(),
+                config.deepl_auth_key.clone(),
+                configured_file("ATOGAKI_WHISPER_MODEL"),
+                configured_file("ATOGAKI_VAD_MODEL"),
+            );
+            tauri::async_runtime::block_on(settings_service.initialize())?;
             let glossary_service = LocalGlossaryService::new(database.clone());
             tauri::async_runtime::block_on(glossary_service.ensure_builtins())?;
             let task_service = tauri::async_runtime::block_on(async {
@@ -721,27 +793,33 @@ fn main() {
                     database.clone(),
                 )
             })?;
-            let translation_provider =
-                Arc::new(DeepLTranslationProvider::new(config.deepl_auth_key.clone()));
-            let workspace_service =
-                LocalWorkspaceService::with_provider(database.clone(), translation_provider);
+            tauri::async_runtime::block_on(task_service.recover_interrupted_jobs())?;
+            let workspace_service = LocalWorkspaceService::with_provider(
+                database.clone(),
+                Arc::new(translation_provider),
+            );
             let render_service = tauri::async_runtime::block_on(LocalRenderService::start(
                 config.ffmpeg.clone(),
-                database,
+                database.clone(),
                 workspace_service.clone(),
             ))?;
+            let model_download_service =
+                ModelDownloadService::new(models_directory, settings_service.clone())?;
             app.manage(DesktopState {
                 data_dir,
                 task_service,
                 workspace_service,
                 glossary_service,
                 render_service,
+                settings_service,
+                model_download_service,
             });
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             data_directory,
+            desktop_settings,
             delete_job,
             delete_glossary,
             export_workspace_subtitles,
@@ -750,6 +828,8 @@ fn main() {
             list_glossaries,
             list_jobs,
             list_video_renders,
+            model_catalog,
+            model_download_states,
             media_capabilities,
             pick_media_file,
             pick_model_file,
@@ -764,8 +844,11 @@ fn main() {
             reveal_exported_subtitle,
             reveal_rendered_video,
             rename_job,
+            retry_job,
+            save_desktop_settings,
             save_glossary,
             submit_transcription,
+            start_model_download,
             submit_video_render,
             cancel_video_render,
             translate_all_subtitles,

@@ -39,7 +39,11 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
-当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService` 与 `LocalRenderService`：前者负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
+当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService` 与 `LocalRenderService`：前者负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
+
+`DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。`ModelDownloadService` 每次只运行一个下载，写入应用管理目录中的 `.part` 文件，校验后原子安装并更新模型设置；UI 只轮询进度，不直接访问网络或模型文件。
+
+启动恢复采用显式失败而非静默续跑：数据库中仍为非终态的识别任务会与任务目录快照核对，未完成者标记为上次退出导致的失败。重试从旧任务的输入、识别参数和词表快照创建新 UUID 任务，旧目录保持只读证据；旧模型路径不可用时才使用当前设备设置中的替代模型。ffmpeg/Whisper 子进程设置为随异步任务销毁而终止。
 
 `LocalGlossaryService` 管理 SQLite 词表、任务范围 prompt 预览、差异预览和对工作区的应用。词条分为始终提示的“核心”、按任务选择的“内容包”和不占 prompt 的“仅修正”。新任务选择词表和内容包后，`LocalTaskService` 会在排队前把解析后的词条冻结为任务目录中的 `recognition-glossary.txt`，把最终 prompt 写入 `whisper-prompt.txt`，再将快照路径交给 Whisper。带规范写法的核心或内容词条会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化；仅修正规则只执行后一阶段。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
 
@@ -49,7 +53,8 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 - 媒体、模型、任务产物：默认本地文件系统。
 - 任务元数据、字幕段、词表与编辑状态：桌面 MVP 使用 SQLite；生成快照首次导入后，人工编辑和 SQLite 生成的机器译文以 SQLite 为准，后续快照同步不会用旧 `segments.json` 清空它们。
-- 密钥：目标是使用 macOS Keychain（或同等系统密钥链），不写入任务 JSON；当前桌面 MVP 仅在启动时读取 `DEEPL_AUTH_KEY` 环境变量。
+- 密钥：通过统一凭据接口写入 macOS Keychain、Windows Credential Manager 或 Linux Secret Service，不写入 SQLite、任务 JSON 或日志；`DEEPL_AUTH_KEY` 仅作为兼容环境变量回退，且不会被自动迁移或回显。
+- 桌面设置：模型路径、翻译 provider ID 和引导状态写入 SQLite；模型二进制位于用户选择的位置或应用数据目录的 `models/`，不打入 App Bundle。
 - `status.json`：保留为任务产物与故障恢复副本，不作为唯一长期数据库。
 
 ## 核心数据约定

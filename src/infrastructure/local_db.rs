@@ -165,6 +165,58 @@ impl LocalDatabase {
         Ok(Self { pool })
     }
 
+    pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        sqlx::query_scalar("SELECT value FROM local_settings WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .with_context(|| format!("failed to read local setting {key}"))
+    }
+
+    pub async fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        if key.trim().is_empty() {
+            return Err(anyhow!("local setting key cannot be empty"));
+        }
+        sqlx::query(
+            "INSERT INTO local_settings (key, value, updated_at_unix)
+             VALUES (?, ?, ?)
+             ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at_unix = excluded.updated_at_unix",
+        )
+        .bind(key)
+        .bind(value)
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to save local setting {key}"))?;
+        Ok(())
+    }
+
+    pub async fn delete_setting(&self, key: &str) -> Result<()> {
+        sqlx::query("DELETE FROM local_settings WHERE key = ?")
+            .bind(key)
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to delete local setting {key}"))?;
+        Ok(())
+    }
+
+    pub async fn mark_job_failed(&self, job_id: &str, error: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE local_jobs
+             SET status = 'failed', message = '任务已中断', error_message = ?, updated_at_unix = ?
+             WHERE job_id = ? AND status NOT IN ('done', 'failed')",
+        )
+        .bind(error)
+        .bind(chrono::Utc::now().timestamp())
+        .bind(job_id)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to mark local task {job_id} as failed"))?;
+        Ok(())
+    }
+
     pub async fn sync_snapshot(&self, snapshot: &JobSnapshot) -> Result<()> {
         let manifest = &snapshot.manifest;
         let mut tx = self

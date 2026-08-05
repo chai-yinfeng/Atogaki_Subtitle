@@ -115,7 +115,9 @@ async fn run_whisper(
     force_cpu: bool,
 ) -> std::result::Result<(), WhisperFailure> {
     let args = build_args(options, wav, output_prefix, prompt, force_cpu);
-    let output = Command::new(whisper_cli)
+    let mut command = Command::new(whisper_cli);
+    command.kill_on_drop(true);
+    let output = command
         .args(args)
         .output()
         .await

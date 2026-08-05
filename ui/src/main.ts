@@ -109,6 +109,40 @@ type RecognitionDefaults = {
   vadModelPath: string | null;
 };
 
+type DesktopSettings = {
+  onboardingCompleted: boolean;
+  needsOnboarding: boolean;
+  whisperModelPath: string | null;
+  whisperModelReady: boolean;
+  vadModelPath: string | null;
+  vadModelReady: boolean;
+  translationProviderId: "none" | "deepl";
+  translationApiKeyConfigured: boolean;
+  translationApiKeySource: "system" | "environment" | null;
+  credentialStore: string;
+  credentialError: string | null;
+  modelsDirectory: string;
+};
+
+type ModelCatalogItem = {
+  id: string;
+  kind: "whisper" | "vad";
+  name: string;
+  fileName: string;
+  sizeLabel: string;
+  recommendedFor: string;
+  sourceUrl: string;
+};
+
+type ModelDownloadState = {
+  modelId: string;
+  status: "queued" | "downloading" | "done" | "failed";
+  downloadedBytes: number;
+  totalBytes: number | null;
+  path: string | null;
+  error: string | null;
+};
+
 type SubtitleExport = {
   ja_srt: string;
   zh_srt: string;
@@ -168,7 +202,10 @@ app.innerHTML = `
         <p class="eyebrow">LOCAL JAPANESE MEDIA WORKSPACE</p>
         <h1>Atogaki</h1>
       </div>
-      <button id="refresh" type="button">刷新任务</button>
+      <div class="header-actions">
+        <button id="open-settings" type="button" class="secondary">设置</button>
+        <button id="refresh" type="button">刷新任务</button>
+      </div>
     </header>
     <div id="home-view">
       <section class="intro">
@@ -344,6 +381,46 @@ app.innerHTML = `
         <div id="video-render-list" class="video-render-list"></div>
       </section>
     </dialog>
+    <dialog id="settings-dialog" class="settings-dialog">
+      <form id="settings-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">FIRST RUN & SETTINGS</p><h2>启动配置</h2></div>
+          <button id="close-settings" type="button" class="secondary">稍后再说</button>
+        </div>
+        <p class="dialog-help">媒体和模型保留在本机；只有启用翻译 provider 后，日文字幕才会发送到对应云端。</p>
+        <section class="settings-section">
+          <div class="settings-section-heading"><div><strong>1. 本地识别模型</strong><span id="models-directory"></span></div><span id="model-readiness"></span></div>
+          <div class="settings-path-row">
+            <label>Whisper 模型<input id="settings-whisper-model" placeholder="选择已有 ggml-*.bin，或从下方下载" /></label>
+            <button id="settings-choose-whisper" type="button" class="secondary">选择文件</button>
+          </div>
+          <div class="settings-path-row">
+            <label>Silero VAD 模型（推荐）<input id="settings-vad-model" placeholder="选择已有 ggml-silero-*.bin，或从下方下载" /></label>
+            <button id="settings-choose-vad" type="button" class="secondary">选择文件</button>
+          </div>
+          <div id="model-catalog" class="model-catalog"></div>
+          <p id="model-download-message" class="settings-message" role="status"></p>
+        </section>
+        <section class="settings-section">
+          <div class="settings-section-heading"><div><strong>2. 云端翻译（可选）</strong><span>不配置也可以完成日语转写、编辑和日文字幕导出。</span></div><span id="credential-store-label"></span></div>
+          <label>翻译 provider
+            <select id="settings-provider">
+              <option value="deepl">DeepL</option>
+              <option value="none">关闭云端翻译</option>
+            </select>
+          </label>
+          <label id="api-key-field">DeepL API Key
+            <input id="settings-api-key" type="password" autocomplete="off" placeholder="留空则保持当前密钥" />
+          </label>
+          <label class="clear-secret"><input id="settings-clear-api-key" type="checkbox" />删除系统凭据库中已保存的 DeepL Key</label>
+          <p id="api-key-status" class="settings-message"></p>
+        </section>
+        <div class="settings-footer">
+          <span id="settings-message" role="status"></span>
+          <div><button id="save-settings" type="submit" class="secondary">保存</button><button id="finish-settings" type="button">保存并开始使用</button></div>
+        </div>
+      </form>
+    </dialog>
   </main>
 `;
 
@@ -409,6 +486,20 @@ const videoRenderMessage = document.querySelector<HTMLSpanElement>("#video-rende
 const submitVideoRenderButton = document.querySelector<HTMLButtonElement>("#submit-video-render");
 const videoRenderList = document.querySelector<HTMLDivElement>("#video-render-list");
 const videoRenderCount = document.querySelector<HTMLSpanElement>("#video-render-count");
+const settingsDialog = document.querySelector<HTMLDialogElement>("#settings-dialog");
+const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
+const settingsWhisperModel = document.querySelector<HTMLInputElement>("#settings-whisper-model");
+const settingsVadModel = document.querySelector<HTMLInputElement>("#settings-vad-model");
+const settingsProvider = document.querySelector<HTMLSelectElement>("#settings-provider");
+const settingsApiKey = document.querySelector<HTMLInputElement>("#settings-api-key");
+const settingsClearApiKey = document.querySelector<HTMLInputElement>("#settings-clear-api-key");
+const settingsMessage = document.querySelector<HTMLSpanElement>("#settings-message");
+const apiKeyStatus = document.querySelector<HTMLParagraphElement>("#api-key-status");
+const credentialStoreLabel = document.querySelector<HTMLSpanElement>("#credential-store-label");
+const modelCatalogHost = document.querySelector<HTMLDivElement>("#model-catalog");
+const modelDownloadMessage = document.querySelector<HTMLParagraphElement>("#model-download-message");
+const modelsDirectory = document.querySelector<HTMLSpanElement>("#models-directory");
+const modelReadiness = document.querySelector<HTMLSpanElement>("#model-readiness");
 
 let refreshing = false;
 let activeDetail: JobDetail | null = null;
@@ -431,6 +522,10 @@ let mediaCapabilities: MediaCapabilities | null = null;
 let videoRenders: VideoRender[] = [];
 let selectedVideoOutputAlreadyExists = false;
 let videoRenderSubmitting = false;
+let desktopSettings: DesktopSettings | null = null;
+let availableModels: ModelCatalogItem[] = [];
+let modelDownloads: ModelDownloadState[] = [];
+let modelDownloadPoll: number | null = null;
 let translationStatus: TranslationStatus = {
   provider_id: "none",
   provider: "翻译服务",
@@ -490,6 +585,182 @@ function escapeHtml(value: string): string {
     };
     return entities[character];
   });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KiB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+}
+
+function syncProviderSettings(): void {
+  const deeplEnabled = settingsProvider?.value === "deepl";
+  document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !deeplEnabled);
+  settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !deeplEnabled);
+}
+
+function renderDesktopSettings(settings: DesktopSettings): void {
+  desktopSettings = settings;
+  if (settingsWhisperModel) settingsWhisperModel.value = settings.whisperModelPath ?? "";
+  if (settingsVadModel) settingsVadModel.value = settings.vadModelPath ?? "";
+  if (settingsProvider) settingsProvider.value = settings.translationProviderId;
+  if (settingsApiKey) settingsApiKey.value = "";
+  if (settingsClearApiKey) settingsClearApiKey.checked = false;
+  if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
+  if (modelReadiness) {
+    modelReadiness.textContent = settings.whisperModelReady
+      ? settings.vadModelReady ? "Whisper 与 VAD 已就绪" : "Whisper 已就绪 · VAD 可选"
+      : "需要配置 Whisper 模型";
+    modelReadiness.classList.toggle("warning", !settings.whisperModelReady);
+  }
+  if (credentialStoreLabel) credentialStoreLabel.textContent = settings.credentialStore;
+  if (apiKeyStatus) {
+    const source = settings.translationApiKeySource === "system"
+      ? `已保存在 ${settings.credentialStore}`
+      : settings.translationApiKeySource === "environment"
+        ? "当前来自启动环境；保存新 Key 后会改用系统凭据库"
+        : "尚未配置；Key 不会写入 SQLite 或任务目录";
+    apiKeyStatus.textContent = settings.credentialError
+      ? `${source}。系统凭据库提示：${settings.credentialError}`
+      : source;
+    apiKeyStatus.classList.toggle("warning", Boolean(settings.credentialError));
+  }
+  if (modelPath && settings.whisperModelPath) modelPath.value = settings.whisperModelPath;
+  if (vadModelPath && settings.vadModelPath) vadModelPath.value = settings.vadModelPath;
+  syncProviderSettings();
+  renderModelCatalog();
+}
+
+function renderModelCatalog(): void {
+  if (!modelCatalogHost) return;
+  const activeDownload = modelDownloads.find((download) =>
+    download.status === "queued" || download.status === "downloading"
+  );
+  modelCatalogHost.innerHTML = availableModels.map((model) => {
+    const download = modelDownloads.find((item) => item.modelId === model.id);
+    const progress = download?.totalBytes
+      ? Math.min(1, download.downloadedBytes / download.totalBytes)
+      : null;
+    const state = download?.status === "done"
+      ? "已下载并设为默认"
+      : download?.status === "failed"
+        ? `失败：${download.error ?? "未知错误"}`
+        : download?.status === "downloading"
+          ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}`
+          : download?.status === "queued" ? "等待下载" : "";
+    return `<article class="model-card">
+      <div><strong>${escapeHtml(model.name)}</strong><span>${escapeHtml(model.sizeLabel)} · ${escapeHtml(model.recommendedFor)}</span></div>
+      ${progress === null ? "" : `<progress max="1" value="${progress}"></progress>`}
+      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span><button type="button" class="secondary" data-download-model="${escapeHtml(model.id)}" ${activeDownload ? "disabled" : ""}>${download?.status === "failed" ? "重试下载" : "下载"}</button></div>
+    </article>`;
+  }).join("");
+  modelCatalogHost.querySelectorAll<HTMLButtonElement>("[data-download-model]").forEach((button) => {
+    button.addEventListener("click", () => void startModelDownload(button.dataset.downloadModel ?? ""));
+  });
+}
+
+async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
+  try {
+    const [settings, catalog, downloads] = await Promise.all([
+      invoke<DesktopSettings>("desktop_settings"),
+      availableModels.length ? Promise.resolve(availableModels) : invoke<ModelCatalogItem[]>("model_catalog"),
+      invoke<ModelDownloadState[]>("model_download_states"),
+    ]);
+    availableModels = catalog;
+    modelDownloads = downloads;
+    renderDesktopSettings(settings);
+    if (openWhenNeeded && settings.needsOnboarding && !settingsDialog?.open) settingsDialog?.showModal();
+  } catch (error) {
+    if (settingsMessage) settingsMessage.textContent = `无法读取启动配置：${String(error)}`;
+  }
+}
+
+async function refreshTranslationStatus(): Promise<void> {
+  try {
+    translationStatus = await invoke<TranslationStatus>("translation_status");
+    updateTranslationControls();
+  } catch (error) {
+    setWorkspaceAction(`无法读取翻译配置：${String(error)}`, true);
+  }
+}
+
+async function saveSettings(finishOnboarding: boolean): Promise<void> {
+  if (!settingsWhisperModel || !settingsVadModel || !settingsProvider || !settingsApiKey) return;
+  if (finishOnboarding && !settingsWhisperModel.value.trim()) {
+    if (settingsMessage) settingsMessage.textContent = "请先选择或下载一个 Whisper 模型。";
+    settingsWhisperModel.focus();
+    return;
+  }
+  if (settingsMessage) settingsMessage.textContent = "正在保存配置…";
+  try {
+    const settings = await invoke<DesktopSettings>("save_desktop_settings", {
+      request: {
+        whisperModelPath: settingsWhisperModel.value.trim() || null,
+        vadModelPath: settingsVadModel.value.trim() || null,
+        translationProviderId: settingsProvider.value,
+        apiKey: settingsApiKey.value.trim() || null,
+        clearApiKey: settingsClearApiKey?.checked ?? false,
+        onboardingCompleted: finishOnboarding || desktopSettings?.onboardingCompleted || false,
+      },
+    });
+    renderDesktopSettings(settings);
+    await refreshTranslationStatus();
+    if (settingsMessage) settingsMessage.textContent = "配置已保存；如提供密钥，只会写入系统凭据库。";
+    if (finishOnboarding && !settings.needsOnboarding) settingsDialog?.close();
+  } catch (error) {
+    if (settingsMessage) settingsMessage.textContent = `保存失败：${String(error)}`;
+  }
+}
+
+async function chooseSettingsModel(kind: "whisper" | "vad"): Promise<void> {
+  const command = kind === "whisper" ? "pick_model_file" : "pick_vad_model_file";
+  try {
+    const path = await invoke<string | null>(command);
+    const input = kind === "whisper" ? settingsWhisperModel : settingsVadModel;
+    if (path && input) input.value = path;
+  } catch (error) {
+    if (settingsMessage) settingsMessage.textContent = `无法打开模型选择器：${String(error)}`;
+  }
+}
+
+async function startModelDownload(modelId: string): Promise<void> {
+  if (!modelId) return;
+  if (modelDownloadMessage) modelDownloadMessage.textContent = "正在连接 whisper.cpp 官方模型来源…";
+  try {
+    const state = await invoke<ModelDownloadState>("start_model_download", { modelId });
+    modelDownloads = modelDownloads.filter((download) => download.modelId !== modelId);
+    modelDownloads.push(state);
+    renderModelCatalog();
+    if (modelDownloadPoll === null) {
+      modelDownloadPoll = window.setInterval(() => void refreshModelDownloads(), 500);
+    }
+  } catch (error) {
+    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法开始下载：${String(error)}`;
+  }
+}
+
+async function refreshModelDownloads(): Promise<void> {
+  try {
+    modelDownloads = await invoke<ModelDownloadState[]>("model_download_states");
+    renderModelCatalog();
+    const active = modelDownloads.some((download) =>
+      download.status === "queued" || download.status === "downloading"
+    );
+    if (!active) {
+      if (modelDownloadPoll !== null) window.clearInterval(modelDownloadPoll);
+      modelDownloadPoll = null;
+      await loadDesktopSettings(false);
+      const completed = modelDownloads.find((download) => download.status === "done");
+      const failed = modelDownloads.find((download) => download.status === "failed");
+      if (modelDownloadMessage) {
+        modelDownloadMessage.textContent = completed
+          ? "模型已校验并安装，路径已自动填入。"
+          : failed ? `下载失败：${failed.error ?? "未知错误"}` : "";
+      }
+    }
+  } catch (error) {
+    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法读取下载状态：${String(error)}`;
+  }
 }
 
 function renderGlossaryOptions(): void {
@@ -672,6 +943,7 @@ function renderJobs(jobs: LocalJob[]): void {
             <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
           </button>
           <div class="job-actions">
+            ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重试</button>` : ""}
             <button type="button" class="secondary" data-rename-job="${escapeHtml(job.job_id)}">重命名</button>
             <button type="button" class="danger" data-delete-job="${escapeHtml(job.job_id)}" ${matchesTerminalStatus(job.status) ? "" : "disabled"} title="${matchesTerminalStatus(job.status) ? "删除任务数据，但保留原始媒体" : "任务结束后才能删除"}">删除</button>
           </div>
@@ -687,12 +959,32 @@ function renderJobs(jobs: LocalJob[]): void {
       if (job) renameJob(job);
     });
   });
+  jobList.querySelectorAll<HTMLButtonElement>("[data-retry-job]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const job = jobs.find((item) => item.job_id === button.dataset.retryJob);
+      if (job) void retryJob(job);
+    });
+  });
   jobList.querySelectorAll<HTMLButtonElement>("[data-delete-job]").forEach((button) => {
     button.addEventListener("click", () => {
       const job = jobs.find((item) => item.job_id === button.dataset.deleteJob);
       if (job) void deleteJob(job);
     });
   });
+}
+
+async function retryJob(job: LocalJob): Promise<void> {
+  if (job.status !== "failed") return;
+  if (jobManagementMessage) jobManagementMessage.textContent = "正在从冻结参数创建重试任务…";
+  try {
+    const newJobId = await invoke<string>("retry_job", { jobId: job.job_id });
+    if (jobManagementMessage) {
+      jobManagementMessage.textContent = `已创建新的重试任务 ${newJobId}；失败任务保留不变。`;
+    }
+    await refresh();
+  } catch (error) {
+    if (jobManagementMessage) jobManagementMessage.textContent = `重试失败：${String(error)}`;
+  }
 }
 
 function matchesTerminalStatus(status: string): boolean {
@@ -755,6 +1047,26 @@ async function refresh(): Promise<void> {
     jobList.innerHTML = `<div class="empty-state error">无法读取本地任务：${escapeHtml(String(error))}</div>`;
   } finally {
     refreshing = false;
+  }
+}
+
+async function refreshActiveJob(): Promise<void> {
+  const current = activeDetail;
+  if (!current || matchesTerminalStatus(current.job.status) || hasUnsavedSubtitleEdits()) return;
+  try {
+    const detail = await invoke<JobDetail>("get_job_detail", { jobId: current.job.job_id });
+    if (!activeDetail || activeDetail.job.job_id !== detail.job.job_id) return;
+    const completedNow = matchesTerminalStatus(detail.job.status);
+    activeDetail.job = detail.job;
+    if (workspaceMessage) {
+      workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message}`;
+    }
+    if (completedNow || detail.segments.length !== activeDetail.segments.length) {
+      activeDetail = detail;
+      renderWorkspace(detail);
+    }
+  } catch (error) {
+    if (workspaceMessage) workspaceMessage.textContent = `自动刷新失败：${String(error)}`;
   }
 }
 
@@ -1714,6 +2026,19 @@ async function applyPreviewedGlossary(): Promise<void> {
 }
 
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
+document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
+  if (!settingsDialog?.open) settingsDialog?.showModal();
+  void loadDesktopSettings(false);
+});
+document.querySelector<HTMLButtonElement>("#close-settings")?.addEventListener("click", () => settingsDialog?.close());
+document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
+document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
+settingsProvider?.addEventListener("change", syncProviderSettings);
+settingsForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveSettings(false);
+});
+document.querySelector<HTMLButtonElement>("#finish-settings")?.addEventListener("click", () => void saveSettings(true));
 document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
   activeMedia?.pause();
   activeDetail = null;
@@ -1860,14 +2185,7 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
 });
 
 syncVadControls();
-void invoke<RecognitionDefaults>("recognition_defaults")
-  .then((defaults) => {
-    if (modelPath && !modelPath.value && defaults.whisperModelPath) modelPath.value = defaults.whisperModelPath;
-    if (vadModelPath && !vadModelPath.value && defaults.vadModelPath) vadModelPath.value = defaults.vadModelPath;
-  })
-  .catch(() => {
-    // Manual path entry and the native pickers remain available.
-  });
+void loadDesktopSettings(true);
 
 void invoke<string>("data_directory")
   .then((path) => {
@@ -1876,18 +2194,11 @@ void invoke<string>("data_directory")
   .catch(() => {
     if (dataPath) dataPath.textContent = "本地数据目录暂不可用。";
   });
-void invoke<TranslationStatus>("translation_status")
-  .then((status) => {
-    translationStatus = status;
-    updateTranslationControls();
-  })
-  .catch((error) => {
-    setWorkspaceAction(`无法读取翻译配置：${String(error)}`, true);
-    updateTranslationControls();
-  });
+void refreshTranslationStatus();
 void refreshGlossaries();
 void refresh();
 window.setInterval(() => void refresh(), 2_000);
+window.setInterval(() => void refreshActiveJob(), 2_000);
 window.setInterval(() => {
   if (activeDetail && videoRenders.some((render) => render.status === "queued" || render.status === "running")) {
     void refreshVideoRenders();

@@ -74,6 +74,18 @@ impl Job {
         })
     }
 
+    pub fn read_recognition_options(&self) -> Result<TranscriptionOptions> {
+        let data = fs::read(&self.recognition_options_json).with_context(|| {
+            format!("failed to read {}", self.recognition_options_json.display())
+        })?;
+        serde_json::from_slice(&data).with_context(|| {
+            format!(
+                "failed to parse {}",
+                self.recognition_options_json.display()
+            )
+        })
+    }
+
     pub fn write_whisper_prompt(&self, prompt: Option<&str>) -> Result<()> {
         fs::write(&self.whisper_prompt_txt, prompt.unwrap_or_default())
             .with_context(|| format!("failed to write {}", self.whisper_prompt_txt.display()))
