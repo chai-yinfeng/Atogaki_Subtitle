@@ -34,8 +34,9 @@
       "binaries/ffprobe",
       "binaries/whisper-cli"
     ],
-    "resources": [
-      "third-party/**/*"
-    ]
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "third-party/": "third-party/"
+    }
   }
 }

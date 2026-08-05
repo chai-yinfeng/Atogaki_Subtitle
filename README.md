@@ -180,3 +180,9 @@ cargo run -- rerender atogaki_jobs/job-...
 ```
 
 Use `DEEPL_AUTH_KEY` or pass `--deepl-auth-key`.
+
+## License
+
+Atogaki's own source code, documentation, and build configuration are licensed under the
+[Apache License 2.0](LICENSE). Bundled sidecars, models, libraries, and other third-party material
+remain subject to their respective licenses; see `src-tauri/third-party/README.md`.
