@@ -30,9 +30,12 @@ export ATOGAKI_WHISPER_CLI="/path/to/whisper-cli"
 export ATOGAKI_WHISPER_MODEL="/path/to/ggml-medium.bin"
 export ATOGAKI_VAD_MODEL="/path/to/ggml-silero-v6.2.0.bin"
 export DEEPL_AUTH_KEY="your-deepl-api-key"
+export ATOGAKI_DATA_DIR="/absolute/path/to/isolated-atogaki-data"
 npm --prefix ui run build
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
+
+真实窗口回归必须设置绝对路径的 `ATOGAKI_DATA_DIR`。桌面端会在启动时创建并规范化该目录，将测试 SQLite、任务目录、词表和烧录快照全部隔离在其中；不设置时才使用系统正式应用数据目录。媒体、模型和用户选择的最终导出文件仍位于各自原路径，因此回归时也应选择独立导出目录。
 
 当前直接使用 `cargo run` 时加载的是最近一次 `ui/dist`，所以修改前端后必须先运行前端构建。`tauri.conf.json` 刻意不配置 `devUrl`，避免普通 `cargo run` 在没有同时启动 Vite server 时显示白屏。开发窗口启动后，首页会显示实际的应用数据目录和 SQLite 任务列表。
 
@@ -79,6 +82,8 @@ cargo run --manifest-path src-tauri/Cargo.toml
 22. 完成后记录应显示最终编码器和音频处理方式；VideoToolbox 运行时失败时，应显示回退原因与 `libx264`。点击“在 Finder 中显示”应选中最终 MP4。
 23. 任务目录 `renders/` 应保存本次不可变 ASS 快照；烧录期间继续编辑 SQLite 字幕只影响下次提交。
 24. 将原媒体临时移走后重新打开任务，应显示可操作错误；若任务目录已有 `audio.wav`，应回退到音频。
+
+每轮真实窗口回归还应确认首页显示的数据目录等于本轮 `ATOGAKI_DATA_DIR`，并在结束后检查系统正式应用数据目录未产生本轮测试任务。
 
 真实一秒视频烧录回归可单独运行：
 

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf};
 
 use atogaki_subtitle::{
     application::{
@@ -675,10 +675,40 @@ fn desktop_transcription_options(
     Ok(options)
 }
 
+fn validated_data_dir_override(value: Option<OsString>) -> Result<Option<PathBuf>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_empty() {
+        return Err("ATOGAKI_DATA_DIR must not be empty".to_string());
+    }
+
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        return Err(format!(
+            "ATOGAKI_DATA_DIR must be an absolute path: {}",
+            path.display()
+        ));
+    }
+    std::fs::create_dir_all(&path).map_err(|error| {
+        format!(
+            "failed to create ATOGAKI_DATA_DIR {}: {error}",
+            path.display()
+        )
+    })?;
+    path.canonicalize().map(Some).map_err(|error| {
+        format!(
+            "failed to resolve ATOGAKI_DATA_DIR {}: {error}",
+            path.display()
+        )
+    })
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
+            let data_dir = validated_data_dir_override(std::env::var_os("ATOGAKI_DATA_DIR"))?
+                .unwrap_or(app.path().app_data_dir()?);
             let config = AppConfig {
                 ffmpeg: desktop_ffmpeg_path(),
                 whisper_cli: std::env::var_os("ATOGAKI_WHISPER_CLI")
@@ -759,7 +789,33 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{SubmitTranscriptionRequest, desktop_transcription_options};
+    use super::{
+        SubmitTranscriptionRequest, desktop_transcription_options, validated_data_dir_override,
+    };
+
+    #[test]
+    fn desktop_data_directory_override_requires_an_absolute_path() {
+        let error = validated_data_dir_override(Some("relative/test-data".into())).unwrap_err();
+
+        assert!(error.contains("must be an absolute path"));
+    }
+
+    #[test]
+    fn desktop_data_directory_override_creates_an_isolated_directory() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-desktop-data-test-{nonce}"));
+
+        let resolved = validated_data_dir_override(Some(root.clone().into_os_string()))
+            .unwrap()
+            .unwrap();
+
+        assert!(resolved.is_dir());
+        assert_eq!(resolved, root.canonicalize().unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn desktop_request_keeps_vad_disabled_when_no_model_is_selected() {
