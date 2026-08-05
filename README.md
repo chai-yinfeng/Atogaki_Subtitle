@@ -60,7 +60,7 @@ cargo run -- process input.mp4 \
 
 Whisper tries the GPU/Metal backend by default and automatically retries once with `--no-gpu` when the failure looks GPU-related. Pass `--no-gpu` to force CPU mode from the start.
 
-The desktop application resolves tools from `ATOGAKI_FFMPEG` and `ATOGAKI_WHISPER_CLI` before falling back to `PATH`. When multiple Homebrew ffmpeg formulae are installed, verify the configured binary itself rather than the `ffmpeg` shell symlink.
+The desktop application resolves tools from `ATOGAKI_FFMPEG` and `ATOGAKI_WHISPER_CLI` before falling back to `PATH`. When multiple Homebrew ffmpeg formulae are installed, verify the configured binary itself rather than the `ffmpeg` shell symlink. Hard-subtitle rendering prefers the real `h264_videotoolbox` hardware encoder and falls back visibly to libx264; CRF and preset settings apply only to that software fallback.
 
 Glossary files can be passed with `--glossary` or `ATOGAKI_GLOSSARY`. Plain lines are fed into Whisper's initial prompt as likely proper nouns. Lines in `wrong => correct` form are also applied as conservative text replacements after ASR.
 For a canonical spelling whose Japanese reading differs, use the reading on the left, for example

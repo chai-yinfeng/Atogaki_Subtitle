@@ -48,6 +48,10 @@ pub async fn transcribe(
     }
     let prompt = glossary::build_whisper_prompt(options)?;
 
+    if !options.no_gpu {
+        eprintln!("whisper-cli: requesting GPU device 0 (Metal on supported macOS builds)");
+    }
+
     let first = run_whisper(
         whisper_cli,
         options,
@@ -159,6 +163,9 @@ fn build_args(
     }
     if force_cpu {
         args.push("--no-gpu".into());
+    } else {
+        args.push("--device".into());
+        args.push("0".into());
     }
     if let Some(prompt) = prompt {
         args.push("--prompt".into());
@@ -277,4 +284,40 @@ fn json_path(prefix: &Path) -> PathBuf {
     let mut path = prefix.to_path_buf();
     path.set_extension("json");
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_args;
+    use crate::application::TranscriptionOptions;
+    use std::path::Path;
+
+    fn string_args(force_cpu: bool) -> Vec<String> {
+        build_args(
+            &TranscriptionOptions::japanese("model.bin".into()),
+            Path::new("audio.wav"),
+            Path::new("transcript"),
+            None,
+            force_cpu,
+        )
+        .into_iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect()
+    }
+
+    #[test]
+    fn requests_the_first_gpu_device_by_default() {
+        let args = string_args(false);
+
+        assert!(args.windows(2).any(|pair| pair == ["--device", "0"]));
+        assert!(!args.iter().any(|argument| argument == "--no-gpu"));
+    }
+
+    #[test]
+    fn cpu_retry_disables_gpu_instead_of_selecting_a_device() {
+        let args = string_args(true);
+
+        assert!(args.iter().any(|argument| argument == "--no-gpu"));
+        assert!(!args.iter().any(|argument| argument == "--device"));
+    }
 }

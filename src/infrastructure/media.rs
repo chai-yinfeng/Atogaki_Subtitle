@@ -1,9 +1,20 @@
-use std::path::{Path, PathBuf};
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use tokio::process::Command;
 
 use crate::{domain::render::RenderOptions, interface::cli::RecordArgs};
+
+const VIDEOTOOLBOX_QUALITY: u8 = 65;
+
+#[derive(Debug, Clone, Copy)]
+enum HardSubtitleEncoder {
+    VideoToolbox,
+    Libx264,
+}
 
 pub async fn list_capture_devices(ffmpeg: &Path) -> Result<()> {
     let output = Command::new(ffmpeg)
@@ -83,21 +94,12 @@ pub async fn render_subtitles(
         anyhow::bail!("ASS subtitle file does not exist: {}", ass.display());
     }
 
-    if supports_filter(ffmpeg, "ass").await? {
-        return burn_ass(ffmpeg, input, ass, output, options).await;
-    }
-
-    if !fallback_srt.exists() {
+    if !supports_filter(ffmpeg, "ass").await? {
         anyhow::bail!(
-            "ffmpeg does not support the ass filter, and fallback SRT is missing: {}",
-            fallback_srt.display()
+            "hard subtitle rendering requires ffmpeg with the libass/ass filter; select soft subtitles explicitly or configure ffmpeg-full"
         );
     }
-
-    eprintln!(
-        "ffmpeg does not support libass/ass filter; muxing bilingual soft subtitles instead of burning them."
-    );
-    mux_srt_soft_subtitle(ffmpeg, input, fallback_srt, output).await
+    burn_ass(ffmpeg, input, ass, output, options).await
 }
 
 async fn burn_ass(
@@ -119,27 +121,100 @@ async fn burn_ass_with_encoder(
     filter: &str,
     options: &RenderOptions,
 ) -> Result<()> {
-    let mut cmd = Command::new(ffmpeg);
-    cmd.args(["-y", "-i"]);
-    cmd.arg(input);
-    cmd.args(["-vf", filter]);
-    if supports_encoder(ffmpeg, "libx264").await? {
-        let crf = options.video_crf.to_string();
-        cmd.args([
-            "-c:v",
-            "libx264",
-            "-preset",
-            &options.video_preset,
-            "-crf",
-            &crf,
-            "-pix_fmt",
-            "yuv420p",
-        ]);
+    if supports_encoder(ffmpeg, "h264_videotoolbox").await? {
+        eprintln!("ffmpeg render: using VideoToolbox hardware H.264 encoder");
+        let result = run_burn_command(
+            ffmpeg,
+            input,
+            output,
+            filter,
+            options,
+            HardSubtitleEncoder::VideoToolbox,
+        )
+        .await;
+        if result.is_ok() {
+            return result;
+        }
+        eprintln!(
+            "VideoToolbox render failed; retrying with libx264. Original failure: {}",
+            result.unwrap_err()
+        );
     }
-    cmd.args(["-c:a", "copy"]);
-    cmd.arg(output);
 
+    if !supports_encoder(ffmpeg, "libx264").await? {
+        anyhow::bail!(
+            "ffmpeg supports neither h264_videotoolbox nor libx264 for subtitle rendering"
+        );
+    }
+    eprintln!("ffmpeg render: using libx264 software encoder");
+    run_burn_command(
+        ffmpeg,
+        input,
+        output,
+        filter,
+        options,
+        HardSubtitleEncoder::Libx264,
+    )
+    .await
+}
+
+async fn run_burn_command(
+    ffmpeg: &Path,
+    input: &Path,
+    output: &Path,
+    filter: &str,
+    options: &RenderOptions,
+    encoder: HardSubtitleEncoder,
+) -> Result<()> {
+    let mut cmd = Command::new(ffmpeg);
+    cmd.args(burn_args(input, output, filter, options, encoder));
     run_checked(cmd, "ffmpeg render").await
+}
+
+fn burn_args(
+    input: &Path,
+    output: &Path,
+    filter: &str,
+    options: &RenderOptions,
+    encoder: HardSubtitleEncoder,
+) -> Vec<OsString> {
+    let mut args = vec![
+        "-y".into(),
+        "-i".into(),
+        input.as_os_str().to_os_string(),
+        "-vf".into(),
+        filter.into(),
+    ];
+    match encoder {
+        HardSubtitleEncoder::VideoToolbox => args.extend([
+            "-c:v".into(),
+            "h264_videotoolbox".into(),
+            "-q:v".into(),
+            VIDEOTOOLBOX_QUALITY.to_string().into(),
+            "-profile:v".into(),
+            "high".into(),
+            "-allow_sw".into(),
+            "0".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
+        ]),
+        HardSubtitleEncoder::Libx264 => args.extend([
+            "-c:v".into(),
+            "libx264".into(),
+            "-preset".into(),
+            options.video_preset.clone().into(),
+            "-crf".into(),
+            options.video_crf.to_string().into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
+        ]),
+    }
+    args.extend([
+        "-c:a".into(),
+        "copy".into(),
+        output.as_os_str().to_os_string(),
+    ]);
+    args
 }
 
 async fn mux_srt_soft_subtitle(
@@ -229,4 +304,53 @@ fn escape_filter_path(path: &Path) -> String {
         .replace('\\', "\\\\")
         .replace(':', "\\:")
         .replace('\'', "\\'")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HardSubtitleEncoder, burn_args};
+    use crate::domain::render::RenderOptions;
+    use std::path::Path;
+
+    fn options() -> RenderOptions {
+        RenderOptions {
+            video_crf: 20,
+            video_preset: "medium".to_string(),
+            soft_subtitles: false,
+        }
+    }
+
+    fn string_args(encoder: HardSubtitleEncoder) -> Vec<String> {
+        burn_args(
+            Path::new("input.mp4"),
+            Path::new("output.mp4"),
+            "ass=subtitle.ass",
+            &options(),
+            encoder,
+        )
+        .into_iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect()
+    }
+
+    #[test]
+    fn videotoolbox_render_requires_real_hardware_encoding() {
+        let args = string_args(HardSubtitleEncoder::VideoToolbox);
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["-c:v", "h264_videotoolbox"])
+        );
+        assert!(args.windows(2).any(|pair| pair == ["-allow_sw", "0"]));
+        assert!(!args.iter().any(|argument| argument == "libx264"));
+    }
+
+    #[test]
+    fn software_fallback_keeps_configured_crf_and_preset() {
+        let args = string_args(HardSubtitleEncoder::Libx264);
+
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
+        assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
+        assert!(args.windows(2).any(|pair| pair == ["-preset", "medium"]));
+    }
 }
