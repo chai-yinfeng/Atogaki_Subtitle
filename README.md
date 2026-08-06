@@ -1,188 +1,160 @@
-# Atogaki Subtitle
+# Atogaki
 
-Local-first Japanese audio/video transcription and translation workspace.
+Atogaki 是一个本地优先的日语音视频理解、字幕校对与导出工具。它最初是为了把
+ヨルシカ「後書き」电台整理成便于中文使用者理解和学习的日中双语资料；长期方向是扩展为泛用的本地字幕识别、翻译、编辑和烧录工作台。
 
-The repository contains a reusable Rust processing core, a CLI, an experimental Web/Postgres shell, and a Tauri desktop MVP backed by local SQLite. Product direction and current milestones live in `docs/product-direction.md` and `docs/roadmap.md`.
+项目目前处于 macOS Apple Silicon 预发布阶段。核心闭环已经可用，但尚未提供签名、公证的正式安装包。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
-## Architecture
+## 能做什么
 
-The code is organized into four layers:
+- 导入本机音频或视频，用内置 `whisper-cli` 和用户下载的 Whisper 模型在本地识别日语。
+- 使用 Silero VAD 过滤静音、音乐和环境声，并通过词表提高人名与作品名的一致性。
+- 在播放器中按时间轴查看、跳转和编辑字幕；日文修改后会标记对应中文为待重译。
+- 可选使用 DeepL 将日文翻译为简体中文。翻译接口已与工作区解耦，后续可以增加 Google Translate 或 LLM provider。
+- 从当前 SQLite 工作区导出日文、中文和双语 SRT/ASS，或把字幕烧录到 MP4。
+- 记录任务、失败阶段、重试来源和烧录历史；重启后会识别被中断的任务，并允许从冻结参数创建新任务重试。
 
-- `src/interface`: CLI argument parsing and command dispatch.
-- `src/application`: job specs, job status, and `JobRunner` workflow orchestration.
-- `src/domain`: transcript segments, glossary handling, segmentation, and subtitle formatting.
-- `src/infrastructure`: filesystem job storage, ffmpeg, whisper-cli, DeepL, and runtime config.
+媒体、模型、任务和编辑结果默认保留在设备上。只有启用云端翻译时，待翻译的日文字幕及有限的相邻上下文会发送给所选 provider。
 
-The CLI and future Web API should call the application layer instead of invoking ffmpeg, Whisper, or DeepL directly.
+## 安装与首次配置
 
-## Requirements
+当前首先支持 Apple Silicon Mac。正式 GitHub Release 发布前，开发者可以按下文从源码构建；测试版 DMG 会作为 GitHub Release asset 提供，而不会提交到 Git 历史。
 
-- Rust toolchain
-- CLI 开发需要可用的 `ffmpeg` 与 whisper.cpp `whisper-cli`
-- 打包桌面 App 先运行 `./scripts/build-sidecars-macos.sh`，生成内置的 LGPL FFmpeg/ffprobe 与 whisper-cli sidecar
-- A local Whisper model, for example `ggml-medium.bin`
-- DeepL API key for translation
+首次打开 App 时，启动配置会引导完成三部分：
 
-Useful environment variables:
+1. **本地模型。** 选择已有 `ggml-*.bin`，或下载 Whisper 与 Silero VAD。App 管理的默认目录通常是 `~/Library/Application Support/com.chai-yinfeng.atogaki/models/`，界面会显示本机的实际路径。
+2. **网络。** 选择跟随启动环境、强制直连或自定义 HTTP/HTTPS 代理；也可以填写 HTTPS 模型镜像。连接测试使用当前输入，实际下载使用保存后的设置。
+3. **云端翻译。** DeepL 是可选项。不配置仍可完成日语识别、编辑和日文字幕导出。
 
-```bash
-export DEEPL_AUTH_KEY="your-key"
-export ATOGAKI_FFMPEG="/path/to/ffmpeg"
-export ATOGAKI_WHISPER_CLI="/opt/homebrew/bin/whisper-cli"
-export ATOGAKI_WHISPER_MODEL="/Users/black_magic/Models/whisper/ggml-medium.bin"
-export ATOGAKI_VAD_MODEL="/Users/black_magic/Models/whisper/ggml-silero-v6.2.0.bin"
-export ATOGAKI_GLOSSARY="/Users/black_magic/Desktop/Coding_projects/Atogaki_Sub/assets/glossaries/yorushika.txt"
+Whisper 模型建议：
+
+| 模型 | 大约大小 | 适用场景 |
+| --- | ---: | --- |
+| small | 466 MiB | 8 GB 内存或更快的初步识别 |
+| medium | 1.5 GiB | 当前日语节目质量基线，16 GB 及以上内存推荐 |
+| large-v3-turbo q5_0 | 547 MiB | Apple Silicon 上的实验选项，需要与 medium 做真实节目对比 |
+| Silero VAD v6.2.0 | 865 KiB | 推荐与任一 Whisper 模型配套使用 |
+
+`large-v3-turbo q5_0` 比 medium 文件更小，是因为它属于更快的 turbo 架构并经过 5-bit 量化；文件大小不能直接代表识别质量。所有内建下载项都有固定 SHA-256，镜像内容与预期不一致时不会安装。
+
+Finder 启动的 App 不会执行 `.zshrc`，因此终端中的 `proxy_on` 不一定传给它。透明/TUN 代理通常可以直接生效；使用本地 HTTP 代理端口时，请在 App 设置中填写，例如 `http://127.0.0.1:7897`。模型镜像失败后会回退 Hugging Face 官方源。
+
+DeepL API Key 在 macOS 写入 Keychain；SQLite 只保存“选择了哪个 provider、是否已经配置”等非敏感设置，任务目录也不会复制 Key。Windows 版本将使用 Credential Manager，Linux 版本将使用 Secret Service。`DEEPL_AUTH_KEY` 仅作为开发兼容回退。
+
+## 基本使用
+
+1. 在“设置”中选好或下载 Whisper 模型，建议同时启用 VAD；需要中文时再配置 DeepL。
+2. 在首页选择本地媒体、识别模型和词表，创建日语转写任务。
+3. 等待任务完成后进入工作区，点击时间码定位原音，检查并修正日文。
+4. 单段重译或批量翻译；也可以直接人工编辑中文。
+5. 导出四份字幕文件，或选择日文、中文、双语样式烧录视频。
+
+删除一个已结束的任务会移除 Atogaki 管理的 SQLite 记录与任务派生产物，不会删除最初导入的媒体，也不会删除共用模型。模型下载中的 `.part` 临时文件会在 App 下次启动时清理；系统临时目录仍由 macOS 自行管理。
+
+硬字幕必须重新编码视频。内置 FFmpeg 依次尝试：
+
+1. Apple VideoToolbox H.264；
+2. FFmpeg 原生 LGPL MPEG-4 软件编码；
+3. 两者都失败时保留错误与 ASS 快照，并明确将烧录标记为失败。
+
+分发版不包含 GPL `libx264`。因此软件回退生成的文件通常会比 x264 更大，但 VideoToolbox 故障不会直接让导出失去回退路径。
+
+## 本地数据与隐私
+
+macOS 正式数据目录通常为：
+
+```text
+~/Library/Application Support/com.chai-yinfeng.atogaki/
+├── atogaki.sqlite
+├── jobs/
+└── models/
 ```
 
-## Quick Start
+可在开发或隔离测试时使用绝对路径覆盖：
 
 ```bash
-cargo run -- process input.mp4 \
-  --model /path/to/ggml-medium.bin \
-  --deepl-auth-key "$DEEPL_AUTH_KEY"
+ATOGAKI_DATA_DIR=/private/tmp/atogaki-isolated-test \
+  cargo run --manifest-path src-tauri/Cargo.toml
 ```
 
-If `ATOGAKI_WHISPER_MODEL` and `DEEPL_AUTH_KEY` are set:
+产品遵循以下边界：
+
+- 只处理用户在本机拥有或有权使用的媒体，不提供受限制内容下载或绕过机制。
+- 本地识别不上传媒体；云端翻译只接收字幕文本与为连贯性所需的局部上下文。
+- 原始媒体不由任务删除操作管理；密钥不进入 SQLite、日志或任务快照。
+- 任务参数、词表快照和导出来源可追溯，重试不会覆盖原任务和人工修改。
+
+## 从源码构建桌面 App
+
+需要 Rust、Node.js/npm、Tauri CLI，以及用于构建 sidecar 的 Xcode Command Line Tools、CMake、Meson、Ninja、pkg-config、Autoconf/Automake/Libtool。sidecar 构建脚本会下载并校验固定版本源码。
 
 ```bash
-cargo run -- process input.mp4
-```
-
-For tighter timestamping, pass a whisper.cpp VAD model:
-
-```bash
-cargo run -- process input.mp4 \
-  --model /path/to/ggml-medium.bin \
-  --vad-model /path/to/ggml-silero-v5.1.2.bin
-```
-
-Whisper tries the GPU/Metal backend by default and automatically retries once with `--no-gpu` when the failure looks GPU-related. Pass `--no-gpu` to force CPU mode from the start.
-
-The packaged desktop application uses `ffmpeg`, `ffprobe`, and `whisper-cli` from its App Bundle. `ATOGAKI_FFMPEG`, `ATOGAKI_FFPROBE`, and `ATOGAKI_WHISPER_CLI` remain explicit development overrides. Hard-subtitle rendering tries real `h264_videotoolbox`, falls back visibly to FFmpeg's native LGPL `mpeg4` encoder, and fails only if both layers fail. The distributed FFmpeg does not contain libx264.
-
-Glossary files can be passed with `--glossary` or `ATOGAKI_GLOSSARY`. Plain lines are fed into Whisper's initial prompt as likely proper nouns. Lines in `wrong => correct` form are also applied as conservative text replacements after ASR.
-For a canonical spelling whose Japanese reading differs, use the reading on the left, for example
-`スイ => suis`: Whisper is prompted with both forms and the post-ASR pass normalizes the result to
-`suis`. This is an ASR glossary and does not configure DeepL translation terminology.
-
-Outputs are written to `./atogaki_jobs/<timestamp>/` by default:
-
-- `status.json`
-- `audio.wav`
-- `segments.json`
-- `ja.srt`
-- `zh.srt`
-- `bilingual.srt`
-- `bilingual.ass`
-
-`status.json` records the durable job state for CLI progress and future Web polling.
-
-## Commands
-
-Build and check the desktop MVP:
-
-```bash
-npm --prefix ui install
+npm --prefix ui ci
 npm --prefix ui run build
 ./scripts/build-sidecars-macos.sh
 cargo check --manifest-path src-tauri/Cargo.toml
-```
-
-After the frontend build, launch the desktop application directly:
-
-```bash
-export DEEPL_AUTH_KEY="your-deepl-api-key" # optional; enables Japanese -> Simplified Chinese
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
 
-The desktop home screen can submit transcription jobs. Select a completed task to open the
-playback workspace, follow the highlighted subtitle, click a timecode to seek, and save Japanese
-or Chinese edits to SQLite. With DeepL configured, the workspace can translate one segment or
-atomically retranslate all segments, then export Japanese, Chinese, and bilingual SRT/ASS files
-from the current SQLite state. Recognition glossaries can be created and edited in the desktop,
-selected for a new Whisper task, previewed against an existing SQLite workspace, and extended from
-a manual subtitle correction. Each selected glossary is snapshotted inside its task directory for
-reproducibility. See `docs/desktop-testing.md` for the manual smoke-test checklist and current codec
-limitations.
-
-Desktop tasks may be given a SQLite-backed display name without renaming their durable UUID
-directory. Finished and failed tasks can be deleted from the task list; deletion removes only the
-managed task directory and SQLite workspace, never the original imported media file.
-
-Start the Web API shell:
+构建未签名 App 或 DMG：
 
 ```bash
-cargo run -- serve --bind 127.0.0.1:8080
+tauri build --bundles app --no-sign
+CI=true tauri build --bundles dmg --no-sign
 ```
 
-With Postgres configured, the server connects and runs migrations at startup:
+产物位于 `src-tauri/target/release/bundle/`。详细窗口回归见 [`docs/desktop-testing.md`](docs/desktop-testing.md)，发布资产和 LGPL 源码归档见 [`docs/releasing.md`](docs/releasing.md)。
+
+根目录和 Tauri 目录各有一个 Cargo package，因此会出现两个构建目录：
+
+- `target/`：根 package 的 Rust 核心、CLI、测试和旧 Web API 构建缓存。
+- `src-tauri/target/`：桌面 package、Tauri App/DMG 和相关构建缓存。
+
+两者都不是源码，也不会提交到 Git；可以在不需要增量编译时分别用对应 manifest 的 `cargo clean` 重建。
+
+## CLI（开发与兼容入口）
+
+CLI 仍用于核心开发、自动化和故障定位，但不再是面向普通用户的主要产品形态：
 
 ```bash
-export DATABASE_URL="postgres://$(whoami)@localhost:5432/atogaki_dev"
-cargo run -- serve --bind 127.0.0.1:8080
+cargo run -- --help
+cargo run -- process input.mp4 --model /path/to/ggml-medium.bin
+cargo run -- render input.mp4 atogaki_jobs/job-... --output output.mp4
 ```
 
-List macOS/ffmpeg capture devices:
+CLI 可通过参数或 `ATOGAKI_FFMPEG`、`ATOGAKI_WHISPER_CLI`、`ATOGAKI_WHISPER_MODEL`、`ATOGAKI_VAD_MODEL`、`ATOGAKI_GLOSSARY` 和 `DEEPL_AUTH_KEY` 覆盖开发环境。打包 App 默认使用 Bundle 内的 sidecar 和 App 自己的设置，不要求用户配置这些环境变量。
 
-```bash
-cargo run -- devices
+## 代码库构成
+
+```text
+Atogaki_Sub/
+├── src/                    Rust 处理核心、CLI 与早期 Web API
+│   ├── application/        任务编排和本地服务
+│   ├── domain/             字幕、分段、词表和导出规则
+│   ├── infrastructure/     FFmpeg、Whisper、provider、SQLite 与文件系统
+│   └── interface/          CLI / HTTP 输入边界
+├── src-tauri/              Tauri 桌面主进程、系统集成和打包配置
+│   ├── binaries/           按 target triple 命名的本地 sidecar
+│   └── third-party/        构建清单、许可证与生成的第三方声明
+├── ui/                     TypeScript/CSS 桌面界面
+├── assets/glossaries/      可复用的内建识别词表
+├── migrations/             Postgres 与 SQLite schema 迁移
+├── scripts/                sidecar 构建、许可证审计和发布源码归档
+└── docs/                   产品方向、路线图、测试、发布与架构决策
 ```
 
-Record audio through ffmpeg:
+桌面 App 复用 `src/` 的 application/domain/infrastructure 层。`serve` 与 Postgres schema 是早期探索，不是当前桌面 MVP 的主架构。
 
-```bash
-cargo run -- record --device ":0" --duration 300 --output capture.wav
-```
+## 开发准则与当前边界
 
-Process a media file end-to-end:
+- 正确性、可编辑性和可回看性优先于实时性；实时辅助属于后续阶段。
+- 时间轴和人工修正是一等数据，重新识别与重试应派生新任务而非覆盖旧结果。
+- 首个语言组合是日语识别、简体中文翻译，但内部 provider 与领域接口不应写死此组合。
+- 首个平台是 macOS Apple Silicon；x86_64 macOS 和 Windows 需要独立构建、许可证审计与真实设备回归。
+- 当前没有账号、云端文件托管、跨设备同步或自动媒体下载。
 
-```bash
-cargo run -- process input.mp4 --model /path/to/model.bin
-```
+项目方向见 [`docs/product-direction.md`](docs/product-direction.md)，完成度和技术债见 [`docs/roadmap.md`](docs/roadmap.md)。适合后续补充的公开材料包括 App 截图/短演示、已知问题、测试设备矩阵、贡献指南和稳定 Release 下载入口；这些应在首轮功能回归与外部测试反馈稳定后加入。
 
-Process and render subtitles into a video. With the bundled FFmpeg this burns styled ASS subtitles using VideoToolbox when available and native MPEG-4 as the software fallback. Otherwise, select soft subtitles explicitly to mux bilingual SRT.
+## 许可证
 
-```bash
-cargo run -- process input.mp4 \
-  --model /path/to/model.bin \
-  --render-output output.mp4
-```
-
-Hard-subtitle rendering must re-encode the video because subtitles become pixels in the video stream. Legacy `--video-crf` and `--video-preset` options remain accepted for CLI compatibility but do not control the fixed-quality LGPL MPEG-4 fallback.
-
-```bash
-cargo run -- render input.mp4 atogaki_jobs/job-... \
-  --output output.mp4 \
-  --video-crf 18 \
-  --video-preset medium
-```
-
-To preserve the original video stream, mux bilingual SRT as a soft subtitle track instead:
-
-```bash
-cargo run -- render input.mp4 atogaki_jobs/job-... \
-  --output output-soft.mp4 \
-  --soft-subtitles
-```
-
-After changing glossary rules, apply them to an existing job without rerunning Whisper. Changed Japanese lines have their stale Chinese translations cleared by default, so run `translate` again before final export/render.
-
-```bash
-cargo run -- apply-glossary atogaki_jobs/job-...
-cargo run -- translate atogaki_jobs/job-...
-cargo run -- export atogaki_jobs/job-...
-```
-
-If a job already has `input` and `render_output` in `status.json`, rerender it without repeating those paths:
-
-```bash
-cargo run -- rerender atogaki_jobs/job-...
-```
-
-Use `DEEPL_AUTH_KEY` or pass `--deepl-auth-key`.
-
-## License
-
-Atogaki's own source code, documentation, and build configuration are licensed under the
-[Apache License 2.0](LICENSE). Bundled sidecars, models, libraries, and other third-party material
-remain subject to their respective licenses; see `src-tauri/third-party/README.md`.
+Atogaki 自有源码、文档和构建配置使用 [Apache License 2.0](LICENSE)。第三方 crate、前端包、sidecar、模型和其他材料遵循各自许可证；详见 [`src-tauri/third-party/README.md`](src-tauri/third-party/README.md) 和 [`docs/third-party-license-audit.md`](docs/third-party-license-audit.md)。

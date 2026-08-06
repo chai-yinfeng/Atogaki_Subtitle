@@ -10,18 +10,23 @@ DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后�
 
 - `Atogaki-v0.1.0-alpha.1-macos-arm64.dmg`
 - `Atogaki-v0.1.0-alpha.1-macos-arm64.dmg.sha256`
-- sidecar 的完整对应源码归档与校验值
-- `src-tauri/third-party/` 中的构建清单和许可证材料
+- `Atogaki-0.1.0-third-party-sources.tar.xz`
+- `Atogaki-0.1.0-third-party-sources.tar.xz.sha256`
+
+`src-tauri/third-party/` 中的项目依赖声明、sidecar 构建清单和许可证材料已经随 `.app` 进入 DMG；对应源码包单独上传，避免每个普通用户重复下载约数十 MiB 的源码。
 
 GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpeg、whisper.cpp 与静态依赖的对应源码材料。
 
 ## 首次手工预发布
 
 1. 在干净提交上完成 Rust、前端、打包 App、模型下载和真实窗口回归。
-2. 用固定 sidecar 构建 DMG；本机可用 `CI=true tauri build --bundles dmg --no-sign` 跳过 Finder 美化脚本。没有 Apple Developer 账号时只发布为明确标注“未签名、未公证”的 prerelease，供知情测试者使用。
-3. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.1`，并把 tag 推送到 GitHub。
-4. 在 GitHub 的 Releases 页面从该 tag 创建 prerelease，填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值和第三方许可证说明。
-5. 上传 DMG、SHA-256、第三方源码与许可证材料，而不是把它们 `git add` 到仓库。
+2. 运行 `./scripts/generate-rust-licenses.sh` 与 `node ./scripts/generate-frontend-licenses.mjs`，审阅并提交生成声明。详细范围见 `docs/third-party-license-audit.md`。
+3. 用固定 sidecar 构建 DMG；本机可用 `CI=true tauri build --bundles dmg --no-sign` 跳过 Finder 美化脚本。没有 Apple Developer 账号时只发布为明确标注“未签名、未公证”的 prerelease，供知情测试者使用。
+4. 运行 `./scripts/package-sidecar-sources-macos.sh`。进入输出目录执行 `shasum -a 256 -c Atogaki-0.1.0-third-party-sources.tar.xz.sha256`，并抽查归档的 `SOURCES.md`、`sources/SHA256SUMS` 和 `build/build-manifest.txt`。
+5. 为最终 DMG 生成 SHA-256，并挂载确认 App、Applications 链接、三个 sidecar、根许可证和 `third-party/` 声明都存在。
+6. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.1`，并把 tag 推送到 GitHub。
+7. 在 GitHub 的 Releases 页面从该 tag 创建 prerelease，填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值、模型不内置和第三方许可证说明。
+8. 上传 DMG、两个 SHA-256 文件与对应源码包，而不是把这些大产物 `git add` 到仓库。
 
 可使用 GitHub CLI 上传已核对的产物：
 
@@ -29,7 +34,8 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 gh release create v0.1.0-alpha.1 \
   path/to/Atogaki-v0.1.0-alpha.1-macos-arm64.dmg \
   path/to/Atogaki-v0.1.0-alpha.1-macos-arm64.dmg.sha256 \
-  path/to/Atogaki-v0.1.0-alpha.1-third-party-sources.tar.xz \
+  src-tauri/target/release/bundle/sources/Atogaki-0.1.0-third-party-sources.tar.xz \
+  src-tauri/target/release/bundle/sources/Atogaki-0.1.0-third-party-sources.tar.xz.sha256 \
   --prerelease --title "Atogaki v0.1.0-alpha.1" --notes-file path/to/release-notes.md
 ```
 

@@ -8,21 +8,7 @@ NOTICES_DIR="$PROJECT_DIR/src-tauri/third-party"
 TARGET_TRIPLE=$(rustc --print host-tuple)
 JOBS=$(sysctl -n hw.logicalcpu)
 MACOS_MINIMUM=${MACOSX_DEPLOYMENT_TARGET:-12.0}
-
-WHISPER_VERSION=v1.8.6
-WHISPER_COMMIT_PREFIX=23ee035
-FFMPEG_VERSION=8.1.2
-FFMPEG_SHA256=464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c
-LIBASS_VERSION=0.17.5
-LIBASS_SHA256=2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc
-LIBUNIBREAK_VERSION=7.0
-LIBUNIBREAK_SHA256=8c9a6e121736cd0d5c890ae3ae96f3f4010a19aa040f1dbded833a62a87717d3
-FRIBIDI_VERSION=1.0.16
-FRIBIDI_SHA256=1b1cde5b235d40479e91be2f0e88a309e3214c8ab470ec8a2744d82a5a9ea05c
-FREETYPE_VERSION=2.14.3
-FREETYPE_SHA256=36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f
-HARFBUZZ_VERSION=14.3.0
-HARFBUZZ_SHA256=16070d77cfc4ba1f1e7327e83bf9b3f55898081cabdb94e56a33e04fc8874eae
+source "$SCRIPT_DIR/sidecar-versions.zsh"
 
 case "$TARGET_TRIPLE" in
   aarch64-apple-darwin|x86_64-apple-darwin) ;;
@@ -78,7 +64,7 @@ export PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
 # make the App depend on the build machine.
 LIBUNIBREAK_ARCHIVE="$SOURCE_CACHE/libunibreak-$LIBUNIBREAK_VERSION.tar.gz"
 download_and_verify \
-  "https://github.com/adah1972/libunibreak/releases/download/libunibreak_7_0/libunibreak-$LIBUNIBREAK_VERSION.tar.gz" \
+  "$LIBUNIBREAK_SOURCE_URL" \
   "$LIBUNIBREAK_ARCHIVE" "$LIBUNIBREAK_SHA256"
 tar -xf "$LIBUNIBREAK_ARCHIVE" -C "$BUILD_ROOT"
 pushd "$BUILD_ROOT/libunibreak-$LIBUNIBREAK_VERSION" >/dev/null
@@ -89,7 +75,7 @@ popd >/dev/null
 
 FRIBIDI_ARCHIVE="$SOURCE_CACHE/fribidi-$FRIBIDI_VERSION.tar.xz"
 download_and_verify \
-  "https://github.com/fribidi/fribidi/releases/download/v$FRIBIDI_VERSION/fribidi-$FRIBIDI_VERSION.tar.xz" \
+  "$FRIBIDI_SOURCE_URL" \
   "$FRIBIDI_ARCHIVE" "$FRIBIDI_SHA256"
 tar -xf "$FRIBIDI_ARCHIVE" -C "$BUILD_ROOT"
 meson setup "$BUILD_ROOT/fribidi-$FRIBIDI_VERSION/build-atogaki" \
@@ -101,7 +87,7 @@ meson install -C "$BUILD_ROOT/fribidi-$FRIBIDI_VERSION/build-atogaki"
 
 FREETYPE_ARCHIVE="$SOURCE_CACHE/freetype-$FREETYPE_VERSION.tar.xz"
 download_and_verify \
-  "https://downloads.sourceforge.net/project/freetype/freetype2/$FREETYPE_VERSION/freetype-$FREETYPE_VERSION.tar.xz" \
+  "$FREETYPE_SOURCE_URL" \
   "$FREETYPE_ARCHIVE" "$FREETYPE_SHA256"
 tar -xf "$FREETYPE_ARCHIVE" -C "$BUILD_ROOT"
 cmake -S "$BUILD_ROOT/freetype-$FREETYPE_VERSION" \
@@ -120,7 +106,7 @@ cmake --install "$BUILD_ROOT/freetype-$FREETYPE_VERSION/build-atogaki"
 
 HARFBUZZ_ARCHIVE="$SOURCE_CACHE/harfbuzz-$HARFBUZZ_VERSION.tar.xz"
 download_and_verify \
-  "https://github.com/harfbuzz/harfbuzz/releases/download/$HARFBUZZ_VERSION/harfbuzz-$HARFBUZZ_VERSION.tar.xz" \
+  "$HARFBUZZ_SOURCE_URL" \
   "$HARFBUZZ_ARCHIVE" "$HARFBUZZ_SHA256"
 tar -xf "$HARFBUZZ_ARCHIVE" -C "$BUILD_ROOT"
 meson setup "$BUILD_ROOT/harfbuzz-$HARFBUZZ_VERSION/build-atogaki" \
@@ -135,7 +121,7 @@ meson install -C "$BUILD_ROOT/harfbuzz-$HARFBUZZ_VERSION/build-atogaki"
 
 LIBASS_ARCHIVE="$SOURCE_CACHE/libass-$LIBASS_VERSION.tar.xz"
 download_and_verify \
-  "https://github.com/libass/libass/releases/download/$LIBASS_VERSION/libass-$LIBASS_VERSION.tar.xz" \
+  "$LIBASS_SOURCE_URL" \
   "$LIBASS_ARCHIVE" "$LIBASS_SHA256"
 tar -xf "$LIBASS_ARCHIVE" -C "$BUILD_ROOT"
 pushd "$BUILD_ROOT/libass-$LIBASS_VERSION" >/dev/null
@@ -146,9 +132,9 @@ popd >/dev/null
 
 WHISPER_SOURCE="$BUILD_ROOT/whisper.cpp"
 git clone --branch "$WHISPER_VERSION" --depth 1 https://github.com/ggml-org/whisper.cpp.git "$WHISPER_SOURCE"
-WHISPER_COMMIT=$(git -C "$WHISPER_SOURCE" rev-parse HEAD)
-if [[ "$WHISPER_COMMIT" != ${WHISPER_COMMIT_PREFIX}* ]]; then
-  print -u2 "unexpected whisper.cpp commit for $WHISPER_VERSION: $WHISPER_COMMIT"
+WHISPER_ACTUAL_COMMIT=$(git -C "$WHISPER_SOURCE" rev-parse HEAD)
+if [[ "$WHISPER_ACTUAL_COMMIT" != "$WHISPER_COMMIT" ]]; then
+  print -u2 "unexpected whisper.cpp commit for $WHISPER_VERSION: $WHISPER_ACTUAL_COMMIT"
   exit 1
 fi
 
@@ -169,7 +155,7 @@ install -m 755 "$WHISPER_SOURCE/build-atogaki/bin/whisper-cli" "$BINARIES_DIR/wh
 FFMPEG_ARCHIVE="$SOURCE_CACHE/ffmpeg-$FFMPEG_VERSION.tar.xz"
 FFMPEG_SOURCE="$BUILD_ROOT/ffmpeg-$FFMPEG_VERSION"
 download_and_verify \
-  "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" \
+  "$FFMPEG_SOURCE_URL" \
   "$FFMPEG_ARCHIVE" "$FFMPEG_SHA256"
 tar -xf "$FFMPEG_ARCHIVE" -C "$BUILD_ROOT"
 
@@ -269,14 +255,20 @@ cp "$BUILD_ROOT/harfbuzz-$HARFBUZZ_VERSION/src/ms-use/COPYING" "$NOTICES_DIR/lic
   print "target=$TARGET_TRIPLE"
   print "macos_minimum=$MACOS_MINIMUM"
   print "whisper_version=$WHISPER_VERSION"
-  print "whisper_commit=$WHISPER_COMMIT"
+  print "whisper_commit=$WHISPER_ACTUAL_COMMIT"
+  print "whisper_source_sha256=$WHISPER_SOURCE_SHA256"
   print "ffmpeg_version=$FFMPEG_VERSION"
   print "ffmpeg_source_sha256=$FFMPEG_SHA256"
   print "libass_version=$LIBASS_VERSION"
+  print "libass_source_sha256=$LIBASS_SHA256"
   print "libunibreak_version=$LIBUNIBREAK_VERSION"
+  print "libunibreak_source_sha256=$LIBUNIBREAK_SHA256"
   print "fribidi_version=$FRIBIDI_VERSION"
+  print "fribidi_source_sha256=$FRIBIDI_SHA256"
   print "freetype_version=$FREETYPE_VERSION"
+  print "freetype_source_sha256=$FREETYPE_SHA256"
   print "harfbuzz_version=$HARFBUZZ_VERSION"
+  print "harfbuzz_source_sha256=$HARFBUZZ_SHA256"
   print "ffmpeg_configuration=$FFMPEG_CONFIGURATION"
   print "ffmpeg_binary_sha256=$(shasum -a 256 "$FFMPEG_BINARY" | awk '{print $1}')"
   print "ffprobe_binary_sha256=$(shasum -a 256 "$FFPROBE_BINARY" | awk '{print $1}')"
