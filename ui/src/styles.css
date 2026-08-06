@@ -156,8 +156,6 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .clear-secret { display: flex !important; align-items: center; gap: 8px; font-weight: 500 !important; }
 .clear-secret input { accent-color: #a54632; }
 .settings-message { min-height: 17px; margin: 0; }
-.credential-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.credential-status .secondary { align-self: center; white-space: nowrap; }
 .settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #d8d0c1; padding-top: 15px; }
 .settings-footer > span { color: #6f716a; font-size: 12px; overflow-wrap: anywhere; }
 .settings-footer > div { display: flex; gap: 9px; }

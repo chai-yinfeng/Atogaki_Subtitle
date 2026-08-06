@@ -630,15 +630,6 @@ async fn save_desktop_settings(
 }
 
 #[tauri::command]
-async fn verify_deepl_key(state: State<'_, DesktopState>) -> Result<DesktopSettings, String> {
-    state
-        .settings_service
-        .verify_deepl_key()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn save_download_network_settings(
     state: State<'_, DesktopState>,
     request: SaveDownloadNetworkSettingsRequest,
@@ -902,7 +893,6 @@ fn main() {
             retry_job,
             save_download_network_settings,
             save_desktop_settings,
-            verify_deepl_key,
             save_glossary,
             submit_transcription,
             start_model_download,

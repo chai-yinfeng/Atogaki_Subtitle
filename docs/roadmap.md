@@ -82,11 +82,11 @@ _最后更新：2026-08-06_
 - 应用启动时会把遗留的非终态识别任务标记为中断失败，并允许以新 UUID 从冻结选项、词表和当前可用模型重试；尚未实现下载断点续传和识别阶段内的检查点续跑。
 - 首页任务、活动任务详情和烧录进度已自动轮询；转写任务会同步当前阶段并显示累计耗时。Whisper 当前没有稳定的机器可读进度协议，故不显示伪百分比或单次 ETA；后续应基于本机历史速度、媒体时长和模型档位生成区间预测。
 - 系统 WebView 不能播放所有 ffmpeg 支持的容器或编码；当前失败时回退任务 `audio.wav`，后续需按需生成视频代理文件。
-- 桌面 DeepL 单段/批量翻译与重启持久化已通过真实 API 窗口回归；`LocalWorkspaceService` 已改为注入可热切换的通用翻译 provider。DeepL key 写入系统凭据库（macOS Keychain、Windows Credential Manager 或 Linux Secret Service），`DEEPL_AUTH_KEY` 仅作兼容回退；SQLite 只保留非敏感的“曾成功保存”标记，启动、设置和模型下载不读取凭据，用户主动检查或首次实际翻译才访问系统凭据库并在进程内缓存。增加 Google Translate 或 LLM 前仍应记录每次翻译的 provider/model，并设计各 provider 的端点和模型设置。
+- 桌面 DeepL 单段/批量翻译与重启持久化已通过真实 API 窗口回归；`LocalWorkspaceService` 已改为注入可热切换的通用翻译 provider。DeepL key 写入系统凭据库（macOS Keychain、Windows Credential Manager 或 Linux Secret Service），`DEEPL_AUTH_KEY` 仅作兼容回退；SQLite 只保留非敏感的“曾成功保存”标记，启动、设置和模型下载不读取凭据，首次实际翻译才访问系统凭据库并在进程内缓存。旧版 Key 可重新填写并保存一次以建立状态标记。增加 Google Translate 或 LLM 前仍应记录每次翻译的 provider/model，并设计各 provider 的端点和模型设置。
 - 桌面 SRT/ASS 与带字幕 MP4 均从 SQLite 当前工作区派生；视频烧录使用独立 SQLite 记录和不可变 ASS 快照，支持取消、安全覆盖与 Finder 定位。VideoToolbox 运行时失败会记录原始错误并回退内置 MPEG-4；两者均失败才标记任务失败。应用重启时未完成烧录会标记失败，尚不自动恢复。
 - 识别词表已支持核心、任务内容包和仅修正；Yorushika 内置词表当前以人物为核心、作品分为内容包，并为人名常见的平假名识别结果提供不占 prompt 的回退修正。最终 prompt 会预览并保存，但精确 tokenizer 预算和真实节目质量仍需继续评估；DeepL 已使用局部字幕上下文，中文翻译术语表尚未接入。
 - 当前本地回归已覆盖 Rust 核心、SQLite、前端生产构建、Tauri 编译，以及隔离数据目录下无 Atogaki/DeepL 环境变量的打包 App 真实窗口；已用真实视频验证内置 Whisper/VAD、libass 与 MPEG-4 回退。仍需建立持续集成基线和跨平台可重复窗口自动化。
 - macOS 原生文件面板曾在未打包的 `cargo run` 进程中触发 XPC 中断；桌面端已改用 Rust 主事件循环的非阻塞选择接口，并保留可直接粘贴路径的降级入口。未签名 `.app` 的媒体/模型选择、字幕目录选择和视频保存面板已回归，正式分发仍需补充签名、公证与安装后权限引导。
 - 真实窗口回归可通过绝对路径 `ATOGAKI_DATA_DIR` 隔离 SQLite、任务目录、词表与烧录快照；正式应用数据目录仍是未设置该变量时的默认路径。
-- macOS Tahoe 的 Spotlight“应用程序”浏览器目前未稳定显示 Atogaki。App 已声明 `public.app-category.productivity`，但本机还发现构建目录、DMG 和废纸篓副本造成重复 LaunchServices 注册；应在干净的外部测试机上验证只保留 `/Applications/Atogaki.app` 时的显示行为，不能把分类字段视为已验证的修复。
+- macOS Tahoe 的 Spotlight“应用程序”浏览器已在清理构建目录、已挂载 DMG 和废纸篓中的重复 LaunchServices 注册后恢复显示；`public.app-category.productivity` 也已随 App 声明。发布前仍应在外部测试机仅从 DMG 安装到 `/Applications/Atogaki.app` 后回归，避免把本机缓存清理当作所有系统版本上的保证。
 - 打包 WebView 中原生 `window.prompt`/`window.confirm` 无法作为可靠交互边界；词表修正和所有覆盖、删除、批量重译、烧录取消已使用应用内对话框。

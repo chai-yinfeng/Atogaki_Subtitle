@@ -340,19 +340,6 @@ impl DesktopSettingsService {
         self.load().await
     }
 
-    /// Reads the secret only after an explicit settings-page request. This gives users a way to
-    /// verify a pre-existing Keychain entry without restoring startup-time Keychain prompts.
-    pub async fn verify_deepl_key(&self) -> Result<DesktopSettings> {
-        let (stored_key, credential_error) =
-            cached_deepl_key(self.credentials.as_ref(), self.credential_cache.as_ref());
-        if stored_key.is_some() {
-            self.database.set_setting(DEEPL_KEY_SAVED, "true").await?;
-        } else if credential_error.is_none() {
-            self.database.delete_setting(DEEPL_KEY_SAVED).await?;
-        }
-        self.load().await
-    }
-
     /// Persists only the non-secret network draft used by the model downloader.
     /// This deliberately bypasses provider construction and credential-store access so a
     /// download can use the visible proxy settings without prompting for a DeepL key.
@@ -728,22 +715,6 @@ mod tests {
         );
         assert_eq!(*credentials.reads.lock().unwrap(), 0);
         assert!(provider.status().configured);
-
-        let verified = service.verify_deepl_key().await.unwrap();
-        assert!(verified.translation_api_key_configured);
-        assert_eq!(
-            verified.translation_api_key_source.as_deref(),
-            Some("system")
-        );
-        assert_eq!(*credentials.reads.lock().unwrap(), 1);
-        assert_eq!(
-            database
-                .get_setting("translation.deepl_key_saved")
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("true")
-        );
 
         drop(service);
         drop(database);

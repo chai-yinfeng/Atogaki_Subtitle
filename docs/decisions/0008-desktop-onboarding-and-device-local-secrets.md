@@ -13,7 +13,7 @@ Whisper 与 Silero VAD 模型体积较大，而且模型路径、CPU/GPU 能力�
 - 首次启动显示桌面配置引导。Whisper 模型是进入完整识别流程的必需项；VAD 和云端翻译均可选。用户可以选择已有模型，也可以从应用维护的官方模型目录下载。
 - 模型不进入 App Bundle。应用管理的模型放在应用数据目录的 `models/` 下；下载先写 `.part`，成功校验后再原子重命名。启动和失败时只清理由应用管理目录产生的 `.part` 文件，不删除用户选择的外部模型。
 - Whisper 与 Silero VAD 模型固定为经过核对的版本，并对完整文件校验 SHA-256；来源选择、代理和回退策略见决策 0011。
-- 非敏感设置（模型路径、provider ID、引导完成状态和“曾成功保存 DeepL Key”的状态标记）写入本地 SQLite。API key 通过 `CredentialStore` 抽象写入操作系统密钥存储：macOS Keychain、Windows Credential Manager、Linux Secret Service。状态标记不包含、不能还原且不验证 API key；启动不读取密钥库，用户可在设置中主动检查已有 Key。若系统密钥存储不可用，显示错误并拒绝降级为明文；启动环境变量仅作为现有 CLI/开发流程的兼容回退。
+- 非敏感设置（模型路径、provider ID、引导完成状态和“曾成功保存 DeepL Key”的状态标记）写入本地 SQLite。API key 通过 `CredentialStore` 抽象写入操作系统密钥存储：macOS Keychain、Windows Credential Manager、Linux Secret Service。状态标记不包含、不能还原且不验证 API key；启动和设置页不读取密钥库，旧版已保存的 Key 可以重新填写并保存一次以建立状态标记。若系统密钥存储不可用，显示错误并拒绝降级为明文；启动环境变量仅作为现有 CLI/开发流程的兼容回退。
 - `MutableTranslationProvider` 允许设置保存后原地切换 provider，不要求重启 App。当前只提供 DeepL 和关闭翻译；新增 Google Translate 或 LLM 时实现新的 provider 适配器，并另行记录结果的 provider/model 来源。
 - App 启动时把此前仍为排队或执行中的识别任务标记为“因上次退出而中断”。旧任务目录与部分产物保留。用户点击重试时创建新 UUID 任务，复制冻结的识别选项和词表快照；旧模型仍存在时继续使用旧模型，换设备后旧路径失效时使用设置页当前有效模型。
 - ffmpeg 和 Whisper 子进程随持有它们的异步任务销毁而终止，避免主进程退出后继续写入旧任务目录。识别与烧录仍保持单 worker；界面通过轮询持久化状态自动刷新。
