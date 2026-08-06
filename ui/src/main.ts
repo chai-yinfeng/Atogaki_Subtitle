@@ -119,7 +119,7 @@ type DesktopSettings = {
   vadModelReady: boolean;
   translationProviderId: "none" | "deepl";
   translationApiKeyConfigured: boolean;
-  translationApiKeySource: "system" | "environment" | "deferred" | null;
+  translationApiKeySource: "system" | "environment" | "saved" | "deferred" | null;
   credentialStore: string;
   credentialError: string | null;
   modelsDirectory: string;
@@ -447,7 +447,7 @@ app.innerHTML = `
             <input id="settings-api-key" type="password" autocomplete="off" placeholder="留空则保持当前密钥" />
           </label>
           <label class="clear-secret"><input id="settings-clear-api-key" type="checkbox" />删除系统凭据库中已保存的 DeepL Key</label>
-          <p id="api-key-status" class="settings-message"></p>
+          <div class="credential-status"><p id="api-key-status" class="settings-message"></p><button id="check-api-key" type="button" class="secondary">检查 Keychain</button></div>
         </section>
         <div class="settings-footer">
           <span id="settings-message" role="status"></span>
@@ -534,6 +534,7 @@ const settingsApiKey = document.querySelector<HTMLInputElement>("#settings-api-k
 const settingsClearApiKey = document.querySelector<HTMLInputElement>("#settings-clear-api-key");
 const settingsMessage = document.querySelector<HTMLSpanElement>("#settings-message");
 const apiKeyStatus = document.querySelector<HTMLParagraphElement>("#api-key-status");
+const checkApiKeyButton = document.querySelector<HTMLButtonElement>("#check-api-key");
 const credentialStoreLabel = document.querySelector<HTMLSpanElement>("#credential-store-label");
 const modelCatalogHost = document.querySelector<HTMLDivElement>("#model-catalog");
 const modelDownloadMessage = document.querySelector<HTMLParagraphElement>("#model-download-message");
@@ -674,6 +675,7 @@ function syncProviderSettings(): void {
   const deeplEnabled = settingsProvider?.value === "deepl";
   document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !deeplEnabled);
   settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !deeplEnabled);
+  checkApiKeyButton?.classList.toggle("hidden", !deeplEnabled);
 }
 
 function syncNetworkSettings(): void {
@@ -712,8 +714,10 @@ function renderDesktopSettings(settings: DesktopSettings): void {
       ? `已保存在 ${settings.credentialStore}`
       : settings.translationApiKeySource === "environment"
         ? "当前来自启动环境；保存新 Key 后会改用系统凭据库"
+        : settings.translationApiKeySource === "saved"
+          ? `已保存至 ${settings.credentialStore}；启动时不读取，首次翻译时验证`
         : settings.translationApiKeySource === "deferred"
-          ? `启动时不会读取 ${settings.credentialStore}；首次翻译时才会访问已有 Key`
+          ? `尚未检查 ${settings.credentialStore}；启动时不会读取，可主动检查已有 Key`
         : "尚未配置；Key 不会写入 SQLite 或任务目录";
     apiKeyStatus.textContent = settings.credentialError
       ? `${source}。系统凭据库提示：${settings.credentialError}`
@@ -725,6 +729,20 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   syncProviderSettings();
   syncNetworkSettings();
   renderModelCatalog();
+}
+
+async function verifyDeepLKey(): Promise<void> {
+  if (!checkApiKeyButton) return;
+  checkApiKeyButton.disabled = true;
+  if (apiKeyStatus) apiKeyStatus.textContent = "正在检查 Keychain…";
+  try {
+    const settings = await invoke<DesktopSettings>("verify_deepl_key");
+    renderDesktopSettings(settings);
+  } catch (error) {
+    if (apiKeyStatus) apiKeyStatus.textContent = `无法检查 Keychain：${String(error)}`;
+  } finally {
+    checkApiKeyButton.disabled = false;
+  }
 }
 
 function renderModelCatalog(): void {
@@ -2207,6 +2225,7 @@ document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListe
 settingsProvider?.addEventListener("change", syncProviderSettings);
 settingsProxyMode?.addEventListener("change", syncNetworkSettings);
 testNetworkButton?.addEventListener("click", () => void testNetworkConnection());
+checkApiKeyButton?.addEventListener("click", () => void verifyDeepLKey());
 settingsForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveSettings(false);

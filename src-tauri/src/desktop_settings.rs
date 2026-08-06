@@ -24,6 +24,7 @@ const ONBOARDING_COMPLETED: &str = "desktop.onboarding_completed";
 const WHISPER_MODEL_PATH: &str = "recognition.whisper_model_path";
 const VAD_MODEL_PATH: &str = "recognition.vad_model_path";
 const TRANSLATION_PROVIDER: &str = "translation.provider";
+const DEEPL_KEY_SAVED: &str = "translation.deepl_key_saved";
 const NETWORK_PROXY_MODE: &str = "network.proxy_mode";
 const NETWORK_PROXY_URL: &str = "network.proxy_url";
 const MODEL_MIRROR_URL: &str = "network.model_mirror_url";
@@ -250,11 +251,19 @@ impl DesktopSettingsService {
             .await?
             .filter(|provider_id| matches!(provider_id.as_str(), "none" | DEEPL_PROVIDER_ID))
             .unwrap_or_else(|| "none".to_string());
+        let deepl_key_saved = self
+            .database
+            .get_setting(DEEPL_KEY_SAVED)
+            .await?
+            .as_deref()
+            == Some("true");
         let (stored_key, credential_error, credential_loaded) = self.cached_deepl_key_snapshot();
         let (translation_api_key_configured, translation_api_key_source) = if stored_key.is_some() {
             (true, Some("system".to_string()))
         } else if self.environment_deepl_key.is_some() {
             (true, Some("environment".to_string()))
+        } else if deepl_key_saved {
+            (true, Some("saved".to_string()))
         } else if translation_provider_id == DEEPL_PROVIDER_ID && !credential_loaded {
             (false, Some("deferred".to_string()))
         } else {
@@ -319,13 +328,28 @@ impl DesktopSettingsService {
         if request.clear_api_key {
             self.credentials.delete(DEEPL_PROVIDER_ID)?;
             self.replace_cached_deepl_key(None, None);
+            self.database.delete_setting(DEEPL_KEY_SAVED).await?;
         }
         if let Some(secret) = normalized_secret(request.api_key) {
             self.credentials.set(DEEPL_PROVIDER_ID, &secret)?;
             self.replace_cached_deepl_key(Some(secret), None);
+            self.database.set_setting(DEEPL_KEY_SAVED, "true").await?;
         }
 
         self.replace_provider(&request.translation_provider_id, &network)?;
+        self.load().await
+    }
+
+    /// Reads the secret only after an explicit settings-page request. This gives users a way to
+    /// verify a pre-existing Keychain entry without restoring startup-time Keychain prompts.
+    pub async fn verify_deepl_key(&self) -> Result<DesktopSettings> {
+        let (stored_key, credential_error) =
+            cached_deepl_key(self.credentials.as_ref(), self.credential_cache.as_ref());
+        if stored_key.is_some() {
+            self.database.set_setting(DEEPL_KEY_SAVED, "true").await?;
+        } else if credential_error.is_none() {
+            self.database.delete_setting(DEEPL_KEY_SAVED).await?;
+        }
         self.load().await
     }
 
@@ -612,6 +636,14 @@ mod tests {
                 .as_deref(),
             Some(model.display().to_string().as_str())
         );
+        assert_eq!(
+            database
+                .get_setting("translation.deepl_key_saved")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("true")
+        );
         assert!(database.get_setting("deepl").await.unwrap().is_none());
 
         drop(service);
@@ -696,6 +728,22 @@ mod tests {
         );
         assert_eq!(*credentials.reads.lock().unwrap(), 0);
         assert!(provider.status().configured);
+
+        let verified = service.verify_deepl_key().await.unwrap();
+        assert!(verified.translation_api_key_configured);
+        assert_eq!(
+            verified.translation_api_key_source.as_deref(),
+            Some("system")
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 1);
+        assert_eq!(
+            database
+                .get_setting("translation.deepl_key_saved")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("true")
+        );
 
         drop(service);
         drop(database);

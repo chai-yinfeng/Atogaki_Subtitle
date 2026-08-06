@@ -39,7 +39,6 @@ _最后更新：2026-08-06_
 - [x] 增加首次启动引导、官方 Whisper/VAD 模型下载、DeepL 凭据配置和 provider 热切换。
 - [x] 增加桌面网络与模型来源配置：环境/直连/自定义代理、可选镜像、官方回退、连通性测试和全模型 SHA-256 校验。
 - [x] 固定提供 small、medium、large-v3 q5_0、large-v3-turbo q5_0/q8_0 五档 Whisper 下载项，覆盖轻量、质量与 turbo 对比需求。
-- [x] 为 macOS App 声明系统应用分类，使 Tahoe 的 Spotlight“应用程序”浏览器可将 Atogaki 归入效率类而非仅依赖名称搜索。
 - [x] 自动刷新任务列表与活动详情；启动时显式标记中断任务，并允许从不可变快照派生重试任务。
 - [x] 运行中的转写任务会持续把阶段写入 SQLite；界面显示阶段、累计耗时与不定量进度，避免在 Whisper 执行期间只显示排队状态。
 
@@ -89,4 +88,5 @@ _最后更新：2026-08-06_
 - 当前本地回归已覆盖 Rust 核心、SQLite、前端生产构建、Tauri 编译，以及隔离数据目录下无 Atogaki/DeepL 环境变量的打包 App 真实窗口；已用真实视频验证内置 Whisper/VAD、libass 与 MPEG-4 回退。仍需建立持续集成基线和跨平台可重复窗口自动化。
 - macOS 原生文件面板曾在未打包的 `cargo run` 进程中触发 XPC 中断；桌面端已改用 Rust 主事件循环的非阻塞选择接口，并保留可直接粘贴路径的降级入口。未签名 `.app` 的媒体/模型选择、字幕目录选择和视频保存面板已回归，正式分发仍需补充签名、公证与安装后权限引导。
 - 真实窗口回归可通过绝对路径 `ATOGAKI_DATA_DIR` 隔离 SQLite、任务目录、词表与烧录快照；正式应用数据目录仍是未设置该变量时的默认路径。
+- macOS Tahoe 的 Spotlight“应用程序”浏览器目前未稳定显示 Atogaki。App 已声明 `public.app-category.productivity`，但本机还发现构建目录、DMG 和废纸篓副本造成重复 LaunchServices 注册；应在干净的外部测试机上验证只保留 `/Applications/Atogaki.app` 时的显示行为，不能把分类字段视为已验证的修复。
 - 打包 WebView 中原生 `window.prompt`/`window.confirm` 无法作为可靠交互边界；词表修正和所有覆盖、删除、批量重译、烧录取消已使用应用内对话框。
