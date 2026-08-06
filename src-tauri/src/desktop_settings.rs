@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -6,7 +7,8 @@ use std::{
 use anyhow::{Result, anyhow, bail};
 use atogaki_subtitle::{
     application::{
-        MutableTranslationProvider, TranslationProvider, UnconfiguredTranslationProvider,
+        MutableTranslationProvider, TranslationFuture, TranslationOptions, TranslationProvider,
+        TranslationProviderStatus, UnconfiguredTranslationProvider,
     },
     infrastructure::{
         deepl::DeepLTranslationProvider,
@@ -88,6 +90,88 @@ struct CredentialCache {
     error: Option<String>,
 }
 
+/// Avoids asking macOS for a Keychain unlock while the user is only opening the
+/// local application or configuring model downloads. The secret is resolved on
+/// the first actual translation request and is cached for the rest of the run.
+#[derive(Clone)]
+struct DeferredDeepLTranslationProvider {
+    credentials: Arc<dyn CredentialStore>,
+    credential_cache: Arc<Mutex<CredentialCache>>,
+    environment_key: Option<String>,
+    network: NetworkClientConfig,
+}
+
+impl DeferredDeepLTranslationProvider {
+    fn new(
+        credentials: Arc<dyn CredentialStore>,
+        credential_cache: Arc<Mutex<CredentialCache>>,
+        environment_key: Option<String>,
+        network: NetworkClientConfig,
+    ) -> Self {
+        Self {
+            credentials,
+            credential_cache,
+            environment_key,
+            network,
+        }
+    }
+
+    fn resolve(&self) -> Result<DeepLTranslationProvider> {
+        let (stored_key, credential_error) =
+            cached_deepl_key(self.credentials.as_ref(), self.credential_cache.as_ref());
+        let key = stored_key
+            .or_else(|| self.environment_key.clone())
+            .ok_or_else(|| {
+                credential_error
+                    .map(|error| anyhow!("无法读取 DeepL Key：{error}"))
+                    .unwrap_or_else(|| anyhow!("请先在设置中配置 DeepL API Key。"))
+            })?;
+        DeepLTranslationProvider::with_network_config(Some(key), &self.network)
+    }
+}
+
+impl fmt::Debug for DeferredDeepLTranslationProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DeferredDeepLTranslationProvider")
+            .field(
+                "credential_loaded",
+                &credential_cache_loaded(self.credential_cache.as_ref()),
+            )
+            .finish()
+    }
+}
+
+impl TranslationProvider for DeferredDeepLTranslationProvider {
+    fn status(&self) -> TranslationProviderStatus {
+        TranslationProviderStatus {
+            id: DEEPL_PROVIDER_ID.to_string(),
+            name: "DeepL".to_string(),
+            // DeepL is deliberately selectable before reading Keychain. A missing or denied
+            // secret is reported on the first translation rather than during local startup.
+            configured: true,
+            model: None,
+            configuration_hint: Some("将在首次翻译时从系统凭据库读取 DeepL Key。".to_string()),
+        }
+    }
+
+    fn translate<'a>(
+        &'a self,
+        options: &'a TranslationOptions,
+        texts: &'a [String],
+        context: Option<&'a str>,
+    ) -> TranslationFuture<'a> {
+        let options = options.clone();
+        let texts = texts.to_vec();
+        let context = context.map(str::to_string);
+        Box::pin(async move {
+            self.resolve()?
+                .translate(&options, &texts, context.as_deref())
+                .await
+        })
+    }
+}
+
 impl DesktopSettingsService {
     pub fn new(
         database: LocalDatabase,
@@ -166,15 +250,13 @@ impl DesktopSettingsService {
             .await?
             .filter(|provider_id| matches!(provider_id.as_str(), "none" | DEEPL_PROVIDER_ID))
             .unwrap_or_else(|| "none".to_string());
-        let (stored_key, credential_error) = if translation_provider_id == DEEPL_PROVIDER_ID {
-            self.cached_deepl_key()
-        } else {
-            (None, None)
-        };
+        let (stored_key, credential_error, credential_loaded) = self.cached_deepl_key_snapshot();
         let (translation_api_key_configured, translation_api_key_source) = if stored_key.is_some() {
             (true, Some("system".to_string()))
         } else if self.environment_deepl_key.is_some() {
             (true, Some("environment".to_string()))
+        } else if translation_provider_id == DEEPL_PROVIDER_ID && !credential_loaded {
+            (false, Some("deferred".to_string()))
         } else {
             (false, None)
         };
@@ -291,11 +373,12 @@ impl DesktopSettingsService {
     fn replace_provider(&self, provider_id: &str, network: &NetworkClientConfig) -> Result<()> {
         let provider: Arc<dyn TranslationProvider> = match provider_id {
             "none" => Arc::new(UnconfiguredTranslationProvider),
-            DEEPL_PROVIDER_ID => {
-                let (stored_key, _) = self.cached_deepl_key();
-                let key = stored_key.or_else(|| self.environment_deepl_key.clone());
-                Arc::new(DeepLTranslationProvider::with_network_config(key, network)?)
-            }
+            DEEPL_PROVIDER_ID => Arc::new(DeferredDeepLTranslationProvider::new(
+                Arc::clone(&self.credentials),
+                Arc::clone(&self.credential_cache),
+                self.environment_deepl_key.clone(),
+                network.clone(),
+            )),
             _ => return Err(anyhow!("unsupported translation provider: {provider_id}")),
         };
         self.provider.replace(provider);
@@ -319,19 +402,12 @@ impl DesktopSettingsService {
         save_optional_string(&self.database, MODEL_MIRROR_URL, model_mirror_url).await
     }
 
-    fn cached_deepl_key(&self) -> (Option<String>, Option<String>) {
-        let mut cache = self
+    fn cached_deepl_key_snapshot(&self) -> (Option<String>, Option<String>, bool) {
+        let cache = self
             .credential_cache
             .lock()
             .expect("credential cache lock poisoned");
-        if !cache.loaded {
-            cache.loaded = true;
-            match self.credentials.get(DEEPL_PROVIDER_ID) {
-                Ok(secret) => cache.secret = normalized_secret(secret),
-                Err(error) => cache.error = Some(error.to_string()),
-            }
-        }
-        (cache.secret.clone(), cache.error.clone())
+        (cache.secret.clone(), cache.error.clone(), cache.loaded)
     }
 
     fn replace_cached_deepl_key(&self, secret: Option<String>, error: Option<String>) {
@@ -343,6 +419,30 @@ impl DesktopSettingsService {
         cache.secret = secret;
         cache.error = error;
     }
+}
+
+fn cached_deepl_key(
+    credentials: &dyn CredentialStore,
+    credential_cache: &Mutex<CredentialCache>,
+) -> (Option<String>, Option<String>) {
+    let mut cache = credential_cache
+        .lock()
+        .expect("credential cache lock poisoned");
+    if !cache.loaded {
+        cache.loaded = true;
+        match credentials.get(DEEPL_PROVIDER_ID) {
+            Ok(secret) => cache.secret = normalized_secret(secret),
+            Err(error) => cache.error = Some(error.to_string()),
+        }
+    }
+    (cache.secret.clone(), cache.error.clone())
+}
+
+fn credential_cache_loaded(credential_cache: &Mutex<CredentialCache>) -> bool {
+    credential_cache
+        .lock()
+        .expect("credential cache lock poisoned")
+        .loaded
 }
 
 fn validate_provider_id(provider_id: &str) -> Result<()> {
@@ -558,6 +658,44 @@ mod tests {
             Some("https://hf-mirror.com")
         );
         assert_eq!(*credentials.reads.lock().unwrap(), 0);
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn startup_defers_keychain_access_until_a_translation_is_requested() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-deferred-key-test-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .set_setting("translation.provider", "deepl")
+            .await
+            .unwrap();
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        *credentials.secret.lock().unwrap() = Some("existing-key:fx".to_string());
+        let provider = MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider));
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            provider.clone(),
+            root.join("models"),
+            credentials.clone(),
+        );
+
+        let settings = service.initialize().await.unwrap();
+        assert_eq!(
+            settings.translation_api_key_source.as_deref(),
+            Some("deferred")
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+        assert!(provider.status().configured);
 
         drop(service);
         drop(database);

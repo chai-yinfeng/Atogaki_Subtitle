@@ -12,6 +12,7 @@ type LocalJob = {
   glossary_id: string | null;
   glossary_name: string | null;
   glossary_snapshot_path: string | null;
+  created_at_unix: number;
   updated_at_unix: number;
 };
 
@@ -118,7 +119,7 @@ type DesktopSettings = {
   vadModelReady: boolean;
   translationProviderId: "none" | "deepl";
   translationApiKeyConfigured: boolean;
-  translationApiKeySource: "system" | "environment" | null;
+  translationApiKeySource: "system" | "environment" | "deferred" | null;
   credentialStore: string;
   credentialError: string | null;
   modelsDirectory: string;
@@ -565,6 +566,7 @@ let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelDownloadPoll: number | null = null;
 const settingsDirtyFields = new Set<string>();
+let workspaceElapsedTimer: number | null = null;
 let translationStatus: TranslationStatus = {
   provider_id: "none",
   provider: "翻译服务",
@@ -582,7 +584,43 @@ function displayName(job: LocalJob): string {
 }
 
 function statusLabel(status: string): string {
-  return status.split("_").join(" ");
+  const labels: Record<string, string> = {
+    queued: "等待处理",
+    created: "已创建",
+    extracting_audio: "提取音频",
+    transcribing: "正在转写",
+    refining_segments: "整理分段",
+    translating: "正在翻译",
+    exporting_subtitles: "写入字幕",
+    rendering_video: "烧录视频",
+    done: "已完成",
+    failed: "失败",
+  };
+  return labels[status] ?? status.split("_").join(" ");
+}
+
+function formatElapsed(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  const remainingSeconds = total % 60;
+  if (hours > 0) return `${hours}小时${String(minutes).padStart(2, "0")}分`;
+  if (minutes > 0) return `${minutes}分${String(remainingSeconds).padStart(2, "0")}秒`;
+  return `${remainingSeconds}秒`;
+}
+
+function jobTimingLabel(job: LocalJob): string {
+  if (matchesTerminalStatus(job.status)) {
+    return `总用时 ${formatElapsed(job.updated_at_unix - job.created_at_unix)}`;
+  }
+  const now = Math.floor(Date.now() / 1_000);
+  const stageElapsed = formatElapsed(now - job.updated_at_unix);
+  const totalElapsed = formatElapsed(now - job.created_at_unix);
+  return `本阶段 ${stageElapsed} · 累计 ${totalElapsed}`;
+}
+
+function runningJob(job: LocalJob): boolean {
+  return !matchesTerminalStatus(job.status);
 }
 
 function settleConfirmation(confirmed: boolean): void {
@@ -674,6 +712,8 @@ function renderDesktopSettings(settings: DesktopSettings): void {
       ? `已保存在 ${settings.credentialStore}`
       : settings.translationApiKeySource === "environment"
         ? "当前来自启动环境；保存新 Key 后会改用系统凭据库"
+        : settings.translationApiKeySource === "deferred"
+          ? `启动时不会读取 ${settings.credentialStore}；首次翻译时才会访问已有 Key`
         : "尚未配置；Key 不会写入 SQLite 或任务目录";
     apiKeyStatus.textContent = settings.credentialError
       ? `${source}。系统凭据库提示：${settings.credentialError}`
@@ -1017,6 +1057,18 @@ function setWorkspaceAction(message: string, isError = false): void {
   workspaceActionMessage.classList.toggle("warning", isError);
 }
 
+function startWorkspaceElapsed(message: string): () => void {
+  const startedAt = Date.now();
+  const update = () => setWorkspaceAction(`${message} · 已运行 ${formatElapsed((Date.now() - startedAt) / 1_000)}`);
+  if (workspaceElapsedTimer !== null) window.clearInterval(workspaceElapsedTimer);
+  update();
+  workspaceElapsedTimer = window.setInterval(update, 1_000);
+  return () => {
+    if (workspaceElapsedTimer !== null) window.clearInterval(workspaceElapsedTimer);
+    workspaceElapsedTimer = null;
+  };
+}
+
 function setWorkspaceBusy(busy: boolean): void {
   workspaceActionBusy = busy;
   updateTranslationControls();
@@ -1039,7 +1091,7 @@ function renderJobs(jobs: LocalJob[]): void {
       (job) => `
         <article class="job-card">
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
-            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)}</p></div>
+            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · ${escapeHtml(jobTimingLabel(job))}</p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
             <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
           </button>
           <div class="job-actions">
@@ -1159,7 +1211,7 @@ async function refreshActiveJob(): Promise<void> {
     const completedNow = matchesTerminalStatus(detail.job.status);
     activeDetail.job = detail.job;
     if (workspaceMessage) {
-      workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message}`;
+      workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message} · ${jobTimingLabel(detail.job)}`;
     }
     if (completedNow || detail.segments.length !== activeDetail.segments.length) {
       activeDetail = detail;
@@ -1197,7 +1249,7 @@ function renderWorkspace(detail: JobDetail): void {
   revealExportButton?.classList.add("hidden");
   if (workspaceTitle) workspaceTitle.textContent = displayName(detail.job);
   if (workspaceMessage) {
-    workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message}`;
+    workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message} · ${jobTimingLabel(detail.job)}`;
   }
   if (segmentCount) segmentCount.textContent = `${detail.segments.length} 段`;
   if (jobGlossaryStatus) {
@@ -1387,6 +1439,7 @@ async function translateSegment(
 ): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
   setWorkspaceBusy(true);
+  const stopElapsed = startWorkspaceElapsed(`正在保存并发送本段到 ${translationStatus.provider}`);
   state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
   state.classList.remove("warning");
   try {
@@ -1405,6 +1458,7 @@ async function translateSegment(
     state.classList.add("warning");
     setWorkspaceAction(`翻译失败：${String(error)}`, true);
   } finally {
+    stopElapsed();
     setWorkspaceBusy(false);
   }
 }
@@ -1470,7 +1524,10 @@ async function translateAllSubtitles(): Promise<void> {
   if (!confirmed) return;
 
   setWorkspaceBusy(true);
-  setWorkspaceAction(`正在通过 ${translationStatus.provider} 翻译 ${activeDetail.segments.length} 段字幕…`);
+  const batchCount = Math.ceil(activeDetail.segments.length / 12);
+  const stopElapsed = startWorkspaceElapsed(
+    `正在通过 ${translationStatus.provider} 翻译 ${activeDetail.segments.length} 段字幕（${batchCount} 批）`,
+  );
   try {
     activeDetail.segments = await invoke<SubtitleSegment[]>("translate_all_subtitles", {
       jobId: activeDetail.job.job_id,
@@ -1481,6 +1538,7 @@ async function translateAllSubtitles(): Promise<void> {
   } catch (error) {
     setWorkspaceAction(`全部翻译失败：${String(error)}`, true);
   } finally {
+    stopElapsed();
     setWorkspaceBusy(false);
   }
 }

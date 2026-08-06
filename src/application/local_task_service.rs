@@ -1,7 +1,9 @@
 use std::{
     fs,
+    future::Future,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -568,11 +570,17 @@ async fn run_worker(
 
         let (job_dir, result) = match task {
             QueuedTask::Transcribe { job_dir, spec } => {
-                let result = runner.transcribe(spec).await.map(|_| ());
+                let result =
+                    run_with_status_sync(&job_dir, database.as_ref(), runner.transcribe(spec))
+                        .await
+                        .map(|_| ());
                 (job_dir, result)
             }
             QueuedTask::Process { job_dir, spec } => {
-                let result = runner.process(spec).await.map(|_| ());
+                let result =
+                    run_with_status_sync(&job_dir, database.as_ref(), runner.process(spec))
+                        .await
+                        .map(|_| ());
                 (job_dir, result)
             }
         };
@@ -589,6 +597,30 @@ async fn run_worker(
                     }
                 }
                 Err(error) => eprintln!("[task-service] failed to load task state: {error:#}"),
+            }
+        }
+    }
+}
+
+async fn run_with_status_sync<T>(
+    job_dir: &Path,
+    database: Option<&LocalDatabase>,
+    task: impl Future<Output = Result<T>>,
+) -> Result<T> {
+    let Some(database) = database else {
+        return task.await;
+    };
+    let mut task = Box::pin(task);
+    let mut refresh = tokio::time::interval(Duration::from_millis(500));
+    loop {
+        tokio::select! {
+            result = &mut task => return result,
+            _ = refresh.tick() => {
+                if let Ok(snapshot) = JobSnapshot::load(job_dir)
+                    && let Err(error) = database.sync_snapshot(&snapshot).await
+                {
+                    eprintln!("[task-service] failed to publish running task status: {error:#}");
+                }
             }
         }
     }
