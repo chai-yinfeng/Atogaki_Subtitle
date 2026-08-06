@@ -89,6 +89,14 @@ struct TestDownloadNetworkRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SaveDownloadNetworkSettingsRequest {
+    proxy_mode: String,
+    proxy_url: Option<String>,
+    model_mirror_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SaveGlossaryRequest {
     glossary_id: Option<String>,
     name: String,
@@ -622,6 +630,22 @@ async fn save_desktop_settings(
 }
 
 #[tauri::command]
+async fn save_download_network_settings(
+    state: State<'_, DesktopState>,
+    request: SaveDownloadNetworkSettingsRequest,
+) -> Result<(), String> {
+    state
+        .settings_service
+        .save_download_network_settings(
+            &request.proxy_mode,
+            request.proxy_url,
+            request.model_mirror_url,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn model_catalog(state: State<'_, DesktopState>) -> Vec<ModelCatalogItem> {
     state.model_download_service.catalog()
 }
@@ -867,6 +891,7 @@ fn main() {
             reveal_rendered_video,
             rename_job,
             retry_job,
+            save_download_network_settings,
             save_desktop_settings,
             save_glossary,
             submit_transcription,

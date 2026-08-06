@@ -426,10 +426,10 @@ app.innerHTML = `
               <input id="settings-proxy-url" inputmode="url" placeholder="http://127.0.0.1:7897" />
             </label>
             <label>Hugging Face 镜像根地址（可选）
-              <input id="settings-model-mirror" inputmode="url" placeholder="https://example.com" />
+              <input id="settings-model-mirror" inputmode="url" placeholder="https://hf-mirror.com" />
             </label>
           </div>
-          <div class="network-test-row"><button id="test-network" type="button" class="secondary">测试当前网络配置</button><span>测试使用当前输入；模型下载使用已保存配置。</span></div>
+          <div class="network-test-row"><button id="test-network" type="button" class="secondary">测试当前网络配置</button><span>下载会自动保存当前网络配置；官方源受阻时可先尝试填写 https://hf-mirror.com。</span></div>
           <div id="network-test-results" class="network-test-results" role="status"></div>
           <div id="model-catalog" class="model-catalog"></div>
           <p id="model-download-message" class="settings-message" role="status"></p>
@@ -564,6 +564,7 @@ let desktopSettings: DesktopSettings | null = null;
 let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelDownloadPoll: number | null = null;
+const settingsDirtyFields = new Set<string>();
 let translationStatus: TranslationStatus = {
   provider_id: "none",
   provider: "翻译服务",
@@ -644,16 +645,22 @@ function syncNetworkSettings(): void {
   if (settingsProxyUrl) settingsProxyUrl.disabled = !customProxy;
 }
 
+function overwriteSettingsField<T extends HTMLInputElement | HTMLSelectElement>(field: T | null, value: string | boolean): void {
+  if (!field || settingsDirtyFields.has(field.id)) return;
+  if (typeof value === "boolean" && field instanceof HTMLInputElement) field.checked = value;
+  else if (typeof value === "string") field.value = value;
+}
+
 function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
-  if (settingsWhisperModel) settingsWhisperModel.value = settings.whisperModelPath ?? "";
-  if (settingsVadModel) settingsVadModel.value = settings.vadModelPath ?? "";
-  if (settingsProxyMode) settingsProxyMode.value = settings.networkProxyMode;
-  if (settingsProxyUrl) settingsProxyUrl.value = settings.networkProxyUrl ?? "";
-  if (settingsModelMirror) settingsModelMirror.value = settings.modelMirrorUrl ?? "";
-  if (settingsProvider) settingsProvider.value = settings.translationProviderId;
-  if (settingsApiKey) settingsApiKey.value = "";
-  if (settingsClearApiKey) settingsClearApiKey.checked = false;
+  overwriteSettingsField(settingsWhisperModel, settings.whisperModelPath ?? "");
+  overwriteSettingsField(settingsVadModel, settings.vadModelPath ?? "");
+  overwriteSettingsField(settingsProxyMode, settings.networkProxyMode);
+  overwriteSettingsField(settingsProxyUrl, settings.networkProxyUrl ?? "");
+  overwriteSettingsField(settingsModelMirror, settings.modelMirrorUrl ?? "");
+  overwriteSettingsField(settingsProvider, settings.translationProviderId);
+  overwriteSettingsField(settingsApiKey, "");
+  overwriteSettingsField(settingsClearApiKey, false);
   if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
   if (modelReadiness) {
     modelReadiness.textContent = settings.whisperModelReady
@@ -756,6 +763,7 @@ async function saveSettings(finishOnboarding: boolean): Promise<void> {
         onboardingCompleted: finishOnboarding || desktopSettings?.onboardingCompleted || false,
       },
     });
+    settingsDirtyFields.clear();
     renderDesktopSettings(settings);
     await refreshTranslationStatus();
     if (settingsMessage) settingsMessage.textContent = "配置已保存；如提供密钥，只会写入系统凭据库。";
@@ -795,7 +803,10 @@ async function chooseSettingsModel(kind: "whisper" | "vad"): Promise<void> {
   try {
     const path = await invoke<string | null>(command);
     const input = kind === "whisper" ? settingsWhisperModel : settingsVadModel;
-    if (path && input) input.value = path;
+    if (path && input) {
+      input.value = path;
+      settingsDirtyFields.add(input.id);
+    }
   } catch (error) {
     if (settingsMessage) settingsMessage.textContent = `无法打开模型选择器：${String(error)}`;
   }
@@ -803,8 +814,19 @@ async function chooseSettingsModel(kind: "whisper" | "vad"): Promise<void> {
 
 async function startModelDownload(modelId: string): Promise<void> {
   if (!modelId) return;
-  if (modelDownloadMessage) modelDownloadMessage.textContent = "正在按已保存的配置连接模型来源…";
+  if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return;
+  if (modelDownloadMessage) modelDownloadMessage.textContent = "正在保存当前网络配置并连接模型来源…";
   try {
+    await invoke<void>("save_download_network_settings", {
+      request: {
+        proxyMode: settingsProxyMode.value,
+        proxyUrl: settingsProxyUrl.value.trim() || null,
+        modelMirrorUrl: settingsModelMirror.value.trim() || null,
+      },
+    });
+    settingsDirtyFields.delete(settingsProxyMode.id);
+    settingsDirtyFields.delete(settingsProxyUrl.id);
+    settingsDirtyFields.delete(settingsModelMirror.id);
     const state = await invoke<ModelDownloadState>("start_model_download", { modelId });
     modelDownloads = modelDownloads.filter((download) => download.modelId !== modelId);
     modelDownloads.push(state);
@@ -2104,10 +2126,24 @@ async function applyPreviewedGlossary(): Promise<void> {
 
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
 document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
+  settingsDirtyFields.clear();
   if (!settingsDialog?.open) settingsDialog?.showModal();
   void loadDesktopSettings(false);
 });
 document.querySelector<HTMLButtonElement>("#close-settings")?.addEventListener("click", () => settingsDialog?.close());
+settingsDialog?.addEventListener("close", () => settingsDirtyFields.clear());
+settingsForm?.addEventListener("input", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+    settingsDirtyFields.add(target.id);
+  }
+});
+settingsForm?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+    settingsDirtyFields.add(target.id);
+  }
+});
 document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
 settingsProvider?.addEventListener("change", syncProviderSettings);

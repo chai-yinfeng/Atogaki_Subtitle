@@ -1,4 +1,7 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{Result, anyhow, bail};
 use atogaki_subtitle::{
@@ -75,6 +78,14 @@ pub struct DesktopSettingsService {
     environment_deepl_key: Option<String>,
     environment_whisper_model: Option<PathBuf>,
     environment_vad_model: Option<PathBuf>,
+    credential_cache: Arc<Mutex<CredentialCache>>,
+}
+
+#[derive(Debug, Default)]
+struct CredentialCache {
+    loaded: bool,
+    secret: Option<String>,
+    error: Option<String>,
 }
 
 impl DesktopSettingsService {
@@ -94,6 +105,7 @@ impl DesktopSettingsService {
             environment_deepl_key: normalized_secret(environment_deepl_key),
             environment_whisper_model: existing_file(environment_whisper_model),
             environment_vad_model: existing_file(environment_vad_model),
+            credential_cache: Arc::new(Mutex::new(CredentialCache::default())),
         }
     }
 
@@ -112,6 +124,7 @@ impl DesktopSettingsService {
             environment_deepl_key: None,
             environment_whisper_model: None,
             environment_vad_model: None,
+            credential_cache: Arc::new(Mutex::new(CredentialCache::default())),
         }
     }
 
@@ -152,10 +165,11 @@ impl DesktopSettingsService {
             .get_setting(TRANSLATION_PROVIDER)
             .await?
             .filter(|provider_id| matches!(provider_id.as_str(), "none" | DEEPL_PROVIDER_ID))
-            .unwrap_or_else(|| DEEPL_PROVIDER_ID.to_string());
-        let (stored_key, credential_error) = match self.credentials.get(DEEPL_PROVIDER_ID) {
-            Ok(secret) => (normalized_secret(secret), None),
-            Err(error) => (None, Some(error.to_string())),
+            .unwrap_or_else(|| "none".to_string());
+        let (stored_key, credential_error) = if translation_provider_id == DEEPL_PROVIDER_ID {
+            self.cached_deepl_key()
+        } else {
+            (None, None)
         };
         let (translation_api_key_configured, translation_api_key_source) = if stored_key.is_some() {
             (true, Some("system".to_string()))
@@ -217,31 +231,35 @@ impl DesktopSettingsService {
                 },
             )
             .await?;
-        self.database
-            .set_setting(NETWORK_PROXY_MODE, network.proxy_mode().as_str())
+        self.persist_download_network_settings(&network, model_mirror_url.as_deref())
             .await?;
-        save_optional_string(
-            &self.database,
-            NETWORK_PROXY_URL,
-            network.custom_proxy_url(),
-        )
-        .await?;
-        save_optional_string(
-            &self.database,
-            MODEL_MIRROR_URL,
-            model_mirror_url.as_deref(),
-        )
-        .await?;
 
         if request.clear_api_key {
             self.credentials.delete(DEEPL_PROVIDER_ID)?;
+            self.replace_cached_deepl_key(None, None);
         }
         if let Some(secret) = normalized_secret(request.api_key) {
             self.credentials.set(DEEPL_PROVIDER_ID, &secret)?;
+            self.replace_cached_deepl_key(Some(secret), None);
         }
 
         self.replace_provider(&request.translation_provider_id, &network)?;
         self.load().await
+    }
+
+    /// Persists only the non-secret network draft used by the model downloader.
+    /// This deliberately bypasses provider construction and credential-store access so a
+    /// download can use the visible proxy settings without prompting for a DeepL key.
+    pub async fn save_download_network_settings(
+        &self,
+        proxy_mode: &str,
+        proxy_url: Option<String>,
+        model_mirror_url: Option<String>,
+    ) -> Result<()> {
+        let network = NetworkClientConfig::new(proxy_mode, proxy_url)?;
+        let model_mirror_url = normalize_https_endpoint(model_mirror_url)?;
+        self.persist_download_network_settings(&network, model_mirror_url.as_deref())
+            .await
     }
 
     pub async fn download_network_settings(&self) -> Result<DownloadNetworkSettings> {
@@ -274,18 +292,56 @@ impl DesktopSettingsService {
         let provider: Arc<dyn TranslationProvider> = match provider_id {
             "none" => Arc::new(UnconfiguredTranslationProvider),
             DEEPL_PROVIDER_ID => {
-                let key = self
-                    .credentials
-                    .get(DEEPL_PROVIDER_ID)
-                    .ok()
-                    .flatten()
-                    .or_else(|| self.environment_deepl_key.clone());
+                let (stored_key, _) = self.cached_deepl_key();
+                let key = stored_key.or_else(|| self.environment_deepl_key.clone());
                 Arc::new(DeepLTranslationProvider::with_network_config(key, network)?)
             }
             _ => return Err(anyhow!("unsupported translation provider: {provider_id}")),
         };
         self.provider.replace(provider);
         Ok(())
+    }
+
+    async fn persist_download_network_settings(
+        &self,
+        network: &NetworkClientConfig,
+        model_mirror_url: Option<&str>,
+    ) -> Result<()> {
+        self.database
+            .set_setting(NETWORK_PROXY_MODE, network.proxy_mode().as_str())
+            .await?;
+        save_optional_string(
+            &self.database,
+            NETWORK_PROXY_URL,
+            network.custom_proxy_url(),
+        )
+        .await?;
+        save_optional_string(&self.database, MODEL_MIRROR_URL, model_mirror_url).await
+    }
+
+    fn cached_deepl_key(&self) -> (Option<String>, Option<String>) {
+        let mut cache = self
+            .credential_cache
+            .lock()
+            .expect("credential cache lock poisoned");
+        if !cache.loaded {
+            cache.loaded = true;
+            match self.credentials.get(DEEPL_PROVIDER_ID) {
+                Ok(secret) => cache.secret = normalized_secret(secret),
+                Err(error) => cache.error = Some(error.to_string()),
+            }
+        }
+        (cache.secret.clone(), cache.error.clone())
+    }
+
+    fn replace_cached_deepl_key(&self, secret: Option<String>, error: Option<String>) {
+        let mut cache = self
+            .credential_cache
+            .lock()
+            .expect("credential cache lock poisoned");
+        cache.loaded = true;
+        cache.secret = secret;
+        cache.error = error;
     }
 }
 
@@ -369,6 +425,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct MemoryCredentialStore {
         secret: Mutex<Option<String>>,
+        reads: Mutex<usize>,
     }
 
     impl CredentialStore for MemoryCredentialStore {
@@ -377,6 +434,7 @@ mod tests {
         }
 
         fn get(&self, _provider_id: &str) -> Result<Option<String>> {
+            *self.reads.lock().unwrap() += 1;
             Ok(self.secret.lock().unwrap().clone())
         }
 
@@ -444,6 +502,7 @@ mod tests {
             credentials.secret.lock().unwrap().as_deref(),
             Some("test-secret:fx")
         );
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
         assert!(provider.status().configured);
         assert_eq!(
             database
@@ -454,6 +513,51 @@ mod tests {
             Some(model.display().to_string().as_str())
         );
         assert!(database.get_setting("deepl").await.unwrap().is_none());
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn saves_download_network_without_reading_the_credential_store() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-network-settings-test-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            credentials.clone(),
+        );
+
+        service
+            .save_download_network_settings(
+                "custom",
+                Some("http://127.0.0.1:7897".to_string()),
+                Some("https://hf-mirror.com/".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let network = service.download_network_settings().await.unwrap();
+        assert_eq!(network.client.proxy_mode().as_str(), "custom");
+        assert_eq!(
+            network.client.custom_proxy_url(),
+            Some("http://127.0.0.1:7897")
+        );
+        assert_eq!(
+            network.model_mirror_url.as_deref(),
+            Some("https://hf-mirror.com")
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
 
         drop(service);
         drop(database);
