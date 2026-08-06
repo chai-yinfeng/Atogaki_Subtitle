@@ -41,7 +41,7 @@ Whisper 模型建议：
 
 Finder 启动的 App 不会执行 `.zshrc`，因此终端中的 `proxy_on` 不一定传给它。透明/TUN 代理通常可以直接生效；使用本地 HTTP 代理端口时，请在 App 设置中填写，例如 `http://127.0.0.1:7897`。模型镜像失败后会回退 Hugging Face 官方源。
 
-DeepL API Key 在 macOS 写入 Keychain；SQLite 只保存 provider 与其他非敏感设置，任务目录也不会复制 Key。Windows 版本将使用 Credential Manager，Linux 版本将使用 Secret Service。`DEEPL_AUTH_KEY` 仅作为开发兼容回退。
+DeepL API Key 在 macOS 写入 Keychain；SQLite 只保存 provider、其他非敏感设置及“曾成功保存 Key”的状态标记，任务目录也不会复制 Key。启动不读取 Keychain；可在设置中主动检查已有 Key。Windows 版本将使用 Credential Manager，Linux 版本将使用 Secret Service。`DEEPL_AUTH_KEY` 仅作为开发兼容回退。
 
 ## 基本使用
 
