@@ -47,9 +47,9 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 当前直接使用 `cargo run` 时加载的是最近一次 `ui/dist`，所以修改前端后必须先运行前端构建。`tauri.conf.json` 刻意不配置 `devUrl`，避免普通 `cargo run` 在没有同时启动 Vite server 时显示白屏。开发窗口启动后，首页会显示实际的应用数据目录和 SQLite 任务列表。
 
-打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。本地无需签名的 App Bundle 可用 `tauri build --bundles app --no-sign` 生成，再从 `src-tauri/target/release/bundle/macos/Atogaki.app` 启动。
+打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。本地 ad-hoc 签名的 App Bundle 可用 `tauri build --bundles app` 生成，再从 `src-tauri/target/release/bundle/macos/Atogaki.app` 启动。配置声明最低 macOS 12.0，与 sidecar 的 deployment target 一致。
 
-本机验证 DMG 时使用 `CI=true tauri build --bundles dmg --no-sign`。当前 macOS 26 上非 CI 模式的 Finder 美化 AppleScript 会挂起并导致 `bundle_dmg.sh` 失败；CI 模式跳过图标定位与背景美化，但生成的 DMG 可正常挂载、校验和安装，适合作为首轮测试发布基线。
+本机验证 DMG 时使用 `CI=true tauri build --bundles dmg`。当前 macOS 26 上非 CI 模式的 Finder 美化 AppleScript 会挂起并导致 `bundle_dmg.sh` 失败；CI 模式跳过图标定位与背景美化，但生成的 DMG 可正常挂载、校验和安装，适合作为首轮测试发布基线。ad-hoc 签名只保证 Bundle 完整性，不代表 Developer ID 身份，也没有经过 Apple 公证。
 
 从终端直接执行 Bundle 内二进制前，必须先退出同一 bundle identifier 的现有 Atogaki 进程。macOS 26 上同时直接执行第二个 GUI 二进制会在 AppKit `_RegisterApplication` 阶段触发 `SIGABRT`；这是重复实例的启动方式问题，不是数据目录初始化崩溃。Finder 的普通再次打开会交给 LaunchServices 激活现有实例。
 
@@ -110,6 +110,15 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 ## 最近一次打包窗口回归
 
+2026-08-06 使用 Tauri CLI 2.11.4 生成新的 `0.1.0` Apple Silicon 候选 App/DMG，并完成发布结构审计：
+
+- App 采用 ad-hoc identity `-`，主程序及三个 sidecar 均通过 `codesign --verify --deep --strict`；Bundle identifier 为 `com.chai-yinfeng.atogaki`，最低系统已与 sidecar 统一为 macOS 12.0。该签名不代表 Developer ID，也未公证，`spctl` 不会把它评估为已认证开发者版本。
+- 四个可执行文件均为单架构 arm64，只链接 macOS 系统框架；FFmpeg 8.1.2 含 `ass`、`h264_videotoolbox` 和原生 `mpeg4`，不含 `libx264`。一秒 SQLite/ASS 真实烧录再次验证 VideoToolbox `-12908` 后自动回退 MPEG-4 并成功完成。
+- App Resources 与仓库 `LICENSE`、完整 `third-party/` 一致；没有打包 Whisper/VAD 模型、`.part` 或非系统 dylib。Tauri 签名会改变 Bundle 内 Mach-O 哈希，构建清单因此明确记录打包前 sidecar 哈希，签名后文件由 `codesign` 与 DMG SHA-256 保护。
+- `Atogaki_0.1.0_aarch64.dmg` 通过 `hdiutil verify`，只读挂载后包含 `Atogaki.app` 和指向 `/Applications` 的链接；挂载内容与构建 App 逐文件一致。候选 DMG SHA-256 为 `e207f0fc8326a5e1f39c3396f2273a292ebd00d2c4e0907775b97629c035af52`。
+- 对应源码包及内部七份上游源码全部通过 SHA-256；源码包 SHA-256 为 `d2d8335747198847da16976ce63ec37a879c8ba77d311d97d9890bd9a887c5cc`。
+- 候选 App 已在清除代理、Atogaki 和 DeepL 环境变量后，以 `/private/tmp/atogaki-rc-20260806.KDUTfK` 启动；隔离 SQLite migration/integrity 检查通过，初始化 1 个内建词表、0 个任务。窗口内的完整用户操作回归等待手工确认。
+
 2026-08-06 使用未签名打包 App 和 `/tmp/atogaki-network-ui-20260806` 完成网络与模型下载回归：
 
 - 清除进程中的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`ATOGAKI_*` 与 `DEEPL_AUTH_KEY` 后，设置页正确显示隔离模型目录。
@@ -151,4 +160,4 @@ ATOGAKI_FFMPEG="$PWD/src-tauri/binaries/ffmpeg-$(rustc --print host-tuple)" \
 - macOS WebView 通常可以直接播放 MP4/MOV 和常见音频；MKV、部分 WebM 或特殊编码可能失败，此时只保证 `audio.wav` 回听。
 - 桌面翻译使用 DeepL 云端 API，会发送当前日文字幕；单段和全部重译还会发送 SQLite 中前后约 30 秒的日文作为局部上下文。API key 可由设置界面写入系统凭据库，环境变量仅作兼容回退；设置加载只返回是否已配置和来源，不回显密钥。
 - 桌面 SRT/ASS 与 MP4 烧录均使用 SQLite，并支持选择目标位置、覆盖确认与 Finder 定位；现有 CLI `translate`/`export` 仍读取任务 JSON，两条入口的数据源不同，不要用 CLI 命令验证桌面人工编辑。
-- 当前窗口回归仍以 macOS 未签名 `.app` 为主；Windows Credential Manager、Linux Secret Service、安装包权限与可重复窗口自动化需要在对应平台补测。
+- 当前候选包以 macOS ad-hoc 签名、未公证的 `.app` 为主；Windows Credential Manager、Linux Secret Service、安装包权限与可重复窗口自动化需要在对应平台补测。

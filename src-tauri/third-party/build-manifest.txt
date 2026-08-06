@@ -16,6 +16,6 @@ freetype_source_sha256=36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775
 harfbuzz_version=14.3.0
 harfbuzz_source_sha256=16070d77cfc4ba1f1e7327e83bf9b3f55898081cabdb94e56a33e04fc8874eae
 ffmpeg_configuration=configuration: --prefix=/atogaki-sidecar --cc=clang --cxx=clang++ --pkg-config-flags=--static --extra-cflags='-mmacosx-version-min=12.0' --extra-ldflags='-mmacosx-version-min=12.0' --disable-autodetect --disable-gpl --disable-nonfree --disable-network --disable-doc --disable-debug --disable-ffplay --disable-shared --enable-static --enable-bzlib --enable-iconv --enable-zlib --enable-libass --enable-videotoolbox --enable-audiotoolbox
-ffmpeg_binary_sha256=bb79918436b5e56de03f06bebeff920ecdc2dfbdc7735144525f35e0030972e2
-ffprobe_binary_sha256=d62de63fb86639ab08c3370432e3e9bd12b8adc8d8efad841e59bcdc7f145f66
-whisper_binary_sha256=e8a833596e330e219669d686c64ebd2d03d0a018735ea4ae90f4306bc2ca3112
+prebundle_ffmpeg_binary_sha256=bb79918436b5e56de03f06bebeff920ecdc2dfbdc7735144525f35e0030972e2
+prebundle_ffprobe_binary_sha256=d62de63fb86639ab08c3370432e3e9bd12b8adc8d8efad841e59bcdc7f145f66
+prebundle_whisper_binary_sha256=e8a833596e330e219669d686c64ebd2d03d0a018735ea4ae90f4306bc2ca3112

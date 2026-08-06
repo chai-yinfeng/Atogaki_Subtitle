@@ -72,7 +72,7 @@ _最后更新：2026-08-06_
 ## 当前技术债清单
 
 - 当前 Web API 和 Postgres schema 是早期探索，不应驱动桌面 MVP 的设计。
-- macOS Apple Silicon 已能从固定源码生成 whisper.cpp v1.8.6 与 FFmpeg 8.1.2 sidecar，随 `.app` 打包并在无 Atogaki 环境变量时运行；FFmpeg 为无 libx264 的 LGPL 构建，libass 字体栈同样从固定源码静态链接。未签名 DMG 已能在 CI 模式生成并通过 `hdiutil verify`；对应源码包与校验文件已可复现生成。正式分发仍需补 x86_64/Windows 构建机、签名/公证和实际 GitHub Release 上传演练。
+- macOS Apple Silicon 已能从固定源码生成 whisper.cpp v1.8.6 与 FFmpeg 8.1.2 sidecar，随 `.app` 打包并在无 Atogaki 环境变量时运行；FFmpeg 为无 libx264 的 LGPL 构建，libass 字体栈同样从固定源码静态链接。App 已统一声明最低 macOS 12.0，并采用无需开发者账号的 ad-hoc 签名；CI 模式 DMG 与对应源码包均可复现生成。正式分发仍需补 x86_64/Windows 构建机、Developer ID 签名/公证和实际 GitHub Release 上传演练。
 - Atogaki 项目已采用 Apache-2.0；App 会携带项目许可证、macOS arm64 Rust/Tauri 与前端的生成式第三方声明。新的 target、lockfile 或 sidecar 版本仍必须重新审计；当前审计属于工程记录，不替代正式法律意见。
 - 模型下载由桌面主进程的 `reqwest` 发起，不经过 WebView。设置页已提供环境/直连/自定义 HTTP 代理、可选 HTTPS 镜像和连通性测试；镜像失败会回退 Hugging Face 官方源，所有模型必须通过固定 SHA-256 才会安装。Finder 启动不再要求依赖 zsh 的 `proxy_on`，但认证代理凭据与断点续传尚未实现。
 - 当前识别与翻译选项已可配置；UI 在 MVP 中只暴露日语到简中的默认组合。

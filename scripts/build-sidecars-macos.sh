@@ -270,9 +270,9 @@ cp "$BUILD_ROOT/harfbuzz-$HARFBUZZ_VERSION/src/ms-use/COPYING" "$NOTICES_DIR/lic
   print "harfbuzz_version=$HARFBUZZ_VERSION"
   print "harfbuzz_source_sha256=$HARFBUZZ_SHA256"
   print "ffmpeg_configuration=$FFMPEG_CONFIGURATION"
-  print "ffmpeg_binary_sha256=$(shasum -a 256 "$FFMPEG_BINARY" | awk '{print $1}')"
-  print "ffprobe_binary_sha256=$(shasum -a 256 "$FFPROBE_BINARY" | awk '{print $1}')"
-  print "whisper_binary_sha256=$(shasum -a 256 "$WHISPER_BINARY" | awk '{print $1}')"
+  print "prebundle_ffmpeg_binary_sha256=$(shasum -a 256 "$FFMPEG_BINARY" | awk '{print $1}')"
+  print "prebundle_ffprobe_binary_sha256=$(shasum -a 256 "$FFPROBE_BINARY" | awk '{print $1}')"
+  print "prebundle_whisper_binary_sha256=$(shasum -a 256 "$WHISPER_BINARY" | awk '{print $1}')"
 } > "$NOTICES_DIR/build-manifest.txt"
 
 print "Built and verified Atogaki sidecars for $TARGET_TRIPLE"

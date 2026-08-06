@@ -64,9 +64,9 @@ require_binary_sha256() {
   print "$expected  $binary_path" | shasum -a 256 --check
 }
 
-require_binary_sha256 ffmpeg ffmpeg_binary_sha256
-require_binary_sha256 ffprobe ffprobe_binary_sha256
-require_binary_sha256 whisper-cli whisper_binary_sha256
+require_binary_sha256 ffmpeg prebundle_ffmpeg_binary_sha256
+require_binary_sha256 ffprobe prebundle_ffprobe_binary_sha256
+require_binary_sha256 whisper-cli prebundle_whisper_binary_sha256
 
 FFMPEG_CONFIGURATION=$(sed -n 's/^ffmpeg_configuration=//p' "$MANIFEST")
 if [[ "$FFMPEG_CONFIGURATION" != *"--disable-gpl"* || "$FFMPEG_CONFIGURATION" != *"--disable-nonfree"* ]]; then

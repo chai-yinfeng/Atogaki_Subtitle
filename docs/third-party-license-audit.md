@@ -81,7 +81,7 @@ src-tauri/target/release/bundle/sources/
 └── Atogaki-0.1.0-third-party-sources.tar.xz.sha256
 ```
 
-归档包含七份精确上游源码、逐文件 `SHA256SUMS`、当前二进制构建清单、固定版本文件、完整 sidecar 构建脚本和许可证文本。脚本会先验证已构建二进制清单与源码基线完全一致；任一版本或哈希漂移都会停止。
+归档包含七份精确上游源码、逐文件 `SHA256SUMS`、当前二进制构建清单、固定版本文件、完整 sidecar 构建脚本和许可证文本。脚本会先验证打包前 sidecar 与源码基线完全一致；任一版本或哈希漂移都会停止。Tauri 对最终 Bundle 做 ad-hoc 签名后 Mach-O 文件哈希会变化，因此 App 内 sidecar 改用 `codesign` 校验，整个交付物再由 DMG SHA-256 固定。
 
 ## 模型与云端服务
 
@@ -97,7 +97,7 @@ DeepL API 不向 App 分发 SDK；当前通过 HTTPS API 调用。用户仍需�
 4. 生成对应源码包，校验外层 SHA-256，并抽查归档内的 `SHA256SUMS`。
 5. 确认 DMG/App 含 Apache-2.0 项目许可证、`third-party/` 声明和 sidecar 许可证。
 6. 将 DMG、DMG 校验文件、对应源码包及其校验文件上传到同一个 GitHub Release。
-7. 在 Release notes 写明架构、最低 macOS、未签名/公证状态、模型不内置和第三方材料入口。
+7. 在 Release notes 写明架构、最低 macOS、ad-hoc 签名/未公证状态、模型不内置和第三方材料入口。
 
 ## 尚未覆盖
 

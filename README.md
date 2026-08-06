@@ -3,7 +3,7 @@
 Atogaki 是一个本地优先的日语音视频理解、字幕校对与导出工具。它最初是为了把
 ヨルシカ「後書き」电台整理成便于中文使用者理解和学习的日中双语资料；长期方向是扩展为泛用的本地字幕识别、翻译、编辑和烧录工作台。
 
-项目目前处于 macOS Apple Silicon 预发布阶段。核心闭环已经可用，但尚未提供签名、公证的正式安装包。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+项目目前处于 macOS Apple Silicon 预发布阶段。核心闭环已经可用，但尚未提供 Developer ID 签名、公证的正式安装包。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
 ## 能做什么
 
@@ -96,11 +96,11 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
 
-构建未签名 App 或 DMG：
+构建 ad-hoc 签名、未公证的 App 或 DMG：
 
 ```bash
-tauri build --bundles app --no-sign
-CI=true tauri build --bundles dmg --no-sign
+tauri build --bundles app
+CI=true tauri build --bundles dmg
 ```
 
 产物位于 `src-tauri/target/release/bundle/`。详细窗口回归见 [`docs/desktop-testing.md`](docs/desktop-testing.md)，发布资产和 LGPL 源码归档见 [`docs/releasing.md`](docs/releasing.md)。

@@ -34,7 +34,7 @@ Atogaki bundles separately executable command-line sidecars. They communicate wi
 | FreeType | 2.14.3 | FreeType License | https://download.savannah.gnu.org/releases/freetype/ |
 | HarfBuzz | 14.3.0 | permissive; see bundled license | https://github.com/harfbuzz/harfbuzz/releases/tag/14.3.0 |
 
-The FFmpeg build script rejects GPL and nonfree configuration and verifies that `libx264` is absent. It builds libass and its LGPL/permissive dependencies from pinned, SHA-256-verified source archives and links them statically; it does not link Homebrew dylibs. `build-manifest.txt`, generated beside this file for release builds, records the exact dependency versions, source hashes, target, configure line and binary hashes.
+The FFmpeg build script rejects GPL and nonfree configuration and verifies that `libx264` is absent. It builds libass and its LGPL/permissive dependencies from pinned, SHA-256-verified source archives and links them statically; it does not link Homebrew dylibs. `build-manifest.txt`, generated beside this file for release builds, records the exact dependency versions, source hashes, target, configure line and pre-bundle binary hashes. Tauri's final ad-hoc signature changes the Mach-O file hashes inside the App; release integrity is checked with `codesign` and the DMG SHA-256 instead of comparing signed sidecars to the pre-bundle hashes.
 
 Before publishing an installer, generate the complete corresponding source archive:
 
