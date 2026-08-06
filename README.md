@@ -23,8 +23,8 @@ Atogaki 是一个本地优先的日语音视频理解、字幕校对与导出工
 首次打开 App 时，启动配置会引导完成三部分：
 
 1. **本地模型。** 选择已有 `ggml-*.bin`，或下载 Whisper 与 Silero VAD。App 管理的默认目录通常是 `~/Library/Application Support/com.chai-yinfeng.atogaki/models/`，界面会显示本机的实际路径。
-2. **网络。** 选择跟随启动环境、强制直连或自定义 HTTP/HTTPS 代理；也可以填写 HTTPS 模型镜像。连接测试使用当前输入，实际下载使用保存后的设置。
-3. **云端翻译。** DeepL 是可选项。不配置仍可完成日语识别、编辑和日文字幕导出。
+2. **网络。** 选择跟随启动环境、强制直连或自定义 HTTP/HTTPS 代理；也可以填写 HTTPS 模型镜像。连接测试使用当前输入；点击下载会自动保存当前网络草稿。
+3. **云端翻译。** DeepL 是可选项。不配置仍可完成日语识别、编辑和日文字幕导出；启动时不访问 Keychain，首次翻译才读取已有 Key。
 
 Whisper 模型建议：
 
@@ -32,14 +32,16 @@ Whisper 模型建议：
 | --- | ---: | --- |
 | small | 466 MiB | 8 GB 内存或更快的初步识别 |
 | medium | 1.5 GiB | 当前日语节目质量基线，16 GB 及以上内存推荐 |
-| large-v3-turbo q5_0 | 547 MiB | Apple Silicon 上的实验选项，需要与 medium 做真实节目对比 |
+| large-v3 q5_0 | 1.1 GiB | 质量实验档，适合与 medium 做真实节目对比 |
+| large-v3-turbo q5_0 | 547 MiB | 速度/空间实验档 |
+| large-v3-turbo q8_0 | 834 MiB | turbo 的较高精度量化档，适合与 q5 对比 |
 | Silero VAD v6.2.0 | 865 KiB | 推荐与任一 Whisper 模型配套使用 |
 
-`large-v3-turbo q5_0` 比 medium 文件更小，是因为它属于更快的 turbo 架构并经过 5-bit 量化；文件大小不能直接代表识别质量。所有内建下载项都有固定 SHA-256，镜像内容与预期不一致时不会安装。
+`large-v3-turbo q5_0` 比 medium 文件更小，是因为它属于更快的 turbo 架构并经过 5-bit 量化；`large-v3 q5_0` 则是原始 large-v3 的 q5 量化版。文件大小不能直接代表识别质量。所有内建下载项都有固定 SHA-256，镜像内容与预期不一致时不会安装。
 
 Finder 启动的 App 不会执行 `.zshrc`，因此终端中的 `proxy_on` 不一定传给它。透明/TUN 代理通常可以直接生效；使用本地 HTTP 代理端口时，请在 App 设置中填写，例如 `http://127.0.0.1:7897`。模型镜像失败后会回退 Hugging Face 官方源。
 
-DeepL API Key 在 macOS 写入 Keychain；SQLite 只保存“选择了哪个 provider、是否已经配置”等非敏感设置，任务目录也不会复制 Key。Windows 版本将使用 Credential Manager，Linux 版本将使用 Secret Service。`DEEPL_AUTH_KEY` 仅作为开发兼容回退。
+DeepL API Key 在 macOS 写入 Keychain；SQLite 只保存 provider 与其他非敏感设置，任务目录也不会复制 Key。Windows 版本将使用 Credential Manager，Linux 版本将使用 Secret Service。`DEEPL_AUTH_KEY` 仅作为开发兼容回退。
 
 ## 基本使用
 

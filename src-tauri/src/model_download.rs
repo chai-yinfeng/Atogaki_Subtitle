@@ -409,6 +409,17 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
             sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
         },
         ModelCatalogItem {
+            id: "whisper-large-v3-q5_0",
+            kind: "whisper",
+            name: "Whisper large-v3 q5（质量实验）",
+            file_name: "ggml-large-v3-q5_0.bin",
+            size_label: "约 1.1 GiB",
+            recommended_for: "现代 Apple Silicon；更高质量上限，建议与 medium 做同节目对比。",
+            source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
+            download_path: "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
+            sha256: "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
+        },
+        ModelCatalogItem {
             id: "whisper-large-v3-turbo-q5_0",
             kind: "whisper",
             name: "Whisper large-v3-turbo q5（实验）",
@@ -418,6 +429,17 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
             source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
             download_path: "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
             sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        },
+        ModelCatalogItem {
+            id: "whisper-large-v3-turbo-q8_0",
+            kind: "whisper",
+            name: "Whisper large-v3-turbo q8（质量实验）",
+            file_name: "ggml-large-v3-turbo-q8_0.bin",
+            size_label: "约 834 MiB",
+            recommended_for: "turbo 的较高精度量化档；适合与 turbo q5 比较质量差异。",
+            source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
+            download_path: "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
+            sha256: "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1",
         },
         ModelCatalogItem {
             id: "vad-silero-v6.2.0",
@@ -461,6 +483,26 @@ mod tests {
                 .all(|model| { model.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) })
         );
         assert!(catalog.iter().any(|model| model.kind == "vad"));
+    }
+
+    #[test]
+    fn curated_whisper_catalog_has_the_supported_quality_tiers() {
+        let whisper_ids = model_catalog()
+            .iter()
+            .filter(|model| model.kind == "whisper")
+            .map(|model| model.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            whisper_ids,
+            vec![
+                "whisper-small",
+                "whisper-medium",
+                "whisper-large-v3-q5_0",
+                "whisper-large-v3-turbo-q5_0",
+                "whisper-large-v3-turbo-q8_0",
+            ]
+        );
     }
 
     #[test]
