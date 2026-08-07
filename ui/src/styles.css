@@ -15,6 +15,7 @@ button:disabled { cursor: wait; opacity: .55; }
 .shell { max-width: 1240px; margin: 0 auto; padding: 42px 32px 70px; }
 header { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
 .header-actions { display: flex; align-items: center; gap: 9px; }
+#install-update { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .eyebrow { margin: 0 0 8px; color: #a54632; font-size: 12px; font-weight: 700; letter-spacing: .12em; }
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-family: Georgia, "Songti SC", serif; font-size: clamp(44px, 8vw, 72px); font-weight: 500; letter-spacing: -.05em; }

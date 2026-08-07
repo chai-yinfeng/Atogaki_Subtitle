@@ -9,7 +9,8 @@
     "check": "node ./node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1"
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-updater": "^2.10.1"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

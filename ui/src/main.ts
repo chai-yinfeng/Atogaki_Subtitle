@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { check } from "@tauri-apps/plugin-updater";
 import "./styles.css";
 
 type LocalJob = {
@@ -217,6 +218,7 @@ app.innerHTML = `
         <h1>Atogaki</h1>
       </div>
       <div class="header-actions">
+        <button id="install-update" type="button" class="secondary hidden" aria-live="polite"></button>
         <button id="open-settings" type="button" class="secondary">设置</button>
         <button id="refresh" type="button">刷新任务</button>
       </div>
@@ -539,6 +541,7 @@ const modelCatalogHost = document.querySelector<HTMLDivElement>("#model-catalog"
 const modelDownloadMessage = document.querySelector<HTMLParagraphElement>("#model-download-message");
 const modelsDirectory = document.querySelector<HTMLSpanElement>("#models-directory");
 const modelReadiness = document.querySelector<HTMLSpanElement>("#model-readiness");
+const installUpdateButton = document.querySelector<HTMLButtonElement>("#install-update");
 
 let refreshing = false;
 let activeDetail: JobDetail | null = null;
@@ -567,6 +570,7 @@ let modelDownloads: ModelDownloadState[] = [];
 let modelDownloadPoll: number | null = null;
 const settingsDirtyFields = new Set<string>();
 let workspaceElapsedTimer: number | null = null;
+let pendingUpdate: Awaited<ReturnType<typeof check>> = null;
 let translationStatus: TranslationStatus = {
   provider_id: "none",
   provider: "翻译服务",
@@ -668,6 +672,45 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KiB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+}
+
+async function checkForUpdates(): Promise<void> {
+  try {
+    if (!await invoke<boolean>("updater_configured")) return;
+    pendingUpdate = await check();
+    if (!pendingUpdate || !installUpdateButton) return;
+    installUpdateButton.textContent = `更新到 v${pendingUpdate.version}`;
+    installUpdateButton.classList.remove("hidden");
+  } catch (error) {
+    console.warn("Update check failed", error);
+  }
+}
+
+async function installPendingUpdate(): Promise<void> {
+  if (!pendingUpdate || !installUpdateButton || installUpdateButton.disabled) return;
+  installUpdateButton.disabled = true;
+  installUpdateButton.textContent = "正在下载更新…";
+  let downloadedBytes = 0;
+  let contentLength: number | undefined;
+  try {
+    await pendingUpdate.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        contentLength = event.data.contentLength;
+      } else if (event.event === "Progress") {
+        downloadedBytes += event.data.chunkLength;
+        installUpdateButton.textContent = contentLength
+          ? `正在更新 ${Math.min(100, Math.round(downloadedBytes / contentLength * 100))}%`
+          : `已下载 ${formatBytes(downloadedBytes)}`;
+      } else if (event.event === "Finished") {
+        installUpdateButton.textContent = "正在安装更新…";
+      }
+    });
+    installUpdateButton.textContent = `已安装 v${pendingUpdate.version} · 重启后生效`;
+  } catch (error) {
+    installUpdateButton.disabled = false;
+    installUpdateButton.textContent = "更新失败，点击重试";
+    installUpdateButton.title = String(error);
+  }
 }
 
 function syncProviderSettings(): void {
@@ -2185,6 +2228,7 @@ async function applyPreviewedGlossary(): Promise<void> {
 }
 
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
+installUpdateButton?.addEventListener("click", () => void installPendingUpdate());
 document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
   settingsDirtyFields.clear();
   if (!settingsDialog?.open) settingsDialog?.showModal();
@@ -2361,6 +2405,7 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
 
 syncVadControls();
 void loadDesktopSettings(true);
+void checkForUpdates();
 
 void invoke<string>("data_directory")
   .then((path) => {

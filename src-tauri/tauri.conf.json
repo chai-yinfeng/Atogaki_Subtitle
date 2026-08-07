@@ -42,5 +42,13 @@
       "../LICENSE": "LICENSE",
       "third-party/": "third-party/"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

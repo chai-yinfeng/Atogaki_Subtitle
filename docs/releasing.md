@@ -21,12 +21,22 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 
 1. 在干净提交上完成 Rust、前端、打包 App、模型下载和真实窗口回归。
 2. 运行 `./scripts/generate-rust-licenses.sh` 与 `node ./scripts/generate-frontend-licenses.mjs`，审阅并提交生成声明。详细范围见 `docs/third-party-license-audit.md`。
-3. 用固定 sidecar 构建 DMG；本机可用 `CI=true tauri build --bundles dmg` 跳过 Finder 美化脚本。当前配置使用不需要 Apple Developer 账号的 ad-hoc identity `-`，发布时必须明确标注“ad-hoc 签名、未公证”，供知情测试者使用。
-4. 运行 `./scripts/package-sidecar-sources-macos.sh`。进入输出目录执行 `shasum -a 256 -c Atogaki-0.1.0-third-party-sources.tar.xz.sha256`，并抽查归档的 `SOURCES.md`、`sources/SHA256SUMS` 和 `build/build-manifest.txt`。
-5. 为最终 DMG 生成 SHA-256，并挂载确认 App、Applications 链接、三个 sidecar、根许可证和 `third-party/` 声明都存在。
-6. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.1`，并把 tag 推送到 GitHub。
-7. 在 GitHub 的 Releases 页面从该 tag 创建 prerelease，填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值、模型不内置和第三方许可证说明。
-8. 上传 DMG、两个 SHA-256 文件与对应源码包，而不是把这些大产物 `git add` 到仓库。
+3. 首次启用应用内更新前，用 Tauri signer 生成独立更新密钥。私钥只保存在发布者的安全存储或 GitHub Actions encrypted secrets；公钥通过 `TAURI_UPDATER_PUBKEY` 在编译时注入，不把私钥或密码写入仓库：
+
+   ```bash
+   cargo tauri signer generate -w ~/.tauri/atogaki-updater.key
+   export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/atogaki-updater.key"
+   export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="..."
+   export TAURI_UPDATER_PUBKEY="$(cat ~/.tauri/atogaki-updater.key.pub)"
+   ```
+
+4. 用固定 sidecar 构建 DMG。结构 smoke build 仍可用 `CI=true tauri build --bundles dmg` 跳过 Finder 美化脚本；最终发布产物使用非 CI 构建，并显式加载 updater 配置：`cargo tauri build --bundles dmg --config src-tauri/tauri.updater.conf.json`。这样普通开发和 smoke build 不需要更新私钥，正式构建则会额外生成 macOS `.app.tar.gz` 和 `.sig`。这套 Tauri 更新签名与 Apple 签名相互独立。当前 macOS 配置使用不需要 Apple Developer 账号的 ad-hoc identity `-`，发布时必须明确标注“ad-hoc 签名、未公证”，供知情测试者使用。
+5. 运行 `./scripts/package-sidecar-sources-macos.sh`。进入输出目录执行 `shasum -a 256 -c Atogaki-0.1.0-third-party-sources.tar.xz.sha256`，并抽查归档的 `SOURCES.md`、`sources/SHA256SUMS` 和 `build/build-manifest.txt`。
+6. 为最终 DMG 生成 SHA-256，并挂载确认 App、Applications 链接、三个 sidecar、根许可证和 `third-party/` 声明都存在。
+7. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.1`，并把 tag 推送到 GitHub。
+8. 为 GitHub 静态更新端点生成 `latest.json`。`darwin-aarch64` 条目指向同一 Release 的 `.app.tar.gz`，`signature` 必须是对应 `.sig` 文件的完整内容；版本必须与 `tauri.conf.json` 一致。
+9. 在 GitHub 的 Releases 页面从该 tag 创建 prerelease，填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值、模型不内置和第三方许可证说明。
+10. 上传 DMG、更新用 `.app.tar.gz`、`.sig`、`latest.json`、两个 SHA-256 文件与对应源码包，而不是把这些大产物 `git add` 到仓库。
 
 可使用 GitHub CLI 上传已核对的产物：
 
@@ -34,10 +44,15 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 gh release create v0.1.0-alpha.1 \
   path/to/Atogaki-v0.1.0-alpha.1-macos-arm64.dmg \
   path/to/Atogaki-v0.1.0-alpha.1-macos-arm64.dmg.sha256 \
+  src-tauri/target/release/bundle/macos/Atogaki.app.tar.gz \
+  src-tauri/target/release/bundle/macos/Atogaki.app.tar.gz.sig \
+  path/to/latest.json \
   src-tauri/target/release/bundle/sources/Atogaki-0.1.0-third-party-sources.tar.xz \
   src-tauri/target/release/bundle/sources/Atogaki-0.1.0-third-party-sources.tar.xz.sha256 \
   --prerelease --title "Atogaki v0.1.0-alpha.1" --notes-file path/to/release-notes.md
 ```
+
+更新检查只访问 HTTPS GitHub Release 地址，并在安装前验证 Tauri updater 签名。没有配置 `TAURI_UPDATER_PUBKEY` 的开发或 smoke build 会保持现有功能，但不会注册 updater、发起检查或显示更新按钮。安装成功后 App 不会主动重启，避免中断正在进行的任务。
 
 ## 自动化时机
 

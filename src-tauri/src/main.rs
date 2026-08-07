@@ -805,9 +805,27 @@ fn validated_data_dir_override(value: Option<OsString>) -> Result<Option<PathBuf
     })
 }
 
+fn configured_updater_public_key() -> Option<&'static str> {
+    option_env!("TAURI_UPDATER_PUBKEY")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+#[tauri::command]
+fn updater_configured() -> bool {
+    configured_updater_public_key().is_some()
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
+            if let Some(public_key) = configured_updater_public_key() {
+                app.handle().plugin(
+                    tauri_plugin_updater::Builder::new()
+                        .pubkey(public_key)
+                        .build(),
+                )?;
+            }
             let data_dir = validated_data_dir_override(std::env::var_os("ATOGAKI_DATA_DIR"))?
                 .unwrap_or(app.path().app_data_dir()?);
             let config = AppConfig {
@@ -902,7 +920,8 @@ fn main() {
             translate_all_subtitles,
             translate_subtitle,
             translation_status,
-            update_subtitle
+            update_subtitle,
+            updater_configured
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Atogaki desktop application");

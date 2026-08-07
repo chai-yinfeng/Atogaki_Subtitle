@@ -3,5 +3,9 @@
   "identifier": "main-window",
   "description": "Permissions required by the Atogaki main desktop window.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
+  ]
 }
