@@ -24,13 +24,13 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 3. 首次启用应用内更新前，用 Tauri signer 生成独立更新密钥。私钥只保存在发布者的安全存储或 GitHub Actions encrypted secrets；公钥通过 `TAURI_UPDATER_PUBKEY` 在编译时注入，不把私钥或密码写入仓库：
 
    ```bash
-   cargo tauri signer generate -w ~/.tauri/atogaki-updater.key
+   tauri signer generate -w ~/.tauri/atogaki-updater.key
    export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/atogaki-updater.key"
    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="..."
    export TAURI_UPDATER_PUBKEY="$(cat ~/.tauri/atogaki-updater.key.pub)"
    ```
 
-4. 用固定 sidecar 构建 DMG。结构 smoke build 仍可用 `CI=true tauri build --bundles dmg` 跳过 Finder 美化脚本；最终发布产物使用非 CI 构建，并显式加载 updater 配置：`cargo tauri build --bundles dmg --config src-tauri/tauri.updater.conf.json`。这样普通开发和 smoke build 不需要更新私钥，正式构建则会额外生成 macOS `.app.tar.gz` 和 `.sig`。这套 Tauri 更新签名与 Apple 签名相互独立。当前 macOS 配置使用不需要 Apple Developer 账号的 ad-hoc identity `-`，发布时必须明确标注“ad-hoc 签名、未公证”，供知情测试者使用。
+4. 用固定 sidecar 构建 DMG。结构 smoke build 仍可用 `CI=true tauri build --bundles dmg` 跳过 Finder 美化脚本；最终发布产物使用非 CI 构建，并显式加载 updater 配置：`tauri build --bundles dmg --config src-tauri/tauri.updater.conf.json`。这样普通开发和 smoke build 不需要更新私钥，正式构建则会额外生成 macOS `.app.tar.gz` 和 `.sig`。这套 Tauri 更新签名与 Apple 签名相互独立。当前 macOS 配置使用不需要 Apple Developer 账号的 ad-hoc identity `-`，发布时必须明确标注“ad-hoc 签名、未公证”，供知情测试者使用。
 5. 运行 `./scripts/package-sidecar-sources-macos.sh`。进入输出目录执行 `shasum -a 256 -c Atogaki-0.1.0-third-party-sources.tar.xz.sha256`，并抽查归档的 `SOURCES.md`、`sources/SHA256SUMS` 和 `build/build-manifest.txt`。
 6. 为最终 DMG 生成 SHA-256，并挂载确认 App、Applications 链接、三个 sidecar、根许可证和 `third-party/` 声明都存在。
 7. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.1`，并把 tag 推送到 GitHub。
