@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::LanguageCode;
+
 /// Options for an ASR run, independent from a particular user interface.
 ///
 /// CLI, desktop UI, and future automation callers each translate their own
@@ -9,7 +11,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionOptions {
     pub model: PathBuf,
-    pub source_language: String,
+    #[serde(default)]
+    pub source_language: LanguageCode,
     pub glossary: Option<PathBuf>,
     pub prompt: Option<String>,
     pub vad_model: Option<PathBuf>,
@@ -26,10 +29,10 @@ pub struct TranscriptionOptions {
 }
 
 impl TranscriptionOptions {
-    pub fn japanese(model: PathBuf) -> Self {
+    pub fn new(model: PathBuf, source_language: LanguageCode) -> Self {
         Self {
             model,
-            source_language: "ja".to_string(),
+            source_language,
             glossary: None,
             prompt: None,
             vad_model: None,
@@ -44,5 +47,9 @@ impl TranscriptionOptions {
             output_json_full: false,
             no_gpu: false,
         }
+    }
+
+    pub fn japanese(model: PathBuf) -> Self {
+        Self::new(model, LanguageCode::Japanese)
     }
 }

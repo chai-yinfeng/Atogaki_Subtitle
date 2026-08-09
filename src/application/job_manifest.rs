@@ -5,7 +5,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{application::job_status::JobStatus, infrastructure::job_store::Job};
+use crate::{
+    application::job_status::JobStatus,
+    domain::{LanguageCode, LanguagePair},
+    infrastructure::job_store::Job,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobManifest {
@@ -14,6 +18,10 @@ pub struct JobManifest {
     pub message: String,
     pub input: Option<PathBuf>,
     pub render_output: Option<PathBuf>,
+    #[serde(default = "default_source_language")]
+    pub source_language: LanguageCode,
+    #[serde(default = "default_target_language")]
+    pub target_language: LanguageCode,
     pub outputs: JobOutputs,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
@@ -25,14 +33,21 @@ pub struct JobOutputs {
     pub job_dir: PathBuf,
     pub audio_wav: PathBuf,
     pub segments_json: PathBuf,
-    pub ja_srt: PathBuf,
-    pub zh_srt: PathBuf,
+    #[serde(alias = "ja_srt")]
+    pub source_srt: PathBuf,
+    #[serde(alias = "zh_srt")]
+    pub translated_srt: PathBuf,
     pub bilingual_srt: PathBuf,
     pub bilingual_ass: PathBuf,
 }
 
 impl JobManifest {
-    pub fn new(job: &Job, input: Option<PathBuf>, render_output: Option<PathBuf>) -> Self {
+    pub fn new(
+        job: &Job,
+        input: Option<PathBuf>,
+        render_output: Option<PathBuf>,
+        languages: LanguagePair,
+    ) -> Self {
         let now = unix_now();
         Self {
             job_id: job.id(),
@@ -40,6 +55,8 @@ impl JobManifest {
             message: JobStatus::Created.label().to_string(),
             input,
             render_output,
+            source_language: languages.source,
+            target_language: languages.target,
             outputs: JobOutputs::from(job),
             created_at_unix: now,
             updated_at_unix: now,
@@ -64,14 +81,22 @@ impl JobManifest {
     }
 }
 
+fn default_source_language() -> LanguageCode {
+    LanguageCode::Japanese
+}
+
+fn default_target_language() -> LanguageCode {
+    LanguageCode::SimplifiedChinese
+}
+
 impl From<&Job> for JobOutputs {
     fn from(job: &Job) -> Self {
         Self {
             job_dir: job.dir.clone(),
             audio_wav: job.audio_wav.clone(),
             segments_json: job.segments_json.clone(),
-            ja_srt: job.ja_srt.clone(),
-            zh_srt: job.zh_srt.clone(),
+            source_srt: job.source_srt.clone(),
+            translated_srt: job.translated_srt.clone(),
             bilingual_srt: job.bilingual_srt.clone(),
             bilingual_ass: job.bilingual_ass.clone(),
         }
@@ -90,4 +115,40 @@ pub fn job_id_from_dir(dir: &Path) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or("job")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::LanguageCode;
+
+    use super::JobManifest;
+
+    #[test]
+    fn legacy_manifest_defaults_to_japanese_and_accepts_old_output_names() {
+        let manifest: JobManifest = serde_json::from_value(serde_json::json!({
+            "job_id": "legacy-job",
+            "status": "done",
+            "message": "done",
+            "input": "/media/radio.mp4",
+            "render_output": null,
+            "outputs": {
+                "job_dir": "/tasks/legacy-job",
+                "audio_wav": "/tasks/legacy-job/audio.wav",
+                "segments_json": "/tasks/legacy-job/segments.json",
+                "ja_srt": "/tasks/legacy-job/ja.srt",
+                "zh_srt": "/tasks/legacy-job/zh.srt",
+                "bilingual_srt": "/tasks/legacy-job/bilingual.srt",
+                "bilingual_ass": "/tasks/legacy-job/bilingual.ass"
+            },
+            "created_at_unix": 1,
+            "updated_at_unix": 2,
+            "error": null
+        }))
+        .unwrap();
+
+        assert_eq!(manifest.source_language, LanguageCode::Japanese);
+        assert_eq!(manifest.target_language, LanguageCode::SimplifiedChinese);
+        assert!(manifest.outputs.source_srt.ends_with("ja.srt"));
+        assert!(manifest.outputs.translated_srt.ends_with("zh.srt"));
+    }
 }

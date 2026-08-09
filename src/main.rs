@@ -99,10 +99,8 @@ async fn main() -> Result<()> {
         }
         Command::Process(args) => {
             let transcription: TranscriptionOptions = args.whisper.into();
-            let translation = TranslationOptions::new(
-                transcription.source_language.clone(),
-                args.target_language,
-            );
+            let translation =
+                TranslationOptions::new(transcription.source_language, args.target_language);
             let job = runner
                 .process(ProcessSpec {
                     input: args.input,

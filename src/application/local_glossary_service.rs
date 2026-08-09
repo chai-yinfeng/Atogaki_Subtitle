@@ -4,7 +4,10 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    domain::glossary::{Glossary, GlossaryEntry},
+    domain::{
+        LanguageCode,
+        glossary::{Glossary, GlossaryEntry},
+    },
     infrastructure::local_db::{
         LocalDatabase, LocalGlossaryCorrection, LocalGlossaryDetail, LocalGlossaryRecord,
         LocalGlossaryTermInput, LocalSubtitleSegmentRecord,
@@ -91,12 +94,14 @@ impl LocalGlossaryService {
         &self,
         glossary_id: Option<&str>,
         name: String,
+        source_language: LanguageCode,
         terms: Vec<LocalGlossaryTermDraft>,
     ) -> Result<LocalGlossaryDetail> {
         self.database
             .save_glossary(
                 glossary_id,
                 name,
+                source_language.as_str(),
                 terms
                     .into_iter()
                     .map(|term| LocalGlossaryTermInput {
@@ -129,18 +134,20 @@ impl LocalGlossaryService {
         glossary_id: &str,
     ) -> Result<LocalGlossaryPreview> {
         let detail = self.get(glossary_id).await?;
+        self.ensure_job_language_matches_glossary(job_id, &detail)
+            .await?;
         let glossary = glossary_from_detail(&detail)?;
         let segments = self.database.list_segments(job_id).await?;
         let changes = segments
             .into_iter()
             .filter_map(|segment| {
-                let after_text = glossary.corrected_text(&segment.ja_text);
-                (after_text != segment.ja_text).then(|| LocalGlossarySegmentChange {
+                let after_text = glossary.corrected_text(&segment.source_text);
+                (after_text != segment.source_text).then(|| LocalGlossarySegmentChange {
                     segment_id: segment.id,
                     segment_index: segment.segment_index,
-                    before_text: segment.ja_text,
+                    before_text: segment.source_text,
                     after_text,
-                    translation_will_be_stale: segment.zh_text.is_some(),
+                    translation_will_be_stale: segment.translated_text.is_some(),
                 })
             })
             .collect();
@@ -176,6 +183,26 @@ impl LocalGlossaryService {
             stale_translations,
             segments,
         })
+    }
+
+    async fn ensure_job_language_matches_glossary(
+        &self,
+        job_id: &str,
+        detail: &LocalGlossaryDetail,
+    ) -> Result<()> {
+        let job = self
+            .database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        if job.source_language != detail.glossary.source_language {
+            return Err(anyhow!(
+                "glossary language {} does not match task source language {}",
+                detail.glossary.source_language,
+                job.source_language
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -348,6 +375,7 @@ mod tests {
             .save(
                 None,
                 "节目词表".to_string(),
+                crate::domain::LanguageCode::Japanese,
                 vec![LocalGlossaryTermDraft {
                     source_text: "ナブナ".to_string(),
                     target_text: Some("n-buna".to_string()),
@@ -358,7 +386,7 @@ mod tests {
             .await
             .unwrap();
         let job = Job::create_in(&root).unwrap();
-        let manifest = JobManifest::new(&job, None, None);
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
         let mut segment = TranscriptSegment::new(0, 1_000, "ナブナさん".to_string());
         segment.set_translation(Some("N-buna 老师".to_string()));
         database
@@ -382,7 +410,7 @@ mod tests {
             .unwrap();
         assert_eq!(applied.changed_segments, 1);
         assert_eq!(applied.stale_translations, 1);
-        assert_eq!(applied.segments[0].ja_text, "n-bunaさん");
+        assert_eq!(applied.segments[0].source_text, "n-bunaさん");
         assert!(applied.segments[0].translation_stale);
 
         drop(service);
@@ -404,6 +432,7 @@ mod tests {
             .save(
                 None,
                 "范围词表".to_string(),
+                crate::domain::LanguageCode::Japanese,
                 vec![
                     LocalGlossaryTermDraft {
                         source_text: "スイ".to_string(),

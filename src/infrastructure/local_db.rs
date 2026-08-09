@@ -32,6 +32,8 @@ pub struct LocalJobRecord {
     pub glossary_id: Option<String>,
     pub glossary_name: Option<String>,
     pub glossary_snapshot_path: Option<String>,
+    pub source_language: String,
+    pub target_language: String,
     pub created_at_unix: i64,
     pub updated_at_unix: i64,
 }
@@ -40,6 +42,7 @@ pub struct LocalJobRecord {
 pub struct LocalGlossaryRecord {
     pub id: String,
     pub name: String,
+    pub source_language: String,
     pub term_count: i64,
     pub prompt_term_count: i64,
     pub correction_count: i64,
@@ -82,8 +85,8 @@ pub struct LocalSubtitleSegmentRecord {
     pub segment_index: i64,
     pub start_ms: i64,
     pub end_ms: i64,
-    pub ja_text: String,
-    pub zh_text: Option<String>,
+    pub source_text: String,
+    pub translated_text: Option<String>,
     pub source_edited: bool,
     pub translation_edited: bool,
     pub translation_stale: bool,
@@ -228,8 +231,9 @@ impl LocalDatabase {
         sqlx::query(
             "INSERT INTO local_jobs (
                 job_id, storage_dir, input_path, render_output_path, status, message,
-                error_message, created_at_unix, updated_at_unix
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                error_message, source_language, target_language,
+                created_at_unix, updated_at_unix
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(job_id) DO UPDATE SET
                 storage_dir = excluded.storage_dir,
                 input_path = excluded.input_path,
@@ -237,6 +241,8 @@ impl LocalDatabase {
                 status = excluded.status,
                 message = excluded.message,
                 error_message = excluded.error_message,
+                source_language = excluded.source_language,
+                target_language = excluded.target_language,
                 updated_at_unix = MAX(local_jobs.updated_at_unix, excluded.updated_at_unix)",
         )
         .bind(&manifest.job_id)
@@ -256,6 +262,8 @@ impl LocalDatabase {
         .bind(manifest.status.as_str())
         .bind(&manifest.message)
         .bind(&manifest.error)
+        .bind(manifest.source_language.as_str())
+        .bind(manifest.target_language.as_str())
         .bind(to_i64(manifest.created_at_unix, "created_at_unix")?)
         .bind(to_i64(manifest.updated_at_unix, "updated_at_unix")?)
         .execute(&mut *tx)
@@ -279,6 +287,7 @@ impl LocalDatabase {
         sqlx::query_as::<_, LocalJobRecord>(
             "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
+                source_language, target_language,
                 created_at_unix, updated_at_unix
              FROM local_jobs
              ORDER BY updated_at_unix DESC, job_id DESC",
@@ -292,6 +301,7 @@ impl LocalDatabase {
         sqlx::query_as::<_, LocalJobRecord>(
             "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
+                source_language, target_language,
                 created_at_unix, updated_at_unix
              FROM local_jobs
              WHERE job_id = ?",
@@ -588,7 +598,7 @@ impl LocalDatabase {
                 .await
                 .context("failed to classify built-in glossary")?;
         } else {
-            self.save_glossary(None, name, terms).await?;
+            self.save_glossary(None, name, "ja", terms).await?;
         }
 
         sqlx::query(
@@ -606,7 +616,7 @@ impl LocalDatabase {
 
     pub async fn list_glossaries(&self) -> Result<Vec<LocalGlossaryRecord>> {
         sqlx::query_as::<_, LocalGlossaryRecord>(
-            "SELECT g.id, g.name, COUNT(t.id) AS term_count,
+            "SELECT g.id, g.name, g.source_language, COUNT(t.id) AS term_count,
                 COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.prompt_scope != 'correction_only' THEN 1 ELSE 0 END), 0) AS prompt_term_count,
                 COALESCE(SUM(CASE WHEN t.target_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS correction_count,
                 COALESCE(SUM(CASE WHEN t.prompt_scope = 'core' THEN 1 ELSE 0 END), 0) AS core_term_count,
@@ -626,7 +636,7 @@ impl LocalDatabase {
 
     pub async fn get_glossary(&self, glossary_id: &str) -> Result<Option<LocalGlossaryDetail>> {
         let glossary = sqlx::query_as::<_, LocalGlossaryRecord>(
-            "SELECT g.id, g.name, COUNT(t.id) AS term_count,
+            "SELECT g.id, g.name, g.source_language, COUNT(t.id) AS term_count,
                 COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.prompt_scope != 'correction_only' THEN 1 ELSE 0 END), 0) AS prompt_term_count,
                 COALESCE(SUM(CASE WHEN t.target_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS correction_count,
                 COALESCE(SUM(CASE WHEN t.prompt_scope = 'core' THEN 1 ELSE 0 END), 0) AS core_term_count,
@@ -664,6 +674,7 @@ impl LocalDatabase {
         &self,
         glossary_id: Option<&str>,
         name: String,
+        source_language: &str,
         terms: Vec<LocalGlossaryTermInput>,
     ) -> Result<LocalGlossaryDetail> {
         let name = normalized_glossary_name(&name)?;
@@ -682,12 +693,17 @@ impl LocalDatabase {
             return Err(anyhow!("glossary id cannot be empty"));
         }
         let result = sqlx::query(
-            "INSERT INTO local_glossaries (id, name, created_at_unix, updated_at_unix)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at_unix = excluded.updated_at_unix",
+            "INSERT INTO local_glossaries
+                (id, name, source_language, created_at_unix, updated_at_unix)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                source_language = excluded.source_language,
+                updated_at_unix = excluded.updated_at_unix",
         )
         .bind(&glossary_id)
         .bind(&name)
+        .bind(source_language)
         .bind(now)
         .bind(now)
         .execute(&mut *tx)
@@ -740,7 +756,7 @@ impl LocalDatabase {
 
     pub async fn list_segments(&self, job_id: &str) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
-            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+            "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
                 source_edited, translation_edited, translation_stale
              FROM local_subtitle_segments
              WHERE job_id = ?
@@ -758,7 +774,7 @@ impl LocalDatabase {
         segment_id: &str,
     ) -> Result<Option<LocalSubtitleSegmentRecord>> {
         sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
-            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+            "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
                 source_edited, translation_edited, translation_stale
              FROM local_subtitle_segments
              WHERE job_id = ? AND id = ?",
@@ -794,8 +810,8 @@ impl LocalDatabase {
             }
             let result = sqlx::query(
                 "UPDATE local_subtitle_segments
-                 SET zh_text = ?, translation_edited = 0, translation_stale = 0
-                 WHERE job_id = ? AND id = ? AND ja_text = ?",
+                 SET translated_text = ?, translation_edited = 0, translation_stale = 0
+                 WHERE job_id = ? AND id = ? AND source_text = ?",
             )
             .bind(translated_text)
             .bind(job_id)
@@ -852,9 +868,9 @@ impl LocalDatabase {
             }
             let result = sqlx::query(
                 "UPDATE local_subtitle_segments
-                 SET ja_text = ?, source_edited = 1,
-                     translation_stale = CASE WHEN zh_text IS NULL THEN translation_stale ELSE 1 END
-                 WHERE job_id = ? AND id = ? AND ja_text = ?",
+                 SET source_text = ?, source_edited = 1,
+                     translation_stale = CASE WHEN translated_text IS NULL THEN translation_stale ELSE 1 END
+                 WHERE job_id = ? AND id = ? AND source_text = ?",
             )
             .bind(corrected_text)
             .bind(job_id)
@@ -891,14 +907,14 @@ impl LocalDatabase {
         &self,
         job_id: &str,
         segment_id: &str,
-        ja_text: String,
-        zh_text: Option<String>,
+        source_text: String,
+        translated_text: Option<String>,
     ) -> Result<LocalSubtitleSegmentRecord> {
-        let ja_text = ja_text.trim().to_string();
-        if ja_text.is_empty() {
-            return Err(anyhow!("Japanese subtitle text cannot be empty"));
+        let source_text = source_text.trim().to_string();
+        if source_text.is_empty() {
+            return Err(anyhow!("source subtitle text cannot be empty"));
         }
-        let zh_text = zh_text
+        let translated_text = translated_text
             .map(|text| text.trim().to_string())
             .filter(|text| !text.is_empty());
         let mut tx = self
@@ -907,7 +923,7 @@ impl LocalDatabase {
             .await
             .context("failed to begin local subtitle edit transaction")?;
         let current = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
-            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+            "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
                 source_edited, translation_edited, translation_stale
              FROM local_subtitle_segments
              WHERE job_id = ? AND id = ?",
@@ -919,26 +935,26 @@ impl LocalDatabase {
         .context("failed to read local subtitle segment")?
         .ok_or_else(|| anyhow!("subtitle segment not found: {segment_id}"))?;
 
-        let source_changed = current.ja_text != ja_text;
-        let translation_changed = current.zh_text != zh_text;
+        let source_changed = current.source_text != source_text;
+        let translation_changed = current.translated_text != translated_text;
         let source_edited = current.source_edited || source_changed;
         let translation_edited = current.translation_edited || translation_changed;
         let translation_stale = if translation_changed {
             false
         } else if source_changed {
-            current.zh_text.is_some()
+            current.translated_text.is_some()
         } else {
             current.translation_stale
         };
 
         sqlx::query(
             "UPDATE local_subtitle_segments
-             SET ja_text = ?, zh_text = ?, source_edited = ?, translation_edited = ?,
+             SET source_text = ?, translated_text = ?, source_edited = ?, translation_edited = ?,
                  translation_stale = ?
              WHERE job_id = ? AND id = ?",
         )
-        .bind(&ja_text)
-        .bind(&zh_text)
+        .bind(&source_text)
+        .bind(&translated_text)
         .bind(source_edited)
         .bind(translation_edited)
         .bind(translation_stale)
@@ -959,7 +975,7 @@ impl LocalDatabase {
         .context("failed to update local task edit timestamp")?;
 
         let updated = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
-            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+            "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
                 source_edited, translation_edited, translation_stale
              FROM local_subtitle_segments
              WHERE job_id = ? AND id = ?",
@@ -1010,8 +1026,8 @@ impl LocalDatabase {
                 job_id,
                 index,
                 segment,
-                segment.ja_text.as_str(),
-                segment.zh_text.as_deref(),
+                segment.source_text.as_str(),
+                segment.translated_text.as_deref(),
                 segment.source_edited,
                 false,
                 segment.translation_stale,
@@ -1029,7 +1045,7 @@ impl LocalDatabase {
         segments: &[TranscriptSegment],
     ) -> Result<()> {
         let existing = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
-            "SELECT id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+            "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
                 source_edited, translation_edited, translation_stale
              FROM local_subtitle_segments
              WHERE job_id = ?",
@@ -1050,22 +1066,26 @@ impl LocalDatabase {
 
         for (index, segment) in segments.iter().enumerate() {
             let previous = existing.get(&segment.id);
-            let ja_text = previous
+            let source_text = previous
                 .filter(|segment| segment.source_edited)
-                .map(|segment| segment.ja_text.as_str())
-                .unwrap_or(&segment.ja_text);
-            let incoming_translation = segment.zh_text.as_deref();
-            let (zh_text, translation_edited, translation_stale) = match previous {
+                .map(|segment| segment.source_text.as_str())
+                .unwrap_or(&segment.source_text);
+            let incoming_translation = segment.translated_text.as_deref();
+            let (translated_text, translation_edited, translation_stale) = match previous {
                 Some(previous) if previous.translation_edited => (
-                    previous.zh_text.as_deref(),
+                    previous.translated_text.as_deref(),
                     true,
-                    previous.translation_stale || ja_text != previous.ja_text,
+                    previous.translation_stale || source_text != previous.source_text,
                 ),
-                Some(previous) if incoming_translation.is_none() && previous.zh_text.is_some() => (
-                    previous.zh_text.as_deref(),
-                    false,
-                    previous.translation_stale || ja_text != previous.ja_text,
-                ),
+                Some(previous)
+                    if incoming_translation.is_none() && previous.translated_text.is_some() =>
+                {
+                    (
+                        previous.translated_text.as_deref(),
+                        false,
+                        previous.translation_stale || source_text != previous.source_text,
+                    )
+                }
                 _ => (incoming_translation, false, segment.translation_stale),
             };
             insert_segment(
@@ -1073,8 +1093,8 @@ impl LocalDatabase {
                 job_id,
                 index,
                 segment,
-                ja_text,
-                zh_text,
+                source_text,
+                translated_text,
                 previous
                     .map(|segment| segment.source_edited)
                     .unwrap_or(segment.source_edited),
@@ -1094,15 +1114,15 @@ async fn insert_segment(
     job_id: &str,
     index: usize,
     segment: &TranscriptSegment,
-    ja_text: &str,
-    zh_text: Option<&str>,
+    source_text: &str,
+    translated_text: Option<&str>,
     source_edited: bool,
     translation_edited: bool,
     translation_stale: bool,
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO local_subtitle_segments (
-            id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text,
+            id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
             source_edited, translation_edited, translation_stale
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
@@ -1111,8 +1131,8 @@ async fn insert_segment(
     .bind(i64::try_from(index).context("subtitle index exceeds SQLite i64")?)
     .bind(to_i64(segment.start_ms, "segment start")?)
     .bind(to_i64(segment.end_ms, "segment end")?)
-    .bind(ja_text)
-    .bind(zh_text)
+    .bind(source_text)
+    .bind(translated_text)
     .bind(source_edited)
     .bind(translation_edited)
     .bind(translation_stale)
@@ -1203,6 +1223,8 @@ fn normalized_glossary_terms(
 mod tests {
     use std::fs;
 
+    use sqlx::sqlite::SqlitePoolOptions;
+
     use super::{
         LocalDatabase, LocalGlossaryTermInput, LocalMachineTranslation, NewLocalRenderJob,
     };
@@ -1215,11 +1237,124 @@ mod tests {
     };
 
     #[tokio::test]
+    async fn language_migration_preserves_legacy_rows_and_track_meanings() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE local_jobs (
+                job_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at_unix INTEGER NOT NULL,
+                updated_at_unix INTEGER NOT NULL
+             );
+             CREATE TABLE local_subtitle_segments (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL REFERENCES local_jobs(job_id) ON DELETE CASCADE,
+                ja_text TEXT NOT NULL,
+                zh_text TEXT
+             );
+             CREATE TABLE local_glossaries (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at_unix INTEGER NOT NULL,
+                updated_at_unix INTEGER NOT NULL
+             );
+             CREATE TABLE local_render_jobs (
+                id TEXT PRIMARY KEY,
+                source_job_id TEXT NOT NULL REFERENCES local_jobs(job_id) ON DELETE CASCADE,
+                input_path TEXT NOT NULL,
+                subtitle_path TEXT NOT NULL,
+                output_path TEXT NOT NULL,
+                subtitle_track TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress REAL NOT NULL DEFAULT 0,
+                encoder TEXT,
+                audio_encoder TEXT,
+                error_message TEXT,
+                created_at_unix INTEGER NOT NULL,
+                updated_at_unix INTEGER NOT NULL,
+                fallback_reason TEXT
+             );
+             CREATE INDEX local_render_jobs_source_idx
+                ON local_render_jobs (source_job_id, created_at_unix DESC);
+             CREATE INDEX local_render_jobs_status_idx
+                ON local_render_jobs (status, updated_at_unix DESC);
+             INSERT INTO local_jobs VALUES ('legacy-job', 'done', 1, 2);
+             INSERT INTO local_subtitle_segments
+                VALUES ('legacy-segment', 'legacy-job', 'こんばんは', '晚上好');
+             INSERT INTO local_glossaries VALUES ('legacy-glossary', '旧词表', 1, 2);
+             INSERT INTO local_render_jobs VALUES (
+                'legacy-render', 'legacy-job', 'in.mov', 'sub.ass', 'out.mp4',
+                'japanese', 'done', 1, 'videotoolbox', 'aac', NULL, 1, 2, NULL
+             );
+             INSERT INTO local_render_jobs VALUES (
+                'legacy-render-translation', 'legacy-job', 'in.mov', 'sub.ass', 'out-zh.mp4',
+                'chinese', 'done', 1, 'videotoolbox', 'aac', NULL, 1, 3, NULL
+             );",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::raw_sql(include_str!(
+            "../../migrations/sqlite/202608090001_add_task_languages.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let job: (String, String) = sqlx::query_as(
+            "SELECT source_language, target_language FROM local_jobs WHERE job_id = 'legacy-job'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(job, ("ja".to_string(), "zh-Hans".to_string()));
+        let segment: (String, Option<String>) = sqlx::query_as(
+            "SELECT source_text, translated_text FROM local_subtitle_segments
+             WHERE id = 'legacy-segment'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            segment,
+            ("こんばんは".to_string(), Some("晚上好".to_string()))
+        );
+        let glossary_language: String = sqlx::query_scalar(
+            "SELECT source_language FROM local_glossaries WHERE id = 'legacy-glossary'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(glossary_language, "ja");
+        let track: String = sqlx::query_scalar(
+            "SELECT subtitle_track FROM local_render_jobs WHERE id = 'legacy-render'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(track, "source");
+        let translated_track: String = sqlx::query_scalar(
+            "SELECT subtitle_track FROM local_render_jobs
+             WHERE id = 'legacy-render-translation'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(translated_track, "translation");
+    }
+
+    #[tokio::test]
     async fn syncs_task_metadata_and_subtitle_segments() {
         let root =
             std::env::temp_dir().join(format!("atogaki-local-db-test-{}", uuid::Uuid::new_v4()));
         let job = Job::create_in(&root).unwrap();
-        let mut manifest = JobManifest::new(&job, None, None);
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
         manifest.mark(JobStatus::Queued);
         let mut segment = TranscriptSegment::new(0, 1_000, "テスト".to_string());
         segment.set_translation(Some("测试".to_string()));
@@ -1243,7 +1378,7 @@ mod tests {
         let segments = database.list_segments(&manifest.job_id).await.unwrap();
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].id, segment.id);
-        assert_eq!(segments[0].ja_text, "テスト");
+        assert_eq!(segments[0].source_text, "テスト");
 
         let stale = database
             .update_segment_text(
@@ -1272,8 +1407,8 @@ mod tests {
         assert!(!edited.translation_stale);
 
         let mut regenerated = segment.clone();
-        regenerated.ja_text = "再生成された文".to_string();
-        regenerated.zh_text = Some("重新生成的翻译".to_string());
+        regenerated.source_text = "再生成された文".to_string();
+        regenerated.translated_text = Some("重新生成的翻译".to_string());
         database
             .sync_snapshot(&JobSnapshot {
                 manifest,
@@ -1282,8 +1417,8 @@ mod tests {
             .await
             .unwrap();
         let preserved = database.list_segments(&edited.job_id).await.unwrap();
-        assert_eq!(preserved[0].ja_text, "手動修正");
-        assert_eq!(preserved[0].zh_text.as_deref(), Some("人工翻译"));
+        assert_eq!(preserved[0].source_text, "手動修正");
+        assert_eq!(preserved[0].translated_text.as_deref(), Some("人工翻译"));
         assert!(preserved[0].source_edited);
         assert!(preserved[0].translation_edited);
 
@@ -1298,7 +1433,12 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let job = Job::create_in(&root).unwrap();
-        let manifest = JobManifest::new(&job, Some(root.join("input.mov")), None);
+        let manifest = JobManifest::new(
+            &job,
+            Some(root.join("input.mov")),
+            None,
+            crate::domain::LanguagePair::default(),
+        );
         let database = LocalDatabase::open(root.join("atogaki.sqlite"))
             .await
             .unwrap();
@@ -1357,7 +1497,7 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let job = Job::create_in(&root).unwrap();
-        let manifest = JobManifest::new(&job, None, None);
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
         let first = TranscriptSegment::new(0, 1_000, "最初の文".to_string());
         let second = TranscriptSegment::new(1_000, 2_000, "次の文".to_string());
         let database = LocalDatabase::open(root.join("atogaki.sqlite"))
@@ -1377,12 +1517,12 @@ mod tests {
                 &[
                     LocalMachineTranslation {
                         segment_id: first.id.clone(),
-                        source_text: first.ja_text.clone(),
+                        source_text: first.source_text.clone(),
                         translated_text: "第一句话".to_string(),
                     },
                     LocalMachineTranslation {
                         segment_id: second.id.clone(),
-                        source_text: second.ja_text.clone(),
+                        source_text: second.source_text.clone(),
                         translated_text: "下一句话".to_string(),
                     },
                 ],
@@ -1390,7 +1530,7 @@ mod tests {
             .await
             .unwrap();
         let translated = database.list_segments(&manifest.job_id).await.unwrap();
-        assert_eq!(translated[0].zh_text.as_deref(), Some("第一句话"));
+        assert_eq!(translated[0].translated_text.as_deref(), Some("第一句话"));
         assert!(!translated[0].translation_edited);
         assert!(!translated[0].translation_stale);
 
@@ -1402,10 +1542,10 @@ mod tests {
             .await
             .unwrap();
         let preserved = database.list_segments(&manifest.job_id).await.unwrap();
-        assert_eq!(preserved[0].zh_text.as_deref(), Some("第一句话"));
+        assert_eq!(preserved[0].translated_text.as_deref(), Some("第一句话"));
 
         let mut changed = first.clone();
-        changed.ja_text = "変更された文".to_string();
+        changed.source_text = "変更された文".to_string();
         database
             .sync_snapshot(&JobSnapshot {
                 manifest: manifest.clone(),
@@ -1414,7 +1554,7 @@ mod tests {
             .await
             .unwrap();
         let stale = database.list_segments(&manifest.job_id).await.unwrap();
-        assert_eq!(stale[0].zh_text.as_deref(), Some("第一句话"));
+        assert_eq!(stale[0].translated_text.as_deref(), Some("第一句话"));
         assert!(stale[0].translation_stale);
 
         let error = database
@@ -1430,7 +1570,7 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("changed while"));
         let unchanged = database.list_segments(&manifest.job_id).await.unwrap();
-        assert_eq!(unchanged[0].zh_text.as_deref(), Some("第一句话"));
+        assert_eq!(unchanged[0].translated_text.as_deref(), Some("第一句话"));
 
         drop(database);
         fs::remove_dir_all(root).unwrap();

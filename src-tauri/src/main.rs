@@ -12,7 +12,7 @@ use atogaki_subtitle::{
         LocalWorkspaceService, MutableTranslationProvider, TranscriptionOptions,
         UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
     },
-    domain::subtitle::SubtitleTrack,
+    domain::{LanguageCode, subtitle::SubtitleTrack},
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
@@ -58,6 +58,7 @@ async fn media_capabilities(state: State<'_, DesktopState>) -> Result<MediaCapab
 struct SubmitTranscriptionRequest {
     input_path: String,
     model_path: String,
+    source_language: LanguageCode,
     vad_model_path: Option<String>,
     glossary_id: Option<String>,
     #[serde(default)]
@@ -100,6 +101,7 @@ struct SaveDownloadNetworkSettingsRequest {
 struct SaveGlossaryRequest {
     glossary_id: Option<String>,
     name: String,
+    source_language: LanguageCode,
     terms: Vec<LocalGlossaryTermDraft>,
 }
 
@@ -108,8 +110,8 @@ struct SaveGlossaryRequest {
 struct UpdateSubtitleRequest {
     job_id: String,
     segment_id: String,
-    ja_text: String,
-    zh_text: Option<String>,
+    source_text: String,
+    translated_text: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,7 +267,12 @@ async fn save_glossary(
 ) -> Result<LocalGlossaryDetail, String> {
     state
         .glossary_service
-        .save(request.glossary_id.as_deref(), request.name, request.terms)
+        .save(
+            request.glossary_id.as_deref(),
+            request.name,
+            request.source_language,
+            request.terms,
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -347,8 +354,8 @@ async fn update_subtitle(
         .update_subtitle_text(
             &request.job_id,
             &request.segment_id,
-            request.ja_text,
-            request.zh_text,
+            request.source_text,
+            request.translated_text,
         )
         .await
         .map_err(|error| error.to_string())
@@ -761,7 +768,10 @@ fn configured_file(name: &str) -> Option<PathBuf> {
 fn desktop_transcription_options(
     request: &SubmitTranscriptionRequest,
 ) -> Result<TranscriptionOptions, String> {
-    let mut options = TranscriptionOptions::japanese(request.model_path.trim().into());
+    let mut options = TranscriptionOptions::new(
+        request.model_path.trim().into(),
+        request.source_language,
+    );
     options.vad_model = request
         .vad_model_path
         .as_deref()
@@ -918,6 +928,7 @@ mod tests {
     use super::{
         SubmitTranscriptionRequest, desktop_transcription_options, validated_data_dir_override,
     };
+    use atogaki_subtitle::domain::LanguageCode;
 
     #[test]
     fn desktop_data_directory_override_requires_an_absolute_path() {
@@ -948,6 +959,7 @@ mod tests {
         let request = SubmitTranscriptionRequest {
             input_path: "audio.wav".to_string(),
             model_path: "whisper.bin".to_string(),
+            source_language: LanguageCode::Japanese,
             vad_model_path: None,
             glossary_id: None,
             selected_content_groups: Vec::new(),
@@ -971,6 +983,7 @@ mod tests {
         let request = SubmitTranscriptionRequest {
             input_path: "audio.wav".to_string(),
             model_path: "whisper.bin".to_string(),
+            source_language: LanguageCode::English,
             vad_model_path: Some(vad_model.display().to_string()),
             glossary_id: None,
             selected_content_groups: Vec::new(),
@@ -979,6 +992,7 @@ mod tests {
         let options = desktop_transcription_options(&request).unwrap();
 
         assert_eq!(options.vad_model.as_deref(), Some(vad_model.as_path()));
+        assert_eq!(options.source_language, LanguageCode::English);
         fs::remove_dir_all(root).unwrap();
     }
 }

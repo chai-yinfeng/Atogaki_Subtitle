@@ -52,8 +52,8 @@ pub struct SubtitleSegmentRecord {
     pub segment_index: i32,
     pub start_ms: i64,
     pub end_ms: i64,
-    pub ja_text: String,
-    pub zh_text: Option<String>,
+    pub source_text: String,
+    pub translated_text: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
-use crate::application::TranscriptionOptions;
+use crate::{application::TranscriptionOptions, domain::LanguageCode};
 
 #[derive(Debug, Parser)]
 #[command(name = "atogaki")]
@@ -76,14 +76,14 @@ pub struct TranslateArgs {
         env = "ATOGAKI_TRANSLATION_SOURCE_LANGUAGE",
         default_value = "ja"
     )]
-    pub source_language: String,
+    pub source_language: LanguageCode,
 
     #[arg(
         long,
         env = "ATOGAKI_TRANSLATION_TARGET_LANGUAGE",
         default_value = "zh"
     )]
-    pub target_language: String,
+    pub target_language: LanguageCode,
 }
 
 #[derive(Debug, Args)]
@@ -95,7 +95,7 @@ pub struct ApplyGlossaryArgs {
 
     #[arg(
         long,
-        help = "Keep existing translations even when the Japanese source text changes"
+        help = "Keep existing translations even when the source text changes"
     )]
     pub keep_translations: bool,
 }
@@ -178,7 +178,7 @@ pub struct ProcessArgs {
         default_value = "zh",
         help = "DeepL target language; source language follows --source-language"
     )]
-    pub target_language: String,
+    pub target_language: LanguageCode,
 
     #[arg(long, help = "Burn bilingual ASS subtitles into a video output")]
     pub render_output: Option<PathBuf>,
@@ -218,7 +218,7 @@ pub struct WhisperArgs {
     pub model: PathBuf,
 
     #[arg(long, env = "ATOGAKI_SOURCE_LANGUAGE", default_value = "ja")]
-    pub source_language: String,
+    pub source_language: LanguageCode,
 
     #[arg(long, env = "ATOGAKI_GLOSSARY")]
     pub glossary: Option<PathBuf>,
