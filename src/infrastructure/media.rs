@@ -21,6 +21,8 @@ use crate::{domain::render::RenderOptions, interface::cli::RecordArgs};
 
 const VIDEOTOOLBOX_QUALITY: u8 = 65;
 const MPEG4_QUALITY: u8 = 3;
+const SOURCE_BITRATE_HEADROOM_NUMERATOR: u64 = 6;
+const SOURCE_BITRATE_HEADROOM_DENOMINATOR: u64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HardSubtitleEncoder {
@@ -42,6 +44,7 @@ pub struct MediaCapabilities {
 pub struct MediaProbe {
     pub duration_ms: u64,
     pub has_video: bool,
+    pub video_bitrate_bps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -168,9 +171,9 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=index",
+            "stream=index,bit_rate",
             "-of",
-            "default=noprint_wrappers=1:nokey=1",
+            "default=noprint_wrappers=1",
         ])
         .arg(input)
         .output()
@@ -184,11 +187,18 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
         );
     }
 
+    let video_fields = String::from_utf8_lossy(&video_output.stdout);
+    let has_video = video_fields.lines().any(|line| line.starts_with("index="));
+    let video_bitrate_bps = video_fields
+        .lines()
+        .find_map(|line| line.strip_prefix("bit_rate="))
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0);
+
     Ok(MediaProbe {
         duration_ms,
-        has_video: !String::from_utf8_lossy(&video_output.stdout)
-            .trim()
-            .is_empty(),
+        has_video,
+        video_bitrate_bps,
     })
 }
 
@@ -342,7 +352,23 @@ pub async fn render_subtitles_with_progress(
         progress_sender,
         cancelled,
     };
-    burn_ass(ffmpeg, input, ass, output, &execution).await
+    let source_video_bitrate_bps = probe_media(ffmpeg, input).await?.video_bitrate_bps;
+    burn_ass(
+        ffmpeg,
+        input,
+        ass,
+        output,
+        source_relative_target_bitrate(source_video_bitrate_bps),
+        &execution,
+    )
+    .await
+}
+
+fn source_relative_target_bitrate(source_video_bitrate_bps: Option<u64>) -> Option<u64> {
+    source_video_bitrate_bps.map(|bitrate| {
+        bitrate.saturating_mul(SOURCE_BITRATE_HEADROOM_NUMERATOR)
+            / SOURCE_BITRATE_HEADROOM_DENOMINATOR
+    })
 }
 
 async fn burn_ass(
@@ -350,11 +376,20 @@ async fn burn_ass(
     input: &Path,
     ass: &Path,
     output: &Path,
+    target_video_bitrate_bps: Option<u64>,
     execution: &RenderExecution,
 ) -> Result<RenderOutcome> {
     let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
     let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
-    burn_ass_with_encoder(ffmpeg, input, output, &filter, execution).await
+    burn_ass_with_encoder(
+        ffmpeg,
+        input,
+        output,
+        &filter,
+        target_video_bitrate_bps,
+        execution,
+    )
+    .await
 }
 
 async fn burn_ass_with_encoder(
@@ -362,6 +397,7 @@ async fn burn_ass_with_encoder(
     input: &Path,
     output: &Path,
     filter: &str,
+    target_video_bitrate_bps: Option<u64>,
     execution: &RenderExecution,
 ) -> Result<RenderOutcome> {
     let mut hardware_fallback_reason = Some(
@@ -378,6 +414,7 @@ async fn burn_ass_with_encoder(
                 video: HardSubtitleEncoder::VideoToolbox,
                 audio: AudioEncoder::Copy,
             },
+            target_video_bitrate_bps,
             execution,
         )
         .await;
@@ -404,6 +441,7 @@ async fn burn_ass_with_encoder(
                     video: HardSubtitleEncoder::VideoToolbox,
                     audio: AudioEncoder::Aac,
                 },
+                target_video_bitrate_bps,
                 execution,
             )
             .await;
@@ -449,6 +487,7 @@ async fn burn_ass_with_encoder(
             video: HardSubtitleEncoder::Mpeg4,
             audio: AudioEncoder::Copy,
         },
+        target_video_bitrate_bps,
         execution,
     )
     .await;
@@ -471,6 +510,7 @@ async fn burn_ass_with_encoder(
                     video: HardSubtitleEncoder::Mpeg4,
                     audio: AudioEncoder::Aac,
                 },
+                target_video_bitrate_bps,
                 execution,
             )
             .await;
@@ -533,6 +573,7 @@ async fn run_burn_command(
     output: &Path,
     filter: &str,
     encoding: EncodingSelection,
+    target_video_bitrate_bps: Option<u64>,
     execution: &RenderExecution,
 ) -> Result<()> {
     let mut cmd = Command::new(ffmpeg);
@@ -542,6 +583,7 @@ async fn run_burn_command(
         filter,
         encoding.video,
         encoding.audio,
+        target_video_bitrate_bps,
     ));
     run_render_command(
         cmd,
@@ -559,6 +601,7 @@ fn burn_args(
     filter: &str,
     encoder: HardSubtitleEncoder,
     audio_encoder: AudioEncoder,
+    target_video_bitrate_bps: Option<u64>,
 ) -> Vec<OsString> {
     let mut args = vec![
         "-y".into(),
@@ -568,26 +611,33 @@ fn burn_args(
         filter.into(),
     ];
     match encoder {
-        HardSubtitleEncoder::VideoToolbox => args.extend([
-            "-c:v".into(),
-            "h264_videotoolbox".into(),
-            "-q:v".into(),
-            VIDEOTOOLBOX_QUALITY.to_string().into(),
-            "-profile:v".into(),
-            "high".into(),
-            "-allow_sw".into(),
-            "0".into(),
-            "-pix_fmt".into(),
-            "yuv420p".into(),
-        ]),
-        HardSubtitleEncoder::Mpeg4 => args.extend([
-            "-c:v".into(),
-            "mpeg4".into(),
-            "-q:v".into(),
-            MPEG4_QUALITY.to_string().into(),
-            "-pix_fmt".into(),
-            "yuv420p".into(),
-        ]),
+        HardSubtitleEncoder::VideoToolbox => {
+            args.extend([
+                "-c:v".into(),
+                "h264_videotoolbox".into(),
+                "-profile:v".into(),
+                "high".into(),
+                "-allow_sw".into(),
+                "0".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+            ]);
+            append_video_bitrate(
+                &mut args,
+                target_video_bitrate_bps,
+                VIDEOTOOLBOX_QUALITY,
+                true,
+            );
+        }
+        HardSubtitleEncoder::Mpeg4 => {
+            args.extend([
+                "-c:v".into(),
+                "mpeg4".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+            ]);
+            append_video_bitrate(&mut args, target_video_bitrate_bps, MPEG4_QUALITY, false);
+        }
     }
     args.extend(["-c:a".into()]);
     match audio_encoder {
@@ -603,6 +653,31 @@ fn burn_args(
         output.as_os_str().to_os_string(),
     ]);
     args
+}
+
+fn append_video_bitrate(
+    args: &mut Vec<OsString>,
+    target_bitrate_bps: Option<u64>,
+    quality: u8,
+    apply_vbv_limit: bool,
+) {
+    if let Some(bitrate) = target_bitrate_bps {
+        args.extend(["-b:v".into(), bitrate.to_string().into()]);
+        if apply_vbv_limit {
+            args.extend([
+                "-maxrate".into(),
+                bitrate
+                    .saturating_mul(5)
+                    .saturating_div(4)
+                    .to_string()
+                    .into(),
+                "-bufsize".into(),
+                bitrate.saturating_mul(2).to_string().into(),
+            ]);
+        }
+    } else {
+        args.extend(["-q:v".into(), quality.to_string().into()]);
+    }
 }
 
 fn audio_copy_failed(message: &str) -> bool {
@@ -815,6 +890,7 @@ fn escape_filter_path(path: &Path) -> String {
 mod tests {
     use super::{
         AudioEncoder, HardSubtitleEncoder, audio_copy_failed, burn_args, paired_ffprobe_path,
+        source_relative_target_bitrate,
     };
     use std::path::Path;
 
@@ -825,6 +901,7 @@ mod tests {
             "ass=subtitle.ass",
             encoder,
             AudioEncoder::Copy,
+            None,
         )
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())
@@ -860,6 +937,27 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["-c:v", "mpeg4"]));
         assert!(args.windows(2).any(|pair| pair == ["-q:v", "3"]));
         assert!(!args.iter().any(|argument| argument == "libx264"));
+    }
+
+    #[test]
+    fn source_relative_bitrate_leaves_modest_subtitle_headroom() {
+        assert_eq!(source_relative_target_bitrate(Some(467_249)), Some(560_698));
+        assert_eq!(source_relative_target_bitrate(None), None);
+
+        let args = burn_args(
+            Path::new("input.mp4"),
+            Path::new("output.mp4"),
+            "ass=subtitle.ass",
+            HardSubtitleEncoder::VideoToolbox,
+            AudioEncoder::Copy,
+            Some(560_698),
+        )
+        .into_iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+        assert!(args.windows(2).any(|pair| pair == ["-b:v", "560698"]));
+        assert!(!args.iter().any(|argument| argument == "-q:v"));
     }
 
     #[test]

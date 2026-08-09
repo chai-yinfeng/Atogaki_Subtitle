@@ -2,7 +2,11 @@ mod credential_store;
 mod desktop_settings;
 mod model_download;
 
-use std::{ffi::OsString, path::PathBuf, sync::Arc};
+use std::{
+    ffi::OsString,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use atogaki_subtitle::{
     application::{
@@ -23,7 +27,7 @@ use atogaki_subtitle::{
     },
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
@@ -42,6 +46,120 @@ struct DesktopState {
     render_service: LocalRenderService,
     settings_service: DesktopSettingsService,
     model_download_service: ModelDownloadService,
+}
+
+const SUBTITLE_OVERLAY_LABEL: &str = "subtitle-overlay";
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubtitleOverlayPayload {
+    source_text: String,
+    translated_text: Option<String>,
+    source_language: LanguageCode,
+    target_language: LanguageCode,
+}
+
+#[derive(Default)]
+struct SubtitleOverlayState {
+    current: Mutex<Option<SubtitleOverlayPayload>>,
+}
+
+#[tauri::command]
+fn open_subtitle_overlay(
+    app: AppHandle,
+    state: State<'_, SubtitleOverlayState>,
+    payload: SubtitleOverlayPayload,
+) -> Result<(), String> {
+    set_subtitle_overlay_payload(&app, &state, payload)?;
+
+    if let Some(window) = app.get_webview_window(SUBTITLE_OVERLAY_LABEL) {
+        window.show().map_err(|error| error.to_string())?;
+        window.set_always_on_top(true).map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+    } else {
+        let overlay_app = app.clone();
+        let overlay_window = WebviewWindowBuilder::new(
+            &app,
+            SUBTITLE_OVERLAY_LABEL,
+            WebviewUrl::App("overlay.html".into()),
+        )
+        .title("Atogaki 悬浮字幕")
+        .inner_size(680.0, 170.0)
+        .min_inner_size(360.0, 120.0)
+        .resizable(true)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .build()
+        .map_err(|error| error.to_string())?;
+        overlay_window.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                if let Ok(mut current) = overlay_app.state::<SubtitleOverlayState>().current.lock()
+                {
+                    *current = None;
+                }
+                let _ = overlay_app.get_webview_window(SUBTITLE_OVERLAY_LABEL).map(|window| window.hide());
+                let _ = overlay_app.emit_to("main", "subtitle-overlay-visibility", false);
+            }
+        });
+    }
+
+    let _ = app.emit_to("main", "subtitle-overlay-visibility", true);
+    Ok(())
+}
+
+#[tauri::command]
+fn update_subtitle_overlay(
+    app: AppHandle,
+    state: State<'_, SubtitleOverlayState>,
+    payload: SubtitleOverlayPayload,
+) -> Result<(), String> {
+    set_subtitle_overlay_payload(&app, &state, payload)
+}
+
+#[tauri::command]
+fn current_subtitle_overlay(
+    state: State<'_, SubtitleOverlayState>,
+) -> Result<Option<SubtitleOverlayPayload>, String> {
+    state
+        .current
+        .lock()
+        .map(|current| current.clone())
+        .map_err(|_| "subtitle overlay state is unavailable".to_string())
+}
+
+#[tauri::command]
+fn hide_subtitle_overlay(
+    app: AppHandle,
+    state: State<'_, SubtitleOverlayState>,
+) -> Result<(), String> {
+    *state
+        .current
+        .lock()
+        .map_err(|_| "subtitle overlay state is unavailable".to_string())? = None;
+    if let Some(window) = app.get_webview_window(SUBTITLE_OVERLAY_LABEL) {
+        window.hide().map_err(|error| error.to_string())?;
+    }
+    let _ = app.emit_to("main", "subtitle-overlay-visibility", false);
+    Ok(())
+}
+
+fn set_subtitle_overlay_payload(
+    app: &AppHandle,
+    state: &State<'_, SubtitleOverlayState>,
+    payload: SubtitleOverlayPayload,
+) -> Result<(), String> {
+    *state
+        .current
+        .lock()
+        .map_err(|_| "subtitle overlay state is unavailable".to_string())? = Some(payload.clone());
+    if let Some(window) = app.get_webview_window(SUBTITLE_OVERLAY_LABEL) {
+        window
+            .emit("subtitle-overlay-update", payload)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -870,6 +988,7 @@ fn main() {
                 settings_service,
                 model_download_service,
             });
+            app.manage(SubtitleOverlayState::default());
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -893,6 +1012,8 @@ fn main() {
             pick_video_output_file,
             pick_vad_model_file,
             apply_glossary_to_workspace,
+            current_subtitle_overlay,
+            hide_subtitle_overlay,
             preview_glossary_application,
             preview_glossary_prompt,
             preview_workspace_subtitle_export,
@@ -908,10 +1029,12 @@ fn main() {
             start_model_download,
             test_network_connection,
             submit_video_render,
+            open_subtitle_overlay,
             cancel_video_render,
             translate_all_subtitles,
             translate_subtitle,
             translation_status,
+            update_subtitle_overlay,
             update_subtitle
         ])
         .run(tauri::generate_context!())
