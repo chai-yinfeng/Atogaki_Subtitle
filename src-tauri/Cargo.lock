@@ -262,6 +262,8 @@ dependencies = [
  "atogaki-subtitle",
  "futures-util",
  "keyring",
+ "objc2-app-kit",
+ "objc2-foundation",
  "reqwest 0.12.28",
  "serde",
  "sha2",

@@ -78,6 +78,7 @@ fn open_subtitle_overlay(
         window
             .set_visible_on_all_workspaces(true)
             .map_err(|error| error.to_string())?;
+        configure_subtitle_overlay_macos(&window)?;
         window.set_focus().map_err(|error| error.to_string())?;
     } else {
         let overlay_app = app.clone();
@@ -96,6 +97,7 @@ fn open_subtitle_overlay(
         .skip_taskbar(true)
         .build()
         .map_err(|error| error.to_string())?;
+        configure_subtitle_overlay_macos(&overlay_window)?;
         overlay_window.on_window_event(move |event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -110,6 +112,42 @@ fn open_subtitle_overlay(
     }
 
     let _ = app.emit_to("main", "subtitle-overlay-visibility", true);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn configure_subtitle_overlay_macos<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+
+    let native_window: &NSWindow = unsafe {
+        &*window
+            .ns_window()
+            .map_err(|error| error.to_string())?
+            .cast()
+    };
+    let mut behavior = native_window.collectionBehavior()
+        | NSWindowCollectionBehavior::CanJoinAllSpaces
+        | NSWindowCollectionBehavior::Stationary
+        | NSWindowCollectionBehavior::FullScreenAuxiliary;
+    let process_info = NSProcessInfo::processInfo();
+    if process_info.isOperatingSystemAtLeastVersion(NSOperatingSystemVersion {
+        majorVersion: 13,
+        minorVersion: 0,
+        patchVersion: 0,
+    }) {
+        behavior |= NSWindowCollectionBehavior::CanJoinAllApplications;
+    }
+    native_window.setCollectionBehavior(behavior);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_subtitle_overlay_macos<R: tauri::Runtime>(
+    _window: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
     Ok(())
 }
 
