@@ -78,20 +78,22 @@ pub fn refine(
     const MIN_DURATION_MS: u64 = 900;
     const PAUSE_SPLIT_MS: u64 = 750;
 
+    let normalized = raw
+        .into_iter()
+        .filter_map(|seg| {
+            let text = normalize_text(&seg.source_text, source_language);
+            (!text.is_empty()).then_some(TranscriptSegment {
+                source_text: text,
+                ..seg
+            })
+        })
+        .collect();
+    let raw = drop_covered_timing_artifacts(coalesce_equal_ranges(normalized, source_language));
+
     let mut out = Vec::new();
     let mut current: Option<TranscriptSegment> = None;
 
     for seg in raw {
-        let text = normalize_text(&seg.source_text, source_language);
-        if text.is_empty() {
-            continue;
-        }
-
-        let seg = TranscriptSegment {
-            source_text: text,
-            ..seg
-        };
-
         match current.take() {
             None => current = Some(seg),
             Some(mut cur) => {
@@ -123,6 +125,47 @@ pub fn refine(
     }
 
     out
+}
+
+fn coalesce_equal_ranges(
+    raw: Vec<TranscriptSegment>,
+    source_language: crate::domain::LanguageCode,
+) -> Vec<TranscriptSegment> {
+    let mut out: Vec<TranscriptSegment> = Vec::with_capacity(raw.len());
+
+    for seg in raw {
+        if let Some(previous) = out.last_mut()
+            && previous.start_ms == seg.start_ms
+            && previous.end_ms == seg.end_ms
+        {
+            previous.source_text =
+                merge_text(&previous.source_text, &seg.source_text, source_language);
+        } else {
+            out.push(seg);
+        }
+    }
+
+    out
+}
+
+fn drop_covered_timing_artifacts(raw: Vec<TranscriptSegment>) -> Vec<TranscriptSegment> {
+    const MAX_ARTIFACT_DURATION_MS: u64 = 250;
+    const MIN_IMPLAUSIBLE_CHARS: usize = 24;
+
+    raw.iter()
+        .enumerate()
+        .filter(|(index, seg)| {
+            let duration = seg.end_ms.saturating_sub(seg.start_ms);
+            let covered_by_next = raw
+                .get(index + 1)
+                .is_some_and(|next| next.start_ms <= seg.start_ms && next.end_ms > seg.end_ms);
+
+            !(duration <= MAX_ARTIFACT_DURATION_MS
+                && char_count(&seg.source_text) >= MIN_IMPLAUSIBLE_CHARS
+                && covered_by_next)
+        })
+        .map(|(_, seg)| seg.clone())
+        .collect()
 }
 
 fn push_split(out: &mut Vec<TranscriptSegment>, seg: TranscriptSegment, max_chars: usize) {
@@ -241,6 +284,31 @@ mod tests {
 
         assert_eq!(refined.len(), 1);
         assert_eq!(refined[0].source_text, "The night is quiet.");
+    }
+
+    #[test]
+    fn covered_whisper_timing_artifacts_are_dropped() {
+        let raw = vec![
+            TranscriptSegment::new(
+                51_330,
+                53_280,
+                "fewer things but feeling like you have too many things.".to_string(),
+            ),
+            TranscriptSegment::new(53_280, 53_380, "And that's what minimalism is".to_string()),
+            TranscriptSegment::new(53_280, 53_380, "all about, having fewer things".to_string()),
+            TranscriptSegment::new(53_280, 53_380, "but".to_string()),
+            TranscriptSegment::new(53_280, 55_280, "lighter, freer, and happier.".to_string()),
+        ];
+
+        let refined = refine(raw, LanguageCode::English);
+
+        assert_eq!(refined.len(), 2);
+        assert_eq!(
+            refined[0].source_text,
+            "fewer things but feeling like you have too many things."
+        );
+        assert_eq!(refined[1].source_text, "lighter, freer, and happier.");
+        assert_eq!((refined[1].start_ms, refined[1].end_ms), (53_280, 55_280));
     }
 
     #[test]

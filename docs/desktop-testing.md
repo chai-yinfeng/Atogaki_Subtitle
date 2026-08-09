@@ -119,6 +119,14 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 ## 最近一次打包窗口回归
 
+2026-08-09 使用语言抽象分支的 ad-hoc 签名打包 App、独立 `/private/tmp/atogaki-english-regression-20260809.Qctexv` 数据目录和 `Daily English Podcast.mp4` 的 90 秒只读片段完成真实英语闭环：
+
+- 任务明确记录英语原文到简体中文，使用 large-v3 q5_0、Silero VAD 和 Bundle 内 Metal `whisper-cli`，23 秒完成 27 段初始转写；英文单词边界、`.en.srt` 命名和任务语言在 SQLite、状态文件及重启后均保持正确。
+- DeepL 首次实际翻译只在需要读取系统凭据时触发 Keychain 授权；授权后 27 段分 3 批完成并原子写入 SQLite。人工修改第一段原文和译文后，编辑标记、译文和非过期状态均在重启后恢复。
+- 界面导出 `.en.srt`、`.zh-Hans.srt`、双语 SRT 与 ASS，内容来自 SQLite 当前编辑状态。双语 MP4 使用 Bundle 内 FFmpeg、libass、VideoToolbox 和音频 copy 完成；成品 90.4 秒、约 25 MiB，抽帧确认英文与简体中文字幕均已烙入画面。
+- 原始 Whisper JSON 在 53.28 秒处包含三条共享 100 ms 时间范围的长文本，同时被后一条 2 秒范围覆盖。分段整理现会先合并相同范围，再丢弃这种不可能阅读且被后一段完整覆盖的时间戳伪影，并以该真实形态加入单元回归。
+- 源媒体未被修改；隔离目录不会由 App 自动清理，本轮先保留用于问题修复和证据核对。
+
 2026-08-06 使用 Tauri CLI 2.11.4 生成新的 `0.1.0` Apple Silicon 候选 App/DMG，并完成发布结构审计：
 
 - App 采用 ad-hoc identity `-`，主程序及三个 sidecar 均通过 `codesign --verify --deep --strict`；Bundle identifier 为 `com.chai-yinfeng.atogaki`，最低系统已与 sidecar 统一为 macOS 12.0。该签名不代表 Developer ID，也未公证，`spctl` 不会把它评估为已认证开发者版本。
