@@ -12,5 +12,11 @@ export default defineConfig({
   build: {
     // Tauri uses WebKit on macOS; keep syntax compatible with older supported systems.
     target: "safari13",
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        overlay: "overlay.html",
+      },
+    },
   },
 });

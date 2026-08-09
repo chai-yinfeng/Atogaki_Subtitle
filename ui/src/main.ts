@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./styles.css";
 
 type LanguageCode = "ja" | "en" | "zh-Hans";
@@ -209,6 +210,13 @@ type VideoOutputSelection = {
   alreadyExists: boolean;
 };
 
+type SubtitleOverlayPayload = {
+  sourceText: string;
+  translatedText: string | null;
+  sourceLanguage: LanguageCode;
+  targetLanguage: LanguageCode;
+};
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("missing app root");
 
@@ -281,6 +289,7 @@ app.innerHTML = `
         </div>
         <div class="workspace-action-buttons">
           <button id="translate-all" type="button">全部翻译／重译</button>
+          <button id="open-subtitle-overlay" type="button" class="secondary">打开悬浮字幕</button>
           <button id="export-subtitles" type="button" class="secondary">导出字幕…</button>
           <button id="render-video" type="button" class="secondary">导出带字幕视频…</button>
           <button id="reveal-export" type="button" class="secondary hidden">在 Finder 中显示</button>
@@ -390,7 +399,7 @@ app.innerHTML = `
           <input id="video-output-path" placeholder="选择 MP4 保存位置，或粘贴完整路径" />
         </label>
         <button id="choose-video-output" type="button" class="secondary">选择位置</button>
-        <p>提交时会把 SQLite 当前字幕冻结为本次 ASS 快照；默认优先 VideoToolbox，失败时回退到内置 LGPL MPEG-4 软件编码。</p>
+        <p>提交时会把 SQLite 当前字幕冻结为本次 ASS 快照；默认优先 VideoToolbox，失败时回退到内置 LGPL MPEG-4 软件编码。可读取源视频码率时，成品会以源码率加约 20% 余量编码。</p>
       </div>
       <div class="video-render-footer">
         <span id="video-render-message" role="status"></span>
@@ -492,6 +501,7 @@ const currentSource = document.querySelector<HTMLParagraphElement>("#current-sou
 const currentTranslation = document.querySelector<HTMLParagraphElement>("#current-translation");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
+const openSubtitleOverlayButton = document.querySelector<HTMLButtonElement>("#open-subtitle-overlay");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
 const renderVideoButton = document.querySelector<HTMLButtonElement>("#render-video");
 const revealExportButton = document.querySelector<HTMLButtonElement>("#reveal-export");
@@ -552,6 +562,8 @@ let refreshing = false;
 let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
 let activeSegmentId: string | null = null;
+let subtitleOverlayVisible = false;
+let lastSubtitleOverlayKey = "";
 let workspaceActionBusy = false;
 let lastExportedSubtitlePath: string | null = null;
 let glossaries: Glossary[] = [];
@@ -1303,6 +1315,7 @@ function renderWorkspace(detail: JobDetail): void {
   mountMedia(detail.playback_path, detail.audio_fallback_path);
   renderSubtitleList(detail.segments);
   updateActiveSubtitle(0);
+  renderSubtitleOverlayButton();
   updateTranslationControls();
   void refreshVideoRenders();
 }
@@ -1524,10 +1537,68 @@ function seekTo(milliseconds: number): void {
   void activeMedia.play().catch(() => undefined);
 }
 
-function updateActiveSubtitle(milliseconds: number): void {
-  const segment = activeDetail?.segments.find(
+function subtitleAt(milliseconds: number): SubtitleSegment | undefined {
+  return activeDetail?.segments.find(
     (item) => milliseconds >= item.start_ms && milliseconds < item.end_ms,
   );
+}
+
+function subtitleOverlayPayload(segment: SubtitleSegment | undefined): SubtitleOverlayPayload {
+  return {
+    sourceText: segment?.source_text ?? "当前时间没有字幕。",
+    translatedText: segment?.translated_text ?? null,
+    sourceLanguage: activeSourceLanguage(),
+    targetLanguage: activeTargetLanguage(),
+  };
+}
+
+function renderSubtitleOverlayButton(): void {
+  if (!openSubtitleOverlayButton) return;
+  const canOpen = Boolean(activeDetail && activeDetail.segments.length > 0);
+  openSubtitleOverlayButton.disabled = !canOpen;
+  openSubtitleOverlayButton.textContent = subtitleOverlayVisible ? "悬浮字幕已显示" : "打开悬浮字幕";
+}
+
+function syncSubtitleOverlay(segment: SubtitleSegment | undefined): void {
+  if (!subtitleOverlayVisible || !activeDetail) return;
+  const payload = subtitleOverlayPayload(segment);
+  const key = `${activeDetail.job.job_id}:${segment?.id ?? "none"}:${payload.sourceText}:${payload.translatedText ?? ""}`;
+  if (key === lastSubtitleOverlayKey) return;
+  lastSubtitleOverlayKey = key;
+  void invoke("update_subtitle_overlay", { payload }).catch(() => {
+    subtitleOverlayVisible = false;
+    lastSubtitleOverlayKey = "";
+    renderSubtitleOverlayButton();
+  });
+}
+
+async function openSubtitleOverlay(): Promise<void> {
+  if (!activeDetail || activeDetail.segments.length === 0) return;
+  subtitleOverlayVisible = true;
+  lastSubtitleOverlayKey = "";
+  renderSubtitleOverlayButton();
+  const segment = subtitleAt((activeMedia?.currentTime ?? 0) * 1_000);
+  try {
+    await invoke("open_subtitle_overlay", { payload: subtitleOverlayPayload(segment) });
+    syncSubtitleOverlay(segment);
+  } catch (error) {
+    subtitleOverlayVisible = false;
+    lastSubtitleOverlayKey = "";
+    renderSubtitleOverlayButton();
+    setWorkspaceAction(`无法打开悬浮字幕：${String(error)}`, true);
+  }
+}
+
+function hideSubtitleOverlay(): void {
+  if (!subtitleOverlayVisible) return;
+  subtitleOverlayVisible = false;
+  lastSubtitleOverlayKey = "";
+  renderSubtitleOverlayButton();
+  void invoke("hide_subtitle_overlay").catch(() => undefined);
+}
+
+function updateActiveSubtitle(milliseconds: number): void {
+  const segment = subtitleAt(milliseconds);
   const nextId = segment?.id ?? null;
   if (currentSource) currentSource.textContent = segment?.source_text ?? "当前时间没有字幕。";
   if (currentTranslation) {
@@ -1538,6 +1609,7 @@ function updateActiveSubtitle(milliseconds: number): void {
     activeSegmentId = nextId;
     highlightSegment(nextId);
   }
+  syncSubtitleOverlay(segment);
 }
 
 function highlightSegment(segmentId: string | null): void {
@@ -2263,6 +2335,7 @@ settingsForm?.addEventListener("submit", (event) => {
 document.querySelector<HTMLButtonElement>("#finish-settings")?.addEventListener("click", () => void saveSettings(true));
 document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
   activeMedia?.pause();
+  hideSubtitleOverlay();
   activeDetail = null;
   activeMedia = null;
   activeSegmentId = null;
@@ -2273,6 +2346,7 @@ document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("c
   if (activeDetail) void openJob(activeDetail.job.job_id);
 });
 translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
+openSubtitleOverlayButton?.addEventListener("click", () => void openSubtitleOverlay());
 exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
 revealExportButton?.addEventListener("click", () => void revealExportedSubtitle());
@@ -2424,6 +2498,11 @@ void invoke<string>("data_directory")
 void refreshTranslationStatus();
 void refreshGlossaries();
 void refresh();
+void listen<boolean>("subtitle-overlay-visibility", (event) => {
+  subtitleOverlayVisible = event.payload;
+  lastSubtitleOverlayKey = "";
+  renderSubtitleOverlayButton();
+});
 window.setInterval(() => void refresh(), 2_000);
 window.setInterval(() => void refreshActiveJob(), 2_000);
 window.setInterval(() => {
