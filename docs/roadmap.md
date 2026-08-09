@@ -17,6 +17,7 @@ _最后更新：2026-08-09_
 - [x] 为任务目录、选项转换、分段与导出添加离线可运行的测试。
 - [x] 明确并实现本地配置、模型下载和跨平台系统密钥存储策略。
 - [x] macOS App 内置固定版本的 whisper/FFmpeg sidecar；FFmpeg 使用 LGPL 构建并实现 VideoToolbox → MPEG-4 → 明确失败的三级结果。
+- [x] 固定 macOS DMG 的 Finder 窗口尺寸与“App 左、Applications 右”安装布局配置，并把非 CI 实机检查设为发布门禁。
 - [x] Atogaki 自有源码采用 Apache License 2.0，并把项目许可证纳入桌面分发物。
 - [x] 完成 macOS arm64 的 Rust/Tauri、前端与 sidecar 许可证审计，生成随 App 分发的声明，并可复现打包 LGPL 对应源码。
 

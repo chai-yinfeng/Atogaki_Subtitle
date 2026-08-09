@@ -102,7 +102,10 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 ```bash
 tauri build --bundles app
+# 仅用于验证 DMG 结构；会跳过 Finder 图标布局
 CI=true tauri build --bundles dmg
+# 最终发布 DMG；使用 tauri.conf.json 中的 Finder 布局
+tauri build --bundles dmg
 ```
 
 产物位于 `src-tauri/target/release/bundle/`。详细窗口回归见 [`docs/desktop-testing.md`](docs/desktop-testing.md)，发布资产和 LGPL 源码归档见 [`docs/releasing.md`](docs/releasing.md)。
