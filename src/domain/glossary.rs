@@ -179,12 +179,12 @@ fn apply_glossary_to_segments(
     let segments = segments
         .into_iter()
         .map(|mut segment| {
-            let original_ja = segment.ja_text.clone();
-            segment.ja_text = apply_replacements_to_text(&segment.ja_text, &replacements);
+            let original_ja = segment.source_text.clone();
+            segment.source_text = apply_replacements_to_text(&segment.source_text, &replacements);
 
-            if segment.ja_text != original_ja {
+            if segment.source_text != original_ja {
                 report.changed_segments += 1;
-                if segment.zh_text.is_some() {
+                if segment.translated_text.is_some() {
                     if clear_changed_translations {
                         report.cleared_translations += 1;
                     }
@@ -192,7 +192,7 @@ fn apply_glossary_to_segments(
                 }
             }
 
-            if !clear_changed_translations && let Some(zh) = segment.zh_text.as_mut() {
+            if !clear_changed_translations && let Some(zh) = segment.translated_text.as_mut() {
                 *zh = apply_replacements_to_text(zh, &replacements);
             }
             segment

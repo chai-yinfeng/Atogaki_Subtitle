@@ -18,6 +18,7 @@ use crate::{
         job_status::JobStatus,
         local_glossary_service::glossary_for_task,
     },
+    domain::{LanguageCode, LanguagePair},
     infrastructure::{config::AppConfig, job_store::Job, local_db::LocalDatabase},
 };
 
@@ -125,10 +126,11 @@ impl LocalTaskService {
         selected_content_groups: &[String],
     ) -> Result<JobSnapshot> {
         self.require_service_owned_output_dir(spec.output_dir.as_deref())?;
-        let job = self
-            .create_queued_job(Some(spec.input.clone()), None)
-            .await?;
-        if let Some(glossary_id) = glossary_id {
+        let languages = LanguagePair::new(
+            spec.transcription.source_language,
+            LanguageCode::SimplifiedChinese,
+        )?;
+        let glossary_selection = if let Some(glossary_id) = glossary_id {
             let database = self.database.as_ref().ok_or_else(|| {
                 anyhow!("glossary selection requires SQLite-backed local task service")
             })?;
@@ -136,8 +138,27 @@ impl LocalTaskService {
                 .get_glossary(glossary_id)
                 .await?
                 .ok_or_else(|| anyhow!("local glossary not found: {glossary_id}"))?;
-            let snapshot_path = job.dir.join("recognition-glossary.txt");
+            if detail.glossary.source_language != spec.transcription.source_language.as_str() {
+                bail!(
+                    "glossary language {} does not match transcription language {}",
+                    detail.glossary.source_language,
+                    spec.transcription.source_language
+                );
+            }
             let resolved = glossary_for_task(&detail, selected_content_groups)?;
+            Some((detail, resolved))
+        } else {
+            None
+        };
+        let job = self
+            .create_queued_job(Some(spec.input.clone()), None, languages)
+            .await?;
+        if let Some((detail, resolved)) = glossary_selection {
+            let database = self
+                .database
+                .as_ref()
+                .expect("glossary database was validated");
+            let snapshot_path = job.dir.join("recognition-glossary.txt");
             tokio::fs::write(&snapshot_path, resolved.to_file_text())
                 .await
                 .with_context(|| {
@@ -172,8 +193,23 @@ impl LocalTaskService {
 
     pub async fn submit_process(&self, mut spec: ProcessSpec) -> Result<JobSnapshot> {
         self.require_service_owned_output_dir(spec.output_dir.as_deref())?;
+        let languages = LanguagePair::new(
+            spec.translation.source_language,
+            spec.translation.target_language,
+        )?;
+        if spec.transcription.source_language != languages.source {
+            bail!(
+                "transcription language {} does not match translation source {}",
+                spec.transcription.source_language,
+                languages.source
+            );
+        }
         let job = self
-            .create_queued_job(Some(spec.input.clone()), spec.render_output.clone())
+            .create_queued_job(
+                Some(spec.input.clone()),
+                spec.render_output.clone(),
+                languages,
+            )
             .await?;
         spec.output_dir = Some(job.dir.clone());
         let prompt = crate::domain::glossary::build_whisper_prompt(&spec.transcription)?;
@@ -347,6 +383,10 @@ impl LocalTaskService {
         let manifest = previous_job
             .read_manifest_if_exists()?
             .ok_or_else(|| anyhow!("failed task is missing status.json"))?;
+        let languages = LanguagePair {
+            source: manifest.source_language,
+            target: manifest.target_language,
+        };
         let input = manifest
             .input
             .ok_or_else(|| anyhow!("failed task does not record its source media"))?;
@@ -381,7 +421,9 @@ impl LocalTaskService {
             );
         }
 
-        let job = self.create_queued_job(Some(input.clone()), None).await?;
+        let job = self
+            .create_queued_job(Some(input.clone()), None, languages)
+            .await?;
         if let Some(previous_glossary) = transcription
             .glossary
             .as_deref()
@@ -521,9 +563,10 @@ impl LocalTaskService {
         &self,
         input: Option<PathBuf>,
         render_output: Option<PathBuf>,
+        languages: LanguagePair,
     ) -> Result<Job> {
         let job = Job::create_in(&self.jobs_dir)?;
-        let mut manifest = JobManifest::new(&job, input, render_output);
+        let mut manifest = JobManifest::new(&job, input, render_output, languages);
         manifest.mark(JobStatus::Queued);
         job.write_manifest(&manifest)?;
         if let Some(database) = &self.database {
@@ -541,7 +584,7 @@ impl LocalTaskService {
         if self.sender.send(task).await.is_err() {
             let mut manifest = job
                 .read_manifest_if_exists()?
-                .unwrap_or_else(|| JobManifest::new(&job, None, None));
+                .unwrap_or_else(|| JobManifest::new(&job, None, None, LanguagePair::default()));
             manifest.fail("local task service stopped before the task could start");
             let _ = job.write_manifest(&manifest);
             return Err(anyhow!("local task service is not running"));
@@ -633,6 +676,7 @@ mod tests {
     use super::LocalTaskService;
     use crate::{
         application::{TranscriptionOptions, job_spec::TranscribeSpec},
+        domain::LanguageCode,
         infrastructure::{
             config::AppConfig,
             local_db::{LocalDatabase, LocalGlossaryTermInput},
@@ -668,7 +712,10 @@ mod tests {
             database: Some(database.clone()),
         };
 
-        let job = service.create_queued_job(None, None).await.unwrap();
+        let job = service
+            .create_queued_job(None, None, crate::domain::LanguagePair::default())
+            .await
+            .unwrap();
         let jobs = database.list_jobs().await.unwrap();
 
         assert_eq!(jobs.len(), 1);
@@ -692,6 +739,7 @@ mod tests {
             .save_glossary(
                 None,
                 "测试词表".to_string(),
+                "ja",
                 vec![LocalGlossaryTermInput {
                     source_text: "ナブナ".to_string(),
                     target_text: Some("n-buna".to_string()),
@@ -764,6 +812,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mismatched_glossary_language_is_rejected_without_creating_a_task() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-task-glossary-language-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let glossary = database
+            .save_glossary(None, "日语词表".to_string(), "ja", vec![])
+            .await
+            .unwrap();
+        let (sender, _receiver) = mpsc::channel(1);
+        let jobs_dir = root.join("jobs");
+        let service = LocalTaskService {
+            sender,
+            jobs_dir: jobs_dir.clone(),
+            database: Some(database.clone()),
+        };
+
+        let error = service
+            .submit_transcription_with_glossary(
+                TranscribeSpec {
+                    input: root.join("english.mp3"),
+                    output_dir: None,
+                    transcription: TranscriptionOptions::new(
+                        root.join("model.bin"),
+                        LanguageCode::English,
+                    ),
+                },
+                Some(&glossary.glossary.id),
+                &[],
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("does not match"));
+        assert!(database.list_jobs().await.unwrap().is_empty());
+        assert!(!jobs_dir.exists());
+
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn interrupted_task_is_failed_and_retry_creates_a_new_preserved_job() {
         let root = std::env::temp_dir().join(format!(
             "atogaki-task-recovery-test-{}",
@@ -783,12 +876,19 @@ mod tests {
         fs::write(&input, b"media placeholder").unwrap();
         fs::write(&model, b"model placeholder").unwrap();
         let job = service
-            .create_queued_job(Some(input.clone()), None)
+            .create_queued_job(
+                Some(input.clone()),
+                None,
+                crate::domain::LanguagePair::default(),
+            )
             .await
             .unwrap();
         job.write_recognition_options(&TranscriptionOptions::japanese(model.clone()))
             .unwrap();
-        let corrupt_job = service.create_queued_job(None, None).await.unwrap();
+        let corrupt_job = service
+            .create_queued_job(None, None, crate::domain::LanguagePair::default())
+            .await
+            .unwrap();
         fs::write(&corrupt_job.status_json, b"not valid json").unwrap();
 
         assert_eq!(service.recover_interrupted_jobs().await.unwrap(), 2);
@@ -852,7 +952,11 @@ mod tests {
         let source_media = root.join("source-media.mp3");
         fs::write(&source_media, b"source media must survive task deletion").unwrap();
         let job = service
-            .create_queued_job(Some(source_media.clone()), None)
+            .create_queued_job(
+                Some(source_media.clone()),
+                None,
+                crate::domain::LanguagePair::default(),
+            )
             .await
             .unwrap();
         let job_id = job.id();
@@ -882,8 +986,12 @@ mod tests {
 
         let unmanaged =
             crate::infrastructure::job_store::Job::create_in(&root.join("foreign")).unwrap();
-        let mut unmanaged_manifest =
-            crate::application::job_manifest::JobManifest::new(&unmanaged, None, None);
+        let mut unmanaged_manifest = crate::application::job_manifest::JobManifest::new(
+            &unmanaged,
+            None,
+            None,
+            crate::domain::LanguagePair::default(),
+        );
         unmanaged_manifest.mark(crate::application::job_status::JobStatus::Done);
         unmanaged.write_manifest(&unmanaged_manifest).unwrap();
         database

@@ -8,7 +8,7 @@ use crate::{
     application::{
         TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
     },
-    domain::TranscriptSegment,
+    domain::{LanguagePair, TranscriptSegment},
     infrastructure::network::NetworkClientConfig,
 };
 
@@ -101,7 +101,7 @@ pub async fn translate_segments(
     options: &TranslationOptions,
     segments: &mut [TranscriptSegment],
 ) -> Result<()> {
-    let texts: Vec<String> = segments.iter().map(|s| s.ja_text.clone()).collect();
+    let texts: Vec<String> = segments.iter().map(|s| s.source_text.clone()).collect();
     let translated = translate_texts(auth_key, options, &texts).await?;
 
     for (segment, zh) in segments.iter_mut().zip(translated) {
@@ -152,6 +152,8 @@ async fn translate_lines(
     context: Option<&str>,
 ) -> Result<Vec<String>> {
     const BATCH_SIZE: usize = 12;
+    LanguagePair::new(options.source_language, options.target_language)
+        .context("invalid DeepL language pair")?;
     let mut out = Vec::with_capacity(texts.len());
 
     for batch in texts.chunks(BATCH_SIZE) {
@@ -197,8 +199,8 @@ fn translation_form(
 ) -> String {
     let mut body = format!(
         "source_lang={}&target_lang={}",
-        urlencoding::encode(&options.source_language.to_ascii_uppercase()),
-        urlencoding::encode(&options.target_language.to_ascii_uppercase())
+        urlencoding::encode(options.source_language.deepl_source_code()),
+        urlencoding::encode(options.target_language.deepl_target_code())
     );
     for text in texts {
         body.push_str("&text=");
@@ -223,6 +225,7 @@ fn deepl_endpoint(auth_key: &str) -> &'static str {
 mod tests {
     use super::{DeepLTranslationProvider, deepl_endpoint, translate_texts, translation_form};
     use crate::application::{TranslationOptions, TranslationProvider};
+    use crate::domain::LanguageCode;
 
     #[test]
     fn provider_status_reports_configuration_without_exposing_the_key() {
@@ -269,6 +272,17 @@ mod tests {
         assert_eq!(body.matches("&text=").count(), 2);
         assert_eq!(body.matches("&context=").count(), 1);
         assert!(body.contains("%E5%89%8D%E3%81%AE%E8%A9%B1%0A%E5%BE%8C%E3%81%AE%E8%A9%B1"));
+    }
+
+    #[test]
+    fn maps_english_to_simplified_chinese_provider_codes() {
+        let body = translation_form(
+            &TranslationOptions::new(LanguageCode::English, LanguageCode::SimplifiedChinese),
+            &["Good evening".to_string()],
+            None,
+        );
+
+        assert!(body.starts_with("source_lang=EN&target_lang=ZH-HANS"));
     }
 
     #[test]

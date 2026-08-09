@@ -10,7 +10,7 @@ use crate::{
         },
         job_status::JobStatus,
     },
-    domain::{glossary, segment, subtitle},
+    domain::{LanguageCode, LanguagePair, glossary, segment, subtitle},
     infrastructure::{config::AppConfig, deepl, job_store::Job, media, whisper},
 };
 
@@ -31,7 +31,12 @@ impl JobRunner {
 
     pub async fn transcribe(&self, spec: TranscribeSpec) -> Result<Job> {
         let job = Job::create(spec.output_dir.as_deref())?;
-        let mut manifest = self.manifest_for_job(&job, Some(spec.input.clone()), None)?;
+        let languages = LanguagePair::new(
+            spec.transcription.source_language,
+            LanguageCode::SimplifiedChinese,
+        )?;
+        let mut manifest =
+            self.manifest_for_job(&job, Some(spec.input.clone()), None, languages)?;
         self.mark(&job, &mut manifest, JobStatus::Created)?;
 
         let result = async {
@@ -48,11 +53,14 @@ impl JobRunner {
             .await?;
 
             self.mark(&job, &mut manifest, JobStatus::RefiningSegments)?;
-            let refined = segment::refine(glossary::apply_to_segments(&spec.transcription, raw)?);
+            let refined = segment::refine(
+                glossary::apply_to_segments(&spec.transcription, raw)?,
+                spec.transcription.source_language,
+            );
             job.write_segments(&refined)?;
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
-            subtitle::write_srt(&job.ja_srt, &refined, subtitle::SubtitleTrack::Japanese)?;
+            subtitle::write_srt(&job.source_srt, &refined, subtitle::SubtitleTrack::Source)?;
 
             self.mark(&job, &mut manifest, JobStatus::Done)?;
             Ok::<(), anyhow::Error>(())
@@ -64,8 +72,23 @@ impl JobRunner {
 
     pub async fn process(&self, spec: ProcessSpec) -> Result<Job> {
         let job = Job::create(spec.output_dir.as_deref())?;
-        let mut manifest =
-            self.manifest_for_job(&job, Some(spec.input.clone()), spec.render_output.clone())?;
+        let languages = LanguagePair::new(
+            spec.translation.source_language,
+            spec.translation.target_language,
+        )?;
+        if languages.source != spec.transcription.source_language {
+            return Err(anyhow!(
+                "transcription language {} does not match translation source {}",
+                spec.transcription.source_language,
+                languages.source
+            ));
+        }
+        let mut manifest = self.manifest_for_job(
+            &job,
+            Some(spec.input.clone()),
+            spec.render_output.clone(),
+            languages,
+        )?;
         self.mark(&job, &mut manifest, JobStatus::Created)?;
 
         let result = async {
@@ -82,11 +105,13 @@ impl JobRunner {
             .await?;
 
             self.mark(&job, &mut manifest, JobStatus::RefiningSegments)?;
-            let mut segments =
-                segment::refine(glossary::apply_to_segments(&spec.transcription, raw)?);
+            let mut segments = segment::refine(
+                glossary::apply_to_segments(&spec.transcription, raw)?,
+                spec.transcription.source_language,
+            );
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
-            subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
+            subtitle::write_srt(&job.source_srt, &segments, subtitle::SubtitleTrack::Source)?;
 
             if let Some(key) = spec.deepl_auth_key.or(self.config.deepl_auth_key.clone()) {
                 self.mark(&job, &mut manifest, JobStatus::Translating)?;
@@ -108,7 +133,7 @@ impl JobRunner {
                     .await?;
                 }
             } else {
-                eprintln!("DeepL key missing; wrote Japanese transcript only.");
+                eprintln!("DeepL key missing; wrote source-language transcript only.");
             }
 
             job.write_segments(&segments)?;
@@ -123,6 +148,8 @@ impl JobRunner {
     pub async fn translate(&self, spec: TranslateSpec) -> Result<Job> {
         let job = Job::open(spec.job_dir)?;
         let mut manifest = self.manifest_for_existing_job(&job)?;
+        manifest.source_language = spec.translation.source_language;
+        manifest.target_language = spec.translation.target_language;
         let result = async {
             let mut segments = job.read_segments()?;
             let key = spec
@@ -167,7 +194,7 @@ impl JobRunner {
             );
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
-            subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
+            subtitle::write_srt(&job.source_srt, &segments, subtitle::SubtitleTrack::Source)?;
             self.write_translated_outputs(&job, &segments)?;
 
             self.mark(&job, &mut manifest, JobStatus::Done)?;
@@ -185,7 +212,7 @@ impl JobRunner {
             let segments = job.read_segments()?;
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
-            subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
+            subtitle::write_srt(&job.source_srt, &segments, subtitle::SubtitleTrack::Source)?;
             self.write_translated_outputs(&job, &segments)?;
 
             self.mark(&job, &mut manifest, JobStatus::Done)?;
@@ -267,7 +294,11 @@ impl JobRunner {
         job: &Job,
         segments: &[crate::domain::TranscriptSegment],
     ) -> Result<()> {
-        subtitle::write_srt(&job.zh_srt, segments, subtitle::SubtitleTrack::Chinese)?;
+        subtitle::write_srt(
+            &job.translated_srt,
+            segments,
+            subtitle::SubtitleTrack::Translation,
+        )?;
         subtitle::write_srt(
             &job.bilingual_srt,
             segments,
@@ -291,7 +322,7 @@ impl JobRunner {
     fn manifest_for_existing_job(&self, job: &Job) -> Result<JobManifest> {
         Ok(job
             .read_manifest_if_exists()?
-            .unwrap_or_else(|| JobManifest::new(job, None, None)))
+            .unwrap_or_else(|| JobManifest::new(job, None, None, LanguagePair::default())))
     }
 
     fn manifest_for_job(
@@ -299,10 +330,13 @@ impl JobRunner {
         job: &Job,
         input: Option<std::path::PathBuf>,
         render_output: Option<std::path::PathBuf>,
+        languages: LanguagePair,
     ) -> Result<JobManifest> {
         let mut manifest = self.manifest_for_existing_job(job)?;
         manifest.input = input;
         manifest.render_output = render_output;
+        manifest.source_language = languages.source;
+        manifest.target_language = languages.target;
         Ok(manifest)
     }
 

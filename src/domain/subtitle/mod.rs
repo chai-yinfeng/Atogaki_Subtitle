@@ -6,10 +6,12 @@ use serde::{Deserialize, Serialize};
 use crate::domain::TranscriptSegment;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum SubtitleTrack {
-    Japanese,
-    Chinese,
+    #[serde(rename = "source", alias = "japanese")]
+    Source,
+    #[serde(rename = "translation", alias = "chinese")]
+    Translation,
+    #[serde(rename = "bilingual")]
     Bilingual,
 }
 
@@ -18,12 +20,12 @@ pub fn write_srt(path: &Path, segments: &[TranscriptSegment], track: SubtitleTra
 
     for (idx, seg) in segments.iter().enumerate() {
         let text = match track {
-            SubtitleTrack::Japanese => seg.ja_text.as_str(),
-            SubtitleTrack::Chinese => seg.zh_text.as_deref().unwrap_or(""),
+            SubtitleTrack::Source => seg.source_text.as_str(),
+            SubtitleTrack::Translation => seg.translated_text.as_deref().unwrap_or(""),
             SubtitleTrack::Bilingual => {
-                let zh = seg.zh_text.as_deref().unwrap_or("").trim();
-                if zh.is_empty() {
-                    seg.ja_text.as_str()
+                let translation = seg.translated_text.as_deref().unwrap_or("").trim();
+                if translation.is_empty() {
+                    seg.source_text.as_str()
                 } else {
                     out.push_str(&(idx + 1).to_string());
                     out.push('\n');
@@ -32,9 +34,9 @@ pub fn write_srt(path: &Path, segments: &[TranscriptSegment], track: SubtitleTra
                         format_srt_time(seg.start_ms),
                         format_srt_time(seg.end_ms)
                     ));
-                    out.push_str(seg.ja_text.trim());
+                    out.push_str(seg.source_text.trim());
                     out.push('\n');
-                    out.push_str(zh);
+                    out.push_str(translation);
                     out.push_str("\n\n");
                     continue;
                 }
@@ -76,29 +78,32 @@ pub fn write_ass_track(
          ScaledBorderAndShadow: yes\n\n\
          [V4+ Styles]\n\
          Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n\
-         Style: Japanese,Hiragino Sans,42,&H00FFFFFF,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,120,1\n\
-         Style: Chinese,Hiragino Sans GB,46,&H00D7FFFE,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,60,1\n\n\
+         Style: Source,Hiragino Sans,42,&H00FFFFFF,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,120,1\n\
+         Style: Translation,Hiragino Sans GB,46,&H00D7FFFE,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,60,1\n\n\
          [Events]\n\
          Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
     );
 
     for seg in segments {
-        if matches!(track, SubtitleTrack::Japanese | SubtitleTrack::Bilingual) {
+        if matches!(track, SubtitleTrack::Source | SubtitleTrack::Bilingual) {
             out.push_str(&format!(
-                "Dialogue: 0,{},{},Japanese,,0,0,0,,{}\n",
+                "Dialogue: 0,{},{},Source,,0,0,0,,{}\n",
                 format_ass_time(seg.start_ms),
                 format_ass_time(seg.end_ms),
-                escape_ass(&seg.ja_text)
+                escape_ass(&seg.source_text)
             ));
         }
-        if matches!(track, SubtitleTrack::Chinese | SubtitleTrack::Bilingual)
-            && let Some(zh) = seg.zh_text.as_deref().filter(|s| !s.trim().is_empty())
+        if matches!(track, SubtitleTrack::Translation | SubtitleTrack::Bilingual)
+            && let Some(translation) = seg
+                .translated_text
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
         {
             out.push_str(&format!(
-                "Dialogue: 1,{},{},Chinese,,0,0,0,,{}\n",
+                "Dialogue: 1,{},{},Translation,,0,0,0,,{}\n",
                 format_ass_time(seg.start_ms),
                 format_ass_time(seg.end_ms),
-                escape_ass(zh)
+                escape_ass(translation)
             ));
         }
     }
@@ -127,4 +132,25 @@ fn escape_ass(text: &str) -> String {
         .replace('{', "\\{")
         .replace('}', "\\}")
         .replace('\n', "\\N")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SubtitleTrack;
+
+    #[test]
+    fn legacy_language_specific_track_names_remain_readable() {
+        assert_eq!(
+            serde_json::from_str::<SubtitleTrack>("\"japanese\"").unwrap(),
+            SubtitleTrack::Source
+        );
+        assert_eq!(
+            serde_json::from_str::<SubtitleTrack>("\"chinese\"").unwrap(),
+            SubtitleTrack::Translation
+        );
+        assert_eq!(
+            serde_json::to_string(&SubtitleTrack::Translation).unwrap(),
+            "\"translation\""
+        );
+    }
 }

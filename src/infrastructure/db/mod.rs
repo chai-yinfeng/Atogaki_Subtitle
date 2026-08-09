@@ -272,7 +272,7 @@ impl Database {
         for (index, segment) in segments.iter().enumerate() {
             sqlx::query(
                 "INSERT INTO subtitle_segments (
-                    id, job_id, segment_index, start_ms, end_ms, ja_text, zh_text
+                    id, job_id, segment_index, start_ms, end_ms, source_text, translated_text
                  )
                  VALUES ($1, $2, $3, $4, $5, $6, $7)",
             )
@@ -281,8 +281,8 @@ impl Database {
             .bind(i32::try_from(index).context("segment index exceeds i32")?)
             .bind(ms_to_i64(segment.start_ms)?)
             .bind(ms_to_i64(segment.end_ms)?)
-            .bind(&segment.ja_text)
-            .bind(&segment.zh_text)
+            .bind(&segment.source_text)
+            .bind(&segment.translated_text)
             .execute(&mut *tx)
             .await
             .context("failed to insert subtitle segment")?;
@@ -298,7 +298,7 @@ impl Database {
     ) -> Result<Vec<SubtitleSegmentRecord>> {
         let segments = sqlx::query_as::<_, SubtitleSegmentRecord>(
             "SELECT s.id, s.job_id, s.segment_index, s.start_ms, s.end_ms,
-                s.ja_text, s.zh_text, s.created_at, s.updated_at
+                s.source_text, s.translated_text, s.created_at, s.updated_at
              FROM subtitle_segments s
              JOIN jobs j ON j.id = s.job_id
              WHERE s.job_id = $1 AND j.user_id = $2

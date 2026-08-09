@@ -1,6 +1,8 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import "./styles.css";
 
+type LanguageCode = "ja" | "en" | "zh-Hans";
+
 type LocalJob = {
   job_id: string;
   display_name: string | null;
@@ -12,6 +14,8 @@ type LocalJob = {
   glossary_id: string | null;
   glossary_name: string | null;
   glossary_snapshot_path: string | null;
+  source_language: LanguageCode;
+  target_language: LanguageCode;
   created_at_unix: number;
   updated_at_unix: number;
 };
@@ -19,6 +23,7 @@ type LocalJob = {
 type Glossary = {
   id: string;
   name: string;
+  source_language: LanguageCode;
   term_count: number;
   prompt_term_count: number;
   correction_count: number;
@@ -81,8 +86,8 @@ type SubtitleSegment = {
   segment_index: number;
   start_ms: number;
   end_ms: number;
-  ja_text: string;
-  zh_text: string | null;
+  source_text: string;
+  translated_text: string | null;
   source_edited: boolean;
   translation_edited: boolean;
   translation_stale: boolean;
@@ -101,8 +106,6 @@ type TranslationStatus = {
   configured: boolean;
   model: string | null;
   configuration_hint: string | null;
-  source_language: string;
-  target_language: string;
 };
 
 type RecognitionDefaults = {
@@ -158,8 +161,8 @@ type NetworkSourceCheck = {
 };
 
 type SubtitleExport = {
-  ja_srt: string;
-  zh_srt: string;
+  source_srt: string;
+  translated_srt: string;
   bilingual_srt: string;
   bilingual_ass: string;
   missing_translation_count: number;
@@ -168,8 +171,8 @@ type SubtitleExport = {
 type SubtitleExportPlan = {
   output_directory: string;
   base_name: string;
-  ja_srt: string;
-  zh_srt: string;
+  source_srt: string;
+  translated_srt: string;
   bilingual_srt: string;
   bilingual_ass: string;
   existing_files: string[];
@@ -190,7 +193,7 @@ type VideoRender = {
   input_path: string;
   subtitle_path: string;
   output_path: string;
-  subtitle_track: "japanese" | "chinese" | "bilingual";
+  subtitle_track: "source" | "translation" | "bilingual";
   status: "queued" | "running" | "done" | "failed" | "cancelled";
   progress: number;
   encoder: string | null;
@@ -213,7 +216,7 @@ app.innerHTML = `
   <main class="shell">
     <header>
       <div>
-        <p class="eyebrow">LOCAL JAPANESE MEDIA WORKSPACE</p>
+        <p class="eyebrow">LOCAL MEDIA LANGUAGE WORKSPACE</p>
         <h1>Atogaki</h1>
       </div>
       <div class="header-actions">
@@ -224,12 +227,14 @@ app.innerHTML = `
     <div id="home-view">
       <section class="intro">
         <h2>离线理解，保留在本机。</h2>
-        <p>选择本地媒体与 Whisper 模型后，任务会先写入本地 SQLite，再在后台开始日语转写。</p>
+        <p>选择节目语言、本地媒体与 Whisper 模型后，任务会先写入本地 SQLite，再在后台开始转写。</p>
         <p class="data-path" id="data-path">正在读取本地数据目录…</p>
       </section>
       <section class="create-task" aria-labelledby="create-heading">
-        <div class="section-heading"><h2 id="create-heading">新建日语转写</h2><span>本地执行</span></div>
+        <div class="section-heading"><h2 id="create-heading">新建转写任务</h2><span>本地执行</span></div>
         <form id="task-form">
+          <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option></select></label>
+          <label>翻译目标<select id="target-language" disabled><option value="zh-Hans">简体中文</option></select></label>
           <label>媒体文件<input id="media-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
           <label>Whisper 模型<input id="model-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
@@ -296,8 +301,8 @@ app.innerHTML = `
           <div id="media-host" class="media-host"></div>
           <p id="media-message" class="media-message"></p>
           <div class="current-caption" aria-live="polite">
-            <p id="current-ja">播放时将在这里显示当前日文。</p>
-            <p id="current-zh">中文翻译</p>
+            <p id="current-source">播放时将在这里显示当前原文。</p>
+            <p id="current-translation">简体中文翻译</p>
           </div>
         </section>
         <section class="timeline" aria-labelledby="timeline-title">
@@ -321,7 +326,8 @@ app.innerHTML = `
           <div id="glossary-list" class="glossary-list"></div>
         </aside>
         <section class="glossary-editor">
-          <label>词表名称<input id="glossary-name" maxlength="80" placeholder="例如：日语电台常用词" /></label>
+          <label>词表语言<select id="glossary-language"><option value="ja">日语</option><option value="en">英语</option></select></label>
+          <label>词表名称<input id="glossary-name" maxlength="80" placeholder="例如：电台常用词" /></label>
           <div class="term-heading"><strong>提示词与识别修正规则</strong><button id="add-glossary-term" type="button" class="secondary">＋ 添加词条</button></div>
           <div id="glossary-terms" class="glossary-terms"></div>
           <div class="glossary-editor-footer">
@@ -375,9 +381,9 @@ app.innerHTML = `
       <div class="video-render-form">
         <label>字幕内容
           <select id="video-subtitle-track">
-            <option value="bilingual">日中双语（推荐）</option>
-            <option value="chinese">仅中文</option>
-            <option value="japanese">仅日文</option>
+            <option value="bilingual">原文＋译文（推荐）</option>
+            <option value="translation">仅译文</option>
+            <option value="source">仅原文</option>
           </select>
         </label>
         <label>输出视频
@@ -401,7 +407,7 @@ app.innerHTML = `
           <div><p class="eyebrow">FIRST RUN & SETTINGS</p><h2>启动配置</h2></div>
           <button id="close-settings" type="button" class="secondary">稍后再说</button>
         </div>
-        <p class="dialog-help">媒体和模型保留在本机；只有启用翻译 provider 后，日文字幕才会发送到对应云端。</p>
+        <p class="dialog-help">媒体和模型保留在本机；只有启用翻译 provider 后，原文字幕才会发送到对应云端。</p>
         <section class="settings-section">
           <div class="settings-section-heading"><div><strong>1. 本地识别模型</strong><span id="models-directory"></span></div><span id="model-readiness"></span></div>
           <div class="settings-path-row">
@@ -436,7 +442,7 @@ app.innerHTML = `
           <p id="model-download-message" class="settings-message" role="status"></p>
         </section>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>3. 云端翻译（可选）</strong><span>不配置也可以完成日语转写、编辑和日文字幕导出。</span></div><span id="credential-store-label"></span></div>
+          <div class="settings-section-heading"><div><strong>3. 云端翻译（可选）</strong><span>不配置也可以完成本地转写、编辑和原文字幕导出。</span></div><span id="credential-store-label"></span></div>
           <label>翻译 provider
             <select id="settings-provider">
               <option value="deepl">DeepL</option>
@@ -466,6 +472,7 @@ const jobManagementMessage = document.querySelector<HTMLParagraphElement>("#job-
 const dataPath = document.querySelector<HTMLParagraphElement>("#data-path");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
+const sourceLanguage = document.querySelector<HTMLSelectElement>("#source-language");
 const vadEnabled = document.querySelector<HTMLInputElement>("#vad-enabled");
 const vadModelPath = document.querySelector<HTMLInputElement>("#vad-model-path");
 const taskGlossary = document.querySelector<HTMLSelectElement>("#task-glossary");
@@ -481,8 +488,8 @@ const mediaHost = document.querySelector<HTMLDivElement>("#media-host");
 const mediaMessage = document.querySelector<HTMLParagraphElement>("#media-message");
 const subtitleList = document.querySelector<HTMLDivElement>("#subtitle-list");
 const segmentCount = document.querySelector<HTMLSpanElement>("#segment-count");
-const currentJa = document.querySelector<HTMLParagraphElement>("#current-ja");
-const currentZh = document.querySelector<HTMLParagraphElement>("#current-zh");
+const currentSource = document.querySelector<HTMLParagraphElement>("#current-source");
+const currentTranslation = document.querySelector<HTMLParagraphElement>("#current-translation");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
@@ -495,6 +502,7 @@ const glossaryPreviewHost = document.querySelector<HTMLDivElement>("#glossary-pr
 const glossaryDialog = document.querySelector<HTMLDialogElement>("#glossary-dialog");
 const glossaryListHost = document.querySelector<HTMLDivElement>("#glossary-list");
 const glossaryName = document.querySelector<HTMLInputElement>("#glossary-name");
+const glossaryLanguage = document.querySelector<HTMLSelectElement>("#glossary-language");
 const glossaryTerms = document.querySelector<HTMLDivElement>("#glossary-terms");
 const glossaryMessage = document.querySelector<HTMLSpanElement>("#glossary-message");
 const deleteGlossaryButton = document.querySelector<HTMLButtonElement>("#delete-glossary");
@@ -573,9 +581,26 @@ let translationStatus: TranslationStatus = {
   configured: false,
   model: null,
   configuration_hint: "请在设置中选择并配置翻译服务。",
-  source_language: "ja",
-  target_language: "zh-hans",
 };
+
+function languageLabel(language: string): string {
+  if (language === "ja") return "日语";
+  if (language === "en") return "英语";
+  if (language === "zh-Hans") return "简体中文";
+  return language;
+}
+
+function selectedSourceLanguage(): LanguageCode {
+  return (sourceLanguage?.value as LanguageCode | undefined) ?? "ja";
+}
+
+function activeSourceLanguage(): LanguageCode {
+  return activeDetail?.job.source_language ?? selectedSourceLanguage();
+}
+
+function activeTargetLanguage(): LanguageCode {
+  return activeDetail?.job.target_language ?? "zh-Hans";
+}
 
 function displayName(job: LocalJob): string {
   if (job.display_name?.trim()) return job.display_name;
@@ -908,19 +933,24 @@ async function refreshModelDownloads(): Promise<void> {
 function renderGlossaryOptions(): void {
   const taskSelection = taskGlossary?.value ?? "";
   const workspaceSelection = workspaceGlossary?.value ?? "";
-  const options = glossaries
+  const taskGlossaries = glossaries.filter((glossary) => glossary.source_language === selectedSourceLanguage());
+  const workspaceGlossaries = glossaries.filter((glossary) => glossary.source_language === activeSourceLanguage());
+  const taskOptions = taskGlossaries
+    .map((glossary) => `<option value="${escapeHtml(glossary.id)}">${escapeHtml(glossary.name)}（核心 ${glossary.core_term_count}／内容包 ${glossary.content_group_count}／仅修正 ${glossary.correction_only_count}）</option>`)
+    .join("");
+  const workspaceOptions = workspaceGlossaries
     .map((glossary) => `<option value="${escapeHtml(glossary.id)}">${escapeHtml(glossary.name)}（核心 ${glossary.core_term_count}／内容包 ${glossary.content_group_count}／仅修正 ${glossary.correction_only_count}）</option>`)
     .join("");
   if (taskGlossary) {
-    taskGlossary.innerHTML = `<option value="">不使用词表</option>${options}`;
-    if (glossaries.some((glossary) => glossary.id === taskSelection)) taskGlossary.value = taskSelection;
+    taskGlossary.innerHTML = `<option value="">不使用词表</option>${taskOptions}`;
+    if (taskGlossaries.some((glossary) => glossary.id === taskSelection)) taskGlossary.value = taskSelection;
   }
   if (workspaceGlossary) {
-    workspaceGlossary.innerHTML = `<option value="">选择词表…</option>${options}`;
-    const preferred = glossaries.some((glossary) => glossary.id === workspaceSelection)
+    workspaceGlossary.innerHTML = `<option value="">选择词表…</option>${workspaceOptions}`;
+    const preferred = workspaceGlossaries.some((glossary) => glossary.id === workspaceSelection)
       ? workspaceSelection
       : activeDetail?.job.glossary_id ?? "";
-    workspaceGlossary.value = glossaries.some((glossary) => glossary.id === preferred) ? preferred : "";
+    workspaceGlossary.value = workspaceGlossaries.some((glossary) => glossary.id === preferred) ? preferred : "";
   }
   renderGlossaryList();
 }
@@ -1011,7 +1041,7 @@ function renderGlossaryList(): void {
   }
   glossaryListHost.innerHTML = glossaries
     .map(
-      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}</strong><span>核心 ${glossary.core_term_count} · 内容 ${glossary.content_group_count} 包 · 仅修正 ${glossary.correction_only_count}</span></button>`,
+      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}</strong><span>${languageLabel(glossary.source_language)} · 核心 ${glossary.core_term_count} · 内容 ${glossary.content_group_count} 包 · 仅修正 ${glossary.correction_only_count}</span></button>`,
     )
     .join("");
   glossaryListHost.querySelectorAll<HTMLButtonElement>("[data-glossary-id]").forEach((button) => {
@@ -1023,8 +1053,10 @@ function updateTranslationControls(): void {
   const hasSegments = (activeDetail?.segments.length ?? 0) > 0;
   if (translationStatusText) {
     const model = translationStatus.model ? ` · ${translationStatus.model}` : "";
+    const source = languageLabel(activeSourceLanguage());
+    const target = languageLabel(activeTargetLanguage());
     translationStatusText.textContent = translationStatus.configured
-      ? `${translationStatus.provider}${model} 已配置 · 日文会发送到云端翻译为简体中文`
+      ? `${translationStatus.provider}${model} 已配置 · ${source}原文会发送到云端翻译为${target}`
       : `未配置 ${translationStatus.provider}；${translationStatus.configuration_hint ?? "请完成翻译服务配置"}`;
     translationStatusText.classList.toggle("warning", !translationStatus.configured);
   }
@@ -1254,6 +1286,11 @@ function renderWorkspace(detail: JobDetail): void {
     workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message} · ${jobTimingLabel(detail.job)}`;
   }
   if (segmentCount) segmentCount.textContent = `${detail.segments.length} 段`;
+  renderGlossaryOptions();
+  const sourceTrackOption = videoSubtitleTrack?.querySelector<HTMLOptionElement>('option[value="source"]');
+  const translationTrackOption = videoSubtitleTrack?.querySelector<HTMLOptionElement>('option[value="translation"]');
+  if (sourceTrackOption) sourceTrackOption.textContent = `仅${languageLabel(detail.job.source_language)}原文`;
+  if (translationTrackOption) translationTrackOption.textContent = `仅${languageLabel(detail.job.target_language)}译文`;
   if (jobGlossaryStatus) {
     jobGlossaryStatus.textContent = detail.job.glossary_name
       ? `转写时使用：${detail.job.glossary_name}（已保存任务快照）`
@@ -1337,27 +1374,27 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
     flags.textContent = editFlags(segment);
     meta.append(time, flags);
 
-    const jaLabel = document.createElement("label");
-    jaLabel.textContent = "日本語";
-    const ja = document.createElement("textarea");
-    ja.className = "subtitle-input ja-input";
-    ja.rows = 2;
-    ja.value = segment.ja_text;
-    jaLabel.append(ja);
+    const sourceLabel = document.createElement("label");
+    sourceLabel.textContent = `${languageLabel(activeSourceLanguage())}原文`;
+    const sourceInput = document.createElement("textarea");
+    sourceInput.className = "subtitle-input source-input";
+    sourceInput.rows = 2;
+    sourceInput.value = segment.source_text;
+    sourceLabel.append(sourceInput);
 
-    const zhLabel = document.createElement("label");
-    zhLabel.textContent = "简体中文";
-    const zh = document.createElement("textarea");
-    zh.className = "subtitle-input zh-input";
-    zh.rows = 2;
-    zh.placeholder = "尚无翻译";
-    zh.value = segment.zh_text ?? "";
-    zhLabel.append(zh);
+    const translationLabel = document.createElement("label");
+    translationLabel.textContent = languageLabel(activeTargetLanguage());
+    const translationInput = document.createElement("textarea");
+    translationInput.className = "subtitle-input translation-input";
+    translationInput.rows = 2;
+    translationInput.placeholder = "尚无翻译";
+    translationInput.value = segment.translated_text ?? "";
+    translationLabel.append(translationInput);
 
     const footer = document.createElement("div");
     footer.className = "subtitle-footer";
     const state = document.createElement("span");
-    state.textContent = segment.translation_stale ? "日文已改变，当前译文需要重译" : "已保存到本地 SQLite";
+    state.textContent = segment.translation_stale ? "原文已改变，当前译文需要重译" : "已保存到本地 SQLite";
     if (segment.translation_stale) state.classList.add("warning");
     const save = document.createElement("button");
     save.type = "button";
@@ -1366,7 +1403,7 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
     const translate = document.createElement("button");
     translate.type = "button";
     translate.className = "translate-segment secondary";
-    translate.textContent = segment.zh_text ? "重译本段" : "翻译本段";
+    translate.textContent = segment.translated_text ? "重译本段" : "翻译本段";
     const capture = document.createElement("button");
     capture.type = "button";
     capture.className = "capture-glossary-term secondary";
@@ -1377,17 +1414,17 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
       state.textContent = "有未保存的修改";
       state.classList.remove("warning");
     };
-    ja.addEventListener("input", markDirty);
-    zh.addEventListener("input", markDirty);
-    save.addEventListener("click", () => void saveSegment(segment, ja, zh, save, state));
-    translate.addEventListener("click", () => void translateSegment(segment, ja, zh, state));
-    capture.addEventListener("click", () => void captureGlossaryCorrection(segment, ja, state));
+    sourceInput.addEventListener("input", markDirty);
+    translationInput.addEventListener("input", markDirty);
+    save.addEventListener("click", () => void saveSegment(segment, sourceInput, translationInput, save, state));
+    translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, state));
+    capture.addEventListener("click", () => void captureGlossaryCorrection(segment, sourceInput, state));
     const actions = document.createElement("div");
     actions.className = "subtitle-actions";
     actions.append(capture, translate, save);
     footer.append(state, actions);
 
-    card.append(meta, jaLabel, zhLabel, footer);
+    card.append(meta, sourceLabel, translationLabel, footer);
     subtitleList.append(card);
   }
   highlightSegment(activeSegmentId);
@@ -1396,8 +1433,8 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
 
 async function saveSegment(
   segment: SubtitleSegment,
-  ja: HTMLTextAreaElement,
-  zh: HTMLTextAreaElement,
+  sourceInput: HTMLTextAreaElement,
+  translationInput: HTMLTextAreaElement,
   button: HTMLButtonElement,
   state: HTMLSpanElement,
 ): Promise<void> {
@@ -1405,7 +1442,7 @@ async function saveSegment(
   button.disabled = true;
   state.textContent = "正在保存…";
   try {
-    const updated = await persistSegment(segment.id, ja.value, zh.value);
+    const updated = await persistSegment(segment.id, sourceInput.value, translationInput.value);
     replaceActiveSegment(updated);
     renderSubtitleList(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
@@ -1416,14 +1453,14 @@ async function saveSegment(
   }
 }
 
-async function persistSegment(segmentId: string, jaText: string, zhText: string): Promise<SubtitleSegment> {
+async function persistSegment(segmentId: string, sourceText: string, translatedText: string): Promise<SubtitleSegment> {
   if (!activeDetail) throw new Error("没有打开的字幕任务");
   return invoke<SubtitleSegment>("update_subtitle", {
     request: {
       jobId: activeDetail.job.job_id,
       segmentId,
-      jaText,
-      zhText: zhText.trim() || null,
+      sourceText,
+      translatedText: translatedText.trim() || null,
     },
   });
 }
@@ -1435,8 +1472,8 @@ function replaceActiveSegment(updated: SubtitleSegment): void {
 
 async function translateSegment(
   segment: SubtitleSegment,
-  ja: HTMLTextAreaElement,
-  zh: HTMLTextAreaElement,
+  sourceInput: HTMLTextAreaElement,
+  translationInput: HTMLTextAreaElement,
   state: HTMLSpanElement,
 ): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
@@ -1445,14 +1482,14 @@ async function translateSegment(
   state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
   state.classList.remove("warning");
   try {
-    const saved = await persistSegment(segment.id, ja.value, zh.value);
+    const saved = await persistSegment(segment.id, sourceInput.value, translationInput.value);
     replaceActiveSegment(saved);
     const translated = await invoke<SubtitleSegment>("translate_subtitle", {
       jobId: activeDetail.job.job_id,
       segmentId: segment.id,
     });
     replaceActiveSegment(translated);
-    setWorkspaceAction(`本段中文已由 ${translationStatus.provider} 更新并保存到 SQLite。`);
+    setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并保存到 SQLite。`);
     renderSubtitleList(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
   } catch (error) {
@@ -1467,8 +1504,8 @@ async function translateSegment(
 
 function editFlags(segment: SubtitleSegment): string {
   const flags = [];
-  if (segment.source_edited) flags.push("日文已编辑");
-  if (segment.translation_edited) flags.push("中文已编辑");
+  if (segment.source_edited) flags.push("原文已编辑");
+  if (segment.translation_edited) flags.push("译文已编辑");
   if (segment.translation_stale) flags.push("待重译");
   return flags.join(" · ");
 }
@@ -1492,10 +1529,10 @@ function updateActiveSubtitle(milliseconds: number): void {
     (item) => milliseconds >= item.start_ms && milliseconds < item.end_ms,
   );
   const nextId = segment?.id ?? null;
-  if (currentJa) currentJa.textContent = segment?.ja_text ?? "当前时间没有字幕。";
-  if (currentZh) {
-    currentZh.textContent = segment?.zh_text || "尚无中文翻译";
-    currentZh.classList.toggle("stale", segment?.translation_stale ?? false);
+  if (currentSource) currentSource.textContent = segment?.source_text ?? "当前时间没有字幕。";
+  if (currentTranslation) {
+    currentTranslation.textContent = segment?.translated_text || `尚无${languageLabel(activeTargetLanguage())}翻译`;
+    currentTranslation.classList.toggle("stale", segment?.translation_stale ?? false);
   }
   if (activeSegmentId !== nextId) {
     activeSegmentId = nextId;
@@ -1519,7 +1556,7 @@ async function translateAllSubtitles(): Promise<void> {
   }
   const confirmed = await confirmAction({
     title: "全部翻译／重译？",
-    message: `将把 ${activeDetail.segments.length} 段日文发送到 ${translationStatus.provider}，并覆盖现有中文，包括人工修改。`,
+    message: `将把 ${activeDetail.segments.length} 段${languageLabel(activeSourceLanguage())}原文发送到 ${translationStatus.provider}，并覆盖现有${languageLabel(activeTargetLanguage())}译文，包括人工修改。`,
     confirmLabel: "发送并覆盖",
     danger: true,
   });
@@ -1553,7 +1590,7 @@ async function exportSubtitles(): Promise<void> {
   }
   const staleCount = activeDetail.segments.filter((segment) => segment.translation_stale).length;
   if (staleCount > 0) {
-    setWorkspaceAction(`有 ${staleCount} 段中文已过期，请重译或修正后再导出。`, true);
+    setWorkspaceAction(`有 ${staleCount} 段译文已过期，请重译或修正后再导出。`, true);
     return;
   }
 
@@ -1594,7 +1631,7 @@ async function exportSubtitles(): Promise<void> {
       }
     }
 
-    setWorkspaceAction("正在从 SQLite 当前内容生成日文、中文和双语字幕…");
+    setWorkspaceAction("正在从 SQLite 当前内容生成原文、译文和双语字幕…");
     const exported = await invoke<SubtitleExport>("export_workspace_subtitles", {
       request: {
         jobId: activeDetail.job.job_id,
@@ -1603,7 +1640,7 @@ async function exportSubtitles(): Promise<void> {
       },
     });
     const missing = exported.missing_translation_count
-      ? `；${exported.missing_translation_count} 段尚无中文，双语字幕中保留日文`
+      ? `；${exported.missing_translation_count} 段尚无译文，双语字幕中保留原文`
       : "";
     lastExportedSubtitlePath = exported.bilingual_ass;
     revealExportButton?.classList.remove("hidden");
@@ -1628,9 +1665,9 @@ async function revealExportedSubtitle(): Promise<void> {
 }
 
 function videoTrackLabel(track: VideoRender["subtitle_track"]): string {
-  if (track === "japanese") return "仅日文";
-  if (track === "chinese") return "仅中文";
-  return "日中双语";
+  if (track === "source") return `仅${languageLabel(activeSourceLanguage())}原文`;
+  if (track === "translation") return `仅${languageLabel(activeTargetLanguage())}译文`;
+  return "原文＋译文";
 }
 
 function videoRenderStatusLabel(render: VideoRender): string {
@@ -1728,7 +1765,7 @@ async function openVideoRenderDialog(): Promise<void> {
   }
   const staleCount = activeDetail.segments.filter((segment) => segment.translation_stale).length;
   if (staleCount > 0) {
-    setWorkspaceAction(`有 ${staleCount} 段中文已过期，请重译或修正后再烧录。`, true);
+    setWorkspaceAction(`有 ${staleCount} 段译文已过期，请重译或修正后再烧录。`, true);
     return;
   }
   if (!activeDetail.job.input_path || isAudioPath(activeDetail.job.input_path)) {
@@ -1896,7 +1933,7 @@ function addGlossaryTermRow(
   const syncKind = (): void => {
     const correction = kind.value === "correction";
     row.dataset.termKind = kind.value;
-    source.placeholder = correction ? "日语读音或常见误识别" : "希望 Whisper 识别出的写法";
+    source.placeholder = correction ? "读音或常见误识别" : "希望 Whisper 识别出的写法";
     target.disabled = !correction;
     target.placeholder = correction ? "最终规范写法" : "提示词不需要目标写法";
     arrow.classList.toggle("inactive", !correction);
@@ -1931,6 +1968,7 @@ async function editGlossary(glossaryId: string | null): Promise<void> {
   if (glossaryTerms) glossaryTerms.replaceChildren();
   if (!glossaryId) {
     if (glossaryName) glossaryName.value = "";
+    if (glossaryLanguage) glossaryLanguage.value = selectedSourceLanguage();
     if (deleteGlossaryButton) deleteGlossaryButton.disabled = true;
     addGlossaryTermRow();
     glossaryName?.focus();
@@ -1941,6 +1979,7 @@ async function editGlossary(glossaryId: string | null): Promise<void> {
   try {
     const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
     if (glossaryName) glossaryName.value = detail.glossary.name;
+    if (glossaryLanguage) glossaryLanguage.value = detail.glossary.source_language;
     if (deleteGlossaryButton) deleteGlossaryButton.disabled = false;
     if (glossaryTerms) glossaryTerms.replaceChildren();
     for (const term of detail.terms) {
@@ -1968,7 +2007,7 @@ async function openGlossaryManager(): Promise<void> {
 }
 
 async function saveGlossaryEditor(): Promise<void> {
-  if (!glossaryName || !glossaryTerms || !glossaryMessage) return;
+  if (!glossaryName || !glossaryLanguage || !glossaryTerms || !glossaryMessage) return;
   const name = glossaryName.value.trim();
   const rows = Array.from(glossaryTerms.querySelectorAll<HTMLElement>(".glossary-term-row"));
   if (
@@ -2008,11 +2047,18 @@ async function saveGlossaryEditor(): Promise<void> {
   glossaryMessage.textContent = "正在保存…";
   try {
     const detail = await invoke<GlossaryDetail>("save_glossary", {
-      request: { glossaryId: editingGlossaryId, name, terms },
+      request: {
+        glossaryId: editingGlossaryId,
+        name,
+        sourceLanguage: glossaryLanguage.value as LanguageCode,
+        terms,
+      },
     });
     editingGlossaryId = detail.glossary.id;
     await refreshGlossaries();
-    if (taskGlossary) taskGlossary.value = detail.glossary.id;
+    if (taskGlossary && detail.glossary.source_language === selectedSourceLanguage()) {
+      taskGlossary.value = detail.glossary.id;
+    }
     await refreshTaskGlossaryConfiguration();
     glossaryMessage.textContent = `已保存 ${detail.terms.length} 条词条。`;
     await editGlossary(detail.glossary.id);
@@ -2044,7 +2090,7 @@ async function deleteGlossaryEditor(): Promise<void> {
 
 function captureGlossaryCorrection(
   segment: SubtitleSegment,
-  ja: HTMLTextAreaElement,
+  sourceInput: HTMLTextAreaElement,
   state: HTMLSpanElement,
 ): void {
   const glossaryId = workspaceGlossary?.value;
@@ -2053,8 +2099,8 @@ function captureGlossaryCorrection(
     return;
   }
   pendingGlossaryCorrection = { glossaryId, state };
-  if (glossaryCorrectionSource) glossaryCorrectionSource.value = segment.ja_text;
-  if (glossaryCorrectionTarget) glossaryCorrectionTarget.value = ja.value.trim();
+  if (glossaryCorrectionSource) glossaryCorrectionSource.value = segment.source_text;
+  if (glossaryCorrectionTarget) glossaryCorrectionTarget.value = sourceInput.value.trim();
   if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
   glossaryCorrectionDialog?.showModal();
   glossaryCorrectionSource?.focus();
@@ -2096,6 +2142,7 @@ async function saveGlossaryCorrection(): Promise<void> {
       request: {
         glossaryId,
         name: detail.glossary.name,
+        sourceLanguage: detail.glossary.source_language,
         terms,
       },
     });
@@ -2125,7 +2172,7 @@ async function previewGlossaryApplication(): Promise<void> {
     return;
   }
   setWorkspaceBusy(true);
-  setWorkspaceAction("正在比较词表与 SQLite 日文字幕…");
+  setWorkspaceAction("正在比较词表与 SQLite 原文字幕…");
   try {
     pendingGlossaryPreview = await invoke<GlossaryPreview>("preview_glossary_application", {
       jobId: activeDetail.job.job_id,
@@ -2155,7 +2202,7 @@ function renderGlossaryPreview(preview: GlossaryPreview): void {
     )
     .join("");
   glossaryPreviewHost.innerHTML = preview.changes.length
-    ? `<div><strong>${escapeHtml(preview.glossary_name)} 将修改 ${preview.changes.length} 段</strong><span>${staleCount} 段已有中文，应用后会标记为待重译。</span></div><ul>${examples}</ul><button id="apply-previewed-glossary" type="button">确认应用</button>`
+    ? `<div><strong>${escapeHtml(preview.glossary_name)} 将修改 ${preview.changes.length} 段</strong><span>${staleCount} 段已有译文，应用后会标记为待重译。</span></div><ul>${examples}</ul><button id="apply-previewed-glossary" type="button">确认应用</button>`
     : `<div><strong>${escapeHtml(preview.glossary_name)} 无匹配修正</strong><span>提示词只影响新转写；这里只预览“错误写法 → 规范写法”规则。</span></div>`;
   glossaryPreviewHost.classList.remove("hidden");
   document.querySelector<HTMLButtonElement>("#apply-previewed-glossary")?.addEventListener("click", () => void applyPreviewedGlossary());
@@ -2175,7 +2222,7 @@ async function applyPreviewedGlossary(): Promise<void> {
     renderSubtitleList(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
     setWorkspaceAction(
-      `已修正 ${applied.changed_segments} 段并保存到 SQLite；${applied.stale_translations} 段中文需要重译。`,
+      `已修正 ${applied.changed_segments} 段并保存到 SQLite；${applied.stale_translations} 段译文需要重译。`,
     );
   } catch (error) {
     setWorkspaceAction(`应用词表失败：${String(error)}`, true);
@@ -2327,6 +2374,10 @@ document.querySelector<HTMLButtonElement>("#choose-model")?.addEventListener("cl
 document.querySelector<HTMLButtonElement>("#choose-vad-model")?.addEventListener("click", () => void chooseFile("vad"));
 vadEnabled?.addEventListener("change", syncVadControls);
 taskGlossary?.addEventListener("change", () => void refreshTaskGlossaryConfiguration());
+sourceLanguage?.addEventListener("change", () => {
+  renderGlossaryOptions();
+  void refreshTaskGlossaryConfiguration();
+});
 
 document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2342,6 +2393,7 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
     request: {
       inputPath: mediaPath.value,
       modelPath: modelPath.value,
+      sourceLanguage: selectedSourceLanguage(),
       vadModelPath: vadEnabled?.checked ? vadModelPath?.value.trim() || null : null,
       glossaryId: taskGlossary?.value || null,
       selectedContentGroups: taskGlossary?.value ? Array.from(selectedTaskContentGroups) : [],

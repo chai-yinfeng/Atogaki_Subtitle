@@ -145,7 +145,7 @@ fn build_args(
         "-m".into(),
         options.model.as_os_str().to_os_string(),
         "-l".into(),
-        options.source_language.clone().into(),
+        options.source_language.whisper_code().into(),
         "-sns".into(),
         "-nth".into(),
         format!("{:.2}", options.no_speech_threshold).into(),
@@ -292,11 +292,12 @@ fn json_path(prefix: &Path) -> PathBuf {
 mod tests {
     use super::build_args;
     use crate::application::TranscriptionOptions;
+    use crate::domain::LanguageCode;
     use std::path::Path;
 
-    fn string_args(force_cpu: bool) -> Vec<String> {
+    fn string_args(source_language: LanguageCode, force_cpu: bool) -> Vec<String> {
         build_args(
-            &TranscriptionOptions::japanese("model.bin".into()),
+            &TranscriptionOptions::new("model.bin".into(), source_language),
             Path::new("audio.wav"),
             Path::new("transcript"),
             None,
@@ -309,7 +310,7 @@ mod tests {
 
     #[test]
     fn requests_the_first_gpu_device_by_default() {
-        let args = string_args(false);
+        let args = string_args(LanguageCode::Japanese, false);
 
         assert!(args.windows(2).any(|pair| pair == ["--device", "0"]));
         assert!(!args.iter().any(|argument| argument == "--no-gpu"));
@@ -317,9 +318,16 @@ mod tests {
 
     #[test]
     fn cpu_retry_disables_gpu_instead_of_selecting_a_device() {
-        let args = string_args(true);
+        let args = string_args(LanguageCode::Japanese, true);
 
         assert!(args.iter().any(|argument| argument == "--no-gpu"));
         assert!(!args.iter().any(|argument| argument == "--device"));
+    }
+
+    #[test]
+    fn maps_english_to_the_whisper_language_argument() {
+        let args = string_args(LanguageCode::English, false);
+
+        assert!(args.windows(2).any(|pair| pair == ["-l", "en"]));
     }
 }

@@ -307,8 +307,8 @@ async fn run_render_worker(
 
 fn subtitle_track_key(track: SubtitleTrack) -> &'static str {
     match track {
-        SubtitleTrack::Japanese => "japanese",
-        SubtitleTrack::Chinese => "chinese",
+        SubtitleTrack::Source => "source",
+        SubtitleTrack::Translation => "translation",
         SubtitleTrack::Bilingual => "bilingual",
     }
 }
@@ -456,7 +456,12 @@ mod tests {
         assert!(generated.status.success());
 
         let job = Job::create_in(&root.join("jobs")).unwrap();
-        let mut manifest = JobManifest::new(&job, Some(input.clone()), None);
+        let mut manifest = JobManifest::new(
+            &job,
+            Some(input.clone()),
+            None,
+            crate::domain::LanguagePair::default(),
+        );
         manifest.mark(JobStatus::Done);
         let mut segment = TranscriptSegment::new(0, 900, "テスト字幕".to_string());
         segment.set_translation(Some("测试字幕".to_string()));

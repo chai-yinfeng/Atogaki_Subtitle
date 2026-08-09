@@ -3,6 +3,7 @@ use std::{
     fs::{self, OpenOptions},
     io,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -12,7 +13,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     application::{TranslationOptions, TranslationProvider, UnconfiguredTranslationProvider},
-    domain::{TranscriptSegment, subtitle},
+    domain::{LanguageCode, TranscriptSegment, subtitle},
     infrastructure::{
         job_store::Job,
         local_db::{
@@ -38,14 +39,12 @@ pub struct LocalTranslationStatus {
     pub configured: bool,
     pub model: Option<String>,
     pub configuration_hint: Option<String>,
-    pub source_language: String,
-    pub target_language: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalSubtitleExport {
-    pub ja_srt: String,
-    pub zh_srt: String,
+    pub source_srt: String,
+    pub translated_srt: String,
     pub bilingual_srt: String,
     pub bilingual_ass: String,
     pub missing_translation_count: usize,
@@ -55,8 +54,8 @@ pub struct LocalSubtitleExport {
 pub struct LocalSubtitleExportPlan {
     pub output_directory: String,
     pub base_name: String,
-    pub ja_srt: String,
-    pub zh_srt: String,
+    pub source_srt: String,
+    pub translated_srt: String,
     pub bilingual_srt: String,
     pub bilingual_ass: String,
     pub existing_files: Vec<String>,
@@ -92,7 +91,6 @@ impl LocalWorkspaceService {
     }
 
     pub fn translation_status(&self) -> LocalTranslationStatus {
-        let options = TranslationOptions::default();
         let provider = self.translation_provider.status();
         LocalTranslationStatus {
             provider_id: provider.id,
@@ -100,8 +98,6 @@ impl LocalWorkspaceService {
             configured: provider.configured,
             model: provider.model,
             configuration_hint: provider.configuration_hint,
-            source_language: options.source_language,
-            target_language: options.target_language,
         }
     }
 
@@ -119,11 +115,11 @@ impl LocalWorkspaceService {
         &self,
         job_id: &str,
         segment_id: &str,
-        ja_text: String,
-        zh_text: Option<String>,
+        source_text: String,
+        translated_text: Option<String>,
     ) -> Result<LocalSubtitleSegmentRecord> {
         self.database
-            .update_segment_text(job_id, segment_id, ja_text, zh_text)
+            .update_segment_text(job_id, segment_id, source_text, translated_text)
             .await
     }
 
@@ -182,14 +178,18 @@ impl LocalWorkspaceService {
             .iter()
             .filter(|segment| {
                 segment
-                    .zh_text
+                    .translated_text
                     .as_deref()
                     .is_none_or(|text| text.trim().is_empty())
             })
             .count();
         let job = Job::open(PathBuf::from(&workspace.job.storage_dir))?;
-        subtitle::write_srt(&job.ja_srt, &segments, subtitle::SubtitleTrack::Japanese)?;
-        subtitle::write_srt(&job.zh_srt, &segments, subtitle::SubtitleTrack::Chinese)?;
+        subtitle::write_srt(&job.source_srt, &segments, subtitle::SubtitleTrack::Source)?;
+        subtitle::write_srt(
+            &job.translated_srt,
+            &segments,
+            subtitle::SubtitleTrack::Translation,
+        )?;
         subtitle::write_srt(
             &job.bilingual_srt,
             &segments,
@@ -198,8 +198,8 @@ impl LocalWorkspaceService {
         subtitle::write_ass(&job.bilingual_ass, &segments)?;
 
         Ok(LocalSubtitleExport {
-            ja_srt: job.ja_srt.display().to_string(),
-            zh_srt: job.zh_srt.display().to_string(),
+            source_srt: job.source_srt.display().to_string(),
+            translated_srt: job.translated_srt.display().to_string(),
             bilingual_srt: job.bilingual_srt.display().to_string(),
             bilingual_ass: job.bilingual_ass.display().to_string(),
             missing_translation_count,
@@ -236,7 +236,7 @@ impl LocalWorkspaceService {
             .iter()
             .filter(|segment| {
                 segment
-                    .zh_text
+                    .translated_text
                     .as_deref()
                     .is_none_or(|text| text.trim().is_empty())
             })
@@ -275,8 +275,12 @@ impl LocalWorkspaceService {
         // Always refresh the task-local projections first. The selected export
         // is a copy of the same current SQLite state used by future rendering.
         let generated = self.export_subtitles(job_id).await?;
-        copy_export_file(&generated.ja_srt, &plan.ja_srt, overwrite_existing)?;
-        copy_export_file(&generated.zh_srt, &plan.zh_srt, overwrite_existing)?;
+        copy_export_file(&generated.source_srt, &plan.source_srt, overwrite_existing)?;
+        copy_export_file(
+            &generated.translated_srt,
+            &plan.translated_srt,
+            overwrite_existing,
+        )?;
         copy_export_file(
             &generated.bilingual_srt,
             &plan.bilingual_srt,
@@ -289,8 +293,8 @@ impl LocalWorkspaceService {
         )?;
 
         Ok(LocalSubtitleExport {
-            ja_srt: plan.ja_srt,
-            zh_srt: plan.zh_srt,
+            source_srt: plan.source_srt,
+            translated_srt: plan.translated_srt,
             bilingual_srt: plan.bilingual_srt,
             bilingual_ass: plan.bilingual_ass,
             missing_translation_count: generated.missing_translation_count,
@@ -314,12 +318,20 @@ impl LocalWorkspaceService {
                     .unwrap_or("Configure the translation provider and restart Atogaki")
             ));
         }
-        let options = TranslationOptions::default();
+        let job = self
+            .database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        let options = TranslationOptions::new(
+            LanguageCode::from_str(&job.source_language).map_err(anyhow::Error::msg)?,
+            LanguageCode::from_str(&job.target_language).map_err(anyhow::Error::msg)?,
+        );
         let mut updates = Vec::with_capacity(segments_to_translate.len());
         for batch in segments_to_translate.chunks(TRANSLATION_BATCH_SIZE) {
             let source_texts = batch
                 .iter()
-                .map(|segment| segment.ja_text.clone())
+                .map(|segment| segment.source_text.clone())
                 .collect::<Vec<_>>();
             let context = translation_context(context_segments, batch);
             let translated = self
@@ -346,7 +358,7 @@ impl LocalWorkspaceService {
                     .zip(translated)
                     .map(|(segment, translated_text)| LocalMachineTranslation {
                         segment_id: segment.id.clone(),
-                        source_text: segment.ja_text.clone(),
+                        source_text: segment.source_text.clone(),
                         translated_text,
                     }),
             );
@@ -368,11 +380,15 @@ fn planned_subtitle_export(
         ));
     }
     let base_name = subtitle_export_base_name(job);
-    let ja_srt = output_directory.join(format!("{base_name}.ja.srt"));
-    let zh_srt = output_directory.join(format!("{base_name}.zh.srt"));
+    let source_language =
+        LanguageCode::from_str(&job.source_language).map_err(anyhow::Error::msg)?;
+    let target_language =
+        LanguageCode::from_str(&job.target_language).map_err(anyhow::Error::msg)?;
+    let source_srt = output_directory.join(format!("{base_name}.{source_language}.srt"));
+    let translated_srt = output_directory.join(format!("{base_name}.{target_language}.srt"));
     let bilingual_srt = output_directory.join(format!("{base_name}.bilingual.srt"));
     let bilingual_ass = output_directory.join(format!("{base_name}.bilingual.ass"));
-    let paths = [&ja_srt, &zh_srt, &bilingual_srt, &bilingual_ass];
+    let paths = [&source_srt, &translated_srt, &bilingual_srt, &bilingual_ass];
     let existing_files = paths
         .iter()
         .filter(|path| path.exists())
@@ -382,8 +398,8 @@ fn planned_subtitle_export(
     Ok(LocalSubtitleExportPlan {
         output_directory: output_directory.display().to_string(),
         base_name,
-        ja_srt: ja_srt.display().to_string(),
-        zh_srt: zh_srt.display().to_string(),
+        source_srt: source_srt.display().to_string(),
+        translated_srt: translated_srt.display().to_string(),
         bilingual_srt: bilingual_srt.display().to_string(),
         bilingual_ass: bilingual_ass.display().to_string(),
         existing_files,
@@ -492,8 +508,8 @@ fn translation_context(
             context_chars += 1;
         }
         let line_start = context_chars;
-        context.push_str(&segment.ja_text);
-        context_chars += segment.ja_text.chars().count();
+        context.push_str(&segment.source_text);
+        context_chars += segment.source_text.chars().count();
         if target_ids.contains(segment.id.as_str()) {
             target_start.get_or_insert(line_start);
             target_end = context_chars;
@@ -528,8 +544,8 @@ fn workspace_segments(records: &[LocalSubtitleSegmentRecord]) -> Result<Vec<Tran
                     .context("SQLite subtitle start time is negative")?,
                 end_ms: u64::try_from(record.end_ms)
                     .context("SQLite subtitle end time is negative")?,
-                ja_text: record.ja_text.clone(),
-                zh_text: record.zh_text.clone(),
+                source_text: record.source_text.clone(),
+                translated_text: record.translated_text.clone(),
                 source_edited: record.source_edited,
                 translation_stale: record.translation_stale,
             })
@@ -550,16 +566,18 @@ mod tests {
             TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
             job_manifest::JobManifest, job_snapshot::JobSnapshot,
         },
-        domain::TranscriptSegment,
+        domain::{LanguageCode, LanguagePair, TranscriptSegment},
         infrastructure::{
             job_store::Job,
             local_db::{LocalDatabase, LocalSubtitleSegmentRecord},
         },
     };
 
+    type CapturedTranslationRequest = (LanguageCode, LanguageCode, Vec<String>, Option<String>);
+
     #[derive(Debug, Clone)]
     struct FakeTranslationProvider {
-        requests: Arc<StdMutex<Vec<(Vec<String>, Option<String>)>>>,
+        requests: Arc<StdMutex<Vec<CapturedTranslationRequest>>>,
         omit_last_result: bool,
     }
 
@@ -585,15 +603,17 @@ mod tests {
 
         fn translate<'a>(
             &'a self,
-            _options: &'a TranslationOptions,
+            options: &'a TranslationOptions,
             texts: &'a [String],
             context: Option<&'a str>,
         ) -> TranslationFuture<'a> {
             let source_texts = texts.to_vec();
-            self.requests
-                .lock()
-                .unwrap()
-                .push((source_texts.clone(), context.map(str::to_string)));
+            self.requests.lock().unwrap().push((
+                options.source_language,
+                options.target_language,
+                source_texts.clone(),
+                context.map(str::to_string),
+            ));
             let omit_last_result = self.omit_last_result;
             Box::pin(async move {
                 let mut translated = source_texts
@@ -620,8 +640,8 @@ mod tests {
             segment_index: index,
             start_ms,
             end_ms,
-            ja_text: text.into(),
-            zh_text: None,
+            source_text: text.into(),
+            translated_text: None,
             source_edited: false,
             translation_edited: false,
             translation_stale: false,
@@ -668,9 +688,14 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let job = Job::create_in(&root).unwrap();
-        let first = TranscriptSegment::new(0, 1_000, "前半句".to_string());
-        let second = TranscriptSegment::new(1_000, 2_000, "后半句".to_string());
-        let manifest = JobManifest::new(&job, None, None);
+        let first = TranscriptSegment::new(0, 1_000, "The first line".to_string());
+        let second = TranscriptSegment::new(1_000, 2_000, "The second line".to_string());
+        let manifest = JobManifest::new(
+            &job,
+            None,
+            None,
+            LanguagePair::english_to_simplified_chinese(),
+        );
         let database = LocalDatabase::open(root.join("atogaki.sqlite"))
             .await
             .unwrap();
@@ -691,16 +716,24 @@ mod tests {
 
         let translated = service.translate_all(&manifest.job_id).await.unwrap();
         assert_eq!(translated[0].id, first.id);
-        assert_eq!(translated[0].zh_text.as_deref(), Some("译：前半句"));
+        assert_eq!(
+            translated[0].translated_text.as_deref(),
+            Some("译：The first line")
+        );
         assert_eq!(translated[1].id, second.id);
-        assert_eq!(translated[1].zh_text.as_deref(), Some("译：后半句"));
+        assert_eq!(
+            translated[1].translated_text.as_deref(),
+            Some("译：The second line")
+        );
 
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].0, ["前半句", "后半句"]);
-        let context = requests[0].1.as_deref().unwrap();
-        assert!(context.contains("前半句"));
-        assert!(context.contains("后半句"));
+        assert_eq!(requests[0].0, LanguageCode::English);
+        assert_eq!(requests[0].1, LanguageCode::SimplifiedChinese);
+        assert_eq!(requests[0].2, ["The first line", "The second line"]);
+        let context = requests[0].3.as_deref().unwrap();
+        assert!(context.contains("The first line"));
+        assert!(context.contains("The second line"));
         drop(requests);
 
         drop(service);
@@ -717,7 +750,7 @@ mod tests {
         let job = Job::create_in(&root).unwrap();
         let first = TranscriptSegment::new(0, 1_000, "第一段".to_string());
         let second = TranscriptSegment::new(1_000, 2_000, "第二段".to_string());
-        let manifest = JobManifest::new(&job, None, None);
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
         let database = LocalDatabase::open(root.join("atogaki.sqlite"))
             .await
             .unwrap();
@@ -741,7 +774,7 @@ mod tests {
                 .await
                 .unwrap()
                 .iter()
-                .all(|segment| segment.zh_text.is_none())
+                .all(|segment| segment.translated_text.is_none())
         );
 
         drop(service);
@@ -758,9 +791,14 @@ mod tests {
         let export_directory = root.join("exports");
         fs::create_dir_all(&export_directory).unwrap();
         let job = Job::create_in(&root).unwrap();
-        let mut segment = TranscriptSegment::new(0, 1_000, "現在の原文".to_string());
+        let mut segment = TranscriptSegment::new(0, 1_000, "Current source text".to_string());
         segment.set_translation(Some("当前译文".to_string()));
-        let manifest = JobManifest::new(&job, Some("/media/radio.mp4".into()), None);
+        let manifest = JobManifest::new(
+            &job,
+            Some("/media/radio.mp4".into()),
+            None,
+            LanguagePair::english_to_simplified_chinese(),
+        );
         let database = LocalDatabase::open(root.join("atogaki.sqlite"))
             .await
             .unwrap();
@@ -783,15 +821,20 @@ mod tests {
             .unwrap();
         assert_eq!(plan.base_name, "深夜电台_ 第_12回");
         assert!(plan.existing_files.is_empty());
+        assert!(plan.source_srt.ends_with("深夜电台_ 第_12回.en.srt"));
+        assert!(
+            plan.translated_srt
+                .ends_with("深夜电台_ 第_12回.zh-Hans.srt")
+        );
 
         let exported = service
             .export_subtitles_to(&manifest.job_id, &export_directory, false)
             .await
             .unwrap();
         assert!(
-            fs::read_to_string(&exported.ja_srt)
+            fs::read_to_string(&exported.source_srt)
                 .unwrap()
-                .contains("現在の原文")
+                .contains("Current source text")
         );
         assert!(
             fs::read_to_string(&exported.bilingual_ass)
@@ -830,7 +873,7 @@ mod tests {
         let second = TranscriptSegment::new(1_000, 2_000, "二番目".to_string());
         job.write_segments(&[first.clone(), second.clone()])
             .unwrap();
-        let manifest = JobManifest::new(&job, None, None);
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
         let database = LocalDatabase::open(root.join("atogaki.sqlite"))
             .await
             .unwrap();
@@ -854,7 +897,7 @@ mod tests {
         let service = LocalWorkspaceService::new(database.clone());
         let exported = service.export_subtitles(&manifest.job_id).await.unwrap();
         assert_eq!(exported.missing_translation_count, 1);
-        let japanese = fs::read_to_string(&exported.ja_srt).unwrap();
+        let japanese = fs::read_to_string(&exported.source_srt).unwrap();
         let bilingual = fs::read_to_string(&exported.bilingual_srt).unwrap();
         let ass = fs::read_to_string(&exported.bilingual_ass).unwrap();
         assert!(japanese.contains("SQLiteで直した原文"));
@@ -876,7 +919,7 @@ mod tests {
         let job = Job::create_in(&root).unwrap();
         let mut segment = TranscriptSegment::new(0, 1_000, "原文".to_string());
         segment.set_translation(Some("译文".to_string()));
-        let manifest = JobManifest::new(&job, None, None);
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
         let database = LocalDatabase::open(root.join("atogaki.sqlite"))
             .await
             .unwrap();
@@ -892,7 +935,7 @@ mod tests {
                 &manifest.job_id,
                 &segment.id,
                 "修正した原文".to_string(),
-                segment.zh_text,
+                segment.translated_text,
             )
             .await
             .unwrap();

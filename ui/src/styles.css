@@ -96,9 +96,9 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .media-message { margin: 10px 3px 14px; color: #77796f; font-family: ui-monospace, monospace; font-size: 11px; overflow-wrap: anywhere; }
 .current-caption { min-height: 118px; display: grid; align-content: center; gap: 8px; border-top: 1px solid #ded7c9; padding: 18px 10px 6px; text-align: center; }
 .current-caption p { margin: 0; line-height: 1.55; }
-#current-ja { font-size: 18px; font-weight: 600; }
-#current-zh { color: #666960; font-size: 15px; }
-#current-zh.stale { color: #a54632; text-decoration: line-through; text-decoration-thickness: 1px; }
+#current-source { font-size: 18px; font-weight: 600; }
+#current-translation { color: #666960; font-size: 15px; }
+#current-translation.stale { color: #a54632; text-decoration: line-through; text-decoration-thickness: 1px; }
 .timeline { min-width: 0; }
 .subtitle-list { max-height: calc(100vh - 210px); display: grid; gap: 10px; overflow-y: auto; padding-right: 5px; scroll-behavior: smooth; }
 .subtitle-card { display: grid; gap: 11px; border: 1px solid #ddd5c7; border-left: 4px solid transparent; border-radius: 12px; padding: 14px; background: rgba(255, 253, 247, .78); transition: border-color .16s, background .16s; }
@@ -110,8 +110,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .subtitle-card label { display: grid; gap: 5px; color: #74766e; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
 .subtitle-input { width: 100%; resize: vertical; border: 1px solid #d8d0c1; border-radius: 8px; padding: 9px 10px; color: #252822; background: #fffefa; line-height: 1.5; }
 .subtitle-input:focus { border-color: #66877a; outline: 2px solid rgba(67, 111, 94, .13); }
-.ja-input { font-size: 15px; }
-.zh-input { color: #53564f; font-size: 14px; }
+.source-input { font-size: 15px; }
+.translation-input { color: #53564f; font-size: 14px; }
 .subtitle-footer span { color: #74766e; font-size: 11px; }
 .subtitle-footer span.warning { color: #a54632; }
 .subtitle-footer button { padding: 7px 11px; font-size: 12px; }
