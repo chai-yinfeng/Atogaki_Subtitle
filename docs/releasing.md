@@ -1,6 +1,6 @@
 # macOS 发布说明
 
-_最后更新：2026-08-06_
+_最后更新：2026-08-09_
 
 ## 产物边界
 
@@ -19,7 +19,7 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 
 ## 首次手工预发布
 
-1. 在干净提交上完成 Rust、前端、打包 App、模型下载和真实窗口回归。
+1. 在干净提交上完成 Rust、前端、打包 App、模型下载和真实窗口回归。凡本版本新增或修改的交互，必须在**最终 ad-hoc 签名 App**中逐项完成对应 `docs/desktop-testing.md` 场景并记录结果；仅通过单元测试、前端构建、Tauri 编译，或仅验证窗口能创建，均不得创建公开 Release。
 2. 运行 `./scripts/generate-rust-licenses.sh` 与 `node ./scripts/generate-frontend-licenses.mjs`，审阅并提交生成声明。详细范围见 `docs/third-party-license-audit.md`。
 3. 用固定 sidecar 构建 DMG。`CI=true tauri build --bundles dmg` 只用于结构 smoke，会跳过 Finder 图标布局，不能作为最终发布产物；最终 DMG 必须在非 CI 环境运行 `tauri build --bundles dmg`，挂载后确认 App 位于左侧、Applications 位于右侧，两个图标在 660×400 窗口中居中并充分分隔。若 Finder 美化脚本挂起，应阻止发布并单独排查，不能回退发布左上角堆叠的 CI 产物。当前配置使用不需要 Apple Developer 账号的 ad-hoc identity `-`，发布时必须明确标注“ad-hoc 签名、未公证”，供知情测试者使用。
 4. 运行 `./scripts/package-sidecar-sources-macos.sh`。进入输出目录执行 `shasum -a 256 -c Atogaki-0.1.0-third-party-sources.tar.xz.sha256`，并抽查归档的 `SOURCES.md`、`sources/SHA256SUMS` 和 `build/build-manifest.txt`。
@@ -27,6 +27,8 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 6. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.1`，并把 tag 推送到 GitHub。
 7. 在 GitHub 的 Releases 页面从该 tag 创建 prerelease，填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值、模型不内置和第三方许可证说明。
 8. 上传 DMG、两个 SHA-256 文件与对应源码包，而不是把这些大产物 `git add` 到仓库。
+
+若公开预发布在完整窗口回归前发现功能描述不成立，应立即删除 Release 及同名远端 tag，并使用新的版本号重新发布；不得替换已公开 tag 下的资产，也不要假定下载计数为零就没有外部副本。
 
 可使用 GitHub CLI 上传已核对的产物：
 

@@ -75,6 +75,9 @@ fn open_subtitle_overlay(
     if let Some(window) = app.get_webview_window(SUBTITLE_OVERLAY_LABEL) {
         window.show().map_err(|error| error.to_string())?;
         window.set_always_on_top(true).map_err(|error| error.to_string())?;
+        window
+            .set_visible_on_all_workspaces(true)
+            .map_err(|error| error.to_string())?;
         window.set_focus().map_err(|error| error.to_string())?;
     } else {
         let overlay_app = app.clone();
@@ -89,6 +92,7 @@ fn open_subtitle_overlay(
         .resizable(true)
         .decorations(false)
         .always_on_top(true)
+        .visible_on_all_workspaces(true)
         .skip_taskbar(true)
         .build()
         .map_err(|error| error.to_string())?;
