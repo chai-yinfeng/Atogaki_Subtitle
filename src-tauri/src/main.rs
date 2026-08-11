@@ -79,12 +79,14 @@ fn open_subtitle_overlay(
         show_subtitle_overlay_macos(&app, &window)?;
         #[cfg(not(target_os = "macos"))]
         {
-        window.show().map_err(|error| error.to_string())?;
-        window.set_always_on_top(true).map_err(|error| error.to_string())?;
-        window
-            .set_visible_on_all_workspaces(true)
-            .map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
+            window.show().map_err(|error| error.to_string())?;
+            window
+                .set_always_on_top(true)
+                .map_err(|error| error.to_string())?;
+            window
+                .set_visible_on_all_workspaces(true)
+                .map_err(|error| error.to_string())?;
+            window.set_focus().map_err(|error| error.to_string())?;
         }
     } else {
         let overlay_app = app.clone();
@@ -115,7 +117,9 @@ fn open_subtitle_overlay(
                 {
                     *current = None;
                 }
-                let _ = overlay_app.get_webview_window(SUBTITLE_OVERLAY_LABEL).map(|window| window.hide());
+                let _ = overlay_app
+                    .get_webview_window(SUBTITLE_OVERLAY_LABEL)
+                    .map(|window| window.hide());
                 let _ = overlay_app.emit_to("main", "subtitle-overlay-visibility", false);
             }
         });
@@ -132,8 +136,8 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
 ) -> Result<(), String> {
     use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
     use objc2_app_kit::{
-        NSBackingStoreType, NSPanel, NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior,
-        NSWindowStyleMask,
+        NSBackingStoreType, NSPanel, NSScreenSaverWindowLevel, NSWindow, NSWindowButton,
+        NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
 
@@ -189,7 +193,19 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
             }
             panel.setTitle(&NSString::from_str("Atogaki 悬浮字幕"));
             panel.setContentView(Some(&content_view));
-            panel.setDelegate(native_window.delegate().as_deref());
+            // The WebView was created for Tauri's hidden NSWindow, but its
+            // window delegate must not be reused by this separately allocated
+            // NSPanel. Tao's delegate assumes resize notifications come from
+            // the original window and aborts when it receives this panel.
+            for button in [
+                NSWindowButton::CloseButton,
+                NSWindowButton::MiniaturizeButton,
+                NSWindowButton::ZoomButton,
+            ] {
+                if let Some(button) = panel.standardWindowButton(button) {
+                    button.setHidden(true);
+                }
+            }
             panel.setMinSize(NSSize::new(360.0, 120.0));
             panel.setFloatingPanel(true);
             panel.setBecomesKeyOnlyIfNeeded(true);
@@ -201,11 +217,7 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
             panel.orderFrontRegardless();
 
             let panel_pointer = Retained::into_raw(panel) as usize;
-            if let Ok(mut stored) = app
-                .state::<SubtitleOverlayState>()
-                .native_panel
-                .lock()
-            {
+            if let Ok(mut stored) = app.state::<SubtitleOverlayState>().native_panel.lock() {
                 *stored = Some(panel_pointer);
             }
         })
@@ -1017,10 +1029,8 @@ fn configured_file(name: &str) -> Option<PathBuf> {
 fn desktop_transcription_options(
     request: &SubmitTranscriptionRequest,
 ) -> Result<TranscriptionOptions, String> {
-    let mut options = TranscriptionOptions::new(
-        request.model_path.trim().into(),
-        request.source_language,
-    );
+    let mut options =
+        TranscriptionOptions::new(request.model_path.trim().into(), request.source_language);
     options.vad_model = request
         .vad_model_path
         .as_deref()
@@ -1122,19 +1132,16 @@ fn main() {
             app.manage(SubtitleOverlayState::default());
             if let Some(main_window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
-                main_window.on_window_event(move |event| {
-                    match event {
-                        WindowEvent::CloseRequested { api, .. } => {
-                            api.prevent_close();
-                            if let Some(overlay) =
-                                app_handle.get_webview_window(SUBTITLE_OVERLAY_LABEL)
-                            {
-                                let _ = overlay.destroy();
-                            }
-                            app_handle.exit(0);
+                main_window.on_window_event(move |event| match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        if let Some(overlay) = app_handle.get_webview_window(SUBTITLE_OVERLAY_LABEL)
+                        {
+                            let _ = overlay.destroy();
                         }
-                        _ => {}
+                        app_handle.exit(0);
                     }
+                    _ => {}
                 });
             }
             Ok(())
