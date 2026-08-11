@@ -157,7 +157,15 @@ async fn translate_lines(
     let mut out = Vec::with_capacity(texts.len());
 
     for batch in texts.chunks(BATCH_SIZE) {
-        let body = translation_form(options, batch, context);
+        let prepared = batch
+            .iter()
+            .map(|text| protect_translation_terms(text, &options.protected_terms))
+            .collect::<Vec<_>>();
+        let request_texts = prepared
+            .iter()
+            .map(|text| text.request_text.clone())
+            .collect::<Vec<_>>();
+        let body = translation_form(options, &request_texts, context);
 
         let resp = client
             .post(endpoint)
@@ -186,7 +194,13 @@ async fn translate_lines(
                 batch.len()
             ));
         }
-        out.extend(decoded.translations.into_iter().map(|item| item.text));
+        out.extend(
+            decoded
+                .translations
+                .into_iter()
+                .zip(prepared.iter())
+                .map(|(item, protected)| restore_translation_terms(&item.text, protected)),
+        );
     }
 
     Ok(out)
@@ -206,11 +220,88 @@ fn translation_form(
         body.push_str("&text=");
         body.push_str(&urlencoding::encode(text));
     }
+    if !options.protected_terms.is_empty() {
+        body.push_str("&tag_handling=xml&ignore_tags=atogaki-term&non_splitting_tags=atogaki-term");
+    }
     if let Some(context) = context.map(str::trim).filter(|context| !context.is_empty()) {
         body.push_str("&context=");
-        body.push_str(&urlencoding::encode(context));
+        let context = options
+            .protected_terms
+            .is_empty()
+            .then_some(context.to_string())
+            .unwrap_or_else(|| escape_xml(context));
+        body.push_str(&urlencoding::encode(&context));
     }
     body
+}
+
+#[derive(Debug)]
+struct ProtectedTranslationText {
+    request_text: String,
+    terms: Vec<String>,
+}
+
+fn protect_translation_terms(text: &str, protected_terms: &[String]) -> ProtectedTranslationText {
+    if protected_terms.is_empty() {
+        return ProtectedTranslationText {
+            request_text: text.to_string(),
+            terms: Vec::new(),
+        };
+    }
+    let mut request_text = String::with_capacity(text.len());
+    let mut terms = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        let found = protected_terms
+            .iter()
+            .filter_map(|term| remaining.find(term).map(|index| (index, term)))
+            .min_by(|(left_index, left_term), (right_index, right_term)| {
+                left_index
+                    .cmp(right_index)
+                    .then_with(|| right_term.len().cmp(&left_term.len()))
+            });
+        let Some((index, term)) = found else {
+            request_text.push_str(&escape_xml(remaining));
+            break;
+        };
+        request_text.push_str(&escape_xml(&remaining[..index]));
+        let id = terms.len();
+        request_text.push_str(&format!("<atogaki-term id=\"{id}\"/>"));
+        terms.push((*term).clone());
+        remaining = &remaining[index + term.len()..];
+    }
+
+    ProtectedTranslationText {
+        request_text,
+        terms,
+    }
+}
+
+fn restore_translation_terms(text: &str, protected: &ProtectedTranslationText) -> String {
+    let mut restored = text.to_string();
+    for (id, term) in protected.terms.iter().enumerate() {
+        let compact = format!("<atogaki-term id=\"{id}\"/>");
+        let spaced = format!("<atogaki-term id=\"{id}\" />");
+        restored = restored.replace(&compact, term).replace(&spaced, term);
+    }
+    unescape_xml(&restored)
+}
+
+fn escape_xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn unescape_xml(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 fn deepl_endpoint(auth_key: &str) -> &'static str {
@@ -223,7 +314,10 @@ fn deepl_endpoint(auth_key: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{DeepLTranslationProvider, deepl_endpoint, translate_texts, translation_form};
+    use super::{
+        DeepLTranslationProvider, deepl_endpoint, protect_translation_terms,
+        restore_translation_terms, translate_texts, translation_form,
+    };
     use crate::application::{TranslationOptions, TranslationProvider};
     use crate::domain::LanguageCode;
 
@@ -283,6 +377,39 @@ mod tests {
         );
 
         assert!(body.starts_with("source_lang=EN&target_lang=ZH-HANS"));
+    }
+
+    #[test]
+    fn maps_korean_to_simplified_chinese_provider_codes() {
+        let body = translation_form(
+            &TranslationOptions::new(LanguageCode::Korean, LanguageCode::SimplifiedChinese),
+            &["안녕하세요".to_string()],
+            None,
+        );
+
+        assert!(body.starts_with("source_lang=KO&target_lang=ZH-HANS"));
+    }
+
+    #[test]
+    fn preserves_selected_terms_with_deepl_xml_tags() {
+        let options = TranslationOptions::default()
+            .with_protected_terms(["盗作".to_string(), "ヨルシカ".to_string()]);
+        let protected = protect_translation_terms("ヨルシカの盗作を聴く", &options.protected_terms);
+        let body = translation_form(&options, &[protected.request_text.clone()], None);
+
+        assert_eq!(
+            protected.request_text,
+            "<atogaki-term id=\"0\"/>の<atogaki-term id=\"1\"/>を聴く"
+        );
+        assert!(body.contains("tag_handling=xml"));
+        assert!(body.contains("ignore_tags=atogaki-term"));
+        assert_eq!(
+            restore_translation_terms(
+                "听<atogaki-term id=\"0\" />的<atogaki-term id=\"1\"/>",
+                &protected
+            ),
+            "听ヨルシカ的盗作"
+        );
     }
 
     #[test]

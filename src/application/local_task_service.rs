@@ -249,6 +249,16 @@ impl LocalTaskService {
         database.list_jobs().await
     }
 
+    pub async fn list_persisted_job_translation_stats(
+        &self,
+    ) -> Result<Vec<crate::infrastructure::local_db::LocalJobTranslationStats>> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("local task service was started without SQLite persistence"))?;
+        database.list_job_translation_stats().await
+    }
+
     pub async fn rename_persisted_job(
         &self,
         job_id: &str,

@@ -3,6 +3,7 @@ mod desktop_settings;
 mod model_download;
 
 use std::{
+    collections::HashMap,
     ffi::OsString,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -21,7 +22,7 @@ use atogaki_subtitle::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
-            LocalRenderJobRecord, LocalSubtitleSegmentRecord,
+            LocalJobTranslationStats, LocalRenderJobRecord, LocalSubtitleSegmentRecord,
         },
         media::MediaCapabilities,
     },
@@ -62,6 +63,8 @@ struct SubtitleOverlayPayload {
 #[derive(Default)]
 struct SubtitleOverlayState {
     current: Mutex<Option<SubtitleOverlayPayload>>,
+    #[cfg(target_os = "macos")]
+    native_panel: Mutex<Option<usize>>,
 }
 
 #[tauri::command]
@@ -73,9 +76,19 @@ fn open_subtitle_overlay(
     set_subtitle_overlay_payload(&app, &state, payload)?;
 
     if let Some(window) = app.get_webview_window(SUBTITLE_OVERLAY_LABEL) {
-        window.show().map_err(|error| error.to_string())?;
-        window.set_always_on_top(true).map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
+        #[cfg(target_os = "macos")]
+        show_subtitle_overlay_macos(&app, &window)?;
+        #[cfg(not(target_os = "macos"))]
+        {
+            window.show().map_err(|error| error.to_string())?;
+            window
+                .set_always_on_top(true)
+                .map_err(|error| error.to_string())?;
+            window
+                .set_visible_on_all_workspaces(true)
+                .map_err(|error| error.to_string())?;
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
     } else {
         let overlay_app = app.clone();
         let overlay_window = WebviewWindowBuilder::new(
@@ -89,9 +102,15 @@ fn open_subtitle_overlay(
         .resizable(true)
         .decorations(false)
         .always_on_top(true)
+        .visible_on_all_workspaces(true)
         .skip_taskbar(true)
+        .visible(false)
         .build()
         .map_err(|error| error.to_string())?;
+        #[cfg(target_os = "macos")]
+        show_subtitle_overlay_macos(&app, &overlay_window)?;
+        #[cfg(not(target_os = "macos"))]
+        overlay_window.show().map_err(|error| error.to_string())?;
         overlay_window.on_window_event(move |event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -99,7 +118,9 @@ fn open_subtitle_overlay(
                 {
                     *current = None;
                 }
-                let _ = overlay_app.get_webview_window(SUBTITLE_OVERLAY_LABEL).map(|window| window.hide());
+                let _ = overlay_app
+                    .get_webview_window(SUBTITLE_OVERLAY_LABEL)
+                    .map(|window| window.hide());
                 let _ = overlay_app.emit_to("main", "subtitle-overlay-visibility", false);
             }
         });
@@ -107,6 +128,123 @@ fn open_subtitle_overlay(
 
     let _ = app.emit_to("main", "subtitle-overlay-visibility", true);
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn show_subtitle_overlay_macos<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
+    use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
+    use objc2_app_kit::{
+        NSBackingStoreType, NSPanel, NSScreenSaverWindowLevel, NSWindow, NSWindowButton,
+        NSWindowCollectionBehavior, NSWindowStyleMask,
+    };
+    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
+
+    let app = app.clone();
+    let window = window.clone();
+    window
+        .clone()
+        .run_on_main_thread(move || {
+            if let Some(panel_pointer) = app
+                .state::<SubtitleOverlayState>()
+                .native_panel
+                .lock()
+                .ok()
+                .and_then(|panel| *panel)
+            {
+                let panel: &NSPanel = unsafe { &*(panel_pointer as *const NSPanel) };
+                panel.orderFrontRegardless();
+                return;
+            }
+            let Ok(native_window) = window.ns_window() else {
+                return;
+            };
+            let native_window: &NSWindow = unsafe { &*native_window.cast() };
+            let Some(content_view) = native_window.contentView() else {
+                return;
+            };
+            let Some(main_thread) = MainThreadMarker::new() else {
+                return;
+            };
+            let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
+                NSPanel::alloc(main_thread),
+                native_window.frame(),
+                NSWindowStyleMask::Titled
+                    | NSWindowStyleMask::Resizable
+                    | NSWindowStyleMask::UtilityWindow
+                    | NSWindowStyleMask::NonactivatingPanel,
+                NSBackingStoreType::Buffered,
+                false,
+            );
+            let mut behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::FullScreenAuxiliary;
+            let process_info = NSProcessInfo::processInfo();
+            if process_info.isOperatingSystemAtLeastVersion(NSOperatingSystemVersion {
+                majorVersion: 13,
+                minorVersion: 0,
+                patchVersion: 0,
+            }) {
+                behavior |= NSWindowCollectionBehavior::CanJoinAllApplications;
+            }
+            panel.setTitle(&NSString::from_str("Atogaki 悬浮字幕"));
+            panel.setContentView(Some(&content_view));
+            // The WebView was created for Tauri's hidden NSWindow, but its
+            // window delegate must not be reused by this separately allocated
+            // NSPanel. Tao's delegate assumes resize notifications come from
+            // the original window and aborts when it receives this panel.
+            for button in [
+                NSWindowButton::CloseButton,
+                NSWindowButton::MiniaturizeButton,
+                NSWindowButton::ZoomButton,
+            ] {
+                if let Some(button) = panel.standardWindowButton(button) {
+                    button.setHidden(true);
+                }
+            }
+            panel.setMinSize(NSSize::new(360.0, 120.0));
+            panel.setFloatingPanel(true);
+            panel.setBecomesKeyOnlyIfNeeded(true);
+            panel.setHidesOnDeactivate(false);
+            panel.setCollectionBehavior(behavior);
+            panel.setLevel(NSScreenSaverWindowLevel);
+            unsafe { panel.setReleasedWhenClosed(false) };
+            native_window.orderOut(None);
+            panel.orderFrontRegardless();
+
+            let panel_pointer = Retained::into_raw(panel) as usize;
+            if let Ok(mut stored) = app.state::<SubtitleOverlayState>().native_panel.lock() {
+                *stored = Some(panel_pointer);
+            }
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn hide_subtitle_overlay_macos(app: &AppHandle) -> Result<(), String> {
+    use objc2_app_kit::NSPanel;
+
+    let panel_pointer = app
+        .state::<SubtitleOverlayState>()
+        .native_panel
+        .lock()
+        .map_err(|_| "subtitle overlay panel state is unavailable".to_string())?
+        .to_owned();
+    if let (Some(panel_pointer), Some(window)) = (
+        panel_pointer,
+        app.get_webview_window(SUBTITLE_OVERLAY_LABEL),
+    ) {
+        window
+            .run_on_main_thread(move || {
+                let panel: &NSPanel = unsafe { &*(panel_pointer as *const NSPanel) };
+                panel.orderOut(None);
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    app.set_activation_policy(tauri::ActivationPolicy::Regular)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -138,6 +276,9 @@ fn hide_subtitle_overlay(
         .current
         .lock()
         .map_err(|_| "subtitle overlay state is unavailable".to_string())? = None;
+    #[cfg(target_os = "macos")]
+    hide_subtitle_overlay_macos(&app)?;
+    #[cfg(not(target_os = "macos"))]
     if let Some(window) = app.get_webview_window(SUBTITLE_OVERLAY_LABEL) {
         window.hide().map_err(|error| error.to_string())?;
     }
@@ -271,13 +412,67 @@ struct DesktopJobDetail {
     audio_fallback_path: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct DesktopJobSummary {
+    #[serde(flatten)]
+    job: LocalJobRecord,
+    translation_status: &'static str,
+    segment_count: i64,
+    translated_segment_count: i64,
+    stale_translation_count: i64,
+}
+
+impl DesktopJobSummary {
+    fn new(job: LocalJobRecord, stats: Option<LocalJobTranslationStats>) -> Self {
+        let stats = stats.unwrap_or(LocalJobTranslationStats {
+            job_id: job.job_id.clone(),
+            segment_count: 0,
+            translated_segment_count: 0,
+            stale_translation_count: 0,
+        });
+        let translation_status = if stats.segment_count == 0 {
+            "not_ready"
+        } else if stats.stale_translation_count > 0 {
+            "stale"
+        } else if stats.translated_segment_count == 0 {
+            "untranslated"
+        } else if stats.translated_segment_count < stats.segment_count {
+            "partial"
+        } else {
+            "translated"
+        };
+        Self {
+            job,
+            translation_status,
+            segment_count: stats.segment_count,
+            translated_segment_count: stats.translated_segment_count,
+            stale_translation_count: stats.stale_translation_count,
+        }
+    }
+}
+
 #[tauri::command]
-async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<LocalJobRecord>, String> {
-    state
+async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopJobSummary>, String> {
+    let jobs = state
         .task_service
         .list_persisted_jobs()
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let stats = state
+        .task_service
+        .list_persisted_job_translation_stats()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|stats| (stats.job_id.clone(), stats))
+        .collect::<HashMap<_, _>>();
+    Ok(jobs
+        .into_iter()
+        .map(|job| {
+            let job_stats = stats.get(&job.job_id).cloned();
+            DesktopJobSummary::new(job, job_stats)
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -886,10 +1081,8 @@ fn configured_file(name: &str) -> Option<PathBuf> {
 fn desktop_transcription_options(
     request: &SubmitTranscriptionRequest,
 ) -> Result<TranscriptionOptions, String> {
-    let mut options = TranscriptionOptions::new(
-        request.model_path.trim().into(),
-        request.source_language,
-    );
+    let mut options =
+        TranscriptionOptions::new(request.model_path.trim().into(), request.source_language);
     options.vad_model = request
         .vad_model_path
         .as_deref()
@@ -989,6 +1182,36 @@ fn main() {
                 model_download_service,
             });
             app.manage(SubtitleOverlayState::default());
+            if let Some(main_window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main_window.on_window_event(move |event| match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        if let Some(overlay) = app_handle.get_webview_window(SUBTITLE_OVERLAY_LABEL)
+                        {
+                            let _ = overlay.destroy();
+                        }
+                        app_handle.exit(0);
+                    }
+                    #[cfg(target_os = "macos")]
+                    WindowEvent::Focused(focused) => {
+                        let overlay_visible = app_handle
+                            .state::<SubtitleOverlayState>()
+                            .current
+                            .lock()
+                            .is_ok_and(|current| current.is_some());
+                        if overlay_visible {
+                            let policy = if *focused {
+                                tauri::ActivationPolicy::Regular
+                            } else {
+                                tauri::ActivationPolicy::Accessory
+                            };
+                            let _ = app_handle.set_activation_policy(policy);
+                        }
+                    }
+                    _ => {}
+                });
+            }
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -1049,9 +1272,46 @@ mod tests {
     };
 
     use super::{
-        SubmitTranscriptionRequest, desktop_transcription_options, validated_data_dir_override,
+        DesktopJobSummary, SubmitTranscriptionRequest, desktop_transcription_options,
+        validated_data_dir_override,
     };
-    use atogaki_subtitle::domain::LanguageCode;
+    use atogaki_subtitle::{
+        domain::LanguageCode,
+        infrastructure::local_db::{LocalJobRecord, LocalJobTranslationStats},
+    };
+
+    fn test_job() -> LocalJobRecord {
+        LocalJobRecord {
+            job_id: "job-1".to_string(),
+            display_name: None,
+            storage_dir: "/tmp/job-1".to_string(),
+            input_path: None,
+            render_output_path: None,
+            status: "done".to_string(),
+            message: "done".to_string(),
+            error_message: None,
+            glossary_id: None,
+            glossary_name: None,
+            glossary_snapshot_path: None,
+            source_language: "ja".to_string(),
+            target_language: "zh-Hans".to_string(),
+            created_at_unix: 1,
+            updated_at_unix: 1,
+        }
+    }
+
+    fn translation_stats(
+        segment_count: i64,
+        translated_segment_count: i64,
+        stale_translation_count: i64,
+    ) -> LocalJobTranslationStats {
+        LocalJobTranslationStats {
+            job_id: "job-1".to_string(),
+            segment_count,
+            translated_segment_count,
+            stale_translation_count,
+        }
+    }
 
     #[test]
     fn desktop_data_directory_override_requires_an_absolute_path() {
@@ -1117,5 +1377,34 @@ mod tests {
         assert_eq!(options.vad_model.as_deref(), Some(vad_model.as_path()));
         assert_eq!(options.source_language, LanguageCode::English);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn desktop_job_summary_distinguishes_translation_coverage() {
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(0, 0, 0)))
+                .translation_status,
+            "not_ready"
+        );
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 0, 0)))
+                .translation_status,
+            "untranslated"
+        );
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 2, 0)))
+                .translation_status,
+            "partial"
+        );
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 3, 0)))
+                .translation_status,
+            "translated"
+        );
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 3, 1)))
+                .translation_status,
+            "stale"
+        );
     }
 }

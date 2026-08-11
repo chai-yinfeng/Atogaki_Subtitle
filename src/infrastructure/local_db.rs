@@ -38,6 +38,14 @@ pub struct LocalJobRecord {
     pub updated_at_unix: i64,
 }
 
+#[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
+pub struct LocalJobTranslationStats {
+    pub job_id: String,
+    pub segment_count: i64,
+    pub translated_segment_count: i64,
+    pub stale_translation_count: i64,
+}
+
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct LocalGlossaryRecord {
     pub id: String,
@@ -295,6 +303,25 @@ impl LocalDatabase {
         .fetch_all(&self.pool)
         .await
         .context("failed to list local tasks")
+    }
+
+    pub async fn list_job_translation_stats(&self) -> Result<Vec<LocalJobTranslationStats>> {
+        sqlx::query_as::<_, LocalJobTranslationStats>(
+            "SELECT j.job_id,
+                COUNT(s.id) AS segment_count,
+                COALESCE(SUM(CASE
+                    WHEN s.translated_text IS NOT NULL AND trim(s.translated_text) != '' THEN 1
+                    ELSE 0
+                END), 0) AS translated_segment_count,
+                COALESCE(SUM(CASE WHEN s.translation_stale = 1 THEN 1 ELSE 0 END), 0)
+                    AS stale_translation_count
+             FROM local_jobs j
+             LEFT JOIN local_subtitle_segments s ON s.job_id = j.job_id
+             GROUP BY j.job_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to summarize local task translations")
     }
 
     pub async fn get_job(&self, job_id: &str) -> Result<Option<LocalJobRecord>> {
@@ -1375,6 +1402,12 @@ mod tests {
         assert_eq!(jobs[0].job_id, manifest.job_id);
         assert_eq!(jobs[0].status, "queued");
 
+        let translation_stats = database.list_job_translation_stats().await.unwrap();
+        assert_eq!(translation_stats.len(), 1);
+        assert_eq!(translation_stats[0].segment_count, 1);
+        assert_eq!(translation_stats[0].translated_segment_count, 1);
+        assert_eq!(translation_stats[0].stale_translation_count, 0);
+
         let segments = database.list_segments(&manifest.job_id).await.unwrap();
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].id, segment.id);
@@ -1392,6 +1425,10 @@ mod tests {
         assert!(stale.source_edited);
         assert!(!stale.translation_edited);
         assert!(stale.translation_stale);
+        assert_eq!(
+            database.list_job_translation_stats().await.unwrap()[0].stale_translation_count,
+            1
+        );
 
         let edited = database
             .update_segment_text(

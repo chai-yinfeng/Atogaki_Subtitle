@@ -2,7 +2,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./styles.css";
 
-type LanguageCode = "ja" | "en" | "zh-Hans";
+type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
 
 type LocalJob = {
   job_id: string;
@@ -19,6 +19,10 @@ type LocalJob = {
   target_language: LanguageCode;
   created_at_unix: number;
   updated_at_unix: number;
+  translation_status: "not_ready" | "untranslated" | "partial" | "translated" | "stale";
+  segment_count: number;
+  translated_segment_count: number;
+  stale_translation_count: number;
 };
 
 type Glossary = {
@@ -241,7 +245,7 @@ app.innerHTML = `
       <section class="create-task" aria-labelledby="create-heading">
         <div class="section-heading"><h2 id="create-heading">新建转写任务</h2><span>本地执行</span></div>
         <form id="task-form">
-          <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option></select></label>
+          <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option></select></label>
           <label>翻译目标<select id="target-language" disabled><option value="zh-Hans">简体中文</option></select></label>
           <label>媒体文件<input id="media-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
@@ -335,7 +339,7 @@ app.innerHTML = `
           <div id="glossary-list" class="glossary-list"></div>
         </aside>
         <section class="glossary-editor">
-          <label>词表语言<select id="glossary-language"><option value="ja">日语</option><option value="en">英语</option></select></label>
+          <label>词表语言<select id="glossary-language"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option></select></label>
           <label>词表名称<input id="glossary-name" maxlength="80" placeholder="例如：电台常用词" /></label>
           <div class="term-heading"><strong>提示词与识别修正规则</strong><button id="add-glossary-term" type="button" class="secondary">＋ 添加词条</button></div>
           <div id="glossary-terms" class="glossary-terms"></div>
@@ -559,6 +563,7 @@ const modelsDirectory = document.querySelector<HTMLSpanElement>("#models-directo
 const modelReadiness = document.querySelector<HTMLSpanElement>("#model-readiness");
 
 let refreshing = false;
+let renderedJobsFingerprint: string | null = null;
 let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
 let activeSegmentId: string | null = null;
@@ -598,6 +603,7 @@ let translationStatus: TranslationStatus = {
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
   if (language === "en") return "英语";
+  if (language === "ko") return "韩语";
   if (language === "zh-Hans") return "简体中文";
   return language;
 }
@@ -1138,7 +1144,10 @@ function renderJobs(jobs: LocalJob[]): void {
         <article class="job-card">
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
             <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · ${escapeHtml(jobTimingLabel(job))}</p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
-            <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+            <span class="job-statuses">
+              <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+              <span class="status translation-status translation-status-${escapeHtml(job.translation_status)}">${escapeHtml(translationStatusLabel(job))}</span>
+            </span>
           </button>
           <div class="job-actions">
             ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重试</button>` : ""}
@@ -1169,6 +1178,16 @@ function renderJobs(jobs: LocalJob[]): void {
       if (job) void deleteJob(job);
     });
   });
+}
+
+function translationStatusLabel(job: LocalJob): string {
+  if (job.translation_status === "translated") return "已翻译";
+  if (job.translation_status === "partial") {
+    return `部分翻译 ${job.translated_segment_count}/${job.segment_count}`;
+  }
+  if (job.translation_status === "stale") return `待重译 ${job.stale_translation_count}`;
+  if (job.translation_status === "untranslated") return "未翻译";
+  return "尚无字幕";
 }
 
 async function retryJob(job: LocalJob): Promise<void> {
@@ -1237,12 +1256,21 @@ async function deleteJob(job: LocalJob): Promise<void> {
 async function refresh(): Promise<void> {
   if (!jobList || refreshing) return;
   refreshing = true;
-  if (!activeDetail) jobList.innerHTML = `<div class="empty-state">正在读取任务…</div>`;
+  if (!activeDetail && renderedJobsFingerprint === null && jobList.childElementCount === 0) {
+    jobList.innerHTML = `<div class="empty-state">正在读取任务…</div>`;
+  }
   try {
     const jobs = await invoke<LocalJob[]>("list_jobs");
-    renderJobs(jobs);
+    const fingerprint = JSON.stringify(jobs);
+    if (fingerprint !== renderedJobsFingerprint) {
+      const scrollTop = window.scrollY;
+      renderJobs(jobs);
+      renderedJobsFingerprint = fingerprint;
+      if (!activeDetail) window.scrollTo({ top: scrollTop, behavior: "auto" });
+    }
   } catch (error) {
     jobList.innerHTML = `<div class="empty-state error">无法读取本地任务：${escapeHtml(String(error))}</div>`;
+    renderedJobsFingerprint = null;
   } finally {
     refreshing = false;
   }
@@ -1574,6 +1602,10 @@ function syncSubtitleOverlay(segment: SubtitleSegment | undefined): void {
 
 async function openSubtitleOverlay(): Promise<void> {
   if (!activeDetail || activeDetail.segments.length === 0) return;
+  if (subtitleOverlayVisible) {
+    hideSubtitleOverlay();
+    return;
+  }
   subtitleOverlayVisible = true;
   lastSubtitleOverlayKey = "";
   renderSubtitleOverlayButton();

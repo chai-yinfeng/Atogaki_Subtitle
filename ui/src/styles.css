@@ -49,7 +49,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
 .section-heading h2 { margin-bottom: 20px; font-size: 24px; }
 .section-heading span { color: #75776f; font-size: 14px; }
-.job-list { display: grid; gap: 10px; }
+.job-list { display: grid; gap: 10px; overflow-anchor: none; }
 .job-card { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid #ded7c9; border-radius: 12px; padding: 8px 10px 8px 18px; color: inherit; background: rgba(255, 253, 247, .76); }
 .job-card:hover { border-color: #9aae9f; background: #fffdf7; }
 .job-open { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 8px 9px 0; border-radius: 0; color: inherit; background: transparent; text-align: left; }
@@ -60,10 +60,16 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .job-actions { display: flex; gap: 7px; }
 .job-actions button { align-self: auto; padding: 8px 11px; font-size: 12px; }
 .job-management-message { min-height: 18px; margin: -10px 0 10px; color: #6e7068; font-size: 12px; }
+.job-statuses { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .status { border-radius: 999px; padding: 5px 9px; background: #e7e2d5; color: #55584f; font-size: 12px; text-transform: capitalize; white-space: nowrap; }
 .status-done { background: #d9eadf; color: #1d5c3e; }
 .status-failed { background: #f3d8d2; color: #8e3027; }
 .status-transcribing, .status-translating, .status-extracting_audio { background: #e0e9ed; color: #315864; }
+.translation-status { text-transform: none; }
+.translation-status-translated { background: #d9eadf; color: #1d5c3e; }
+.translation-status-partial { background: #e0e9ed; color: #315864; }
+.translation-status-stale { background: #f3e4c7; color: #79501d; }
+.translation-status-untranslated, .translation-status-not_ready { background: #ebe7dd; color: #66685f; }
 .empty-state { display: grid; gap: 7px; min-height: 116px; place-content: center; border: 1px dashed #cfc6b7; border-radius: 12px; padding: 20px; color: #717369; text-align: center; }
 .empty-state.error { color: #8e3027; }
 

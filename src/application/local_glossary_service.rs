@@ -75,7 +75,7 @@ impl LocalGlossaryService {
     pub async fn ensure_builtins(&self) -> Result<()> {
         let terms = parse_builtin_glossary(include_str!("../../assets/glossaries/yorushika.txt"))?;
         self.database
-            .ensure_builtin_glossary("Yorushika", "prompt-scopes-v1", terms)
+            .ensure_builtin_glossary("Yorushika", "prompt-scopes-v2", terms)
             .await
     }
 
@@ -509,6 +509,9 @@ mod tests {
         assert!(prompt.contains("スイ（表記: suis）"));
         assert!(!prompt.contains("すい"));
         assert!(!prompt.contains("月に吠える"));
+
+        let tosaku = glossary_for_task(&detail, &["盗作".to_string()]).unwrap();
+        assert!(tosaku.whisper_prompt(None).unwrap().contains("盗作"));
 
         drop(service);
         drop(database);
