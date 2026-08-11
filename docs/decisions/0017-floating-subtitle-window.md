@@ -11,10 +11,12 @@
 - 用户在已打开的任务工作区显式点击后，创建或显示一个独立的 Tauri Webview 窗口。它只展示当前播放位置的原文与译文，并应支持跨普通桌面的置顶、可靠拖动、可见缩放控制和单独关闭。
 - 悬浮窗是临时播放视图，不写入 SQLite，不创建新的任务，也不接管媒体播放。主工作区仍是播放、跳转、编辑、翻译和导出的唯一控制面。
 - 主窗口仅在字幕段变化或当前字幕文本被编辑后向悬浮窗同步内容；新开的悬浮窗从主进程读取最近一次快照，以避免窗口加载时丢失首条字幕。
-- macOS 首版使用普通无边框深色窗口，不启用 Tauri 的 `macos-private-api` 来实现透明窗口。除 Tauri 的公开置顶/跨工作区接口外，使用 Apple 公开的 AppKit collection behavior：`CanJoinAllSpaces`、`Stationary`、`FullScreenAuxiliary`，且仅在 macOS 13+ 加 `CanJoinAllApplications`。按用户确认，窗口使用公开的 `NSScreenSaverWindowLevel` 和 `orderFrontRegardless`，以覆盖普通桌面和全屏应用 Space；不使用任何私有系统接口。
+- macOS 使用真正的 AppKit `NSPanel` 承载原有 WebView 内容，面板采用 `NonactivatingPanel`、`NSScreenSaverWindowLevel`、`CanJoinAllSpaces`、`Stationary`、`FullScreenAuxiliary`，且仅在 macOS 13+ 加 `CanJoinAllApplications`。悬浮字幕开启期间把应用 activation policy 切为 `Accessory`，关闭后恢复 `Regular`；这是公开 AppKit 对跨其他 App 全屏 Space 浮层的要求。
+- 不启用 Tauri 的 `macos-private-api`，也不使用通过 Objective-C runtime 把现有 `NSWindow` 强制改类为 `NSPanel` 的第三方插件。原生面板通过公开初始化器创建，再接管 Tauri 已创建的 WebView content view。
 
 ## 后果
 
-- 窗口创建与字幕同步已实现，但 2026-08-11 首轮“全屏 Space”打包实测仍未显示窗口；因此不能视为已完成。实现会在 Atogaki 失焦时重新应用公开的跨应用全屏策略，并明确关闭“App 失活时隐藏窗口”；须由下一轮打包实测验证，失败前不应发布或宣称该能力可用。窗口缩放会按可用宽高的共同尺度同步排版；长字幕超出窗口高度时会再缩小字体以完整显示。
-- 屏幕保护级别意味着悬浮字幕可能高于其他 App 的全屏控制条或弹窗；这是“始终覆盖全屏应用”的明确取舍。当前不提供全局快捷键、点击穿透、跨设备记住位置或独立播放控制；这些需要在真实使用反馈出现后再设计。
+- 2026-08-11 两轮使用普通 `NSWindow` 的“全屏 Space”打包实测都未显示窗口；第二轮的失焦重新置前还造成关闭后再次出现的回归，因此该补偿已删除。新的 `NSPanel + Accessory` 实现已通过本机构建窗口的创建、关闭和重复显示检查，仍须由 DMG 实机验证全屏 Space，验证前不应发布或宣称完成。
+- 悬浮模式期间 Atogaki 的 Dock 图标和菜单栏会暂时隐藏，关闭悬浮字幕后恢复；主窗口和任务处理仍然存在。若未来要求悬浮期间主 App 始终保持普通 Dock 身份，则需拆出独立的 accessory helper 进程。
+- 屏幕保护级别意味着悬浮字幕可能高于其他 App 的全屏控制条或弹窗；这是“始终覆盖全屏应用”的明确取舍。窗口使用原生标题栏拖动和原生边缘缩放，Web 内容继续按可用宽高同步缩放。当前不提供全局快捷键、点击穿透、跨设备记住位置或独立播放控制。
 - 悬浮窗口首先在 macOS 打包 App 回归。Windows/Linux 的窗口层级和透明效果不能仅凭 macOS 结果推断。

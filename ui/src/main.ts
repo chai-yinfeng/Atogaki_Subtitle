@@ -1575,6 +1575,10 @@ function syncSubtitleOverlay(segment: SubtitleSegment | undefined): void {
 
 async function openSubtitleOverlay(): Promise<void> {
   if (!activeDetail || activeDetail.segments.length === 0) return;
+  if (subtitleOverlayVisible) {
+    hideSubtitleOverlay();
+    return;
+  }
   subtitleOverlayVisible = true;
   lastSubtitleOverlayKey = "";
   renderSubtitleOverlayButton();

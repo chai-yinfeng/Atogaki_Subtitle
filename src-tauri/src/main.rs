@@ -62,6 +62,8 @@ struct SubtitleOverlayPayload {
 #[derive(Default)]
 struct SubtitleOverlayState {
     current: Mutex<Option<SubtitleOverlayPayload>>,
+    #[cfg(target_os = "macos")]
+    native_panel: Mutex<Option<usize>>,
 }
 
 #[tauri::command]
@@ -73,13 +75,17 @@ fn open_subtitle_overlay(
     set_subtitle_overlay_payload(&app, &state, payload)?;
 
     if let Some(window) = app.get_webview_window(SUBTITLE_OVERLAY_LABEL) {
+        #[cfg(target_os = "macos")]
+        show_subtitle_overlay_macos(&app, &window)?;
+        #[cfg(not(target_os = "macos"))]
+        {
         window.show().map_err(|error| error.to_string())?;
         window.set_always_on_top(true).map_err(|error| error.to_string())?;
         window
             .set_visible_on_all_workspaces(true)
             .map_err(|error| error.to_string())?;
-        configure_subtitle_overlay_macos(&window)?;
         window.set_focus().map_err(|error| error.to_string())?;
+        }
     } else {
         let overlay_app = app.clone();
         let overlay_window = WebviewWindowBuilder::new(
@@ -95,9 +101,13 @@ fn open_subtitle_overlay(
         .always_on_top(true)
         .visible_on_all_workspaces(true)
         .skip_taskbar(true)
+        .visible(false)
         .build()
         .map_err(|error| error.to_string())?;
-        configure_subtitle_overlay_macos(&overlay_window)?;
+        #[cfg(target_os = "macos")]
+        show_subtitle_overlay_macos(&app, &overlay_window)?;
+        #[cfg(not(target_os = "macos"))]
+        overlay_window.show().map_err(|error| error.to_string())?;
         overlay_window.on_window_event(move |event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -116,31 +126,57 @@ fn open_subtitle_overlay(
 }
 
 #[cfg(target_os = "macos")]
-fn configure_subtitle_overlay_macos<R: tauri::Runtime>(
+fn show_subtitle_overlay_macos<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
-    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior};
-    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+    use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
+    use objc2_app_kit::{
+        NSBackingStoreType, NSPanel, NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior,
+        NSWindowStyleMask,
+    };
+    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
 
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory)
+        .map_err(|error| error.to_string())?;
+
+    let app = app.clone();
     let window = window.clone();
     window
         .clone()
         .run_on_main_thread(move || {
+            if let Some(panel_pointer) = app
+                .state::<SubtitleOverlayState>()
+                .native_panel
+                .lock()
+                .ok()
+                .and_then(|panel| *panel)
+            {
+                let panel: &NSPanel = unsafe { &*(panel_pointer as *const NSPanel) };
+                panel.orderFrontRegardless();
+                return;
+            }
             let Ok(native_window) = window.ns_window() else {
                 return;
             };
             let native_window: &NSWindow = unsafe { &*native_window.cast() };
-            let mut behavior = native_window.collectionBehavior();
-            // AppKit allows only one Stage Manager/full-screen role. Tauri
-            // currently leaves this at the default, but clear a future
-            // primary/auxiliary role before choosing the global-overlay one.
-            behavior.remove(
-                NSWindowCollectionBehavior::Primary
-                    | NSWindowCollectionBehavior::Auxiliary
-                    | NSWindowCollectionBehavior::FullScreenPrimary
-                    | NSWindowCollectionBehavior::FullScreenNone,
+            let Some(content_view) = native_window.contentView() else {
+                return;
+            };
+            let Some(main_thread) = MainThreadMarker::new() else {
+                return;
+            };
+            let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
+                NSPanel::alloc(main_thread),
+                native_window.frame(),
+                NSWindowStyleMask::Titled
+                    | NSWindowStyleMask::Resizable
+                    | NSWindowStyleMask::UtilityWindow
+                    | NSWindowStyleMask::NonactivatingPanel,
+                NSBackingStoreType::Buffered,
+                false,
             );
-            behavior |= NSWindowCollectionBehavior::CanJoinAllSpaces
+            let mut behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::Stationary
                 | NSWindowCollectionBehavior::FullScreenAuxiliary;
             let process_info = NSProcessInfo::processInfo();
@@ -151,19 +187,54 @@ fn configure_subtitle_overlay_macos<R: tauri::Runtime>(
             }) {
                 behavior |= NSWindowCollectionBehavior::CanJoinAllApplications;
             }
-            native_window.setCollectionBehavior(behavior);
-            native_window.setHidesOnDeactivate(false);
-            native_window.setLevel(NSScreenSaverWindowLevel);
-            native_window.orderFrontRegardless();
+            panel.setTitle(&NSString::from_str("Atogaki 悬浮字幕"));
+            panel.setContentView(Some(&content_view));
+            panel.setDelegate(native_window.delegate().as_deref());
+            panel.setMinSize(NSSize::new(360.0, 120.0));
+            panel.setFloatingPanel(true);
+            panel.setBecomesKeyOnlyIfNeeded(true);
+            panel.setHidesOnDeactivate(false);
+            panel.setCollectionBehavior(behavior);
+            panel.setLevel(NSScreenSaverWindowLevel);
+            unsafe { panel.setReleasedWhenClosed(false) };
+            native_window.orderOut(None);
+            panel.orderFrontRegardless();
+
+            let panel_pointer = Retained::into_raw(panel) as usize;
+            if let Ok(mut stored) = app
+                .state::<SubtitleOverlayState>()
+                .native_panel
+                .lock()
+            {
+                *stored = Some(panel_pointer);
+            }
         })
         .map_err(|error| error.to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
-fn configure_subtitle_overlay_macos<R: tauri::Runtime>(
-    _window: &tauri::WebviewWindow<R>,
-) -> Result<(), String> {
-    Ok(())
+#[cfg(target_os = "macos")]
+fn hide_subtitle_overlay_macos(app: &AppHandle) -> Result<(), String> {
+    use objc2_app_kit::NSPanel;
+
+    let panel_pointer = app
+        .state::<SubtitleOverlayState>()
+        .native_panel
+        .lock()
+        .map_err(|_| "subtitle overlay panel state is unavailable".to_string())?
+        .to_owned();
+    if let (Some(panel_pointer), Some(window)) = (
+        panel_pointer,
+        app.get_webview_window(SUBTITLE_OVERLAY_LABEL),
+    ) {
+        window
+            .run_on_main_thread(move || {
+                let panel: &NSPanel = unsafe { &*(panel_pointer as *const NSPanel) };
+                panel.orderOut(None);
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    app.set_activation_policy(tauri::ActivationPolicy::Regular)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -195,6 +266,9 @@ fn hide_subtitle_overlay(
         .current
         .lock()
         .map_err(|_| "subtitle overlay state is unavailable".to_string())? = None;
+    #[cfg(target_os = "macos")]
+    hide_subtitle_overlay_macos(&app)?;
+    #[cfg(not(target_os = "macos"))]
     if let Some(window) = app.get_webview_window(SUBTITLE_OVERLAY_LABEL) {
         window.hide().map_err(|error| error.to_string())?;
     }
@@ -1058,17 +1132,6 @@ fn main() {
                                 let _ = overlay.destroy();
                             }
                             app_handle.exit(0);
-                        }
-                        WindowEvent::Focused(false) => {
-                            // Switching to a browser's full-screen Space can
-                            // reorder windows after the overlay is first shown.
-                            // Reassert the public AppKit overlay policy at the
-                            // point Atogaki loses activation.
-                            if let Some(overlay) =
-                                app_handle.get_webview_window(SUBTITLE_OVERLAY_LABEL)
-                            {
-                                let _ = configure_subtitle_overlay_macos(&overlay);
-                            }
                         }
                         _ => {}
                     }
