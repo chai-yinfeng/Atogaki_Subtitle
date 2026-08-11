@@ -141,9 +141,6 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
     };
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
 
-    app.set_activation_policy(tauri::ActivationPolicy::Accessory)
-        .map_err(|error| error.to_string())?;
-
     let app = app.clone();
     let window = window.clone();
     window
@@ -1140,6 +1137,22 @@ fn main() {
                             let _ = overlay.destroy();
                         }
                         app_handle.exit(0);
+                    }
+                    #[cfg(target_os = "macos")]
+                    WindowEvent::Focused(focused) => {
+                        let overlay_visible = app_handle
+                            .state::<SubtitleOverlayState>()
+                            .current
+                            .lock()
+                            .is_ok_and(|current| current.is_some());
+                        if overlay_visible {
+                            let policy = if *focused {
+                                tauri::ActivationPolicy::Regular
+                            } else {
+                                tauri::ActivationPolicy::Accessory
+                            };
+                            let _ = app_handle.set_activation_policy(policy);
+                        }
                     }
                     _ => {}
                 });

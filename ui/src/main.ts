@@ -559,6 +559,7 @@ const modelsDirectory = document.querySelector<HTMLSpanElement>("#models-directo
 const modelReadiness = document.querySelector<HTMLSpanElement>("#model-readiness");
 
 let refreshing = false;
+let renderedJobsFingerprint: string | null = null;
 let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
 let activeSegmentId: string | null = null;
@@ -1238,12 +1239,21 @@ async function deleteJob(job: LocalJob): Promise<void> {
 async function refresh(): Promise<void> {
   if (!jobList || refreshing) return;
   refreshing = true;
-  if (!activeDetail) jobList.innerHTML = `<div class="empty-state">正在读取任务…</div>`;
+  if (!activeDetail && renderedJobsFingerprint === null && jobList.childElementCount === 0) {
+    jobList.innerHTML = `<div class="empty-state">正在读取任务…</div>`;
+  }
   try {
     const jobs = await invoke<LocalJob[]>("list_jobs");
-    renderJobs(jobs);
+    const fingerprint = JSON.stringify(jobs);
+    if (fingerprint !== renderedJobsFingerprint) {
+      const scrollTop = window.scrollY;
+      renderJobs(jobs);
+      renderedJobsFingerprint = fingerprint;
+      if (!activeDetail) window.scrollTo({ top: scrollTop, behavior: "auto" });
+    }
   } catch (error) {
     jobList.innerHTML = `<div class="empty-state error">无法读取本地任务：${escapeHtml(String(error))}</div>`;
+    renderedJobsFingerprint = null;
   } finally {
     refreshing = false;
   }
