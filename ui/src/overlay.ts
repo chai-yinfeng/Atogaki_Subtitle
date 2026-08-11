@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./overlay.css";
 
-type LanguageCode = "ja" | "en" | "zh-Hans";
+type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
 
 type SubtitleOverlayPayload = {
   sourceText: string;
@@ -62,6 +62,7 @@ updateOverlayScale();
 function languageLabel(language: LanguageCode): string {
   if (language === "ja") return "日语";
   if (language === "en") return "英语";
+  if (language === "ko") return "韩语";
   return "简体中文";
 }
 

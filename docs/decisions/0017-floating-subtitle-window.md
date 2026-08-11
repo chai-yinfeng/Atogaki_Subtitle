@@ -11,10 +11,10 @@
 - 用户在已打开的任务工作区显式点击后，创建或显示一个独立的 Tauri Webview 窗口。它只展示当前播放位置的原文与译文，并应支持跨普通桌面的置顶、可靠拖动、可见缩放控制和单独关闭。
 - 悬浮窗是临时播放视图，不写入 SQLite，不创建新的任务，也不接管媒体播放。主工作区仍是播放、跳转、编辑、翻译和导出的唯一控制面。
 - 主窗口仅在字幕段变化或当前字幕文本被编辑后向悬浮窗同步内容；新开的悬浮窗从主进程读取最近一次快照，以避免窗口加载时丢失首条字幕。
-- macOS 首版使用普通无边框深色窗口，不启用 Tauri 的 `macos-private-api` 来实现透明窗口。跨普通桌面时，除 Tauri 的公开置顶/跨工作区接口外，使用 Apple 公开的 AppKit collection behavior：`CanJoinAllSpaces`、`Stationary`、`FullScreenAuxiliary`，且仅在 macOS 13+ 加 `CanJoinAllApplications`；不使用任何私有系统接口。
+- macOS 首版使用普通无边框深色窗口，不启用 Tauri 的 `macos-private-api` 来实现透明窗口。除 Tauri 的公开置顶/跨工作区接口外，使用 Apple 公开的 AppKit collection behavior：`CanJoinAllSpaces`、`Stationary`、`FullScreenAuxiliary`，且仅在 macOS 13+ 加 `CanJoinAllApplications`。按用户确认，窗口使用公开的 `NSScreenSaverWindowLevel` 和 `orderFrontRegardless`，以覆盖普通桌面和全屏应用 Space；不使用任何私有系统接口。
 
 ## 后果
 
 - 窗口创建与字幕同步已实现，但 2026-08-09 首轮打包回归没有覆盖拖动、缩放和 Mission Control 跨桌面行为，故不能视为已完成。窗口缩放会按可用宽高的共同尺度同步排版；长字幕超出窗口高度时会再缩小字体以完整显示。实现并完成实机回归前，不应发布或宣称这些能力可用。
-- 当前不提供全局快捷键、点击穿透、跨设备记住位置或独立播放控制；这些需要在真实使用反馈出现后再设计。
+- 屏幕保护级别意味着悬浮字幕可能高于其他 App 的全屏控制条或弹窗；这是“始终覆盖全屏应用”的明确取舍。当前不提供全局快捷键、点击穿透、跨设备记住位置或独立播放控制；这些需要在真实使用反馈出现后再设计。
 - 悬浮窗口首先在 macOS 打包 App 回归。Windows/Linux 的窗口层级和透明效果不能仅凭 macOS 结果推断。

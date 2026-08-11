@@ -119,29 +119,34 @@ fn open_subtitle_overlay(
 fn configure_subtitle_overlay_macos<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
-    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior};
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
 
-    let native_window: &NSWindow = unsafe {
-        &*window
-            .ns_window()
-            .map_err(|error| error.to_string())?
-            .cast()
-    };
-    let mut behavior = native_window.collectionBehavior()
-        | NSWindowCollectionBehavior::CanJoinAllSpaces
-        | NSWindowCollectionBehavior::Stationary
-        | NSWindowCollectionBehavior::FullScreenAuxiliary;
-    let process_info = NSProcessInfo::processInfo();
-    if process_info.isOperatingSystemAtLeastVersion(NSOperatingSystemVersion {
-        majorVersion: 13,
-        minorVersion: 0,
-        patchVersion: 0,
-    }) {
-        behavior |= NSWindowCollectionBehavior::CanJoinAllApplications;
-    }
-    native_window.setCollectionBehavior(behavior);
-    Ok(())
+    let window = window.clone();
+    window
+        .clone()
+        .run_on_main_thread(move || {
+            let Ok(native_window) = window.ns_window() else {
+                return;
+            };
+            let native_window: &NSWindow = unsafe { &*native_window.cast() };
+            let mut behavior = native_window.collectionBehavior()
+                | NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::FullScreenAuxiliary;
+            let process_info = NSProcessInfo::processInfo();
+            if process_info.isOperatingSystemAtLeastVersion(NSOperatingSystemVersion {
+                majorVersion: 13,
+                minorVersion: 0,
+                patchVersion: 0,
+            }) {
+                behavior |= NSWindowCollectionBehavior::CanJoinAllApplications;
+            }
+            native_window.setCollectionBehavior(behavior);
+            native_window.setLevel(NSScreenSaverWindowLevel);
+            native_window.orderFrontRegardless();
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1031,6 +1036,19 @@ fn main() {
                 model_download_service,
             });
             app.manage(SubtitleOverlayState::default());
+            if let Some(main_window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main_window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        if let Some(overlay) = app_handle.get_webview_window(SUBTITLE_OVERLAY_LABEL)
+                        {
+                            let _ = overlay.destroy();
+                        }
+                        app_handle.exit(0);
+                    }
+                });
+            }
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())

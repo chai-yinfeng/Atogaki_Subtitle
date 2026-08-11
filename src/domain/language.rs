@@ -10,6 +10,8 @@ pub enum LanguageCode {
     Japanese,
     #[serde(rename = "en")]
     English,
+    #[serde(rename = "ko")]
+    Korean,
     #[serde(rename = "zh-Hans")]
     SimplifiedChinese,
 }
@@ -19,6 +21,7 @@ impl LanguageCode {
         match self {
             Self::Japanese => "ja",
             Self::English => "en",
+            Self::Korean => "ko",
             Self::SimplifiedChinese => "zh-Hans",
         }
     }
@@ -27,6 +30,7 @@ impl LanguageCode {
         match self {
             Self::Japanese => "日语",
             Self::English => "英语",
+            Self::Korean => "韩语",
             Self::SimplifiedChinese => "简体中文",
         }
     }
@@ -35,6 +39,7 @@ impl LanguageCode {
         match self {
             Self::Japanese => "ja",
             Self::English => "en",
+            Self::Korean => "ko",
             Self::SimplifiedChinese => "zh",
         }
     }
@@ -43,6 +48,7 @@ impl LanguageCode {
         match self {
             Self::Japanese => "JA",
             Self::English => "EN",
+            Self::Korean => "KO",
             Self::SimplifiedChinese => "ZH",
         }
     }
@@ -51,6 +57,7 @@ impl LanguageCode {
         match self {
             Self::Japanese => "JA",
             Self::English => "EN",
+            Self::Korean => "KO",
             Self::SimplifiedChinese => "ZH-HANS",
         }
     }
@@ -69,9 +76,10 @@ impl FromStr for LanguageCode {
         match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
             "ja" | "ja-jp" | "japanese" => Ok(Self::Japanese),
             "en" | "en-us" | "en-gb" | "english" => Ok(Self::English),
+            "ko" | "ko-kr" | "korean" => Ok(Self::Korean),
             "zh" | "zh-cn" | "zh-hans" | "chinese" => Ok(Self::SimplifiedChinese),
             _ => Err(format!(
-                "unsupported language '{value}'; expected ja, en, or zh-Hans"
+                "unsupported language '{value}'; expected ja, en, ko, or zh-Hans"
             )),
         }
     }
@@ -104,6 +112,13 @@ impl LanguagePair {
             target: LanguageCode::SimplifiedChinese,
         }
     }
+
+    pub const fn korean_to_simplified_chinese() -> Self {
+        Self {
+            source: LanguageCode::Korean,
+            target: LanguageCode::SimplifiedChinese,
+        }
+    }
 }
 
 impl Default for LanguagePair {
@@ -127,6 +142,10 @@ mod tests {
         assert_eq!(
             LanguageCode::from_str("en-US").unwrap(),
             LanguageCode::English
+        );
+        assert_eq!(
+            LanguageCode::from_str("ko_KR").unwrap(),
+            LanguageCode::Korean
         );
         assert_eq!(
             LanguageCode::from_str("zh_CN").unwrap(),

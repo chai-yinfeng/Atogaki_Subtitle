@@ -323,10 +323,24 @@ impl LocalWorkspaceService {
             .get_job(job_id)
             .await?
             .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        let protected_terms = job
+            .glossary_snapshot_path
+            .as_deref()
+            .map(Path::new)
+            .map(|path| {
+                crate::domain::glossary::load(path)
+                    .with_context(|| {
+                        format!("failed to load task glossary snapshot {}", path.display())
+                    })
+                    .map(|glossary| glossary.translation_protected_terms())
+            })
+            .transpose()?
+            .unwrap_or_default();
         let options = TranslationOptions::new(
             LanguageCode::from_str(&job.source_language).map_err(anyhow::Error::msg)?,
             LanguageCode::from_str(&job.target_language).map_err(anyhow::Error::msg)?,
-        );
+        )
+        .with_protected_terms(protected_terms);
         let mut updates = Vec::with_capacity(segments_to_translate.len());
         for batch in segments_to_translate.chunks(TRANSLATION_BATCH_SIZE) {
             let source_texts = batch
@@ -569,11 +583,17 @@ mod tests {
         domain::{LanguageCode, LanguagePair, TranscriptSegment},
         infrastructure::{
             job_store::Job,
-            local_db::{LocalDatabase, LocalSubtitleSegmentRecord},
+            local_db::{LocalDatabase, LocalGlossaryTermInput, LocalSubtitleSegmentRecord},
         },
     };
 
-    type CapturedTranslationRequest = (LanguageCode, LanguageCode, Vec<String>, Option<String>);
+    type CapturedTranslationRequest = (
+        LanguageCode,
+        LanguageCode,
+        Vec<String>,
+        Option<String>,
+        Vec<String>,
+    );
 
     #[derive(Debug, Clone)]
     struct FakeTranslationProvider {
@@ -613,6 +633,7 @@ mod tests {
                 options.target_language,
                 source_texts.clone(),
                 context.map(str::to_string),
+                options.protected_terms.clone(),
             ));
             let omit_last_result = self.omit_last_result;
             Box::pin(async move {
@@ -734,8 +755,66 @@ mod tests {
         let context = requests[0].3.as_deref().unwrap();
         assert!(context.contains("The first line"));
         assert!(context.contains("The second line"));
+        assert!(requests[0].4.is_empty());
         drop(requests);
 
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn task_glossary_snapshot_becomes_translation_protection() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-translation-glossary-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let manifest = JobManifest::new(&job, None, None, LanguagePair::default());
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![TranscriptSegment::new(0, 1_000, "盗作を聴く".to_string())],
+            })
+            .await
+            .unwrap();
+        let snapshot_path = root.join("recognition-glossary.txt");
+        fs::write(&snapshot_path, "盗作\nナブナ => n-buna\n").unwrap();
+        let glossary = database
+            .save_glossary(
+                None,
+                "测试词表".to_string(),
+                "ja",
+                vec![LocalGlossaryTermInput {
+                    source_text: "盗作".to_string(),
+                    target_text: None,
+                    prompt_scope: "core".to_string(),
+                    content_group: None,
+                }],
+            )
+            .await
+            .unwrap();
+        database
+            .assign_job_glossary(
+                &manifest.job_id,
+                &glossary.glossary.id,
+                &glossary.glossary.name,
+                &snapshot_path,
+            )
+            .await
+            .unwrap();
+        let provider = Arc::new(FakeTranslationProvider::new(false));
+        let service = LocalWorkspaceService::with_provider(database.clone(), provider.clone());
+
+        service.translate_all(&manifest.job_id).await.unwrap();
+
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].4, ["n-buna", "ナブナ", "盗作"]);
+        drop(requests);
         drop(service);
         drop(database);
         fs::remove_dir_all(root).unwrap();

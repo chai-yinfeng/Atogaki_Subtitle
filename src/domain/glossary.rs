@@ -132,6 +132,29 @@ impl Glossary {
         (!parts.is_empty()).then(|| parts.join("\n"))
     }
 
+    /// Proper nouns selected for the Whisper prompt are also protected from
+    /// machine translation. Include both the heard and canonical spellings so
+    /// a correction such as `ナブナ => n-buna` cannot be translated either way.
+    pub fn translation_protected_terms(&self) -> Vec<String> {
+        let mut terms = self
+            .entries
+            .iter()
+            .filter(|entry| entry.include_in_prompt)
+            .flat_map(|entry| {
+                std::iter::once(entry.source_text.clone()).chain(entry.target_text.clone())
+            })
+            .collect::<Vec<_>>();
+        terms.sort_by(|left, right| {
+            right
+                .chars()
+                .count()
+                .cmp(&left.chars().count())
+                .then_with(|| left.cmp(right))
+        });
+        terms.dedup();
+        terms
+    }
+
     fn whisper_prompt_terms(&self) -> Vec<String> {
         self.entries
             .iter()
@@ -393,5 +416,32 @@ mod tests {
         assert!(prompt.contains("スイ（表記: suis）"));
 
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn prompt_terms_are_also_translation_protected() {
+        let glossary = Glossary::from_entries([
+            GlossaryEntry {
+                source_text: "盗作".to_string(),
+                target_text: None,
+                include_in_prompt: true,
+            },
+            GlossaryEntry {
+                source_text: "ナブナ".to_string(),
+                target_text: Some("n-buna".to_string()),
+                include_in_prompt: true,
+            },
+            GlossaryEntry {
+                source_text: "水井".to_string(),
+                target_text: Some("suis".to_string()),
+                include_in_prompt: false,
+            },
+        ])
+        .unwrap();
+
+        assert_eq!(
+            glossary.translation_protected_terms(),
+            vec!["n-buna", "ナブナ", "盗作"]
+        );
     }
 }

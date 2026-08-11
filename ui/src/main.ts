@@ -2,7 +2,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./styles.css";
 
-type LanguageCode = "ja" | "en" | "zh-Hans";
+type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
 
 type LocalJob = {
   job_id: string;
@@ -241,7 +241,7 @@ app.innerHTML = `
       <section class="create-task" aria-labelledby="create-heading">
         <div class="section-heading"><h2 id="create-heading">新建转写任务</h2><span>本地执行</span></div>
         <form id="task-form">
-          <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option></select></label>
+          <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option></select></label>
           <label>翻译目标<select id="target-language" disabled><option value="zh-Hans">简体中文</option></select></label>
           <label>媒体文件<input id="media-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
@@ -335,7 +335,7 @@ app.innerHTML = `
           <div id="glossary-list" class="glossary-list"></div>
         </aside>
         <section class="glossary-editor">
-          <label>词表语言<select id="glossary-language"><option value="ja">日语</option><option value="en">英语</option></select></label>
+          <label>词表语言<select id="glossary-language"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option></select></label>
           <label>词表名称<input id="glossary-name" maxlength="80" placeholder="例如：电台常用词" /></label>
           <div class="term-heading"><strong>提示词与识别修正规则</strong><button id="add-glossary-term" type="button" class="secondary">＋ 添加词条</button></div>
           <div id="glossary-terms" class="glossary-terms"></div>
@@ -598,6 +598,7 @@ let translationStatus: TranslationStatus = {
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
   if (language === "en") return "英语";
+  if (language === "ko") return "韩语";
   if (language === "zh-Hans") return "简体中文";
   return language;
 }
