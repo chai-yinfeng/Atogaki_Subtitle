@@ -49,7 +49,7 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。本地 ad-hoc 签名的 App Bundle 可用 `tauri build --bundles app` 生成，再从 `src-tauri/target/release/bundle/macos/Atogaki.app` 启动。配置声明最低 macOS 12.0，与 sidecar 的 deployment target 一致。
 
-本机验证 DMG 时使用 `CI=true tauri build --bundles dmg`。当前 macOS 26 上非 CI 模式的 Finder 美化 AppleScript 会挂起并导致 `bundle_dmg.sh` 失败；CI 模式跳过图标定位与背景美化，但生成的 DMG 可正常挂载、校验和安装，适合作为首轮测试发布基线。ad-hoc 签名只保证 Bundle 完整性，不代表 Developer ID 身份，也没有经过 Apple 公证。
+本机结构冒烟可以使用 `CI=true tauri build --bundles dmg`，但 CI 模式会跳过 Finder 图标定位与背景美化，不能作为最终发布产物。最终候选必须在非 CI 环境运行 `cargo tauri build --bundles dmg`，并实际确认 App、Applications 链接和窗口布局；2026-08-11 的 macOS 26 构建已能正常完成该流程。若以后 Finder AppleScript 再次挂起，应中止并排查，不能用 CI 简化包替代发布门禁。ad-hoc 签名只保证 Bundle 完整性，不代表 Developer ID 身份，也没有经过 Apple 公证。
 
 从终端直接执行 Bundle 内二进制前，必须先退出同一 bundle identifier 的现有 Atogaki 进程。macOS 26 上同时直接执行第二个 GUI 二进制会在 AppKit `_RegisterApplication` 阶段触发 `SIGABRT`；这是重复实例的启动方式问题，不是数据目录初始化崩溃。Finder 的普通再次打开会交给 LaunchServices 激活现有实例。
 

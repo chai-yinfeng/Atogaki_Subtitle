@@ -7,7 +7,7 @@ rust-version = "1.85"
 license = "Apache-2.0"
 
 [build-dependencies]
-tauri-build = "2.6.3"
+tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 anyhow = "1.0.100"
