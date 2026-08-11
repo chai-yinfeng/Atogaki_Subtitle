@@ -130,8 +130,17 @@ fn configure_subtitle_overlay_macos<R: tauri::Runtime>(
                 return;
             };
             let native_window: &NSWindow = unsafe { &*native_window.cast() };
-            let mut behavior = native_window.collectionBehavior()
-                | NSWindowCollectionBehavior::CanJoinAllSpaces
+            let mut behavior = native_window.collectionBehavior();
+            // AppKit allows only one Stage Manager/full-screen role. Tauri
+            // currently leaves this at the default, but clear a future
+            // primary/auxiliary role before choosing the global-overlay one.
+            behavior.remove(
+                NSWindowCollectionBehavior::Primary
+                    | NSWindowCollectionBehavior::Auxiliary
+                    | NSWindowCollectionBehavior::FullScreenPrimary
+                    | NSWindowCollectionBehavior::FullScreenNone,
+            );
+            behavior |= NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::Stationary
                 | NSWindowCollectionBehavior::FullScreenAuxiliary;
             let process_info = NSProcessInfo::processInfo();
@@ -143,6 +152,7 @@ fn configure_subtitle_overlay_macos<R: tauri::Runtime>(
                 behavior |= NSWindowCollectionBehavior::CanJoinAllApplications;
             }
             native_window.setCollectionBehavior(behavior);
+            native_window.setHidesOnDeactivate(false);
             native_window.setLevel(NSScreenSaverWindowLevel);
             native_window.orderFrontRegardless();
         })
@@ -1039,13 +1049,28 @@ fn main() {
             if let Some(main_window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
                 main_window.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        if let Some(overlay) = app_handle.get_webview_window(SUBTITLE_OVERLAY_LABEL)
-                        {
-                            let _ = overlay.destroy();
+                    match event {
+                        WindowEvent::CloseRequested { api, .. } => {
+                            api.prevent_close();
+                            if let Some(overlay) =
+                                app_handle.get_webview_window(SUBTITLE_OVERLAY_LABEL)
+                            {
+                                let _ = overlay.destroy();
+                            }
+                            app_handle.exit(0);
                         }
-                        app_handle.exit(0);
+                        WindowEvent::Focused(false) => {
+                            // Switching to a browser's full-screen Space can
+                            // reorder windows after the overlay is first shown.
+                            // Reassert the public AppKit overlay policy at the
+                            // point Atogaki loses activation.
+                            if let Some(overlay) =
+                                app_handle.get_webview_window(SUBTITLE_OVERLAY_LABEL)
+                            {
+                                let _ = configure_subtitle_overlay_macos(&overlay);
+                            }
+                        }
+                        _ => {}
                     }
                 });
             }
