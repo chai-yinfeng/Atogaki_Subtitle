@@ -42,6 +42,7 @@ _最后更新：2026-08-11_
 - [x] 固定提供 small、medium、large-v3 q5_0、large-v3-turbo q5_0/q8_0 五档 Whisper 下载项，覆盖轻量、质量与 turbo 对比需求。
 - [x] 自动刷新任务列表与活动详情；启动时显式标记中断任务，并允许从不可变快照派生重试任务。
 - [x] 运行中的转写任务会持续把阶段写入 SQLite；界面显示阶段、累计耗时与不定量进度，避免在 Whisper 执行期间只显示排队状态。
+- [x] 首页任务列表显示字幕翻译覆盖状态，区分尚无字幕、未翻译、部分翻译、已翻译与源文修改后的待重译。
 
 **验收：** 用户能独立完成“导入一段日语节目 → 获得并校对双语字幕 → 定位一句话 → 导出”的流程。
 
@@ -67,7 +68,7 @@ _最后更新：2026-08-11_
 
 ## 2. 学习体验
 
-- [ ] 悬浮字幕窗口：独立显示原文／译文，支持可靠拖动、缩放，以及跨普通和全屏 macOS Space 的置顶显示；公开的 `NSPanel + Accessory` 方案已通过全屏 Space 实测，tao delegate 闪退已修复；activation policy 改为随主窗口焦点切换，待验证打开面板不再改变主界面层级且跨全屏能力保持。
+- [ ] 悬浮字幕窗口：独立显示原文／译文，支持可靠拖动、缩放，以及跨普通和全屏 macOS Space 的置顶显示；公开的 `NSPanel + Accessory` 方案已通过全屏 Space 实测，tao delegate 闪退已修复。当前同进程随主窗口焦点切换 activation policy 会让 Dock 图标闪动；生产级方案应把面板拆到独立 Accessory helper，让主 App 始终保持 Regular，需另行设计生命周期和 IPC。
 - [ ] 当前句高亮、点击跳转、快捷键、A/B 循环和慢速播放。
 - [ ] 生词/句子收藏与检索。
 - [x] 将修正过的人名和术语加入可复用词表。
@@ -99,6 +100,7 @@ _最后更新：2026-08-11_
 - 首页任务、活动任务详情和烧录进度已自动轮询；转写任务会同步当前阶段并显示累计耗时。Whisper 当前没有稳定的机器可读进度协议，故不显示伪百分比或单次 ETA；后续应基于本机历史速度、媒体时长和模型档位生成区间预测。
 - 系统 WebView 不能播放所有 ffmpeg 支持的容器或编码；当前失败时回退任务 `audio.wav`，后续需按需生成视频代理文件。
 - 桌面 DeepL 单段/批量翻译与重启持久化已通过真实 API 窗口回归；`LocalWorkspaceService` 已改为注入可热切换的通用翻译 provider。DeepL key 写入系统凭据库（macOS Keychain、Windows Credential Manager 或 Linux Secret Service），`DEEPL_AUTH_KEY` 仅作兼容回退；SQLite 只保留非敏感的“曾成功保存”标记，启动、设置和模型下载不读取凭据，首次实际翻译才访问系统凭据库并在进程内缓存。旧版 Key 可重新填写并保存一次以建立状态标记。增加 Google Translate 或 LLM 前仍应记录每次翻译的 provider/model，并设计各 provider 的端点和模型设置。
+- 第二批翻译 provider 已完成官方额度与条款初步调研，详见 `docs/translation-provider-options.md`。当前优先级是 Azure Translator F0，其次是带明确数据提示的通用 OpenAI-compatible LLM adapter；Google Cloud Translation 的月度免费抵扣不优于 DeepL，Amazon Translate 只免费 12 个月，暂不优先。
 - 桌面 SRT/ASS 与带字幕 MP4 均从 SQLite 当前工作区派生；视频烧录使用独立 SQLite 记录和不可变 ASS 快照，支持取消、安全覆盖与 Finder 定位。VideoToolbox 运行时失败会记录原始错误并回退内置 MPEG-4；两者均失败才标记任务失败。应用重启时未完成烧录会标记失败，尚不自动恢复。
 - 硬字幕需要重编码，旧版 VideoToolbox 固定质量参数会把低码率源视频放大数倍。桌面烧录现在优先按输入视频码率加约 20% 余量设定目标码率；没有可用流码率时保留质量模式。VideoToolbox H.264 可较好跟随该策略，但 LGPL MPEG-4 回退在低码率 720p 样本上可能触及量化器上限而输出更大；后续如出现质量或体积偏好需求，再设计可选档位或评估额外的非 GPL H.264 编码依赖。
 - 识别词表已支持核心、任务内容包和仅修正；Yorushika 内置词表当前以人物为核心、作品分为内容包，并为人名常见的平假名识别结果提供不占 prompt 的回退修正。任务选中的词表快照还会保护其中的提示词，使 DeepL 保留作品、人名等原文而不把它们按普通词义翻译；这不等同于译名映射，后者如有真实需求应另设字段。最终 prompt 会预览并保存，但精确 tokenizer 预算和真实节目质量仍需继续评估。

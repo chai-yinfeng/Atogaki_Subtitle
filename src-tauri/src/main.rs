@@ -3,6 +3,7 @@ mod desktop_settings;
 mod model_download;
 
 use std::{
+    collections::HashMap,
     ffi::OsString,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -21,7 +22,7 @@ use atogaki_subtitle::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
-            LocalRenderJobRecord, LocalSubtitleSegmentRecord,
+            LocalJobTranslationStats, LocalRenderJobRecord, LocalSubtitleSegmentRecord,
         },
         media::MediaCapabilities,
     },
@@ -411,13 +412,67 @@ struct DesktopJobDetail {
     audio_fallback_path: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct DesktopJobSummary {
+    #[serde(flatten)]
+    job: LocalJobRecord,
+    translation_status: &'static str,
+    segment_count: i64,
+    translated_segment_count: i64,
+    stale_translation_count: i64,
+}
+
+impl DesktopJobSummary {
+    fn new(job: LocalJobRecord, stats: Option<LocalJobTranslationStats>) -> Self {
+        let stats = stats.unwrap_or(LocalJobTranslationStats {
+            job_id: job.job_id.clone(),
+            segment_count: 0,
+            translated_segment_count: 0,
+            stale_translation_count: 0,
+        });
+        let translation_status = if stats.segment_count == 0 {
+            "not_ready"
+        } else if stats.stale_translation_count > 0 {
+            "stale"
+        } else if stats.translated_segment_count == 0 {
+            "untranslated"
+        } else if stats.translated_segment_count < stats.segment_count {
+            "partial"
+        } else {
+            "translated"
+        };
+        Self {
+            job,
+            translation_status,
+            segment_count: stats.segment_count,
+            translated_segment_count: stats.translated_segment_count,
+            stale_translation_count: stats.stale_translation_count,
+        }
+    }
+}
+
 #[tauri::command]
-async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<LocalJobRecord>, String> {
-    state
+async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopJobSummary>, String> {
+    let jobs = state
         .task_service
         .list_persisted_jobs()
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let stats = state
+        .task_service
+        .list_persisted_job_translation_stats()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|stats| (stats.job_id.clone(), stats))
+        .collect::<HashMap<_, _>>();
+    Ok(jobs
+        .into_iter()
+        .map(|job| {
+            let job_stats = stats.get(&job.job_id).cloned();
+            DesktopJobSummary::new(job, job_stats)
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -1217,9 +1272,46 @@ mod tests {
     };
 
     use super::{
-        SubmitTranscriptionRequest, desktop_transcription_options, validated_data_dir_override,
+        DesktopJobSummary, SubmitTranscriptionRequest, desktop_transcription_options,
+        validated_data_dir_override,
     };
-    use atogaki_subtitle::domain::LanguageCode;
+    use atogaki_subtitle::{
+        domain::LanguageCode,
+        infrastructure::local_db::{LocalJobRecord, LocalJobTranslationStats},
+    };
+
+    fn test_job() -> LocalJobRecord {
+        LocalJobRecord {
+            job_id: "job-1".to_string(),
+            display_name: None,
+            storage_dir: "/tmp/job-1".to_string(),
+            input_path: None,
+            render_output_path: None,
+            status: "done".to_string(),
+            message: "done".to_string(),
+            error_message: None,
+            glossary_id: None,
+            glossary_name: None,
+            glossary_snapshot_path: None,
+            source_language: "ja".to_string(),
+            target_language: "zh-Hans".to_string(),
+            created_at_unix: 1,
+            updated_at_unix: 1,
+        }
+    }
+
+    fn translation_stats(
+        segment_count: i64,
+        translated_segment_count: i64,
+        stale_translation_count: i64,
+    ) -> LocalJobTranslationStats {
+        LocalJobTranslationStats {
+            job_id: "job-1".to_string(),
+            segment_count,
+            translated_segment_count,
+            stale_translation_count,
+        }
+    }
 
     #[test]
     fn desktop_data_directory_override_requires_an_absolute_path() {
@@ -1285,5 +1377,34 @@ mod tests {
         assert_eq!(options.vad_model.as_deref(), Some(vad_model.as_path()));
         assert_eq!(options.source_language, LanguageCode::English);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn desktop_job_summary_distinguishes_translation_coverage() {
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(0, 0, 0)))
+                .translation_status,
+            "not_ready"
+        );
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 0, 0)))
+                .translation_status,
+            "untranslated"
+        );
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 2, 0)))
+                .translation_status,
+            "partial"
+        );
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 3, 0)))
+                .translation_status,
+            "translated"
+        );
+        assert_eq!(
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 3, 1)))
+                .translation_status,
+            "stale"
+        );
     }
 }

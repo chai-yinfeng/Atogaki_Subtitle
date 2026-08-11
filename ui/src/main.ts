@@ -19,6 +19,10 @@ type LocalJob = {
   target_language: LanguageCode;
   created_at_unix: number;
   updated_at_unix: number;
+  translation_status: "not_ready" | "untranslated" | "partial" | "translated" | "stale";
+  segment_count: number;
+  translated_segment_count: number;
+  stale_translation_count: number;
 };
 
 type Glossary = {
@@ -1140,7 +1144,10 @@ function renderJobs(jobs: LocalJob[]): void {
         <article class="job-card">
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
             <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · ${escapeHtml(jobTimingLabel(job))}</p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
-            <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+            <span class="job-statuses">
+              <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+              <span class="status translation-status translation-status-${escapeHtml(job.translation_status)}">${escapeHtml(translationStatusLabel(job))}</span>
+            </span>
           </button>
           <div class="job-actions">
             ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重试</button>` : ""}
@@ -1171,6 +1178,16 @@ function renderJobs(jobs: LocalJob[]): void {
       if (job) void deleteJob(job);
     });
   });
+}
+
+function translationStatusLabel(job: LocalJob): string {
+  if (job.translation_status === "translated") return "已翻译";
+  if (job.translation_status === "partial") {
+    return `部分翻译 ${job.translated_segment_count}/${job.segment_count}`;
+  }
+  if (job.translation_status === "stale") return `待重译 ${job.stale_translation_count}`;
+  if (job.translation_status === "untranslated") return "未翻译";
+  return "尚无字幕";
 }
 
 async function retryJob(job: LocalJob): Promise<void> {
