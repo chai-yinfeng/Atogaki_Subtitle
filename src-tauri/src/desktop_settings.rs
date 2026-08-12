@@ -120,13 +120,13 @@ impl DeferredDeepLTranslationProvider {
     fn resolve(&self) -> Result<DeepLTranslationProvider> {
         let (stored_key, credential_error) =
             cached_deepl_key(self.credentials.as_ref(), self.credential_cache.as_ref());
-        let key = stored_key
-            .or_else(|| self.environment_key.clone())
-            .ok_or_else(|| {
-                credential_error
-                    .map(|error| anyhow!("无法读取 DeepL Key：{error}"))
-                    .unwrap_or_else(|| anyhow!("请先在设置中配置 DeepL API Key。"))
-            })?;
+        let key = if let Some(key) = stored_key.or_else(|| self.environment_key.clone()) {
+            key
+        } else if let Some(error) = credential_error {
+            return Err(anyhow!("无法读取 DeepL Key：{error}"));
+        } else {
+            return Err(anyhow!("请先在设置中配置 DeepL API Key。"));
+        };
         DeepLTranslationProvider::with_network_config(Some(key), &self.network)
     }
 }
@@ -443,7 +443,7 @@ fn cached_deepl_key(
         cache.loaded = true;
         match credentials.get(DEEPL_PROVIDER_ID) {
             Ok(secret) => cache.secret = normalized_secret(secret),
-            Err(error) => cache.error = Some(error.to_string()),
+            Err(error) => cache.error = Some(format!("{error:#}")),
         }
     }
     (cache.secret.clone(), cache.error.clone())
@@ -526,7 +526,8 @@ mod tests {
 
     use anyhow::Result;
     use atogaki_subtitle::application::{
-        MutableTranslationProvider, TranslationProvider, UnconfiguredTranslationProvider,
+        MutableTranslationProvider, TranslationOptions, TranslationProvider,
+        UnconfiguredTranslationProvider,
     };
 
     use super::{DesktopSettingsService, SaveDesktopSettingsRequest};
@@ -557,6 +558,27 @@ mod tests {
         fn delete(&self, _provider_id: &str) -> Result<()> {
             *self.secret.lock().unwrap() = None;
             Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct FailingCredentialStore;
+
+    impl CredentialStore for FailingCredentialStore {
+        fn backend_name(&self) -> &'static str {
+            "failing credential store"
+        }
+
+        fn get(&self, _provider_id: &str) -> Result<Option<String>> {
+            anyhow::bail!("user interaction was denied")
+        }
+
+        fn set(&self, _provider_id: &str, _secret: &str) -> Result<()> {
+            unreachable!()
+        }
+
+        fn delete(&self, _provider_id: &str) -> Result<()> {
+            unreachable!()
         }
     }
 
@@ -716,6 +738,48 @@ mod tests {
         assert_eq!(*credentials.reads.lock().unwrap(), 0);
         assert!(provider.status().configured);
 
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn denied_keychain_access_keeps_the_full_translation_error_chain() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-denied-key-test-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .set_setting("translation.provider", "deepl")
+            .await
+            .unwrap();
+        let provider = MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider));
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            provider.clone(),
+            root.join("models"),
+            Arc::new(FailingCredentialStore),
+        );
+        service.initialize().await.unwrap();
+
+        let error = provider
+            .translate(
+                &TranslationOptions::default(),
+                &["字幕".to_string()],
+                None,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "无法读取 DeepL Key：user interaction was denied"
+        );
         drop(service);
         drop(database);
         fs::remove_dir_all(root).unwrap();

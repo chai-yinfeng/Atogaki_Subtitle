@@ -689,7 +689,7 @@ async fn translate_subtitle(
         .workspace_service
         .translate_segment(&job_id, &segment_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -701,7 +701,7 @@ async fn translate_all_subtitles(
         .workspace_service
         .translate_all(&job_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]

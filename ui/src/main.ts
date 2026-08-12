@@ -652,14 +652,26 @@ function formatElapsed(seconds: number): string {
   return `${remainingSeconds}秒`;
 }
 
-function jobTimingLabel(job: LocalJob): string {
+function jobTimingLabel(job: Pick<LocalJob, "status" | "created_at_unix" | "updated_at_unix">): string {
   if (matchesTerminalStatus(job.status)) {
     return `总用时 ${formatElapsed(job.updated_at_unix - job.created_at_unix)}`;
   }
   const now = Math.floor(Date.now() / 1_000);
-  const stageElapsed = formatElapsed(now - job.updated_at_unix);
-  const totalElapsed = formatElapsed(now - job.created_at_unix);
-  return `本阶段 ${stageElapsed} · 累计 ${totalElapsed}`;
+  return `已运行 ${formatElapsed(now - job.created_at_unix)}`;
+}
+
+function updateVisibleJobTimings(): void {
+  document.querySelectorAll<HTMLElement>("[data-job-timing]").forEach((element) => {
+    const createdAt = Number(element.dataset.createdAt);
+    const updatedAt = Number(element.dataset.updatedAt);
+    const status = element.dataset.status ?? "";
+    if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return;
+    element.textContent = jobTimingLabel({
+      created_at_unix: createdAt,
+      updated_at_unix: updatedAt,
+      status,
+    });
+  });
 }
 
 function runningJob(job: LocalJob): boolean {
@@ -1143,7 +1155,7 @@ function renderJobs(jobs: LocalJob[]): void {
       (job) => `
         <article class="job-card">
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
-            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · ${escapeHtml(jobTimingLabel(job))}</p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
+            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-updated-at="${job.updated_at_unix}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
             <span class="job-statuses">
               <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
               <span class="status translation-status translation-status-${escapeHtml(job.translation_status)}">${escapeHtml(translationStatusLabel(job))}</span>
@@ -1511,6 +1523,15 @@ function replaceActiveSegment(updated: SubtitleSegment): void {
   activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
 }
 
+async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
+  const detail = await invoke<JobDetail>("get_job_detail", { jobId });
+  if (!activeDetail || activeDetail.job.job_id !== jobId) return;
+  activeDetail.job = detail.job;
+  activeDetail.segments = detail.segments;
+  renderSubtitleList(activeDetail.segments);
+  updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+}
+
 async function translateSegment(
   segment: SubtitleSegment,
   sourceInput: HTMLTextAreaElement,
@@ -1530,9 +1551,14 @@ async function translateSegment(
       segmentId: segment.id,
     });
     replaceActiveSegment(translated);
-    setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并保存到 SQLite。`);
     renderSubtitleList(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    try {
+      await reloadTranslatedWorkspace(activeDetail.job.job_id);
+      setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并从 SQLite 重新读取。`);
+    } catch (reloadError) {
+      setWorkspaceAction(`翻译已经写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+    }
   } catch (error) {
     state.textContent = `翻译失败：${String(error)}`;
     state.classList.add("warning");
@@ -1672,12 +1698,18 @@ async function translateAllSubtitles(): Promise<void> {
     `正在通过 ${translationStatus.provider} 翻译 ${activeDetail.segments.length} 段字幕（${batchCount} 批）`,
   );
   try {
+    const jobId = activeDetail.job.job_id;
     activeDetail.segments = await invoke<SubtitleSegment[]>("translate_all_subtitles", {
-      jobId: activeDetail.job.job_id,
+      jobId,
     });
-    setWorkspaceAction(`已翻译 ${activeDetail.segments.length} 段并原子写入 SQLite。`);
     renderSubtitleList(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    try {
+      await reloadTranslatedWorkspace(jobId);
+      setWorkspaceAction(`已翻译 ${activeDetail.segments.length} 段，原子写入并从 SQLite 重新读取。`);
+    } catch (reloadError) {
+      setWorkspaceAction(`全部翻译已经原子写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+    }
   } catch (error) {
     setWorkspaceAction(`全部翻译失败：${String(error)}`, true);
   } finally {
@@ -2537,6 +2569,7 @@ void listen<boolean>("subtitle-overlay-visibility", (event) => {
 });
 window.setInterval(() => void refresh(), 2_000);
 window.setInterval(() => void refreshActiveJob(), 2_000);
+window.setInterval(updateVisibleJobTimings, 1_000);
 window.setInterval(() => {
   if (activeDetail && videoRenders.some((render) => render.status === "queued" || render.status === "running")) {
     void refreshVideoRenders();
