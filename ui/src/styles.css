@@ -206,6 +206,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .glossary-list-item { width: 100%; min-width: 0; display: grid; gap: 3px; border-radius: 9px; padding: 10px; color: #3d413a; background: transparent; text-align: left; }
 .glossary-list-item:hover, .glossary-list-item.active { color: #234a40; background: #e2ece5; }
 .glossary-list-item span { color: #77796f; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.glossary-list-item .builtin-badge { display: inline-block; margin-left: 5px; border-radius: 999px; padding: 2px 6px; color: #31584e; background: #d2e2d8; font-size: 9px; font-weight: 700; vertical-align: 2px; }
 .glossary-editor { min-width: 0; display: grid; align-content: start; gap: 14px; }
 .glossary-editor > label { display: grid; gap: 6px; color: #62655e; font-size: 12px; font-weight: 700; }
 .glossary-editor input, .glossary-editor select { width: 100%; min-width: 0; border: 1px solid #d3ccbd; border-radius: 8px; padding: 9px; color: #30332d; background: #fffdf7; }

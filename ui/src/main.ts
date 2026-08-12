@@ -29,6 +29,8 @@ type Glossary = {
   id: string;
   name: string;
   source_language: LanguageCode;
+  builtin_key: string | null;
+  builtin_version: string | null;
   term_count: number;
   prompt_term_count: number;
   correction_count: number;
@@ -520,6 +522,7 @@ const glossaryLanguage = document.querySelector<HTMLSelectElement>("#glossary-la
 const glossaryTerms = document.querySelector<HTMLDivElement>("#glossary-terms");
 const glossaryMessage = document.querySelector<HTMLSpanElement>("#glossary-message");
 const deleteGlossaryButton = document.querySelector<HTMLButtonElement>("#delete-glossary");
+const saveGlossaryButton = document.querySelector<HTMLButtonElement>("#save-glossary");
 const renameJobDialog = document.querySelector<HTMLDialogElement>("#rename-job-dialog");
 const renameJobForm = document.querySelector<HTMLFormElement>("#rename-job-form");
 const renameJobInput = document.querySelector<HTMLInputElement>("#rename-job-input");
@@ -1071,7 +1074,7 @@ function renderGlossaryList(): void {
   }
   glossaryListHost.innerHTML = glossaries
     .map(
-      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}</strong><span>${languageLabel(glossary.source_language)} · 核心 ${glossary.core_term_count} · 内容 ${glossary.content_group_count} 包 · 仅修正 ${glossary.correction_only_count}</span></button>`,
+      (glossary) => `<button type="button" class="glossary-list-item${glossary.id === editingGlossaryId ? " active" : ""}" data-glossary-id="${escapeHtml(glossary.id)}"><strong>${escapeHtml(glossary.name)}${glossary.builtin_key ? ' <span class="builtin-badge">内置</span>' : ""}</strong><span>${languageLabel(glossary.source_language)} · 核心 ${glossary.core_term_count} · 内容 ${glossary.content_group_count} 包 · 仅修正 ${glossary.correction_only_count}</span></button>`,
     )
     .join("");
   glossaryListHost.querySelectorAll<HTMLButtonElement>("[data-glossary-id]").forEach((button) => {
@@ -2106,6 +2109,7 @@ async function editGlossary(glossaryId: string | null): Promise<void> {
     if (glossaryName) glossaryName.value = "";
     if (glossaryLanguage) glossaryLanguage.value = selectedSourceLanguage();
     if (deleteGlossaryButton) deleteGlossaryButton.disabled = true;
+    if (saveGlossaryButton) saveGlossaryButton.textContent = "保存词表";
     addGlossaryTermRow();
     glossaryName?.focus();
     return;
@@ -2116,7 +2120,16 @@ async function editGlossary(glossaryId: string | null): Promise<void> {
     const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
     if (glossaryName) glossaryName.value = detail.glossary.name;
     if (glossaryLanguage) glossaryLanguage.value = detail.glossary.source_language;
-    if (deleteGlossaryButton) deleteGlossaryButton.disabled = false;
+    if (deleteGlossaryButton) {
+      deleteGlossaryButton.disabled = Boolean(detail.glossary.builtin_key);
+      deleteGlossaryButton.title = detail.glossary.builtin_key ? "内置词表随 App 更新，不能删除" : "";
+    }
+    if (saveGlossaryButton) {
+      saveGlossaryButton.textContent = detail.glossary.builtin_key ? "复制并保存" : "保存词表";
+      saveGlossaryButton.title = detail.glossary.builtin_key
+        ? "内置词表保持只读；保存会创建可编辑的自定义副本"
+        : "";
+    }
     if (glossaryTerms) glossaryTerms.replaceChildren();
     for (const term of detail.terms) {
       addGlossaryTermRow(
@@ -2128,7 +2141,10 @@ async function editGlossary(glossaryId: string | null): Promise<void> {
     }
     if (detail.terms.length === 0) addGlossaryTermRow();
     if (glossaryMessage) {
-      glossaryMessage.textContent = `核心 ${detail.glossary.core_term_count} 条 · 内容 ${detail.glossary.content_term_count} 条／${detail.glossary.content_group_count} 包 · 仅修正 ${detail.glossary.correction_only_count} 条`;
+      const summary = `核心 ${detail.glossary.core_term_count} 条 · 内容 ${detail.glossary.content_term_count} 条／${detail.glossary.content_group_count} 包 · 仅修正 ${detail.glossary.correction_only_count} 条`;
+      glossaryMessage.textContent = detail.glossary.builtin_key
+        ? `${summary} · 内置词表随 App 更新，保存时会创建自定义副本`
+        : summary;
     }
   } catch (error) {
     if (glossaryMessage) glossaryMessage.textContent = `读取失败：${String(error)}`;
@@ -2182,6 +2198,9 @@ async function saveGlossaryEditor(): Promise<void> {
     .filter((term) => term.sourceText || term.targetText);
   glossaryMessage.textContent = "正在保存…";
   try {
+    const copiedFromBuiltin = Boolean(
+      glossaries.find((glossary) => glossary.id === editingGlossaryId)?.builtin_key,
+    );
     const detail = await invoke<GlossaryDetail>("save_glossary", {
       request: {
         glossaryId: editingGlossaryId,
@@ -2195,8 +2214,13 @@ async function saveGlossaryEditor(): Promise<void> {
     if (taskGlossary && detail.glossary.source_language === selectedSourceLanguage()) {
       taskGlossary.value = detail.glossary.id;
     }
+    if (workspaceGlossary && detail.glossary.source_language === activeSourceLanguage()) {
+      workspaceGlossary.value = detail.glossary.id;
+    }
     await refreshTaskGlossaryConfiguration();
-    glossaryMessage.textContent = `已保存 ${detail.terms.length} 条词条。`;
+    glossaryMessage.textContent = copiedFromBuiltin
+      ? `已从内置版本创建“${detail.glossary.name}”，保存 ${detail.terms.length} 条词条。`
+      : `已保存 ${detail.terms.length} 条词条。`;
     await editGlossary(detail.glossary.id);
   } catch (error) {
     glossaryMessage.textContent = `保存失败：${String(error)}`;
@@ -2274,7 +2298,7 @@ async function saveGlossaryCorrection(): Promise<void> {
       return;
     }
     terms.push({ sourceText, targetText, promptScope: "correction_only", contentGroup: null });
-    await invoke<GlossaryDetail>("save_glossary", {
+    const saved = await invoke<GlossaryDetail>("save_glossary", {
       request: {
         glossaryId,
         name: detail.glossary.name,
@@ -2283,8 +2307,8 @@ async function saveGlossaryCorrection(): Promise<void> {
       },
     });
     await refreshGlossaries();
-    if (workspaceGlossary) workspaceGlossary.value = glossaryId;
-    setWorkspaceAction(`已把“${sourceText} → ${targetText}”加入 ${detail.glossary.name}。字幕修改仍需单独保存。`);
+    if (workspaceGlossary) workspaceGlossary.value = saved.glossary.id;
+    setWorkspaceAction(`已把“${sourceText} → ${targetText}”加入 ${saved.glossary.name}。字幕修改仍需单独保存。`);
     state.textContent = "修正规则已加入词表；字幕修改需单独保存";
     state.classList.remove("warning");
     glossaryCorrectionDialog?.close();

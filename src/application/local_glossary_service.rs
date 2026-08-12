@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     domain::{
@@ -73,9 +74,11 @@ impl LocalGlossaryService {
     }
 
     pub async fn ensure_builtins(&self) -> Result<()> {
-        let terms = parse_builtin_glossary(include_str!("../../assets/glossaries/yorushika.txt"))?;
+        let source = include_str!("../../assets/glossaries/yorushika.txt");
+        let version = format!("sha256:{:x}", Sha256::digest(source.as_bytes()));
+        let terms = parse_builtin_glossary(source)?;
         self.database
-            .ensure_builtin_glossary("Yorushika", "prompt-scopes-v2", terms)
+            .ensure_builtin_glossary("Yorushika", "yorushika", &version, "ja", terms)
             .await
     }
 
@@ -497,8 +500,8 @@ mod tests {
         service.ensure_builtins().await.unwrap();
         let glossary = service.list().await.unwrap().remove(0);
 
-        assert_eq!(glossary.core_term_count, 17);
-        assert_eq!(glossary.content_term_count, 126);
+        assert_eq!(glossary.core_term_count, 12);
+        assert_eq!(glossary.content_term_count, 129);
         assert_eq!(glossary.correction_only_count, 2);
         assert_eq!(glossary.content_group_count, 11);
         let detail = service.get(&glossary.id).await.unwrap();
@@ -512,6 +515,9 @@ mod tests {
 
         let tosaku = glossary_for_task(&detail, &["盗作".to_string()]).unwrap();
         assert!(tosaku.whisper_prompt(None).unwrap().contains("盗作"));
+        assert!(detail.terms.iter().any(|term| {
+            term.source_text == "盗作" && term.content_group.as_deref() == Some("盗作")
+        }));
 
         drop(service);
         drop(database);
