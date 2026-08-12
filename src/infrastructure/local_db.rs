@@ -51,6 +51,8 @@ pub struct LocalGlossaryRecord {
     pub id: String,
     pub name: String,
     pub source_language: String,
+    pub builtin_key: Option<String>,
+    pub builtin_version: Option<String>,
     pub term_count: i64,
     pub prompt_term_count: i64,
     pub correction_count: i64,
@@ -577,73 +579,117 @@ impl LocalDatabase {
     pub async fn ensure_builtin_glossary(
         &self,
         name: &str,
-        seed_version: &str,
+        builtin_key: &str,
+        builtin_version: &str,
+        source_language: &str,
         terms: Vec<LocalGlossaryTermInput>,
     ) -> Result<()> {
         let name = normalized_glossary_name(name)?;
+        let builtin_key = builtin_key.trim();
+        let builtin_version = builtin_version.trim();
+        if builtin_key.is_empty() || builtin_version.is_empty() {
+            return Err(anyhow!("built-in glossary key and version cannot be empty"));
+        }
         let mut seen = HashSet::new();
         let mut terms = terms;
-        terms.retain(|term| seen.insert((term.source_text.clone(), term.target_text.clone())));
+        terms.retain(|term| {
+            seen.insert((
+                term.source_text.clone(),
+                term.target_text.clone(),
+                term.prompt_scope.clone(),
+                term.content_group.clone(),
+            ))
+        });
         let terms = normalized_glossary_terms(terms)?;
-        let setting_key = format!("builtin_glossary_seeded:{name}:{seed_version}");
-        if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM local_settings WHERE key = ?")
-            .bind(&setting_key)
-            .fetch_one(&self.pool)
+        let mut existing = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT id, builtin_version FROM local_glossaries WHERE builtin_key = ?",
+        )
+        .bind(builtin_key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to find versioned built-in glossary")?;
+        if existing.is_none() {
+            let legacy = sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT id, builtin_key FROM local_glossaries WHERE name = ?",
+            )
+            .bind(&name)
+            .fetch_optional(&self.pool)
             .await
-            .context("failed to check built-in glossary seed state")?
-            > 0
+            .context("failed to find legacy built-in glossary")?;
+            if let Some((legacy_id, None)) = legacy {
+                sqlx::query(
+                    "UPDATE local_glossaries
+                     SET builtin_key = ?, builtin_version = NULL
+                     WHERE id = ?",
+                )
+                .bind(builtin_key)
+                .bind(&legacy_id)
+                .execute(&self.pool)
+                .await
+                .context("failed to adopt legacy glossary as versioned built-in")?;
+                existing = Some((legacy_id, None));
+            }
+        }
+        if existing
+            .as_ref()
+            .and_then(|(_, version)| version.as_deref())
+            == Some(builtin_version)
         {
             return Ok(());
         }
-
-        let existing_id =
-            sqlx::query_scalar::<_, String>("SELECT id FROM local_glossaries WHERE name = ?")
-                .bind(&name)
-                .fetch_optional(&self.pool)
-                .await
-                .context("failed to check built-in glossary")?;
-        if let Some(glossary_id) = existing_id {
-            let mut tx = self.pool.begin().await?;
-            for term in terms {
-                sqlx::query(
-                    "UPDATE local_glossary_terms
-                     SET prompt_scope = ?, content_group = ?
-                     WHERE glossary_id = ? AND source_text = ?
-                       AND ((target_text IS NULL AND ? IS NULL) OR target_text = ?)",
-                )
-                .bind(term.prompt_scope)
-                .bind(term.content_group)
-                .bind(&glossary_id)
-                .bind(term.source_text)
-                .bind(&term.target_text)
-                .bind(&term.target_text)
-                .execute(&mut *tx)
-                .await
-                .context("failed to classify built-in glossary term")?;
-            }
-            tx.commit()
-                .await
-                .context("failed to classify built-in glossary")?;
-        } else {
-            self.save_glossary(None, name, "ja", terms).await?;
-        }
-
+        let glossary_id = existing
+            .map(|(id, _)| id)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let now = chrono::Utc::now().timestamp();
+        let mut tx = self.pool.begin().await?;
         sqlx::query(
-            "INSERT INTO local_settings (key, value, updated_at_unix)
-             VALUES (?, '1', ?)
-             ON CONFLICT(key) DO NOTHING",
+            "INSERT INTO local_glossaries
+                (id, name, source_language, builtin_key, builtin_version, created_at_unix, updated_at_unix)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                source_language = excluded.source_language,
+                builtin_version = excluded.builtin_version,
+                updated_at_unix = excluded.updated_at_unix",
         )
-        .bind(setting_key)
-        .bind(chrono::Utc::now().timestamp())
-        .execute(&self.pool)
+        .bind(&glossary_id)
+        .bind(&name)
+        .bind(source_language)
+        .bind(builtin_key)
+        .bind(builtin_version)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
         .await
-        .context("failed to record built-in glossary seed state")?;
+        .context("failed to save versioned built-in glossary")?;
+        sqlx::query("DELETE FROM local_glossary_terms WHERE glossary_id = ?")
+            .bind(&glossary_id)
+            .execute(&mut *tx)
+            .await?;
+        for term in terms {
+            sqlx::query(
+                "INSERT INTO local_glossary_terms
+                    (id, glossary_id, source_text, target_text, prompt_scope, content_group)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&glossary_id)
+            .bind(term.source_text)
+            .bind(term.target_text)
+            .bind(term.prompt_scope)
+            .bind(term.content_group)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit()
+            .await
+            .context("failed to update built-in glossary")?;
         Ok(())
     }
 
     pub async fn list_glossaries(&self) -> Result<Vec<LocalGlossaryRecord>> {
         sqlx::query_as::<_, LocalGlossaryRecord>(
-            "SELECT g.id, g.name, g.source_language, COUNT(t.id) AS term_count,
+            "SELECT g.id, g.name, g.source_language, g.builtin_key, g.builtin_version, COUNT(t.id) AS term_count,
                 COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.prompt_scope != 'correction_only' THEN 1 ELSE 0 END), 0) AS prompt_term_count,
                 COALESCE(SUM(CASE WHEN t.target_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS correction_count,
                 COALESCE(SUM(CASE WHEN t.prompt_scope = 'core' THEN 1 ELSE 0 END), 0) AS core_term_count,
@@ -663,7 +709,7 @@ impl LocalDatabase {
 
     pub async fn get_glossary(&self, glossary_id: &str) -> Result<Option<LocalGlossaryDetail>> {
         let glossary = sqlx::query_as::<_, LocalGlossaryRecord>(
-            "SELECT g.id, g.name, g.source_language, COUNT(t.id) AS term_count,
+            "SELECT g.id, g.name, g.source_language, g.builtin_key, g.builtin_version, COUNT(t.id) AS term_count,
                 COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.prompt_scope != 'correction_only' THEN 1 ELSE 0 END), 0) AS prompt_term_count,
                 COALESCE(SUM(CASE WHEN t.target_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS correction_count,
                 COALESCE(SUM(CASE WHEN t.prompt_scope = 'core' THEN 1 ELSE 0 END), 0) AS core_term_count,
@@ -704,9 +750,31 @@ impl LocalDatabase {
         source_language: &str,
         terms: Vec<LocalGlossaryTermInput>,
     ) -> Result<LocalGlossaryDetail> {
-        let name = normalized_glossary_name(&name)?;
+        let mut name = normalized_glossary_name(&name)?;
         let terms = normalized_glossary_terms(terms)?;
-        let glossary_id = glossary_id
+        let builtin_name = if let Some(glossary_id) = glossary_id {
+            sqlx::query_scalar::<_, String>(
+                "SELECT name FROM local_glossaries WHERE id = ? AND builtin_key IS NOT NULL",
+            )
+            .bind(glossary_id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            None
+        };
+        if let Some(builtin_name) = &builtin_name {
+            let preferred = if name == *builtin_name {
+                let base = name.strip_suffix("（内置）").unwrap_or(&name);
+                format!("{base}（自定义）")
+            } else {
+                name.clone()
+            };
+            name = self.available_glossary_name(&preferred).await?;
+        }
+        let glossary_id = builtin_name
+            .is_none()
+            .then_some(glossary_id)
+            .flatten()
             .map(str::to_string)
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let now = chrono::Utc::now().timestamp();
@@ -770,6 +838,16 @@ impl LocalDatabase {
     }
 
     pub async fn delete_glossary(&self, glossary_id: &str) -> Result<()> {
+        if sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM local_glossaries WHERE id = ? AND builtin_key IS NOT NULL",
+        )
+        .bind(glossary_id)
+        .fetch_one(&self.pool)
+        .await?
+            > 0
+        {
+            return Err(anyhow!("built-in glossaries cannot be deleted"));
+        }
         let result = sqlx::query("DELETE FROM local_glossaries WHERE id = ?")
             .bind(glossary_id)
             .execute(&self.pool)
@@ -779,6 +857,27 @@ impl LocalDatabase {
             return Err(anyhow!("local glossary not found: {glossary_id}"));
         }
         Ok(())
+    }
+
+    async fn available_glossary_name(&self, preferred: &str) -> Result<String> {
+        for suffix in 1..=10_000 {
+            let candidate = if suffix == 1 {
+                preferred.to_string()
+            } else {
+                format!("{preferred} {suffix}")
+            };
+            let exists = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM local_glossaries WHERE name = ?",
+            )
+            .bind(&candidate)
+            .fetch_one(&self.pool)
+            .await?
+                > 0;
+            if !exists {
+                return Ok(candidate);
+            }
+        }
+        Err(anyhow!("could not allocate a custom glossary name"))
     }
 
     pub async fn list_segments(&self, job_id: &str) -> Result<Vec<LocalSubtitleSegmentRecord>> {
@@ -1223,7 +1322,12 @@ fn normalized_glossary_terms(
                     "correction-only glossary terms require a canonical target"
                 ));
             }
-            if !seen.insert((source_text.clone(), target_text.clone())) {
+            if !seen.insert((
+                source_text.clone(),
+                target_text.clone(),
+                prompt_scope.clone(),
+                content_group.clone(),
+            )) {
                 return Err(anyhow!("duplicate glossary term: {source_text}"));
             }
             Ok(LocalGlossaryTermInput {
@@ -1626,7 +1730,9 @@ mod tests {
         database
             .ensure_builtin_glossary(
                 "内置词表",
+                "test-glossary",
                 "v1",
+                "ja",
                 vec![
                     LocalGlossaryTermInput {
                         source_text: "前世".to_string(),
@@ -1657,11 +1763,15 @@ mod tests {
         assert_eq!(glossaries[0].correction_count, 1);
         assert_eq!(glossaries[0].core_term_count, 1);
         assert_eq!(glossaries[0].content_group_count, 1);
-        database.delete_glossary(&glossaries[0].id).await.unwrap();
+        assert_eq!(glossaries[0].builtin_key.as_deref(), Some("test-glossary"));
+        assert_eq!(glossaries[0].builtin_version.as_deref(), Some("v1"));
+        assert!(database.delete_glossary(&glossaries[0].id).await.is_err());
         database
             .ensure_builtin_glossary(
                 "内置词表",
-                "v1",
+                "test-glossary",
+                "v2",
+                "ja",
                 vec![LocalGlossaryTermInput {
                     source_text: "前世".to_string(),
                     target_text: None,
@@ -1671,7 +1781,89 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(database.list_glossaries().await.unwrap().is_empty());
+        let glossaries = database.list_glossaries().await.unwrap();
+        assert_eq!(glossaries.len(), 1);
+        assert_eq!(glossaries[0].term_count, 1);
+        assert_eq!(glossaries[0].core_term_count, 1);
+        assert_eq!(glossaries[0].builtin_version.as_deref(), Some("v2"));
+
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_builtin_glossary_is_refreshed_and_builtin_edits_copy_on_write() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-glossary-cow-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let legacy = database
+            .save_glossary(
+                None,
+                "Yorushika".to_string(),
+                "ja",
+                vec![LocalGlossaryTermInput {
+                    source_text: "旧内置项".to_string(),
+                    target_text: None,
+                    prompt_scope: "core".to_string(),
+                    content_group: None,
+                }],
+            )
+            .await
+            .unwrap();
+        database
+            .ensure_builtin_glossary(
+                "Yorushika",
+                "yorushika",
+                "v3",
+                "ja",
+                vec![LocalGlossaryTermInput {
+                    source_text: "新版内置项".to_string(),
+                    target_text: None,
+                    prompt_scope: "core".to_string(),
+                    content_group: None,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let migrated = database
+            .get_glossary(&legacy.glossary.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(migrated.glossary.name, "Yorushika");
+        assert_eq!(migrated.glossary.builtin_key.as_deref(), Some("yorushika"));
+        assert_eq!(migrated.terms[0].source_text, "新版内置项");
+        let builtin = database
+            .list_glossaries()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|glossary| glossary.builtin_key.as_deref() == Some("yorushika"))
+            .unwrap();
+        let custom_copy = database
+            .save_glossary(
+                Some(&builtin.id),
+                builtin.name.clone(),
+                "ja",
+                vec![LocalGlossaryTermInput {
+                    source_text: "从内置修改".to_string(),
+                    target_text: None,
+                    prompt_scope: "core".to_string(),
+                    content_group: None,
+                }],
+            )
+            .await
+            .unwrap();
+        assert_ne!(custom_copy.glossary.id, builtin.id);
+        assert!(custom_copy.glossary.builtin_key.is_none());
+        assert_eq!(custom_copy.glossary.name, "Yorushika（自定义）");
+        let unchanged_builtin = database.get_glossary(&builtin.id).await.unwrap().unwrap();
+        assert_eq!(unchanged_builtin.terms[0].source_text, "新版内置项");
 
         drop(database);
         fs::remove_dir_all(root).unwrap();

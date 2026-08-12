@@ -50,7 +50,7 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 启动恢复采用显式失败而非静默续跑：数据库中仍为非终态的识别任务会与任务目录快照核对，未完成者标记为上次退出导致的失败。重试从旧任务的输入、识别参数和词表快照创建新 UUID 任务，旧目录保持只读证据；旧模型路径不可用时才使用当前设备设置中的替代模型。ffmpeg/Whisper 子进程设置为随异步任务销毁而终止。
 
-`LocalGlossaryService` 管理 SQLite 词表、任务范围 prompt 预览、差异预览和对工作区的应用。词条分为始终提示的“核心”、按任务选择的“内容包”和不占 prompt 的“仅修正”。新任务选择词表和内容包后，`LocalTaskService` 会在排队前把解析后的词条冻结为任务目录中的 `recognition-glossary.txt`，把最终 prompt 写入 `whisper-prompt.txt`，再将快照路径交给 Whisper。带规范写法的核心或内容词条会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化；仅修正规则只执行后一阶段。SQLite 保存词表关联、名称和快照路径，因此以后编辑或删除原词表不会改变旧任务实际使用的内容。
+`LocalGlossaryService` 管理 SQLite 词表、任务范围 prompt 预览、差异预览和对工作区的应用。词条分为始终提示的“核心”、按任务选择的“内容包”和不占 prompt 的“仅修正”。仓库 TXT 的 SHA-256 是内置词表版本：内容变化时启动流程完整刷新只读内置基线，用户保存内置词表则写时复制为独立自定义词表。新任务选择词表和内容包后，`LocalTaskService` 会在排队前把解析后的词条冻结为任务目录中的 `recognition-glossary.txt`，把最终 prompt 写入 `whisper-prompt.txt`，再将快照路径交给 Whisper。带规范写法的核心或内容词条会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化；仅修正规则只执行后一阶段。SQLite 保存词表关联、名称和快照路径，因此以后编辑、升级或删除原词表不会改变旧任务实际使用的内容。
 
 任务显示名称只保存在 SQLite，不改变 UUID 任务目录和原媒体。任务删除仅允许 `done` 或 `failed` 状态：`LocalTaskService` 会校验目标确实是应用 `jobs` 根目录下与任务 ID 同名的目录，先将其原子移动为待删除目录，再删除 SQLite 记录和派生文件；数据库删除失败时恢复目录。任务记录中的原媒体路径永远不参与删除。
 
