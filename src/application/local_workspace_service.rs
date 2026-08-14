@@ -132,6 +132,13 @@ impl LocalWorkspaceService {
             .await
     }
 
+    pub async fn restore_subtitle(
+        &self,
+        snapshot: &LocalSubtitleSegmentRecord,
+    ) -> Result<LocalSubtitleSegmentRecord> {
+        self.database.restore_segment(snapshot).await
+    }
+
     pub async fn translate_segment(
         &self,
         job_id: &str,

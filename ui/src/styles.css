@@ -82,7 +82,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .workspace-toolbar strong { font-size: 14px; }
 .workspace-toolbar span, .workspace-toolbar p { color: #73766e; font-size: 11px; line-height: 1.5; }
 .workspace-toolbar span.warning, .workspace-toolbar p.warning { color: #a54632; }
-.workspace-action-buttons, .subtitle-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.workspace-action-buttons, .subtitle-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .workspace-action-buttons button { white-space: nowrap; }
 .workspace-toolbar p { grid-column: 1 / -1; margin: 0; overflow-wrap: anywhere; }
 .workspace-glossary-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 280px) auto; align-items: end; gap: 10px; border-top: 1px solid #ded7c9; padding-top: 12px; }

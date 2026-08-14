@@ -58,6 +58,8 @@ struct SubtitleOverlayPayload {
     translated_text: Option<String>,
     source_language: LanguageCode,
     target_language: LanguageCode,
+    playing: bool,
+    playback_rate: f64,
 }
 
 #[derive(Default)]
@@ -206,7 +208,10 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
             }
             panel.setMinSize(NSSize::new(360.0, 120.0));
             panel.setFloatingPanel(true);
-            panel.setBecomesKeyOnlyIfNeeded(true);
+            // Keep the panel non-activating when it is shown, but allow an
+            // intentional click inside it to make its WebView key so the
+            // playback shortcuts work without returning to the main window.
+            panel.setBecomesKeyOnlyIfNeeded(false);
             panel.setHidesOnDeactivate(false);
             panel.setCollectionBehavior(behavior);
             panel.setLevel(NSScreenSaverWindowLevel);
@@ -674,6 +679,18 @@ async fn update_subtitle(
             request.start_ms,
             request.end_ms,
         )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn restore_subtitle(
+    state: State<'_, DesktopState>,
+    snapshot: LocalSubtitleSegmentRecord,
+) -> Result<LocalSubtitleSegmentRecord, String> {
+    state
+        .workspace_service
+        .restore_subtitle(&snapshot)
         .await
         .map_err(|error| error.to_string())
 }
@@ -1262,7 +1279,8 @@ fn main() {
             translate_subtitle,
             translation_status,
             update_subtitle_overlay,
-            update_subtitle
+            update_subtitle,
+            restore_subtitle
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Atogaki desktop application");
