@@ -180,6 +180,10 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .module-number { color: #a54632; font-family: ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .export-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .export-card-actions button { align-self: auto; }
+.subtitle-export-dialog { width: min(560px, calc(100vw - 32px)); }
+.subtitle-export-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.subtitle-export-options label { display: flex; gap: 9px; align-items: center; padding: 12px; border: 1px solid #d8d0c1; border-radius: 10px; background: #fffdf7; }
+.subtitle-export-options input { width: auto; }
 
 .glossary-dialog { width: min(1180px, calc(100vw - 40px)); max-height: calc(100vh - 40px); overflow: auto; border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: #22251f; background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
 .glossary-dialog::backdrop { background: rgba(32, 35, 31, .38); backdrop-filter: blur(3px); }

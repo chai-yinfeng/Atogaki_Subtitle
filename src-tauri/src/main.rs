@@ -13,8 +13,9 @@ use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
         LocalGlossaryService, LocalGlossaryTermDraft, LocalRenderRequest, LocalRenderService,
-        LocalSubtitleExport, LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus,
-        LocalWorkspaceService, MutableTranslationProvider, TranscriptionOptions,
+        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan, LocalTaskService,
+        LocalTranslationStatus, LocalWorkspaceService, MutableTranslationProvider,
+        TranscriptionOptions,
         UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
     },
     domain::{LanguageCode, subtitle::SubtitleTrack},
@@ -416,6 +417,7 @@ struct SubtitleExportRequest {
     job_id: String,
     output_directory: String,
     overwrite_existing: bool,
+    artifacts: Vec<LocalSubtitleExportArtifact>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -423,6 +425,7 @@ struct SubtitleExportRequest {
 struct SubtitleExportPlanRequest {
     job_id: String,
     output_directory: String,
+    artifacts: Vec<LocalSubtitleExportArtifact>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -839,6 +842,7 @@ async fn export_workspace_subtitles(
             &request.job_id,
             &PathBuf::from(request.output_directory),
             request.overwrite_existing,
+            &request.artifacts,
         )
         .await
         .map_err(|error| error.to_string())
@@ -851,7 +855,11 @@ async fn preview_workspace_subtitle_export(
 ) -> Result<LocalSubtitleExportPlan, String> {
     state
         .workspace_service
-        .subtitle_export_plan(&request.job_id, &PathBuf::from(request.output_directory))
+        .subtitle_export_plan(
+            &request.job_id,
+            &PathBuf::from(request.output_directory),
+            &request.artifacts,
+        )
         .await
         .map_err(|error| error.to_string())
 }
