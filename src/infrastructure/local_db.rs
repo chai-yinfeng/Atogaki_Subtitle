@@ -88,7 +88,7 @@ pub struct LocalGlossaryTermInput {
     pub content_group: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
+#[derive(Debug, Clone, Deserialize, Serialize, FromRow, PartialEq, Eq)]
 pub struct LocalSubtitleSegmentRecord {
     pub id: String,
     pub job_id: String,
@@ -281,7 +281,14 @@ impl LocalDatabase {
         .await
         .context("failed to upsert local task")?;
 
-        if !snapshot.segments.is_empty() {
+        let structure_edited = sqlx::query_scalar::<_, bool>(
+            "SELECT subtitle_structure_edited FROM local_jobs WHERE job_id = ?",
+        )
+        .bind(&manifest.job_id)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to read local subtitle structure state")?;
+        if !snapshot.segments.is_empty() && !structure_edited {
             self.merge_snapshot_segments_in_transaction(
                 &mut tx,
                 &manifest.job_id,
@@ -1208,6 +1215,140 @@ impl LocalDatabase {
         Ok(restored)
     }
 
+    pub async fn split_segment(
+        &self,
+        job_id: &str,
+        segment_id: &str,
+        boundary_ms: i64,
+        left_source_text: String,
+        right_source_text: String,
+        left_translated_text: Option<String>,
+        right_translated_text: Option<String>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        let left_source_text = normalized_subtitle_text(left_source_text, "left source subtitle")?;
+        let right_source_text =
+            normalized_subtitle_text(right_source_text, "right source subtitle")?;
+        let left_translated_text = normalized_optional_subtitle_text(left_translated_text);
+        let right_translated_text = normalized_optional_subtitle_text(right_translated_text);
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin subtitle split transaction")?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let mut segments = list_segments_in_transaction(&mut tx, job_id).await?;
+        let index = segments
+            .iter()
+            .position(|segment| segment.id == segment_id)
+            .ok_or_else(|| anyhow!("subtitle segment not found: {segment_id}"))?;
+        let original = segments[index].clone();
+        if boundary_ms <= original.start_ms || boundary_ms >= original.end_ms {
+            return Err(anyhow!(
+                "subtitle split boundary must be inside the selected segment"
+            ));
+        }
+
+        let translations = match (left_translated_text, right_translated_text) {
+            (Some(left), Some(right)) => (Some(left), Some(right), true),
+            _ => (None, None, false),
+        };
+        let mut left = original.clone();
+        left.end_ms = boundary_ms;
+        left.source_text = left_source_text;
+        left.translated_text = translations.0;
+        left.source_edited = true;
+        left.translation_edited = translations.2;
+        left.translation_stale = false;
+        left.timing_edited = true;
+        let mut right = original;
+        right.id = uuid::Uuid::new_v4().to_string();
+        right.start_ms = boundary_ms;
+        right.source_text = right_source_text;
+        right.translated_text = translations.1;
+        right.source_edited = true;
+        right.translation_edited = translations.2;
+        right.translation_stale = false;
+        right.timing_edited = true;
+        segments.splice(index..=index, [left, right]);
+        persist_structure_segments(&mut tx, job_id, &mut segments).await?;
+        tx.commit()
+            .await
+            .context("failed to commit subtitle split transaction")?;
+        Ok(segments)
+    }
+
+    pub async fn merge_adjacent_segments(
+        &self,
+        job_id: &str,
+        left_segment_id: &str,
+        right_segment_id: &str,
+        source_text: String,
+        translated_text: Option<String>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        let source_text = normalized_subtitle_text(source_text, "merged source subtitle")?;
+        let requested_translation = normalized_optional_subtitle_text(translated_text);
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin subtitle merge transaction")?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let mut segments = list_segments_in_transaction(&mut tx, job_id).await?;
+        let left_index = segments
+            .iter()
+            .position(|segment| segment.id == left_segment_id)
+            .ok_or_else(|| anyhow!("subtitle segment not found: {left_segment_id}"))?;
+        if left_index + 1 >= segments.len() || segments[left_index + 1].id != right_segment_id {
+            return Err(anyhow!("only adjacent subtitle segments can be merged"));
+        }
+        let left = segments[left_index].clone();
+        let right = segments[left_index + 1].clone();
+        let both_translated = left.translated_text.is_some() && right.translated_text.is_some();
+        let merged_translation = requested_translation.filter(|_| both_translated);
+        let mut merged = left.clone();
+        merged.start_ms = left.start_ms.min(right.start_ms);
+        merged.end_ms = left.end_ms.max(right.end_ms);
+        merged.source_text = source_text;
+        merged.translated_text = merged_translation.clone();
+        merged.source_edited = true;
+        merged.translation_edited = merged_translation.is_some();
+        merged.translation_stale =
+            merged_translation.is_some() && (left.translation_stale || right.translation_stale);
+        merged.timing_edited = true;
+        segments.splice(left_index..=left_index + 1, [merged]);
+        persist_structure_segments(&mut tx, job_id, &mut segments).await?;
+        tx.commit()
+            .await
+            .context("failed to commit subtitle merge transaction")?;
+        Ok(segments)
+    }
+
+    pub async fn restore_segment_structure(
+        &self,
+        job_id: &str,
+        before_segments: &[LocalSubtitleSegmentRecord],
+        after_segments: &[LocalSubtitleSegmentRecord],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin subtitle structure restore transaction")?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let current = list_segments_in_transaction(&mut tx, job_id).await?;
+        if current != after_segments {
+            return Err(anyhow!(
+                "subtitle structure changed after this operation; reload before undoing"
+            ));
+        }
+        let mut restored = before_segments.to_vec();
+        persist_structure_segments(&mut tx, job_id, &mut restored).await?;
+        tx.commit()
+            .await
+            .context("failed to commit subtitle structure restore transaction")?;
+        Ok(restored)
+    }
+
     pub async fn replace_segments(
         &self,
         job_id: &str,
@@ -1342,6 +1483,121 @@ impl LocalDatabase {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn normalized_subtitle_text(value: String, field: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(anyhow!("{field} cannot be empty"));
+    }
+    Ok(value.to_string())
+}
+
+fn normalized_optional_subtitle_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+async fn ensure_structure_editable(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+) -> Result<()> {
+    let status = sqlx::query_scalar::<_, String>("SELECT status FROM local_jobs WHERE job_id = ?")
+        .bind(job_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .context("failed to read subtitle task state")?
+        .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+    if !matches!(status.as_str(), "done" | "failed") {
+        return Err(anyhow!(
+            "subtitle structure can only be edited after transcription stops"
+        ));
+    }
+    Ok(())
+}
+
+async fn list_segments_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+    sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
+        "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
+            source_edited, translation_edited, translation_stale, timing_edited
+         FROM local_subtitle_segments
+         WHERE job_id = ?
+         ORDER BY segment_index ASC",
+    )
+    .bind(job_id)
+    .fetch_all(&mut **tx)
+    .await
+    .context("failed to read subtitle structure")
+}
+
+async fn persist_structure_segments(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    segments: &mut [LocalSubtitleSegmentRecord],
+) -> Result<()> {
+    let mut ids = HashSet::new();
+    for (index, segment) in segments.iter_mut().enumerate() {
+        if segment.job_id != job_id {
+            return Err(anyhow!("subtitle segment belongs to a different task"));
+        }
+        if !ids.insert(segment.id.clone()) {
+            return Err(anyhow!("duplicate subtitle segment id: {}", segment.id));
+        }
+        if segment.start_ms < 0 || segment.end_ms <= segment.start_ms {
+            return Err(anyhow!(
+                "invalid subtitle timing for segment {}",
+                segment.id
+            ));
+        }
+        segment.source_text =
+            normalized_subtitle_text(std::mem::take(&mut segment.source_text), "source subtitle")?;
+        segment.translated_text = normalized_optional_subtitle_text(segment.translated_text.take());
+        segment.segment_index =
+            i64::try_from(index).context("subtitle index exceeds SQLite i64")?;
+    }
+
+    sqlx::query("DELETE FROM local_subtitle_segments WHERE job_id = ?")
+        .bind(job_id)
+        .execute(&mut **tx)
+        .await
+        .context("failed to replace subtitle structure")?;
+    for segment in segments.iter() {
+        sqlx::query(
+            "INSERT INTO local_subtitle_segments (
+                id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
+                source_edited, translation_edited, translation_stale, timing_edited
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&segment.id)
+        .bind(job_id)
+        .bind(segment.segment_index)
+        .bind(segment.start_ms)
+        .bind(segment.end_ms)
+        .bind(&segment.source_text)
+        .bind(&segment.translated_text)
+        .bind(segment.source_edited)
+        .bind(segment.translation_edited)
+        .bind(segment.translation_stale)
+        .bind(segment.timing_edited)
+        .execute(&mut **tx)
+        .await
+        .context("failed to insert edited subtitle structure")?;
+    }
+    sqlx::query(
+        "UPDATE local_jobs
+         SET subtitle_structure_edited = 1, updated_at_unix = MAX(updated_at_unix, ?)
+         WHERE job_id = ?",
+    )
+    .bind(chrono::Utc::now().timestamp())
+    .bind(job_id)
+    .execute(&mut **tx)
+    .await
+    .context("failed to freeze edited subtitle structure")?;
+    Ok(())
+}
+
 async fn insert_segment(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     job_id: &str,
@@ -1702,6 +1958,146 @@ mod tests {
         assert!(!restored.translation_edited);
         assert!(!restored.translation_stale);
         assert!(!restored.timing_edited);
+
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn splits_merges_restores_and_freezes_subtitle_structure() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-local-structure-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        let mut first = TranscriptSegment::new(0, 1_000, "hello world".to_string());
+        first.set_translation(Some("你好 世界".to_string()));
+        let mut second = TranscriptSegment::new(1_100, 2_000, "again".to_string());
+        second.set_translation(Some("再次".to_string()));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first.clone(), second.clone()],
+            })
+            .await
+            .unwrap();
+        let original = database.list_segments(&manifest.job_id).await.unwrap();
+
+        let split = database
+            .split_segment(
+                &manifest.job_id,
+                &first.id,
+                500,
+                "hello".to_string(),
+                "world".to_string(),
+                Some("你好".to_string()),
+                Some("世界".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(split.len(), 3);
+        assert_eq!(split[0].id, first.id);
+        assert_ne!(split[1].id, first.id);
+        assert_eq!(split[1].segment_index, 1);
+        assert!(split[0].source_edited && split[1].source_edited);
+        assert!(split[0].timing_edited && split[1].timing_edited);
+
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first.clone(), second.clone()],
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            database.list_segments(&manifest.job_id).await.unwrap(),
+            split
+        );
+
+        let restored = database
+            .restore_segment_structure(&manifest.job_id, &original, &split)
+            .await
+            .unwrap();
+        assert_eq!(restored, original);
+        let split_again = database
+            .split_segment(
+                &manifest.job_id,
+                &first.id,
+                500,
+                "hello".to_string(),
+                "world".to_string(),
+                Some("你好".to_string()),
+                Some("世界".to_string()),
+            )
+            .await
+            .unwrap();
+        let merged = database
+            .merge_adjacent_segments(
+                &manifest.job_id,
+                &split_again[0].id,
+                &split_again[1].id,
+                "hello world".to_string(),
+                Some("你好 世界".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].id, first.id);
+        assert_eq!(merged[0].source_text, "hello world");
+        assert_eq!(merged[0].translated_text.as_deref(), Some("你好 世界"));
+        let restored_split = database
+            .restore_segment_structure(&manifest.job_id, &split_again, &merged)
+            .await
+            .unwrap();
+        assert_eq!(restored_split, split_again);
+
+        first.source_text = "incoming snapshot must not replace structure".to_string();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest,
+                segments: vec![first, second],
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            database
+                .list_segments(&restored_split[0].job_id)
+                .await
+                .unwrap(),
+            restored_split
+        );
+
+        let partially_translated_split = database
+            .split_segment(
+                &restored_split[0].job_id,
+                &restored_split[1].id,
+                750,
+                "wo".to_string(),
+                "rld".to_string(),
+                Some("世".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(partially_translated_split[1].translated_text.is_none());
+        assert!(partially_translated_split[2].translated_text.is_none());
+        let untranslated_merge = database
+            .merge_adjacent_segments(
+                &restored_split[0].job_id,
+                &partially_translated_split[1].id,
+                &partially_translated_split[2].id,
+                "world".to_string(),
+                Some("世界".to_string()),
+            )
+            .await
+            .unwrap();
+        assert!(untranslated_merge[1].translated_text.is_none());
 
         drop(database);
         fs::remove_dir_all(root).unwrap();

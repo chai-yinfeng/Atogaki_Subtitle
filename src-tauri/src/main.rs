@@ -382,6 +382,36 @@ struct UpdateSubtitleRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SplitSubtitleRequest {
+    job_id: String,
+    segment_id: String,
+    boundary_ms: i64,
+    left_source_text: String,
+    right_source_text: String,
+    left_translated_text: Option<String>,
+    right_translated_text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeSubtitlesRequest {
+    job_id: String,
+    left_segment_id: String,
+    right_segment_id: String,
+    source_text: String,
+    translated_text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RestoreSubtitleStructureRequest {
+    job_id: String,
+    before_segments: Vec<LocalSubtitleSegmentRecord>,
+    after_segments: Vec<LocalSubtitleSegmentRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SubtitleExportRequest {
     job_id: String,
     output_directory: String,
@@ -691,6 +721,60 @@ async fn restore_subtitle(
     state
         .workspace_service
         .restore_subtitle(&snapshot)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn split_subtitle(
+    state: State<'_, DesktopState>,
+    request: SplitSubtitleRequest,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .workspace_service
+        .split_subtitle(
+            &request.job_id,
+            &request.segment_id,
+            request.boundary_ms,
+            request.left_source_text,
+            request.right_source_text,
+            request.left_translated_text,
+            request.right_translated_text,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn merge_subtitles(
+    state: State<'_, DesktopState>,
+    request: MergeSubtitlesRequest,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .workspace_service
+        .merge_subtitles(
+            &request.job_id,
+            &request.left_segment_id,
+            &request.right_segment_id,
+            request.source_text,
+            request.translated_text,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn restore_subtitle_structure(
+    state: State<'_, DesktopState>,
+    request: RestoreSubtitleStructureRequest,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .workspace_service
+        .restore_subtitle_structure(
+            &request.job_id,
+            &request.before_segments,
+            &request.after_segments,
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -1280,7 +1364,10 @@ fn main() {
             translation_status,
             update_subtitle_overlay,
             update_subtitle,
-            restore_subtitle
+            restore_subtitle,
+            split_subtitle,
+            merge_subtitles,
+            restore_subtitle_structure
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Atogaki desktop application");
@@ -1404,28 +1491,23 @@ mod tests {
     #[test]
     fn desktop_job_summary_distinguishes_translation_coverage() {
         assert_eq!(
-            DesktopJobSummary::new(test_job(), Some(translation_stats(0, 0, 0)))
-                .translation_status,
+            DesktopJobSummary::new(test_job(), Some(translation_stats(0, 0, 0))).translation_status,
             "not_ready"
         );
         assert_eq!(
-            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 0, 0)))
-                .translation_status,
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 0, 0))).translation_status,
             "untranslated"
         );
         assert_eq!(
-            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 2, 0)))
-                .translation_status,
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 2, 0))).translation_status,
             "partial"
         );
         assert_eq!(
-            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 3, 0)))
-                .translation_status,
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 3, 0))).translation_status,
             "translated"
         );
         assert_eq!(
-            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 3, 1)))
-                .translation_status,
+            DesktopJobSummary::new(test_job(), Some(translation_stats(3, 3, 1))).translation_status,
             "stale"
         );
     }

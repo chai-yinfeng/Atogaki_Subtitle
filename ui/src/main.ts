@@ -107,6 +107,16 @@ type SubtitleUndoEntry = {
   afterFingerprint: string;
 };
 
+type SubtitleStructureUndoEntry = {
+  before: SubtitleSegment[];
+  after: SubtitleSegment[];
+  label: string;
+};
+
+type PendingSubtitleStructureAction =
+  | { kind: "split"; segment: SubtitleSegment }
+  | { kind: "merge"; left: SubtitleSegment; right: SubtitleSegment };
+
 type JobDetail = {
   job: LocalJob;
   segments: SubtitleSegment[];
@@ -350,7 +360,7 @@ app.innerHTML = `
         <section class="timeline" aria-labelledby="timeline-title">
           <div class="section-heading">
             <h2 id="timeline-title">字幕时间轴</h2>
-            <span id="segment-count"></span>
+            <div class="timeline-heading-actions"><span id="segment-count"></span><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销上次拆分／合并</button></div>
           </div>
           <div id="subtitle-list" class="subtitle-list"></div>
         </section>
@@ -400,6 +410,17 @@ app.innerHTML = `
           <button id="cancel-confirmation" type="button" class="secondary">取消</button>
           <button id="accept-confirmation" type="submit">继续</button>
         </div>
+      </form>
+    </dialog>
+    <dialog id="subtitle-structure-dialog" class="subtitle-structure-dialog">
+      <form id="subtitle-structure-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">SUBTITLE STRUCTURE</p><h2 id="subtitle-structure-title">调整字幕结构</h2></div>
+          <button id="cancel-subtitle-structure" type="button" class="secondary">取消</button>
+        </div>
+        <p id="subtitle-structure-help" class="dialog-help"></p>
+        <div id="subtitle-structure-editor" class="subtitle-structure-editor"></div>
+        <div class="subtitle-structure-footer"><span id="subtitle-structure-message" role="status"></span><button id="submit-subtitle-structure" type="submit">确认</button></div>
       </form>
     </dialog>
     <dialog id="glossary-correction-dialog" class="rename-job-dialog glossary-correction-dialog">
@@ -565,6 +586,14 @@ const confirmationForm = document.querySelector<HTMLFormElement>("#confirmation-
 const confirmationTitle = document.querySelector<HTMLHeadingElement>("#confirmation-title");
 const confirmationMessage = document.querySelector<HTMLParagraphElement>("#confirmation-message");
 const acceptConfirmationButton = document.querySelector<HTMLButtonElement>("#accept-confirmation");
+const subtitleStructureDialog = document.querySelector<HTMLDialogElement>("#subtitle-structure-dialog");
+const subtitleStructureForm = document.querySelector<HTMLFormElement>("#subtitle-structure-form");
+const subtitleStructureTitle = document.querySelector<HTMLHeadingElement>("#subtitle-structure-title");
+const subtitleStructureHelp = document.querySelector<HTMLParagraphElement>("#subtitle-structure-help");
+const subtitleStructureEditor = document.querySelector<HTMLDivElement>("#subtitle-structure-editor");
+const subtitleStructureMessage = document.querySelector<HTMLSpanElement>("#subtitle-structure-message");
+const submitSubtitleStructureButton = document.querySelector<HTMLButtonElement>("#submit-subtitle-structure");
+const undoSubtitleStructureButton = document.querySelector<HTMLButtonElement>("#undo-subtitle-structure");
 const glossaryCorrectionDialog = document.querySelector<HTMLDialogElement>("#glossary-correction-dialog");
 const glossaryCorrectionForm = document.querySelector<HTMLFormElement>("#glossary-correction-form");
 const glossaryCorrectionSource = document.querySelector<HTMLInputElement>("#glossary-correction-source");
@@ -606,6 +635,8 @@ let activeSegmentId: string | null = null;
 let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
 const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
+const subtitleStructureUndoHistory = new Map<string, SubtitleStructureUndoEntry[]>();
+let pendingSubtitleStructureAction: PendingSubtitleStructureAction | null = null;
 let workspaceActionBusy = false;
 let lastExportedSubtitlePath: string | null = null;
 let glossaries: Glossary[] = [];
@@ -1446,6 +1477,256 @@ function mountMedia(primaryPath: string | null, fallbackPath: string | null): vo
   loadPath(firstPath, firstPath === fallbackPath && primaryPath === null);
 }
 
+function cloneSubtitleSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
+  return segments.map((segment) => ({ ...segment }));
+}
+
+function subtitleStructureFingerprint(segments: SubtitleSegment[]): string {
+  return JSON.stringify(segments);
+}
+
+function currentStructureUndoEntry(): SubtitleStructureUndoEntry | undefined {
+  if (!activeDetail) return undefined;
+  return subtitleStructureUndoHistory.get(activeDetail.job.job_id)?.at(-1);
+}
+
+function updateStructureUndoButton(): void {
+  if (!undoSubtitleStructureButton) return;
+  const entry = currentStructureUndoEntry();
+  const available = Boolean(
+    activeDetail && entry && subtitleStructureFingerprint(activeDetail.segments) === subtitleStructureFingerprint(entry.after),
+  );
+  undoSubtitleStructureButton.disabled = !available;
+  undoSubtitleStructureButton.title = available
+    ? `撤销${entry?.label ?? "上一次结构修改"}`
+    : "只有当前字幕仍与上一次拆分或合并结果一致时才能撤销";
+}
+
+function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment[], label: string): void {
+  if (!activeDetail) return;
+  const jobId = activeDetail.job.job_id;
+  const history = subtitleStructureUndoHistory.get(jobId) ?? [];
+  history.push({ before: cloneSubtitleSegments(before), after: cloneSubtitleSegments(after), label });
+  if (history.length > 10) history.shift();
+  subtitleStructureUndoHistory.set(jobId, history);
+  for (const key of subtitleUndoHistory.keys()) {
+    if (key.startsWith(`${jobId}:`)) subtitleUndoHistory.delete(key);
+  }
+}
+
+function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?: string): void {
+  if (!activeDetail) return;
+  activeDetail.segments = segments;
+  if (segmentCount) segmentCount.textContent = `${segments.length} 段`;
+  renderSubtitleListPreservingView(segments, expandedSegmentId);
+  updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+  lastSubtitleOverlayKey = "";
+  updateStructureUndoButton();
+}
+
+function suggestedSplitIndex(text: string, preferred?: number): number {
+  if (preferred && preferred > 0 && preferred < text.length) {
+    const left = text.slice(0, preferred).trim();
+    const right = text.slice(preferred).trim();
+    if (left && right) return preferred;
+  }
+  const midpoint = Math.floor(text.length / 2);
+  const candidates = Array.from(text.matchAll(/[\s，。！？、,.!?;；:：]/g))
+    .map((match) => (match.index ?? 0) + 1)
+    .filter((index) => text.slice(0, index).trim() && text.slice(index).trim());
+  return candidates.sort((left, right) => Math.abs(left - midpoint) - Math.abs(right - midpoint))[0] ?? midpoint;
+}
+
+function splitTextDraft(text: string, preferred?: number): [string, string] {
+  if (!text) return ["", ""];
+  const index = suggestedSplitIndex(text, preferred);
+  return [text.slice(0, index).trim(), text.slice(index).trim()];
+}
+
+function joinedSubtitleText(left: string, right: string, language: LanguageCode): string {
+  const leftText = left.trim();
+  const rightText = right.trim();
+  if (!leftText) return rightText;
+  if (!rightText) return leftText;
+  const noSeparator = /\s$/.test(left) || /^\s/.test(right) || /^[，。！？、,.!?;；:：…]/.test(rightText);
+  const separator = noSeparator || (language !== "en" && language !== "ko") ? "" : " ";
+  return `${leftText}${separator}${rightText}`;
+}
+
+function structureTextarea(id: string, label: string, value: string): HTMLLabelElement {
+  const field = document.createElement("label");
+  field.textContent = label;
+  const textarea = document.createElement("textarea");
+  textarea.id = id;
+  textarea.rows = 3;
+  textarea.value = value;
+  field.append(textarea);
+  return field;
+}
+
+function openSplitSubtitleDialog(segment: SubtitleSegment, sourceInput: HTMLTextAreaElement): void {
+  if (!subtitleStructureDialog || !subtitleStructureEditor || !subtitleStructureTitle || !subtitleStructureHelp || !submitSubtitleStructureButton) return;
+  if (hasUnsavedSubtitleEdits()) {
+    setWorkspaceAction("拆分前请先保存或放弃当前任务中尚未保存的字幕修改。", true);
+    return;
+  }
+  const splitIndex = suggestedSplitIndex(segment.source_text, sourceInput.selectionStart ?? undefined);
+  const [leftSource, rightSource] = splitTextDraft(segment.source_text, splitIndex);
+  if (!leftSource || !rightSource) {
+    setWorkspaceAction("当前原文无法拆成两个非空段；请先补充内容，或把光标放在正文内部。", true);
+    return;
+  }
+  const translationRatio = segment.source_text.length > 0 ? splitIndex / segment.source_text.length : 0.5;
+  const translationPreferred = segment.translated_text
+    ? Math.round(segment.translated_text.length * translationRatio)
+    : undefined;
+  const [leftTranslation, rightTranslation] = splitTextDraft(segment.translated_text ?? "", translationPreferred);
+  const playhead = Math.round((activeMedia?.currentTime ?? 0) * 1_000);
+  const boundary = playhead > segment.start_ms && playhead < segment.end_ms
+    ? playhead
+    : Math.round((segment.start_ms + segment.end_ms) / 2);
+
+  pendingSubtitleStructureAction = { kind: "split", segment };
+  subtitleStructureTitle.textContent = `拆分第 ${segment.segment_index + 1} 段`;
+  subtitleStructureHelp.textContent = "确认左右原文、译文与时间边界。译文预估只用于起点，请在提交前人工确认；任一侧译文留空会把两段都保存为未翻译。";
+  subtitleStructureEditor.replaceChildren();
+  const timing = document.createElement("label");
+  timing.textContent = "新分界时间（时:分:秒.毫秒）";
+  const timingInput = document.createElement("input");
+  timingInput.id = "subtitle-split-boundary";
+  timingInput.value = formatEditableTime(boundary);
+  timing.append(timingInput);
+  const columns = document.createElement("div");
+  columns.className = "subtitle-structure-columns";
+  const left = document.createElement("fieldset");
+  const leftLegend = document.createElement("legend");
+  leftLegend.textContent = `${formatTime(segment.start_ms)} → 新分界`;
+  left.append(leftLegend, structureTextarea("subtitle-left-source", "左段原文", leftSource), structureTextarea("subtitle-left-translation", "左段译文", leftTranslation));
+  const right = document.createElement("fieldset");
+  const rightLegend = document.createElement("legend");
+  rightLegend.textContent = `新分界 → ${formatTime(segment.end_ms)}`;
+  right.append(rightLegend, structureTextarea("subtitle-right-source", "右段原文", rightSource), structureTextarea("subtitle-right-translation", "右段译文", rightTranslation));
+  columns.append(left, right);
+  subtitleStructureEditor.append(timing, columns);
+  if (subtitleStructureMessage) subtitleStructureMessage.textContent = "";
+  submitSubtitleStructureButton.textContent = "确认拆分";
+  subtitleStructureDialog.showModal();
+  document.querySelector<HTMLTextAreaElement>("#subtitle-left-source")?.focus();
+}
+
+function openMergeSubtitleDialog(left: SubtitleSegment, right: SubtitleSegment): void {
+  if (!subtitleStructureDialog || !subtitleStructureEditor || !subtitleStructureTitle || !subtitleStructureHelp || !submitSubtitleStructureButton) return;
+  if (hasUnsavedSubtitleEdits()) {
+    setWorkspaceAction("合并前请先保存或放弃当前任务中尚未保存的字幕修改。", true);
+    return;
+  }
+  const bothTranslated = Boolean(left.translated_text && right.translated_text);
+  pendingSubtitleStructureAction = { kind: "merge", left, right };
+  subtitleStructureTitle.textContent = `合并第 ${left.segment_index + 1}、${right.segment_index + 1} 段`;
+  subtitleStructureHelp.textContent = bothTranslated
+    ? "合并后时间覆盖两段完整区间。请确认连接后的原文和译文；任一旧译文已过期时，结果仍保持待重译。"
+    : "其中一段没有译文。为避免把部分译文误计为完整译文，合并结果将保存为未翻译。";
+  subtitleStructureEditor.replaceChildren();
+  const range = document.createElement("p");
+  range.className = "subtitle-structure-range";
+  range.textContent = `${formatTime(Math.min(left.start_ms, right.start_ms))} → ${formatTime(Math.max(left.end_ms, right.end_ms))}`;
+  const source = structureTextarea(
+    "subtitle-merged-source",
+    "合并后原文",
+    joinedSubtitleText(left.source_text, right.source_text, activeSourceLanguage()),
+  );
+  const translation = structureTextarea(
+    "subtitle-merged-translation",
+    "合并后译文",
+    bothTranslated
+      ? joinedSubtitleText(left.translated_text ?? "", right.translated_text ?? "", activeTargetLanguage())
+      : "",
+  );
+  translation.querySelector("textarea")!.disabled = !bothTranslated;
+  subtitleStructureEditor.append(range, source, translation);
+  if (subtitleStructureMessage) subtitleStructureMessage.textContent = "";
+  submitSubtitleStructureButton.textContent = "确认合并";
+  subtitleStructureDialog.showModal();
+  document.querySelector<HTMLTextAreaElement>("#subtitle-merged-source")?.focus();
+}
+
+async function submitSubtitleStructure(): Promise<void> {
+  if (!pendingSubtitleStructureAction || !activeDetail || !submitSubtitleStructureButton || !subtitleStructureMessage) return;
+  const before = cloneSubtitleSegments(activeDetail.segments);
+  submitSubtitleStructureButton.disabled = true;
+  subtitleStructureMessage.textContent = "正在保存结构修改…";
+  try {
+    let after: SubtitleSegment[];
+    let label: string;
+    let expandedId: string;
+    if (pendingSubtitleStructureAction.kind === "split") {
+      const segment = pendingSubtitleStructureAction.segment;
+      const boundary = parseTimecode(document.querySelector<HTMLInputElement>("#subtitle-split-boundary")?.value ?? "");
+      if (boundary === null) throw new Error("分界时间格式无效");
+      after = await invoke<SubtitleSegment[]>("split_subtitle", {
+        request: {
+          jobId: activeDetail.job.job_id,
+          segmentId: segment.id,
+          boundaryMs: boundary,
+          leftSourceText: document.querySelector<HTMLTextAreaElement>("#subtitle-left-source")?.value ?? "",
+          rightSourceText: document.querySelector<HTMLTextAreaElement>("#subtitle-right-source")?.value ?? "",
+          leftTranslatedText: document.querySelector<HTMLTextAreaElement>("#subtitle-left-translation")?.value.trim() || null,
+          rightTranslatedText: document.querySelector<HTMLTextAreaElement>("#subtitle-right-translation")?.value.trim() || null,
+        },
+      });
+      label = `第 ${segment.segment_index + 1} 段拆分`;
+      expandedId = segment.id;
+    } else {
+      const { left, right } = pendingSubtitleStructureAction;
+      after = await invoke<SubtitleSegment[]>("merge_subtitles", {
+        request: {
+          jobId: activeDetail.job.job_id,
+          leftSegmentId: left.id,
+          rightSegmentId: right.id,
+          sourceText: document.querySelector<HTMLTextAreaElement>("#subtitle-merged-source")?.value ?? "",
+          translatedText: document.querySelector<HTMLTextAreaElement>("#subtitle-merged-translation")?.value.trim() || null,
+        },
+      });
+      label = `第 ${left.segment_index + 1}、${right.segment_index + 1} 段合并`;
+      expandedId = left.id;
+    }
+    rememberStructureEdit(before, after, label);
+    applySubtitleStructure(after, expandedId);
+    subtitleStructureDialog?.close();
+    pendingSubtitleStructureAction = null;
+    setWorkspaceAction(`已完成${label}；可在时间轴标题旁撤销本次结构修改。`);
+  } catch (error) {
+    subtitleStructureMessage.textContent = `保存失败：${String(error)}`;
+  } finally {
+    submitSubtitleStructureButton.disabled = false;
+  }
+}
+
+async function undoSubtitleStructure(): Promise<void> {
+  if (!activeDetail || !undoSubtitleStructureButton) return;
+  const history = subtitleStructureUndoHistory.get(activeDetail.job.job_id);
+  const entry = history?.at(-1);
+  if (!entry) return;
+  undoSubtitleStructureButton.disabled = true;
+  try {
+    const restored = await invoke<SubtitleSegment[]>("restore_subtitle_structure", {
+      request: {
+        jobId: activeDetail.job.job_id,
+        beforeSegments: entry.before,
+        afterSegments: entry.after,
+      },
+    });
+    history?.pop();
+    if (history?.length === 0) subtitleStructureUndoHistory.delete(activeDetail.job.job_id);
+    applySubtitleStructure(restored, restored[0]?.id);
+    setWorkspaceAction(`已撤销${entry.label}。结构撤销历史只在当前 App 会话内保留。`);
+  } catch (error) {
+    setWorkspaceAction(`无法撤销结构修改：${String(error)}`, true);
+  } finally {
+    updateStructureUndoButton();
+  }
+}
+
 function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: string): void {
   if (!subtitleList) return;
   subtitleList.replaceChildren();
@@ -1454,7 +1735,7 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     return;
   }
 
-  for (const segment of segments) {
+  for (const [segmentPosition, segment] of segments.entries()) {
     const card = document.createElement("article");
     card.className = "subtitle-card";
     card.dataset.segmentId = segment.id;
@@ -1603,6 +1884,26 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     timing.append(timingSummary, timingGrid);
     refreshTimingDraft();
 
+    const structureActions = document.createElement("div");
+    structureActions.className = "subtitle-structure-actions";
+    const split = document.createElement("button");
+    split.type = "button";
+    split.className = "secondary";
+    split.textContent = "从原文光标拆分";
+    split.title = "先在原文中放置光标，再预览左右字幕与分界时间";
+    split.disabled = !activeDetail || !matchesTerminalStatus(activeDetail.job.status);
+    split.addEventListener("click", () => openSplitSubtitleDialog(segment, sourceInput));
+    const merge = document.createElement("button");
+    merge.type = "button";
+    merge.className = "secondary";
+    merge.textContent = "与下一段合并";
+    merge.disabled = segmentPosition + 1 >= segments.length || !activeDetail || !matchesTerminalStatus(activeDetail.job.status);
+    merge.addEventListener("click", () => {
+      const next = activeDetail?.segments[segmentPosition + 1];
+      if (next) openMergeSubtitleDialog(segment, next);
+    });
+    structureActions.append(split, merge);
+
     discard.addEventListener("click", () => {
       const saved = activeDetail?.segments.find((item) => item.id === segment.id) ?? segment;
       sourceInput.value = saved.source_text;
@@ -1626,11 +1927,12 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     actions.append(capture, discard, undo, translate, save);
     footer.append(state, actions);
 
-    card.append(meta, timing, sourceLabel, translationLabel, footer);
+    card.append(meta, timing, structureActions, sourceLabel, translationLabel, footer);
     subtitleList.append(card);
   }
   highlightSegment(activeSegmentId);
   updateTranslationControls();
+  updateStructureUndoButton();
 }
 
 function savedSegmentState(segment: SubtitleSegment): string {
@@ -2847,6 +3149,18 @@ confirmationDialog?.addEventListener("cancel", (event) => {
 confirmationDialog?.addEventListener("close", () => {
   if (confirmationResolver) settleConfirmation(false);
 });
+subtitleStructureForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitSubtitleStructure();
+});
+document.querySelector<HTMLButtonElement>("#cancel-subtitle-structure")?.addEventListener("click", () => {
+  subtitleStructureDialog?.close();
+});
+subtitleStructureDialog?.addEventListener("close", () => {
+  pendingSubtitleStructureAction = null;
+  if (subtitleStructureMessage) subtitleStructureMessage.textContent = "";
+});
+undoSubtitleStructureButton?.addEventListener("click", () => void undoSubtitleStructure());
 glossaryCorrectionForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveGlossaryCorrection();
