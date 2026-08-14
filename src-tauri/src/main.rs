@@ -437,6 +437,13 @@ struct VideoRenderRequest {
     overwrite_existing: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavePlaybackPositionRequest {
+    job_id: String,
+    position_ms: i64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VideoOutputSelection {
@@ -860,6 +867,30 @@ async fn preview_workspace_subtitle_export(
             &PathBuf::from(request.output_directory),
             &request.artifacts,
         )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_playback_position(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<i64, String> {
+    state
+        .workspace_service
+        .playback_position(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_playback_position(
+    state: State<'_, DesktopState>,
+    request: SavePlaybackPositionRequest,
+) -> Result<(), String> {
+    state
+        .workspace_service
+        .save_playback_position(&request.job_id, request.position_ms)
         .await
         .map_err(|error| error.to_string())
 }
@@ -1356,6 +1387,7 @@ fn main() {
             get_glossary,
             get_job_glossary_snapshot,
             get_job_detail,
+            get_playback_position,
             list_glossaries,
             list_jobs,
             list_video_renders,
@@ -1381,6 +1413,7 @@ fn main() {
             save_download_network_settings,
             save_desktop_settings,
             save_glossary,
+            save_playback_position,
             submit_transcription,
             start_model_download,
             test_network_connection,

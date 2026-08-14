@@ -257,6 +257,10 @@ app.innerHTML = `
         <h1>Atogaki</h1>
       </div>
       <div class="header-actions">
+        <nav class="primary-navigation" aria-label="主要区域">
+          <button id="show-workbench" type="button" class="secondary active">工作台</button>
+          <button id="show-listening" type="button" class="secondary">收听</button>
+        </nav>
         <button id="open-settings" type="button" class="secondary">设置</button>
         <button id="refresh" type="button">刷新任务</button>
       </div>
@@ -301,6 +305,39 @@ app.innerHTML = `
         <div id="job-list" class="job-list" aria-live="polite"></div>
       </section>
     </div>
+    <section id="listening-view" class="listening-view hidden" aria-labelledby="listening-title">
+      <div class="module-heading listening-heading">
+        <div><p class="eyebrow">LISTENING LIBRARY</p><h2 id="listening-title">收听</h2><p>只展示已经完整翻译的任务。这里不修改字幕，适合播放、切换节目和使用悬浮字幕。</p></div>
+      </div>
+      <div class="listening-layout">
+        <aside class="listening-library" aria-label="可收听任务">
+          <div class="section-heading"><h3>已翻译节目</h3><span id="listening-job-count"></span></div>
+          <div id="listening-job-list" class="listening-job-list"></div>
+        </aside>
+        <section class="listening-player">
+          <div class="panel-heading compact">
+            <div><p class="eyebrow">NOW PLAYING</p><h3 id="listening-job-title">选择一个节目开始收听</h3></div>
+            <button id="open-subtitle-overlay" type="button" class="secondary">打开悬浮字幕</button>
+          </div>
+          <div id="listening-media-host" class="media-host"></div>
+          <div class="playback-tools" aria-label="收听快捷操作">
+            <button id="listening-previous-subtitle" type="button" class="secondary">上一句</button>
+            <button id="listening-rewind-media" type="button" class="secondary">−5 秒</button>
+            <button id="listening-toggle-playback" type="button">播放</button>
+            <button id="listening-forward-media" type="button" class="secondary">+5 秒</button>
+            <button id="listening-next-subtitle" type="button" class="secondary">下一句</button>
+            <label>速度<select id="listening-playback-rate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+          </div>
+          <p class="shortcut-help">快捷键：空格/K 播放暂停 · ←/J 与 →/L 跳 5 秒 · [ ] 切换字幕 · , . 调整速度 · O 开关悬浮字幕</p>
+          <p id="listening-media-message" class="media-message">从左侧选择一个已翻译任务。</p>
+          <div class="current-caption" aria-live="polite">
+            <p id="listening-current-source">原文字幕</p>
+            <p id="listening-current-translation">简体中文翻译</p>
+          </div>
+          <div id="listening-subtitle-list" class="listening-subtitle-list"></div>
+        </section>
+      </div>
+    </section>
     <section id="workspace-view" class="workspace hidden" aria-labelledby="workspace-title">
       <div class="workspace-heading">
         <button id="back-to-jobs" class="secondary" type="button">← 返回任务</button>
@@ -326,10 +363,7 @@ app.innerHTML = `
       <section id="workspace-review-panel" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-review" data-workspace-panel="review">
         <div class="review-grid">
           <section class="media-panel" aria-label="媒体播放器">
-            <div class="panel-heading compact">
-              <div><p class="eyebrow">PLAYBACK</p><h3>媒体与当前字幕</h3></div>
-              <button id="open-subtitle-overlay" type="button" class="secondary">打开悬浮字幕</button>
-            </div>
+            <div class="panel-heading compact"><div><p class="eyebrow">PLAYBACK</p><h3>媒体与当前字幕</h3></div></div>
           <div id="media-host" class="media-host"></div>
           <div class="playback-tools" aria-label="播放快捷操作">
             <button id="previous-subtitle" type="button" class="secondary" title="上一句（[）">上一句</button>
@@ -594,6 +628,7 @@ app.innerHTML = `
 `;
 
 const homeView = document.querySelector<HTMLDivElement>("#home-view");
+const listeningView = document.querySelector<HTMLElement>("#listening-view");
 const shell = document.querySelector<HTMLElement>(".shell");
 const workspaceView = document.querySelector<HTMLElement>("#workspace-view");
 const workspaceSectionTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-workspace-section]"));
@@ -628,6 +663,20 @@ const subtitleList = document.querySelector<HTMLDivElement>("#subtitle-list");
 const segmentCount = document.querySelector<HTMLSpanElement>("#segment-count");
 const currentSource = document.querySelector<HTMLParagraphElement>("#current-source");
 const currentTranslation = document.querySelector<HTMLParagraphElement>("#current-translation");
+const listeningJobList = document.querySelector<HTMLDivElement>("#listening-job-list");
+const listeningJobCount = document.querySelector<HTMLSpanElement>("#listening-job-count");
+const listeningJobTitle = document.querySelector<HTMLHeadingElement>("#listening-job-title");
+const listeningMediaHost = document.querySelector<HTMLDivElement>("#listening-media-host");
+const listeningMediaMessage = document.querySelector<HTMLParagraphElement>("#listening-media-message");
+const listeningSubtitleList = document.querySelector<HTMLDivElement>("#listening-subtitle-list");
+const listeningCurrentSource = document.querySelector<HTMLParagraphElement>("#listening-current-source");
+const listeningCurrentTranslation = document.querySelector<HTMLParagraphElement>("#listening-current-translation");
+const listeningPreviousSubtitleButton = document.querySelector<HTMLButtonElement>("#listening-previous-subtitle");
+const listeningRewindMediaButton = document.querySelector<HTMLButtonElement>("#listening-rewind-media");
+const listeningTogglePlaybackButton = document.querySelector<HTMLButtonElement>("#listening-toggle-playback");
+const listeningForwardMediaButton = document.querySelector<HTMLButtonElement>("#listening-forward-media");
+const listeningNextSubtitleButton = document.querySelector<HTMLButtonElement>("#listening-next-subtitle");
+const listeningPlaybackRateSelect = document.querySelector<HTMLSelectElement>("#listening-playback-rate");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
 const openSubtitleOverlayButton = document.querySelector<HTMLButtonElement>("#open-subtitle-overlay");
@@ -702,6 +751,8 @@ const modelsDirectory = document.querySelector<HTMLSpanElement>("#models-directo
 const modelReadiness = document.querySelector<HTMLSpanElement>("#model-readiness");
 
 let refreshing = false;
+let latestJobs: LocalJob[] = [];
+let currentArea: "workbench" | "listening" | "workspace" = "workbench";
 let renderedJobsFingerprint: string | null = null;
 let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
@@ -735,6 +786,8 @@ let modelDownloads: ModelDownloadState[] = [];
 let modelDownloadPoll: number | null = null;
 const settingsDirtyFields = new Set<string>();
 let workspaceElapsedTimer: number | null = null;
+let playbackPositionSaveTimer: number | null = null;
+let lastPlaybackPositionSavedAt = 0;
 let translationStatus: TranslationStatus = {
   provider_id: "none",
   provider: "翻译服务",
@@ -1369,6 +1422,18 @@ function renderJobs(jobs: LocalJob[]): void {
   });
 }
 
+function renderListeningJobs(jobs: LocalJob[]): void {
+  if (!listeningJobList || !listeningJobCount) return;
+  const translated = jobs.filter((job) => job.status === "done" && job.translation_status === "translated");
+  listeningJobCount.textContent = `${translated.length} 个`;
+  listeningJobList.innerHTML = translated.length
+    ? translated.map((job) => `<button type="button" class="listening-job${activeDetail?.job.job_id === job.job_id && currentArea === "listening" ? " active" : ""}" data-listen-job="${escapeHtml(job.job_id)}"><strong>${escapeHtml(displayName(job))}</strong><span>${escapeHtml(languageLabel(job.source_language))} → ${escapeHtml(languageLabel(job.target_language))} · ${job.segment_count} 段</span></button>`).join("")
+    : `<div class="empty-state"><strong>还没有可收听任务。</strong><span>完整翻译的任务会自动出现在这里。</span></div>`;
+  listeningJobList.querySelectorAll<HTMLButtonElement>("[data-listen-job]").forEach((button) => {
+    button.addEventListener("click", () => void openListeningJob(button.dataset.listenJob ?? ""));
+  });
+}
+
 function translationStatusLabel(job: LocalJob): string {
   if (job.translation_status === "translated") return "已翻译";
   if (job.translation_status === "partial") {
@@ -1450,10 +1515,12 @@ async function refresh(): Promise<void> {
   }
   try {
     const jobs = await invoke<LocalJob[]>("list_jobs");
+    latestJobs = jobs;
     const fingerprint = JSON.stringify(jobs);
     if (fingerprint !== renderedJobsFingerprint) {
       const scrollTop = window.scrollY;
       renderJobs(jobs);
+      renderListeningJobs(jobs);
       renderedJobsFingerprint = fingerprint;
       if (!activeDetail) window.scrollTo({ top: scrollTop, behavior: "auto" });
     }
@@ -1489,7 +1556,64 @@ function showWorkspace(show: boolean): void {
   shell?.classList.toggle("workspace-open", show);
   homeView?.classList.toggle("hidden", show);
   workspaceView?.classList.toggle("hidden", !show);
+  listeningView?.classList.add("hidden");
+  if (show) currentArea = "workspace";
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", show);
+}
+
+function showTopLevelArea(area: "workbench" | "listening"): void {
+  if (activeMedia) {
+    void persistPlaybackPosition();
+    activeMedia.pause();
+  }
+  hideSubtitleOverlay();
+  activeDetail = null;
+  activeMedia = null;
+  activeSegmentId = null;
+  currentArea = area;
+  shell?.classList.remove("workspace-open");
+  workspaceView?.classList.add("hidden");
+  homeView?.classList.toggle("hidden", area !== "workbench");
+  listeningView?.classList.toggle("hidden", area !== "listening");
+  document.querySelector<HTMLButtonElement>("#show-workbench")?.classList.toggle("active", area === "workbench");
+  document.querySelector<HTMLButtonElement>("#show-listening")?.classList.toggle("active", area === "listening");
+  document.querySelector<HTMLButtonElement>("#refresh")?.classList.remove("hidden");
+  updatePlaybackControls();
+  renderSubtitleOverlayButton();
+  renderListeningJobs(latestJobs);
+  window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+async function openListeningJob(jobId: string): Promise<void> {
+  if (!jobId || !listeningMediaMessage) return;
+  if (activeMedia) await persistPlaybackPosition();
+  activeMedia?.pause();
+  hideSubtitleOverlay();
+  listeningMediaMessage.textContent = "正在读取节目…";
+  try {
+    const [detail, resumeMs] = await Promise.all([
+      invoke<JobDetail>("get_job_detail", { jobId }),
+      invoke<number>("get_playback_position", { jobId }),
+    ]);
+    activeDetail = detail;
+    activeSegmentId = null;
+    if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
+    renderListeningJobs(latestJobs);
+    renderListeningSubtitles(detail.segments);
+    mountMedia(detail.playback_path, detail.audio_fallback_path, listeningMediaHost, listeningMediaMessage, resumeMs);
+    updateActiveSubtitle(resumeMs);
+    renderSubtitleOverlayButton();
+  } catch (error) {
+    listeningMediaMessage.textContent = `无法打开节目：${String(error)}`;
+  }
+}
+
+function renderListeningSubtitles(segments: SubtitleSegment[]): void {
+  if (!listeningSubtitleList) return;
+  listeningSubtitleList.innerHTML = segments.map((segment) => `<button type="button" class="listening-subtitle" data-segment-id="${escapeHtml(segment.id)}" data-listen-time="${segment.start_ms}"><span>${escapeHtml(formatTime(segment.start_ms))}</span><strong>${escapeHtml(segment.source_text)}</strong><em>${escapeHtml(segment.translated_text ?? "")}</em></button>`).join("");
+  listeningSubtitleList.querySelectorAll<HTMLButtonElement>("[data-listen-time]").forEach((button) => {
+    button.addEventListener("click", () => seekTo(Number(button.dataset.listenTime ?? "0")));
+  });
 }
 
 function showWorkspaceSection(section: WorkspaceSection): void {
@@ -1557,14 +1681,20 @@ function isAudioPath(path: string): boolean {
   return /\.(mp3|m4a|aac|wav|flac|ogg)$/i.test(path);
 }
 
-function mountMedia(primaryPath: string | null, fallbackPath: string | null): void {
-  if (!mediaHost || !mediaMessage) return;
+function mountMedia(
+  primaryPath: string | null,
+  fallbackPath: string | null,
+  host: HTMLDivElement | null = mediaHost,
+  message: HTMLParagraphElement | null = mediaMessage,
+  resumeMs = 0,
+): void {
+  if (!host || !message) return;
   activeMedia = null;
   updatePlaybackControls();
-  mediaHost.replaceChildren();
+  host.replaceChildren();
   const firstPath = primaryPath ?? fallbackPath;
   if (!firstPath) {
-    mediaMessage.textContent = "没有找到可播放的本地媒体；任务可能仍在处理或源文件已移动。";
+    message.textContent = "没有找到可播放的本地媒体；任务可能仍在处理或源文件已移动。";
     return;
   }
 
@@ -1574,29 +1704,34 @@ function mountMedia(primaryPath: string | null, fallbackPath: string | null): vo
     element.preload = "metadata";
     element.src = convertFileSrc(path);
     element.addEventListener("timeupdate", () => updateActiveSubtitle(element.currentTime * 1_000));
+    element.addEventListener("timeupdate", schedulePlaybackPositionSave);
     element.addEventListener("seeked", () => updateActiveSubtitle(element.currentTime * 1_000));
     element.addEventListener("play", updatePlaybackControls);
-    element.addEventListener("pause", updatePlaybackControls);
-    element.addEventListener("ended", updatePlaybackControls);
+    element.addEventListener("pause", () => { updatePlaybackControls(); void persistPlaybackPosition(); });
+    element.addEventListener("ended", () => { updatePlaybackControls(); void persistPlaybackPosition(); });
     element.addEventListener("ratechange", updatePlaybackControls);
-    element.addEventListener("loadedmetadata", updatePlaybackControls);
+    element.addEventListener("loadedmetadata", () => {
+      if (resumeMs > 0 && Number.isFinite(element.duration)) element.currentTime = Math.min(resumeMs / 1_000, Math.max(0, element.duration - 0.25));
+      updatePlaybackControls();
+      updateActiveSubtitle(element.currentTime * 1_000);
+    });
     element.addEventListener(
       "error",
       () => {
         if (!isFallback && fallbackPath && fallbackPath !== path) {
-          mediaMessage.textContent = "原媒体编码无法由系统播放器读取，已切换到任务音频。";
+          message.textContent = "原媒体编码无法由系统播放器读取，已切换到任务音频。";
           loadPath(fallbackPath, true);
         } else {
-          mediaMessage.textContent = "媒体加载失败。可能是文件已移动，或系统 WebView 不支持这种编码。";
+          message.textContent = "媒体加载失败。可能是文件已移动，或系统 WebView 不支持这种编码。";
         }
       },
       { once: true },
     );
     activeMedia = element;
-    element.playbackRate = Number(playbackRateSelect?.value || "1");
-    mediaHost.replaceChildren(element);
+    element.playbackRate = Number(activePlaybackRateSelect()?.value || "1");
+    host.replaceChildren(element);
     updatePlaybackControls();
-    if (!isFallback) mediaMessage.textContent = path;
+    if (!isFallback) message.textContent = resumeMs > 0 ? `${path} · 已恢复到 ${formatTime(resumeMs)}` : path;
   };
 
   loadPath(firstPath, firstPath === fallbackPath && primaryPath === null);
@@ -2315,14 +2450,37 @@ function seekTo(milliseconds: number, autoplay = true): void {
   if (autoplay) void activeMedia.play().catch(() => undefined);
 }
 
+function activePlaybackRateSelect(): HTMLSelectElement | null {
+  return currentArea === "listening" ? listeningPlaybackRateSelect : playbackRateSelect;
+}
+
+function schedulePlaybackPositionSave(): void {
+  if (currentArea !== "listening" || !activeMedia || Date.now() - lastPlaybackPositionSavedAt < 5_000) return;
+  if (playbackPositionSaveTimer !== null) return;
+  playbackPositionSaveTimer = window.setTimeout(() => {
+    playbackPositionSaveTimer = null;
+    void persistPlaybackPosition();
+  }, 300);
+}
+
+async function persistPlaybackPosition(): Promise<void> {
+  if (currentArea !== "listening" || !activeDetail || !activeMedia) return;
+  const positionMs = Math.max(0, Math.round(activeMedia.currentTime * 1_000));
+  lastPlaybackPositionSavedAt = Date.now();
+  await invoke("save_playback_position", {
+    request: { jobId: activeDetail.job.job_id, positionMs },
+  }).catch(() => undefined);
+}
+
 function updatePlaybackControls(): void {
   const disabled = !activeMedia;
-  for (const button of [previousSubtitleButton, rewindMediaButton, togglePlaybackButton, forwardMediaButton, nextSubtitleButton]) {
+  for (const button of [previousSubtitleButton, rewindMediaButton, togglePlaybackButton, forwardMediaButton, nextSubtitleButton, listeningPreviousSubtitleButton, listeningRewindMediaButton, listeningTogglePlaybackButton, listeningForwardMediaButton, listeningNextSubtitleButton]) {
     if (button) button.disabled = disabled;
   }
-  if (playbackRateSelect) playbackRateSelect.disabled = disabled;
+  for (const select of [playbackRateSelect, listeningPlaybackRateSelect]) if (select) select.disabled = disabled;
   if (togglePlaybackButton) togglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
-  if (playbackRateSelect && activeMedia) playbackRateSelect.value = String(activeMedia.playbackRate);
+  if (listeningTogglePlaybackButton) listeningTogglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
+  if (activeMedia) for (const select of [playbackRateSelect, listeningPlaybackRateSelect]) if (select) select.value = String(activeMedia.playbackRate);
   if (subtitleOverlayVisible) syncSubtitleOverlay(subtitleAt((activeMedia?.currentTime ?? 0) * 1_000));
 }
 
@@ -2355,8 +2513,9 @@ function seekAdjacentSubtitle(direction: -1 | 1): void {
 }
 
 function changePlaybackRate(direction: -1 | 1): void {
-  if (!activeMedia || !playbackRateSelect) return;
-  const rates = Array.from(playbackRateSelect.options).map((option) => Number(option.value));
+  const rateSelect = activePlaybackRateSelect();
+  if (!activeMedia || !rateSelect) return;
+  const rates = Array.from(rateSelect.options).map((option) => Number(option.value));
   const currentIndex = rates.findIndex((rate) => rate === activeMedia?.playbackRate);
   const nextIndex = Math.max(0, Math.min(rates.length - 1, (currentIndex < 0 ? rates.indexOf(1) : currentIndex) + direction));
   activeMedia.playbackRate = rates[nextIndex];
@@ -2392,7 +2551,7 @@ function subtitleOverlayPayload(segment: SubtitleSegment | undefined): SubtitleO
 
 function renderSubtitleOverlayButton(): void {
   if (!openSubtitleOverlayButton) return;
-  const canOpen = Boolean(activeDetail && activeDetail.segments.length > 0);
+  const canOpen = Boolean(currentArea === "listening" && activeDetail && activeDetail.segments.length > 0);
   openSubtitleOverlayButton.disabled = !canOpen;
   openSubtitleOverlayButton.textContent = subtitleOverlayVisible ? "悬浮字幕已显示" : "打开悬浮字幕";
 }
@@ -2411,7 +2570,7 @@ function syncSubtitleOverlay(segment: SubtitleSegment | undefined): void {
 }
 
 async function openSubtitleOverlay(): Promise<void> {
-  if (!activeDetail || activeDetail.segments.length === 0) return;
+  if (currentArea !== "listening" || !activeDetail || activeDetail.segments.length === 0) return;
   if (subtitleOverlayVisible) {
     hideSubtitleOverlay();
     return;
@@ -2427,7 +2586,7 @@ async function openSubtitleOverlay(): Promise<void> {
     subtitleOverlayVisible = false;
     lastSubtitleOverlayKey = "";
     renderSubtitleOverlayButton();
-    setWorkspaceAction(`无法打开悬浮字幕：${String(error)}`, true);
+    if (listeningMediaMessage) listeningMediaMessage.textContent = `无法打开悬浮字幕：${String(error)}`;
   }
 }
 
@@ -2447,6 +2606,8 @@ function updateActiveSubtitle(milliseconds: number): void {
     currentTranslation.textContent = segment?.translated_text || `尚无${languageLabel(activeTargetLanguage())}翻译`;
     currentTranslation.classList.toggle("stale", segment?.translation_stale ?? false);
   }
+  if (listeningCurrentSource) listeningCurrentSource.textContent = segment?.source_text ?? "当前时间没有字幕。";
+  if (listeningCurrentTranslation) listeningCurrentTranslation.textContent = segment?.translated_text || `尚无${languageLabel(activeTargetLanguage())}翻译`;
   if (activeSegmentId !== nextId) {
     activeSegmentId = nextId;
     highlightSegment(nextId);
@@ -2456,6 +2617,11 @@ function updateActiveSubtitle(milliseconds: number): void {
 
 function highlightSegment(segmentId: string | null): void {
   subtitleList?.querySelectorAll<HTMLElement>(".subtitle-card").forEach((card) => {
+    const active = card.dataset.segmentId === segmentId;
+    card.classList.toggle("active", active);
+    if (active && activeMedia && !activeMedia.paused) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+  listeningSubtitleList?.querySelectorAll<HTMLElement>(".listening-subtitle").forEach((card) => {
     const active = card.dataset.segmentId === segmentId;
     card.classList.toggle("active", active);
     if (active && activeMedia && !activeMedia.paused) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -3191,6 +3357,8 @@ async function applyPreviewedGlossary(): Promise<void> {
 }
 
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
+document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("click", () => showTopLevelArea("workbench"));
+document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => showTopLevelArea("listening"));
 document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
   settingsDirtyFields.clear();
   if (!settingsDialog?.open) settingsDialog?.showModal();
@@ -3227,7 +3395,7 @@ document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("cl
   activeMedia = null;
   updatePlaybackControls();
   activeSegmentId = null;
-  showWorkspace(false);
+  showTopLevelArea("workbench");
   void refresh();
 });
 document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
@@ -3261,6 +3429,14 @@ forwardMediaButton?.addEventListener("click", () => seekRelative(5));
 nextSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(1));
 playbackRateSelect?.addEventListener("change", () => {
   if (activeMedia && playbackRateSelect) activeMedia.playbackRate = Number(playbackRateSelect.value);
+});
+listeningPreviousSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(-1));
+listeningRewindMediaButton?.addEventListener("click", () => seekRelative(-5));
+listeningTogglePlaybackButton?.addEventListener("click", togglePlayback);
+listeningForwardMediaButton?.addEventListener("click", () => seekRelative(5));
+listeningNextSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(1));
+listeningPlaybackRateSelect?.addEventListener("change", () => {
+  if (activeMedia && listeningPlaybackRateSelect) activeMedia.playbackRate = Number(listeningPlaybackRateSelect.value);
 });
 exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
@@ -3454,6 +3630,7 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
 });
 
 syncVadControls();
+renderSubtitleOverlayButton();
 void loadDesktopSettings(true);
 
 void invoke<string>("data_directory")

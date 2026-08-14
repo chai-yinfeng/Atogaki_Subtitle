@@ -25,6 +25,7 @@ use crate::{
 const TRANSLATION_BATCH_SIZE: usize = 12;
 const TRANSLATION_CONTEXT_WINDOW_MS: i64 = 30_000;
 const TRANSLATION_CONTEXT_MAX_CHARS: usize = 2_000;
+const PLAYBACK_POSITION_PREFIX: &str = "listening.playback_position_ms.";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalWorkspaceJob {
@@ -97,6 +98,37 @@ impl LocalWorkspaceService {
             translation_provider,
             translation_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    pub async fn playback_position(&self, job_id: &str) -> Result<i64> {
+        self.database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        let key = format!("{PLAYBACK_POSITION_PREFIX}{job_id}");
+        Ok(self
+            .database
+            .get_setting(&key)
+            .await?
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(0)
+            .max(0))
+    }
+
+    pub async fn save_playback_position(&self, job_id: &str, position_ms: i64) -> Result<()> {
+        if position_ms < 0 {
+            return Err(anyhow!("playback position cannot be negative"));
+        }
+        self.database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        self.database
+            .set_setting(
+                &format!("{PLAYBACK_POSITION_PREFIX}{job_id}"),
+                &position_ms.to_string(),
+            )
+            .await
     }
 
     pub fn translation_status(&self) -> LocalTranslationStatus {
@@ -1155,6 +1187,24 @@ mod tests {
             .export_subtitles_to(&manifest.job_id, &export_directory, true, &artifacts)
             .await
             .unwrap();
+        assert_eq!(
+            service.playback_position(&manifest.job_id).await.unwrap(),
+            0
+        );
+        service
+            .save_playback_position(&manifest.job_id, 42_500)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.playback_position(&manifest.job_id).await.unwrap(),
+            42_500
+        );
+        assert!(
+            service
+                .save_playback_position(&manifest.job_id, -1)
+                .await
+                .is_err()
+        );
 
         drop(service);
         drop(database);
