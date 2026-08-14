@@ -756,6 +756,8 @@ let currentArea: "workbench" | "listening" | "workspace" = "workbench";
 let renderedJobsFingerprint: string | null = null;
 let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
+let mediaSessionId = 0;
+let navigationRequestId = 0;
 let activeSegmentId: string | null = null;
 let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
@@ -788,6 +790,8 @@ const settingsDirtyFields = new Set<string>();
 let workspaceElapsedTimer: number | null = null;
 let playbackPositionSaveTimer: number | null = null;
 let lastPlaybackPositionSavedAt = 0;
+type SubtitleFollowState = { userScrollingUntil: number; autoScrollingUntil: number; resumeTimer: number | null };
+const subtitleFollowStates = new WeakMap<HTMLElement, SubtitleFollowState>();
 let translationStatus: TranslationStatus = {
   provider_id: "none",
   provider: "翻译服务",
@@ -1561,15 +1565,35 @@ function showWorkspace(show: boolean): void {
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", show);
 }
 
-function showTopLevelArea(area: "workbench" | "listening"): void {
-  if (activeMedia) {
-    void persistPlaybackPosition();
-    activeMedia.pause();
-  }
-  hideSubtitleOverlay();
-  activeDetail = null;
+async function stopActivePlayback(): Promise<void> {
+  const media = activeMedia;
+  const detail = activeDetail;
+  const area = currentArea;
+  mediaSessionId += 1;
   activeMedia = null;
+  if (playbackPositionSaveTimer !== null) {
+    window.clearTimeout(playbackPositionSaveTimer);
+    playbackPositionSaveTimer = null;
+  }
+  if (media) {
+    media.pause();
+    if (area === "listening" && detail) {
+      await savePlaybackPosition(detail.job.job_id, media);
+    }
+    media.removeAttribute("src");
+    media.load();
+    media.remove();
+  }
   activeSegmentId = null;
+  updatePlaybackControls();
+  hideSubtitleOverlay();
+}
+
+async function showTopLevelArea(area: "workbench" | "listening"): Promise<void> {
+  const requestId = ++navigationRequestId;
+  await stopActivePlayback();
+  if (requestId !== navigationRequestId) return;
+  activeDetail = null;
   currentArea = area;
   shell?.classList.remove("workspace-open");
   workspaceView?.classList.add("hidden");
@@ -1586,15 +1610,19 @@ function showTopLevelArea(area: "workbench" | "listening"): void {
 
 async function openListeningJob(jobId: string): Promise<void> {
   if (!jobId || !listeningMediaMessage) return;
-  if (activeMedia) await persistPlaybackPosition();
-  activeMedia?.pause();
-  hideSubtitleOverlay();
+  const requestId = ++navigationRequestId;
+  await stopActivePlayback();
+  if (requestId !== navigationRequestId || currentArea !== "listening") return;
+  activeDetail = null;
+  renderListeningJobs(latestJobs);
+  renderSubtitleOverlayButton();
   listeningMediaMessage.textContent = "正在读取节目…";
   try {
     const [detail, resumeMs] = await Promise.all([
       invoke<JobDetail>("get_job_detail", { jobId }),
       invoke<number>("get_playback_position", { jobId }),
     ]);
+    if (requestId !== navigationRequestId || currentArea !== "listening") return;
     activeDetail = detail;
     activeSegmentId = null;
     if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
@@ -1604,6 +1632,7 @@ async function openListeningJob(jobId: string): Promise<void> {
     updateActiveSubtitle(resumeMs);
     renderSubtitleOverlayButton();
   } catch (error) {
+    if (requestId !== navigationRequestId || currentArea !== "listening") return;
     listeningMediaMessage.textContent = `无法打开节目：${String(error)}`;
   }
 }
@@ -1630,6 +1659,9 @@ function showWorkspaceSection(section: WorkspaceSection): void {
 
 async function openJob(jobId: string): Promise<void> {
   if (!jobId || !workspaceMessage) return;
+  const requestId = ++navigationRequestId;
+  await stopActivePlayback();
+  if (requestId !== navigationRequestId) return;
   showWorkspace(true);
   showWorkspaceSection("review");
   window.scrollTo({ top: 0, behavior: "auto" });
@@ -1638,8 +1670,10 @@ async function openJob(jobId: string): Promise<void> {
   if (subtitleList) subtitleList.innerHTML = `<div class="empty-state">正在读取字幕…</div>`;
   try {
     activeDetail = await invoke<JobDetail>("get_job_detail", { jobId });
+    if (requestId !== navigationRequestId || currentArea !== "workspace") return;
     renderWorkspace(activeDetail);
   } catch (error) {
+    if (requestId !== navigationRequestId || currentArea !== "workspace") return;
     activeDetail = null;
     workspaceMessage.textContent = `无法打开任务：${String(error)}`;
   }
@@ -1689,6 +1723,7 @@ function mountMedia(
   resumeMs = 0,
 ): void {
   if (!host || !message) return;
+  const sessionId = ++mediaSessionId;
   activeMedia = null;
   updatePlaybackControls();
   host.replaceChildren();
@@ -1702,15 +1737,33 @@ function mountMedia(
     const element = document.createElement(isAudioPath(path) ? "audio" : "video");
     element.controls = true;
     element.preload = "metadata";
-    element.src = convertFileSrc(path);
-    element.addEventListener("timeupdate", () => updateActiveSubtitle(element.currentTime * 1_000));
-    element.addEventListener("timeupdate", schedulePlaybackPositionSave);
-    element.addEventListener("seeked", () => updateActiveSubtitle(element.currentTime * 1_000));
-    element.addEventListener("play", updatePlaybackControls);
-    element.addEventListener("pause", () => { updatePlaybackControls(); void persistPlaybackPosition(); });
-    element.addEventListener("ended", () => { updatePlaybackControls(); void persistPlaybackPosition(); });
-    element.addEventListener("ratechange", updatePlaybackControls);
+    const isCurrent = () => activeMedia === element && mediaSessionId === sessionId;
+    element.addEventListener("timeupdate", () => {
+      if (!isCurrent()) return;
+      updateActiveSubtitle(element.currentTime * 1_000);
+      schedulePlaybackPositionSave();
+    });
+    element.addEventListener("seeked", () => {
+      if (isCurrent()) updateActiveSubtitle(element.currentTime * 1_000);
+    });
+    element.addEventListener("play", () => {
+      if (isCurrent()) updatePlaybackControls();
+    });
+    element.addEventListener("pause", () => {
+      if (!isCurrent()) return;
+      updatePlaybackControls();
+      void persistPlaybackPosition();
+    });
+    element.addEventListener("ended", () => {
+      if (!isCurrent()) return;
+      updatePlaybackControls();
+      void persistPlaybackPosition();
+    });
+    element.addEventListener("ratechange", () => {
+      if (isCurrent()) updatePlaybackControls();
+    });
     element.addEventListener("loadedmetadata", () => {
+      if (!isCurrent()) return;
       if (resumeMs > 0 && Number.isFinite(element.duration)) element.currentTime = Math.min(resumeMs / 1_000, Math.max(0, element.duration - 0.25));
       updatePlaybackControls();
       updateActiveSubtitle(element.currentTime * 1_000);
@@ -1718,6 +1771,7 @@ function mountMedia(
     element.addEventListener(
       "error",
       () => {
+        if (!isCurrent()) return;
         if (!isFallback && fallbackPath && fallbackPath !== path) {
           message.textContent = "原媒体编码无法由系统播放器读取，已切换到任务音频。";
           loadPath(fallbackPath, true);
@@ -1730,6 +1784,7 @@ function mountMedia(
     activeMedia = element;
     element.playbackRate = Number(activePlaybackRateSelect()?.value || "1");
     host.replaceChildren(element);
+    element.src = convertFileSrc(path);
     updatePlaybackControls();
     if (!isFallback) message.textContent = resumeMs > 0 ? `${path} · 已恢复到 ${formatTime(resumeMs)}` : path;
   };
@@ -2465,10 +2520,14 @@ function schedulePlaybackPositionSave(): void {
 
 async function persistPlaybackPosition(): Promise<void> {
   if (currentArea !== "listening" || !activeDetail || !activeMedia) return;
-  const positionMs = Math.max(0, Math.round(activeMedia.currentTime * 1_000));
+  await savePlaybackPosition(activeDetail.job.job_id, activeMedia);
+}
+
+async function savePlaybackPosition(jobId: string, media: HTMLMediaElement): Promise<void> {
+  const positionMs = Math.max(0, Math.round(media.currentTime * 1_000));
   lastPlaybackPositionSavedAt = Date.now();
   await invoke("save_playback_position", {
-    request: { jobId: activeDetail.job.job_id, positionMs },
+    request: { jobId, positionMs },
   }).catch(() => undefined);
 }
 
@@ -2615,16 +2674,60 @@ function updateActiveSubtitle(milliseconds: number): void {
   syncSubtitleOverlay(segment);
 }
 
+function subtitleFollowState(host: HTMLElement): SubtitleFollowState {
+  const existing = subtitleFollowStates.get(host);
+  if (existing) return existing;
+  const created = { userScrollingUntil: 0, autoScrollingUntil: 0, resumeTimer: null };
+  subtitleFollowStates.set(host, created);
+  return created;
+}
+
+function markUserSubtitleScrolling(host: HTMLElement): void {
+  const state = subtitleFollowState(host);
+  if (Date.now() < state.autoScrollingUntil) return;
+  state.userScrollingUntil = Date.now() + 3_000;
+  if (state.resumeTimer !== null) window.clearTimeout(state.resumeTimer);
+  state.resumeTimer = window.setTimeout(() => {
+    state.resumeTimer = null;
+    if (Date.now() < state.userScrollingUntil || !activeMedia || activeMedia.paused) return;
+    highlightSegment(activeSegmentId);
+  }, 3_050);
+}
+
+function registerSubtitleFollowHost(host: HTMLElement | null): void {
+  if (!host) return;
+  subtitleFollowState(host);
+  for (const eventName of ["wheel", "touchstart", "pointerdown"] as const) {
+    host.addEventListener(eventName, () => markUserSubtitleScrolling(host), { passive: true });
+  }
+  host.addEventListener("scroll", () => markUserSubtitleScrolling(host), { passive: true });
+}
+
+function followActiveSubtitle(host: HTMLElement, card: HTMLElement): void {
+  const state = subtitleFollowState(host);
+  if (!activeMedia || activeMedia.paused || Date.now() < state.userScrollingUntil) return;
+  if (host.scrollHeight <= host.clientHeight + 1) return;
+  const targetTop = Math.max(
+    0,
+    host.scrollTop + card.getBoundingClientRect().top - host.getBoundingClientRect().top - 8,
+  );
+  if (Math.abs(host.scrollTop - targetTop) < 4) return;
+  const pageScrollTop = window.scrollY;
+  state.autoScrollingUntil = Date.now() + 250;
+  host.scrollTop = targetTop;
+  if (window.scrollY !== pageScrollTop) window.scrollTo({ top: pageScrollTop, behavior: "auto" });
+}
+
 function highlightSegment(segmentId: string | null): void {
   subtitleList?.querySelectorAll<HTMLElement>(".subtitle-card").forEach((card) => {
     const active = card.dataset.segmentId === segmentId;
     card.classList.toggle("active", active);
-    if (active && activeMedia && !activeMedia.paused) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (active) followActiveSubtitle(subtitleList, card);
   });
   listeningSubtitleList?.querySelectorAll<HTMLElement>(".listening-subtitle").forEach((card) => {
     const active = card.dataset.segmentId === segmentId;
     card.classList.toggle("active", active);
-    if (active && activeMedia && !activeMedia.paused) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (active) followActiveSubtitle(listeningSubtitleList, card);
   });
 }
 
@@ -3357,8 +3460,8 @@ async function applyPreviewedGlossary(): Promise<void> {
 }
 
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
-document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("click", () => showTopLevelArea("workbench"));
-document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => showTopLevelArea("listening"));
+document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("click", () => void showTopLevelArea("workbench"));
+document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => void showTopLevelArea("listening"));
 document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
   settingsDirtyFields.clear();
   if (!settingsDialog?.open) settingsDialog?.showModal();
@@ -3389,14 +3492,7 @@ settingsForm?.addEventListener("submit", (event) => {
 });
 document.querySelector<HTMLButtonElement>("#finish-settings")?.addEventListener("click", () => void saveSettings(true));
 document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
-  activeMedia?.pause();
-  hideSubtitleOverlay();
-  activeDetail = null;
-  activeMedia = null;
-  updatePlaybackControls();
-  activeSegmentId = null;
-  showTopLevelArea("workbench");
-  void refresh();
+  void showTopLevelArea("workbench").then(() => refresh());
 });
 document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
   if (activeDetail) void openJob(activeDetail.job.job_id);
@@ -3629,6 +3725,8 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
     });
 });
 
+registerSubtitleFollowHost(subtitleList);
+registerSubtitleFollowHost(listeningSubtitleList);
 syncVadControls();
 renderSubtitleOverlayButton();
 void loadDesktopSettings(true);
