@@ -100,6 +100,7 @@ pub struct LocalSubtitleSegmentRecord {
     pub source_edited: bool,
     pub translation_edited: bool,
     pub translation_stale: bool,
+    pub timing_edited: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -883,7 +884,7 @@ impl LocalDatabase {
     pub async fn list_segments(&self, job_id: &str) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
             "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
-                source_edited, translation_edited, translation_stale
+                source_edited, translation_edited, translation_stale, timing_edited
              FROM local_subtitle_segments
              WHERE job_id = ?
              ORDER BY segment_index ASC",
@@ -901,7 +902,7 @@ impl LocalDatabase {
     ) -> Result<Option<LocalSubtitleSegmentRecord>> {
         sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
             "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
-                source_edited, translation_edited, translation_stale
+                source_edited, translation_edited, translation_stale, timing_edited
              FROM local_subtitle_segments
              WHERE job_id = ? AND id = ?",
         )
@@ -1029,13 +1030,23 @@ impl LocalDatabase {
         self.list_segments(job_id).await
     }
 
-    pub async fn update_segment_text(
+    pub async fn update_segment(
         &self,
         job_id: &str,
         segment_id: &str,
         source_text: String,
         translated_text: Option<String>,
+        start_ms: i64,
+        end_ms: i64,
     ) -> Result<LocalSubtitleSegmentRecord> {
+        if start_ms < 0 {
+            return Err(anyhow!("subtitle start time cannot be negative"));
+        }
+        if end_ms <= start_ms {
+            return Err(anyhow!(
+                "subtitle end time must be later than its start time"
+            ));
+        }
         let source_text = source_text.trim().to_string();
         if source_text.is_empty() {
             return Err(anyhow!("source subtitle text cannot be empty"));
@@ -1050,7 +1061,7 @@ impl LocalDatabase {
             .context("failed to begin local subtitle edit transaction")?;
         let current = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
             "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
-                source_edited, translation_edited, translation_stale
+                source_edited, translation_edited, translation_stale, timing_edited
              FROM local_subtitle_segments
              WHERE job_id = ? AND id = ?",
         )
@@ -1063,8 +1074,10 @@ impl LocalDatabase {
 
         let source_changed = current.source_text != source_text;
         let translation_changed = current.translated_text != translated_text;
+        let timing_changed = current.start_ms != start_ms || current.end_ms != end_ms;
         let source_edited = current.source_edited || source_changed;
         let translation_edited = current.translation_edited || translation_changed;
+        let timing_edited = current.timing_edited || timing_changed;
         let translation_stale = if translation_changed {
             false
         } else if source_changed {
@@ -1076,7 +1089,7 @@ impl LocalDatabase {
         sqlx::query(
             "UPDATE local_subtitle_segments
              SET source_text = ?, translated_text = ?, source_edited = ?, translation_edited = ?,
-                 translation_stale = ?
+                 translation_stale = ?, start_ms = ?, end_ms = ?, timing_edited = ?
              WHERE job_id = ? AND id = ?",
         )
         .bind(&source_text)
@@ -1084,6 +1097,9 @@ impl LocalDatabase {
         .bind(source_edited)
         .bind(translation_edited)
         .bind(translation_stale)
+        .bind(start_ms)
+        .bind(end_ms)
+        .bind(timing_edited)
         .bind(job_id)
         .bind(segment_id)
         .execute(&mut *tx)
@@ -1102,7 +1118,7 @@ impl LocalDatabase {
 
         let updated = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
             "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
-                source_edited, translation_edited, translation_stale
+                source_edited, translation_edited, translation_stale, timing_edited
              FROM local_subtitle_segments
              WHERE job_id = ? AND id = ?",
         )
@@ -1152,11 +1168,14 @@ impl LocalDatabase {
                 job_id,
                 index,
                 segment,
+                to_i64(segment.start_ms, "segment start")?,
+                to_i64(segment.end_ms, "segment end")?,
                 segment.source_text.as_str(),
                 segment.translated_text.as_deref(),
                 segment.source_edited,
                 false,
                 segment.translation_stale,
+                false,
             )
             .await?;
         }
@@ -1172,7 +1191,7 @@ impl LocalDatabase {
     ) -> Result<()> {
         let existing = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
             "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
-                source_edited, translation_edited, translation_stale
+                source_edited, translation_edited, translation_stale, timing_edited
              FROM local_subtitle_segments
              WHERE job_id = ?",
         )
@@ -1197,6 +1216,16 @@ impl LocalDatabase {
                 .map(|segment| segment.source_text.as_str())
                 .unwrap_or(&segment.source_text);
             let incoming_translation = segment.translated_text.as_deref();
+            let (start_ms, end_ms, timing_edited) = match previous {
+                Some(previous) if previous.timing_edited => {
+                    (previous.start_ms, previous.end_ms, true)
+                }
+                _ => (
+                    to_i64(segment.start_ms, "segment start")?,
+                    to_i64(segment.end_ms, "segment end")?,
+                    false,
+                ),
+            };
             let (translated_text, translation_edited, translation_stale) = match previous {
                 Some(previous) if previous.translation_edited => (
                     previous.translated_text.as_deref(),
@@ -1219,6 +1248,8 @@ impl LocalDatabase {
                 job_id,
                 index,
                 segment,
+                start_ms,
+                end_ms,
                 source_text,
                 translated_text,
                 previous
@@ -1226,6 +1257,7 @@ impl LocalDatabase {
                     .unwrap_or(segment.source_edited),
                 translation_edited,
                 translation_stale,
+                timing_edited,
             )
             .await?;
         }
@@ -1240,28 +1272,32 @@ async fn insert_segment(
     job_id: &str,
     index: usize,
     segment: &TranscriptSegment,
+    start_ms: i64,
+    end_ms: i64,
     source_text: &str,
     translated_text: Option<&str>,
     source_edited: bool,
     translation_edited: bool,
     translation_stale: bool,
+    timing_edited: bool,
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO local_subtitle_segments (
             id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
-            source_edited, translation_edited, translation_stale
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            source_edited, translation_edited, translation_stale, timing_edited
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&segment.id)
     .bind(job_id)
     .bind(i64::try_from(index).context("subtitle index exceeds SQLite i64")?)
-    .bind(to_i64(segment.start_ms, "segment start")?)
-    .bind(to_i64(segment.end_ms, "segment end")?)
+    .bind(start_ms)
+    .bind(end_ms)
     .bind(source_text)
     .bind(translated_text)
     .bind(source_edited)
     .bind(translation_edited)
     .bind(translation_stale)
+    .bind(timing_edited)
     .execute(&mut **tx)
     .await
     .context("failed to insert local subtitle segment")?;
@@ -1518,28 +1554,33 @@ mod tests {
         assert_eq!(segments[0].source_text, "テスト");
 
         let stale = database
-            .update_segment_text(
+            .update_segment(
                 &manifest.job_id,
                 &segment.id,
                 "手動修正".to_string(),
                 Some("测试".to_string()),
+                100,
+                900,
             )
             .await
             .unwrap();
         assert!(stale.source_edited);
         assert!(!stale.translation_edited);
         assert!(stale.translation_stale);
+        assert!(stale.timing_edited);
         assert_eq!(
             database.list_job_translation_stats().await.unwrap()[0].stale_translation_count,
             1
         );
 
         let edited = database
-            .update_segment_text(
+            .update_segment(
                 &manifest.job_id,
                 &segment.id,
                 "手動修正".to_string(),
                 Some("人工翻译".to_string()),
+                100,
+                900,
             )
             .await
             .unwrap();
@@ -1562,6 +1603,21 @@ mod tests {
         assert_eq!(preserved[0].translated_text.as_deref(), Some("人工翻译"));
         assert!(preserved[0].source_edited);
         assert!(preserved[0].translation_edited);
+        assert!(preserved[0].timing_edited);
+        assert_eq!((preserved[0].start_ms, preserved[0].end_ms), (100, 900));
+
+        let invalid_timing = database
+            .update_segment(
+                &edited.job_id,
+                &edited.id,
+                edited.source_text,
+                edited.translated_text,
+                900,
+                900,
+            )
+            .await
+            .unwrap_err();
+        assert!(invalid_timing.to_string().contains("later than"));
 
         drop(database);
         fs::remove_dir_all(root).unwrap();

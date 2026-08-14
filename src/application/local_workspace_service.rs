@@ -111,15 +111,24 @@ impl LocalWorkspaceService {
         Ok(LocalWorkspaceJob { job, segments })
     }
 
-    pub async fn update_subtitle_text(
+    pub async fn update_subtitle(
         &self,
         job_id: &str,
         segment_id: &str,
         source_text: String,
         translated_text: Option<String>,
+        start_ms: i64,
+        end_ms: i64,
     ) -> Result<LocalSubtitleSegmentRecord> {
         self.database
-            .update_segment_text(job_id, segment_id, source_text, translated_text)
+            .update_segment(
+                job_id,
+                segment_id,
+                source_text,
+                translated_text,
+                start_ms,
+                end_ms,
+            )
             .await
     }
 
@@ -666,6 +675,7 @@ mod tests {
             source_edited: false,
             translation_edited: false,
             translation_stale: false,
+            timing_edited: false,
         }
     }
 
@@ -964,11 +974,13 @@ mod tests {
             .await
             .unwrap();
         database
-            .update_segment_text(
+            .update_segment(
                 &manifest.job_id,
                 &first.id,
                 "SQLiteで直した原文".to_string(),
                 Some("SQLite 中修正的译文".to_string()),
+                250,
+                1_250,
             )
             .await
             .unwrap();
@@ -980,6 +992,7 @@ mod tests {
         let bilingual = fs::read_to_string(&exported.bilingual_srt).unwrap();
         let ass = fs::read_to_string(&exported.bilingual_ass).unwrap();
         assert!(japanese.contains("SQLiteで直した原文"));
+        assert!(japanese.contains("00:00:00,250 --> 00:00:01,250"));
         assert!(!japanese.contains("生成された原文"));
         assert!(bilingual.contains("SQLite 中修正的译文"));
         assert!(ass.contains("SQLite 中修正的译文"));
@@ -1010,11 +1023,13 @@ mod tests {
             .await
             .unwrap();
         database
-            .update_segment_text(
+            .update_segment(
                 &manifest.job_id,
                 &segment.id,
                 "修正した原文".to_string(),
                 segment.translated_text,
+                0,
+                1_000,
             )
             .await
             .unwrap();

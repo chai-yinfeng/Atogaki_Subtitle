@@ -1,6 +1,6 @@
 # 翻译 Provider 候选调研
 
-_调研日期：2026-08-11。免费额度和服务条款会变化，实现前必须重新核对官方页面。_
+_调研日期：2026-08-11；产品选择更新：2026-08-14。免费额度和服务条款会变化，实现前必须重新核对官方页面。_
 
 Atogaki 的场景不是一般的短句查词，而是把较长的日语、英语或韩语口语节目分段翻译为简体中文。候选服务除了价格，还必须比较口语自然度、长任务限流、术语保护、数据处理条款和注册复杂度。
 
@@ -9,6 +9,8 @@ Atogaki 的场景不是一般的短句查词，而是把较长的日语、英语
 | 方案 | 官方免费额度 | 注册与账单 | 适合程度 |
 | --- | --- | --- | --- |
 | [DeepL API Free](https://developers.deepl.com/docs/resources/usage-limits) | 每月 50 万字符 | 独立 API 账号与 Key | 已集成；文档翻译稳定，但电台口语可能偏书面。 |
+| [DeepSeek API](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/) | 按 Token 低价计费，具体价格随模型变化 | 国内可访问、人民币充值；官方提供 OpenAI-compatible API | 当前首个 LLM provider 预设；重点验证电台口语自然度、结构化段 ID 和术语保护。 |
+| [阿里云机器翻译](https://help.aliyun.com/zh/machine-translation/product-overview/billing-overview) | 当前每月 100 万字符 | 国内账号与人民币账单 | 国内专用机器翻译备选；先与 DeepL／DeepSeek 做真实节目质量对比，再决定是否实现。 |
 | [Azure Translator F0](https://azure.microsoft.com/en-us/pricing/details/cognitive-services/translator/) | 每月 200 万字符 | 需要 Azure 账号、订阅、资源 Key 与 region；F0 不产生超额翻译费用，但开户条件因地区而异 | 专用机器翻译 API 中最值得先做的第二个 provider；额度大，REST 接口明确，但自然度仍需真实节目 A/B 测试。 |
 | [Google Cloud Translation](https://cloud.google.com/translate/pricing) | 每月前 50 万字符由 10 美元抵扣 | 必须创建 Google Cloud 项目并启用 Billing；不是独立的“免费翻译 API 注册” | 更像带免费抵扣的云计费服务；额度不优于 DeepL，暂不优先。 |
 | [Amazon Translate](https://aws.amazon.com/translate/pricing/) | 首次请求起 12 个月内每月 200 万字符 | 需要 AWS 账号与云账单配置；到期或超额后按量收费 | 适合短期测试，不是长期永久免费方案。 |
@@ -21,10 +23,10 @@ MyMemory 提供无需复杂 SDK 的公共 REST 接口，但[官方技术规格](
 
 ## 推荐的实现顺序
 
-1. 先增加 Azure Translator：它是专用机器翻译 API，长期免费额度在当前候选中最实用，适合与 DeepL 对同一节目做 A/B 对比。
-2. 同时把“LLM 翻译”设计成通用 OpenAI-compatible provider，而不是为每家 LLM 写一套核心逻辑。配置至少包括 Base URL、模型名、API Key、风格提示和是否允许把内容发送给第三方。
-3. 首批 LLM 实测可以使用 Gemini Flash-Lite，重点验证口语自然度、段落连续性、占位术语恢复、输出段数一致和重试行为；免费层的数据使用提示必须在配置页明确展示。
-4. 后续用同一 OpenAI-compatible 接口接 Ollama，提供不把模型随 App 分发的本机翻译路径。
+1. 先把“LLM 翻译”设计成通用 OpenAI-compatible provider，而不是为每家 LLM 写一套核心逻辑。配置至少包括 Base URL、模型名、API Key、风格提示和是否允许把内容发送给第三方。
+2. 首个预设使用国内可直接访问和充值的 DeepSeek；对真实日语／英语电台与 DeepL 做 A/B，重点验证口语自然度、段落连续性、占位术语恢复、输出段 ID、重试和实际成本。
+3. 保留自定义兼容端点和模型入口，让有条件的用户连接 OpenAI、Gemini 兼容网关或其他海外服务；Atogaki 不内置共享 Key，也不假设所有测试者具备海外网络和支付渠道。
+4. 阿里云机器翻译作为国内传统机器翻译备选；Azure、Google Cloud 与 Amazon 不作为当前默认接入顺序。后续可用同一兼容接口接 Ollama，提供不把模型随 App 分发的本机翻译路径。
 
 ## 实现前需要补齐的持久化
 
