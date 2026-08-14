@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
 
 type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
@@ -99,6 +100,11 @@ type SubtitleSegment = {
   translation_edited: boolean;
   translation_stale: boolean;
   timing_edited: boolean;
+};
+
+type SubtitleUndoEntry = {
+  before: SubtitleSegment;
+  afterFingerprint: string;
 };
 
 type JobDetail = {
@@ -222,6 +228,8 @@ type SubtitleOverlayPayload = {
   translatedText: string | null;
   sourceLanguage: LanguageCode;
   targetLanguage: LanguageCode;
+  playing: boolean;
+  playbackRate: number;
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -597,6 +605,7 @@ let activeMedia: HTMLMediaElement | null = null;
 let activeSegmentId: string | null = null;
 let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
+const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
 let workspaceActionBusy = false;
 let lastExportedSubtitlePath: string | null = null;
 let glossaries: Glossary[] = [];
@@ -1483,12 +1492,22 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     const footer = document.createElement("div");
     footer.className = "subtitle-footer";
     const state = document.createElement("span");
-    state.textContent = segment.translation_stale ? "原文已改变，当前译文需要重译" : "已保存到本地 SQLite";
+    state.textContent = savedSegmentState(segment);
     if (segment.translation_stale) state.classList.add("warning");
     const save = document.createElement("button");
     save.type = "button";
     save.textContent = "保存本段";
     save.disabled = true;
+    const discard = document.createElement("button");
+    discard.type = "button";
+    discard.className = "secondary";
+    discard.textContent = "放弃修改";
+    discard.disabled = true;
+    const undo = document.createElement("button");
+    undo.type = "button";
+    undo.className = "secondary";
+    undo.textContent = "撤销上次保存";
+    undo.disabled = !canUndoSegment(segment);
     const translate = document.createElement("button");
     translate.type = "button";
     translate.className = "translate-segment secondary";
@@ -1500,6 +1519,7 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     const markDirty = (): void => {
       card.dataset.dirty = "true";
       save.disabled = false;
+      discard.disabled = false;
       state.textContent = "有未保存的修改";
       state.classList.remove("warning");
     };
@@ -1583,12 +1603,27 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     timing.append(timingSummary, timingGrid);
     refreshTimingDraft();
 
+    discard.addEventListener("click", () => {
+      const saved = activeDetail?.segments.find((item) => item.id === segment.id) ?? segment;
+      sourceInput.value = saved.source_text;
+      translationInput.value = saved.translated_text ?? "";
+      startInput.value = formatEditableTime(saved.start_ms);
+      endInput.value = formatEditableTime(saved.end_ms);
+      card.dataset.dirty = "false";
+      save.disabled = true;
+      discard.disabled = true;
+      state.textContent = savedSegmentState(saved);
+      state.classList.toggle("warning", saved.translation_stale);
+      refreshTimingDraft();
+    });
+
     save.addEventListener("click", () => void saveSegment(segment, sourceInput, translationInput, startInput, endInput, save, state));
+    undo.addEventListener("click", () => void undoSegment(segment, undo, state));
     translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, startInput, endInput, state));
     capture.addEventListener("click", () => void captureGlossaryCorrection(segment, sourceInput, state));
     const actions = document.createElement("div");
     actions.className = "subtitle-actions";
-    actions.append(capture, translate, save);
+    actions.append(capture, discard, undo, translate, save);
     footer.append(state, actions);
 
     card.append(meta, timing, sourceLabel, translationLabel, footer);
@@ -1596,6 +1631,42 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
   }
   highlightSegment(activeSegmentId);
   updateTranslationControls();
+}
+
+function savedSegmentState(segment: SubtitleSegment): string {
+  return segment.translation_stale ? "原文已改变，当前译文需要重译" : "已保存到本地 SQLite";
+}
+
+function subtitleValueFingerprint(segment: SubtitleSegment): string {
+  return JSON.stringify([
+    segment.source_text,
+    segment.translated_text,
+    segment.start_ms,
+    segment.end_ms,
+    segment.source_edited,
+    segment.translation_edited,
+    segment.translation_stale,
+    segment.timing_edited,
+  ]);
+}
+
+function subtitleUndoKey(segment: SubtitleSegment): string {
+  return `${segment.job_id}:${segment.id}`;
+}
+
+function canUndoSegment(segment: SubtitleSegment): boolean {
+  const history = subtitleUndoHistory.get(subtitleUndoKey(segment));
+  const latest = history?.at(-1);
+  return Boolean(latest && latest.afterFingerprint === subtitleValueFingerprint(segment));
+}
+
+function rememberSubtitleSave(before: SubtitleSegment, after: SubtitleSegment): void {
+  if (subtitleValueFingerprint(before) === subtitleValueFingerprint(after)) return;
+  const key = subtitleUndoKey(after);
+  const history = subtitleUndoHistory.get(key) ?? [];
+  history.push({ before: { ...before }, afterFingerprint: subtitleValueFingerprint(after) });
+  if (history.length > 20) history.shift();
+  subtitleUndoHistory.set(key, history);
 }
 
 function renderSubtitleListPreservingView(segments: SubtitleSegment[], expandedSegmentId?: string): void {
@@ -1620,8 +1691,10 @@ async function saveSegment(
   button.disabled = true;
   state.textContent = "正在保存…";
   try {
+    const before = activeDetail.segments.find((item) => item.id === segment.id) ?? segment;
     const { startMs, endMs } = readTimingDraft(startInput, endInput);
     const updated = await persistSegment(segment.id, sourceInput.value, translationInput.value, startMs, endMs);
+    rememberSubtitleSave(before, updated);
     replaceActiveSegment(updated);
     renderSubtitleListPreservingView(activeDetail.segments, segment.id);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
@@ -1630,6 +1703,44 @@ async function saveSegment(
     state.classList.add("warning");
     button.disabled = false;
   }
+}
+
+async function undoSegment(
+  segment: SubtitleSegment,
+  button: HTMLButtonElement,
+  state: HTMLSpanElement,
+): Promise<void> {
+  if (!activeDetail) return;
+  const key = subtitleUndoKey(segment);
+  const history = subtitleUndoHistory.get(key);
+  const entry = history?.at(-1);
+  const current = activeDetail.segments.find((item) => item.id === segment.id);
+  if (!entry || !current || entry.afterFingerprint !== subtitleValueFingerprint(current)) {
+    state.textContent = "无法撤销：字幕在保存后已重新读取或再次改变。";
+    state.classList.add("warning");
+    button.disabled = true;
+    return;
+  }
+  button.disabled = true;
+  state.textContent = "正在撤销上次保存…";
+  state.classList.remove("warning");
+  try {
+    const restored = await restoreSegment(entry.before);
+    history?.pop();
+    if (history?.length === 0) subtitleUndoHistory.delete(key);
+    replaceActiveSegment(restored);
+    renderSubtitleListPreservingView(activeDetail.segments, segment.id);
+    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    setWorkspaceAction("已撤销该段上一次手动保存；此撤销历史仅在当前 App 会话内保留。");
+  } catch (error) {
+    state.textContent = `撤销失败：${String(error)}`;
+    state.classList.add("warning");
+    button.disabled = false;
+  }
+}
+
+async function restoreSegment(snapshot: SubtitleSegment): Promise<SubtitleSegment> {
+  return invoke<SubtitleSegment>("restore_subtitle", { snapshot });
 }
 
 async function persistSegment(
@@ -1785,6 +1896,7 @@ function updatePlaybackControls(): void {
   if (playbackRateSelect) playbackRateSelect.disabled = disabled;
   if (togglePlaybackButton) togglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
   if (playbackRateSelect && activeMedia) playbackRateSelect.value = String(activeMedia.playbackRate);
+  if (subtitleOverlayVisible) syncSubtitleOverlay(subtitleAt((activeMedia?.currentTime ?? 0) * 1_000));
 }
 
 function togglePlayback(): void {
@@ -1823,6 +1935,17 @@ function changePlaybackRate(direction: -1 | 1): void {
   activeMedia.playbackRate = rates[nextIndex];
 }
 
+function executePlaybackAction(action: PlaybackAction): void {
+  if (action === "toggle-playback") togglePlayback();
+  else if (action === "rewind") seekRelative(-5);
+  else if (action === "forward") seekRelative(5);
+  else if (action === "previous-subtitle") seekAdjacentSubtitle(-1);
+  else if (action === "next-subtitle") seekAdjacentSubtitle(1);
+  else if (action === "slower") changePlaybackRate(-1);
+  else if (action === "faster") changePlaybackRate(1);
+  else if (action === "toggle-overlay") void openSubtitleOverlay();
+}
+
 function subtitleAt(milliseconds: number): SubtitleSegment | undefined {
   return activeDetail?.segments.find(
     (item) => milliseconds >= item.start_ms && milliseconds < item.end_ms,
@@ -1835,6 +1958,8 @@ function subtitleOverlayPayload(segment: SubtitleSegment | undefined): SubtitleO
     translatedText: segment?.translated_text ?? null,
     sourceLanguage: activeSourceLanguage(),
     targetLanguage: activeTargetLanguage(),
+    playing: Boolean(activeMedia && !activeMedia.paused),
+    playbackRate: activeMedia?.playbackRate ?? 1,
   };
 }
 
@@ -1848,7 +1973,7 @@ function renderSubtitleOverlayButton(): void {
 function syncSubtitleOverlay(segment: SubtitleSegment | undefined): void {
   if (!subtitleOverlayVisible || !activeDetail) return;
   const payload = subtitleOverlayPayload(segment);
-  const key = `${activeDetail.job.job_id}:${segment?.id ?? "none"}:${payload.sourceText}:${payload.translatedText ?? ""}`;
+  const key = `${activeDetail.job.job_id}:${segment?.id ?? "none"}:${payload.sourceText}:${payload.translatedText ?? ""}:${payload.playing}:${payload.playbackRate}`;
   if (key === lastSubtitleOverlayKey) return;
   lastSubtitleOverlayKey = key;
   void invoke("update_subtitle_overlay", { payload }).catch(() => {
@@ -2744,16 +2869,9 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
 document.addEventListener("keydown", (event) => {
   if (!activeDetail || !activeMedia || event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return;
   if (document.querySelector("dialog[open]")) return;
-  const key = event.key.toLowerCase();
-  if ((key === " " || key === "k") && !event.repeat) togglePlayback();
-  else if (key === "arrowleft" || key === "j") seekRelative(-5);
-  else if (key === "arrowright" || key === "l") seekRelative(5);
-  else if (key === "[") seekAdjacentSubtitle(-1);
-  else if (key === "]") seekAdjacentSubtitle(1);
-  else if (key === ",") changePlaybackRate(-1);
-  else if (key === ".") changePlaybackRate(1);
-  else if (key === "o" && !event.repeat) void openSubtitleOverlay();
-  else return;
+  const action = playbackActionForKey(event);
+  if (!action || (event.repeat && (action === "toggle-playback" || action === "toggle-overlay"))) return;
+  executePlaybackAction(action);
   event.preventDefault();
 });
 
@@ -2851,6 +2969,10 @@ void listen<boolean>("subtitle-overlay-visibility", (event) => {
   subtitleOverlayVisible = event.payload;
   lastSubtitleOverlayKey = "";
   renderSubtitleOverlayButton();
+});
+void listen<{ action: PlaybackAction }>("subtitle-overlay-playback-action", (event) => {
+  if (!activeDetail || !activeMedia) return;
+  executePlaybackAction(event.payload.action);
 });
 window.setInterval(() => void refresh(), 2_000);
 window.setInterval(() => void refreshActiveJob(), 2_000);

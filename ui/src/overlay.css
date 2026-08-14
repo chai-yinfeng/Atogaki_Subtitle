@@ -8,6 +8,7 @@
 * { box-sizing: border-box; }
 
 html, body, #overlay-root { width: 100%; height: 100%; min-height: 100%; margin: 0; background: #141a18; }
+#overlay-root:focus-visible { outline: 2px solid rgba(145, 188, 169, .75); outline-offset: -2px; }
 
 .overlay-card {
   position: relative;
@@ -48,6 +49,26 @@ html, body, #overlay-root { width: 100%; height: 100%; min-height: 100%; margin:
 }
 
 .overlay-header button:hover { background: rgba(216, 102, 80, .8); }
+
+.overlay-controls {
+  display: flex;
+  align-items: center;
+  gap: calc(5px * var(--overlay-scale));
+}
+
+.overlay-controls button {
+  -webkit-app-region: no-drag;
+  border: 1px solid rgba(244, 239, 225, .2);
+  border-radius: calc(7px * var(--overlay-scale));
+  padding: calc(4px * var(--overlay-scale)) calc(7px * var(--overlay-scale));
+  color: #eff1e8;
+  background: rgba(255, 255, 255, .08);
+  font-size: calc(10px * var(--overlay-scale));
+  cursor: pointer;
+}
+
+.overlay-controls button:hover, .overlay-controls button:focus-visible { background: rgba(145, 188, 169, .32); }
+.overlay-controls span { min-width: calc(28px * var(--overlay-scale)); color: #e9c986; font-size: calc(10px * var(--overlay-scale)); text-align: center; }
 
 .subtitle-block { display: grid; gap: calc(4px * var(--overlay-scale)); }
 .language-label { color: #91bca9; font-size: calc(11px * var(--overlay-scale)); font-weight: 700; }

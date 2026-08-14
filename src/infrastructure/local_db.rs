@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{
     FromRow, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -88,7 +88,7 @@ pub struct LocalGlossaryTermInput {
     pub content_group: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
 pub struct LocalSubtitleSegmentRecord {
     pub id: String,
     pub job_id: String,
@@ -1133,6 +1133,81 @@ impl LocalDatabase {
         Ok(updated)
     }
 
+    pub async fn restore_segment(
+        &self,
+        snapshot: &LocalSubtitleSegmentRecord,
+    ) -> Result<LocalSubtitleSegmentRecord> {
+        if snapshot.start_ms < 0 {
+            return Err(anyhow!("subtitle start time cannot be negative"));
+        }
+        if snapshot.end_ms <= snapshot.start_ms {
+            return Err(anyhow!(
+                "subtitle end time must be later than its start time"
+            ));
+        }
+        let source_text = snapshot.source_text.trim();
+        if source_text.is_empty() {
+            return Err(anyhow!("source subtitle text cannot be empty"));
+        }
+        let translated_text = snapshot
+            .translated_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin local subtitle restore transaction")?;
+        let result = sqlx::query(
+            "UPDATE local_subtitle_segments
+             SET source_text = ?, translated_text = ?, start_ms = ?, end_ms = ?,
+                 source_edited = ?, translation_edited = ?, translation_stale = ?, timing_edited = ?
+             WHERE job_id = ? AND id = ?",
+        )
+        .bind(source_text)
+        .bind(translated_text)
+        .bind(snapshot.start_ms)
+        .bind(snapshot.end_ms)
+        .bind(snapshot.source_edited)
+        .bind(snapshot.translation_edited)
+        .bind(snapshot.translation_stale)
+        .bind(snapshot.timing_edited)
+        .bind(&snapshot.job_id)
+        .bind(&snapshot.id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to restore local subtitle segment")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("subtitle segment not found: {}", snapshot.id));
+        }
+        sqlx::query(
+            "UPDATE local_jobs
+             SET updated_at_unix = MAX(updated_at_unix, ?)
+             WHERE job_id = ?",
+        )
+        .bind(chrono::Utc::now().timestamp())
+        .bind(&snapshot.job_id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to update local task restore timestamp")?;
+        let restored = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
+            "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
+                source_edited, translation_edited, translation_stale, timing_edited
+             FROM local_subtitle_segments
+             WHERE job_id = ? AND id = ?",
+        )
+        .bind(&snapshot.job_id)
+        .bind(&snapshot.id)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to reload restored local subtitle segment")?;
+        tx.commit()
+            .await
+            .context("failed to commit local subtitle restore")?;
+        Ok(restored)
+    }
+
     pub async fn replace_segments(
         &self,
         job_id: &str,
@@ -1618,6 +1693,15 @@ mod tests {
             .await
             .unwrap_err();
         assert!(invalid_timing.to_string().contains("later than"));
+
+        let restored = database.restore_segment(&segments[0]).await.unwrap();
+        assert_eq!(restored.source_text, "テスト");
+        assert_eq!(restored.translated_text.as_deref(), Some("测试"));
+        assert_eq!((restored.start_ms, restored.end_ms), (0, 1_000));
+        assert!(!restored.source_edited);
+        assert!(!restored.translation_edited);
+        assert!(!restored.translation_stale);
+        assert!(!restored.timing_edited);
 
         drop(database);
         fs::remove_dir_all(root).unwrap();
