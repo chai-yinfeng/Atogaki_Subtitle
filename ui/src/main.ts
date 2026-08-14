@@ -242,6 +242,8 @@ type SubtitleOverlayPayload = {
   playbackRate: number;
 };
 
+type WorkspaceSection = "review" | "translation" | "export";
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("missing app root");
 
@@ -301,37 +303,31 @@ app.innerHTML = `
       <div class="workspace-heading">
         <button id="back-to-jobs" class="secondary" type="button">← 返回任务</button>
         <div>
-          <p class="eyebrow">PLAYBACK WORKSPACE</p>
+          <p class="eyebrow">TASK WORKSPACE</p>
           <h2 id="workspace-title">任务详情</h2>
           <p id="workspace-message" class="workspace-message"></p>
         </div>
         <button id="reload-detail" type="button" class="secondary">重新读取</button>
       </div>
-      <section class="workspace-toolbar" aria-label="翻译与导出">
-        <div>
-          <strong>简体中文翻译</strong>
-          <span id="translation-status">正在读取翻译配置…</span>
-        </div>
-        <div class="workspace-action-buttons">
-          <button id="translate-all" type="button">全部翻译／重译</button>
-          <button id="open-subtitle-overlay" type="button" class="secondary">打开悬浮字幕</button>
-          <button id="export-subtitles" type="button" class="secondary">导出字幕…</button>
-          <button id="render-video" type="button" class="secondary">导出带字幕视频…</button>
-          <button id="reveal-export" type="button" class="secondary hidden">在 Finder 中显示</button>
-        </div>
-        <div class="workspace-glossary-row">
-          <div>
-            <strong>识别词表修正</strong>
-            <span id="job-glossary-status">当前任务未记录识别词表</span>
-          </div>
-          <select id="workspace-glossary"><option value="">选择词表…</option></select>
-          <button id="preview-glossary" type="button" class="secondary">预览应用</button>
-        </div>
-        <div id="glossary-preview" class="glossary-preview hidden"></div>
-        <p id="workspace-action-message" role="status"></p>
-      </section>
-      <div class="review-grid">
-        <section class="media-panel" aria-label="媒体播放器">
+      <nav class="workspace-sections" role="tablist" aria-label="任务详情功能">
+        <button id="workspace-tab-review" class="workspace-section-tab active" type="button" role="tab" aria-selected="true" aria-controls="workspace-review-panel" data-workspace-section="review">
+          <strong>字幕校对</strong><span>播放、编辑与打轴</span>
+        </button>
+        <button id="workspace-tab-translation" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-translation-panel" data-workspace-section="translation">
+          <strong>翻译与词表</strong><span>批量翻译与识别修正</span>
+        </button>
+        <button id="workspace-tab-export" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-export-panel" data-workspace-section="export">
+          <strong>导出成品</strong><span>字幕文件与烧录视频</span>
+        </button>
+      </nav>
+      <p id="workspace-action-message" class="workspace-action-message" role="status"></p>
+      <section id="workspace-review-panel" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-review" data-workspace-panel="review">
+        <div class="review-grid">
+          <section class="media-panel" aria-label="媒体播放器">
+            <div class="panel-heading compact">
+              <div><p class="eyebrow">PLAYBACK</p><h3>媒体与当前字幕</h3></div>
+              <button id="open-subtitle-overlay" type="button" class="secondary">打开悬浮字幕</button>
+            </div>
           <div id="media-host" class="media-host"></div>
           <div class="playback-tools" aria-label="播放快捷操作">
             <button id="previous-subtitle" type="button" class="secondary" title="上一句（[）">上一句</button>
@@ -356,15 +352,54 @@ app.innerHTML = `
             <p id="current-source">播放时将在这里显示当前原文。</p>
             <p id="current-translation">简体中文翻译</p>
           </div>
-        </section>
-        <section class="timeline" aria-labelledby="timeline-title">
-          <div class="section-heading">
-            <h2 id="timeline-title">字幕时间轴</h2>
-            <div class="timeline-heading-actions"><span id="segment-count"></span><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销上次拆分／合并</button></div>
+          </section>
+          <section class="timeline" aria-labelledby="timeline-title">
+            <div class="section-heading">
+              <h2 id="timeline-title">字幕时间轴</h2>
+              <div class="timeline-heading-actions"><span id="segment-count"></span><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销上次拆分／合并</button></div>
+            </div>
+            <div id="subtitle-list" class="subtitle-list"></div>
+          </section>
+        </div>
+      </section>
+      <section id="workspace-translation-panel" class="workspace-panel hidden" role="tabpanel" aria-labelledby="workspace-tab-translation" data-workspace-panel="translation">
+        <div class="module-heading">
+          <div><p class="eyebrow">LANGUAGE WORKFLOW</p><h2>翻译与识别修正</h2><p>这里的操作会更新当前 SQLite 字幕工作区；原始识别快照保持不变。</p></div>
+        </div>
+        <section class="workspace-toolbar module-card" aria-label="翻译与词表">
+          <div>
+            <strong>简体中文翻译</strong>
+            <span id="translation-status">正在读取翻译配置…</span>
           </div>
-          <div id="subtitle-list" class="subtitle-list"></div>
+          <div class="workspace-action-buttons">
+            <button id="translate-all" type="button">全部翻译／重译</button>
+          </div>
+          <div class="workspace-glossary-row">
+            <div>
+              <strong>识别词表修正</strong>
+              <span id="job-glossary-status">当前任务未记录识别词表</span>
+            </div>
+            <select id="workspace-glossary"><option value="">选择词表…</option></select>
+            <button id="preview-glossary" type="button" class="secondary">预览应用</button>
+          </div>
+          <div id="glossary-preview" class="glossary-preview hidden"></div>
         </section>
-      </div>
+      </section>
+      <section id="workspace-export-panel" class="workspace-panel hidden" role="tabpanel" aria-labelledby="workspace-tab-export" data-workspace-panel="export">
+        <div class="module-heading">
+          <div><p class="eyebrow">DELIVERABLES</p><h2>导出成品</h2><p>每次导出都读取当前已保存的字幕；未保存草稿不会进入文件或视频。</p></div>
+        </div>
+        <div class="export-grid">
+          <article class="export-card">
+            <div><span class="module-number">01</span><h3>字幕文件</h3><p>一次生成原文、译文与双语 SRT/ASS，适合播放器、校对和后续加工。</p></div>
+            <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 Finder 中显示</button></div>
+          </article>
+          <article class="export-card">
+            <div><span class="module-number">02</span><h3>带字幕视频</h3><p>把当前字幕冻结为一次独立烧录任务；提交后仍可返回字幕校对继续工作。</p></div>
+            <div class="export-card-actions"><button id="render-video" type="button">导出带字幕视频…</button></div>
+          </article>
+        </div>
+      </section>
     </section>
     <dialog id="glossary-dialog" class="glossary-dialog">
       <div class="dialog-heading">
@@ -528,7 +563,10 @@ app.innerHTML = `
 `;
 
 const homeView = document.querySelector<HTMLDivElement>("#home-view");
+const shell = document.querySelector<HTMLElement>(".shell");
 const workspaceView = document.querySelector<HTMLElement>("#workspace-view");
+const workspaceSectionTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-workspace-section]"));
+const workspaceSectionPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-workspace-panel]"));
 const jobList = document.querySelector<HTMLDivElement>("#job-list");
 const jobCount = document.querySelector<HTMLSpanElement>("#job-count");
 const jobManagementMessage = document.querySelector<HTMLParagraphElement>("#job-management-message");
@@ -1377,14 +1415,28 @@ async function refreshActiveJob(): Promise<void> {
 }
 
 function showWorkspace(show: boolean): void {
+  shell?.classList.toggle("workspace-open", show);
   homeView?.classList.toggle("hidden", show);
   workspaceView?.classList.toggle("hidden", !show);
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", show);
 }
 
+function showWorkspaceSection(section: WorkspaceSection): void {
+  for (const tab of workspaceSectionTabs) {
+    const selected = tab.dataset.workspaceSection === section;
+    tab.classList.toggle("active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of workspaceSectionPanels) {
+    panel.classList.toggle("hidden", panel.dataset.workspacePanel !== section);
+  }
+}
+
 async function openJob(jobId: string): Promise<void> {
   if (!jobId || !workspaceMessage) return;
   showWorkspace(true);
+  showWorkspaceSection("review");
   window.scrollTo({ top: 0, behavior: "auto" });
   workspaceMessage.textContent = "正在读取 SQLite 字幕工作区…";
   setWorkspaceAction("");
@@ -3089,6 +3141,25 @@ document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("cl
 });
 document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
   if (activeDetail) void openJob(activeDetail.job.job_id);
+});
+workspaceSectionTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    const section = tab.dataset.workspaceSection as WorkspaceSection | undefined;
+    if (section) showWorkspaceSection(section);
+  });
+  tab.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const currentIndex = workspaceSectionTabs.indexOf(tab);
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex = (currentIndex + direction + workspaceSectionTabs.length) % workspaceSectionTabs.length;
+    const next = workspaceSectionTabs[nextIndex];
+    const section = next?.dataset.workspaceSection as WorkspaceSection | undefined;
+    if (next && section) {
+      showWorkspaceSection(section);
+      next.focus();
+    }
+    event.preventDefault();
+  });
 });
 translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
 openSubtitleOverlayButton?.addEventListener("click", () => void openSubtitleOverlay());
