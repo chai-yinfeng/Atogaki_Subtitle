@@ -139,6 +139,60 @@ impl LocalWorkspaceService {
         self.database.restore_segment(snapshot).await
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn split_subtitle(
+        &self,
+        job_id: &str,
+        segment_id: &str,
+        boundary_ms: i64,
+        left_source_text: String,
+        right_source_text: String,
+        left_translated_text: Option<String>,
+        right_translated_text: Option<String>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        self.database
+            .split_segment(
+                job_id,
+                segment_id,
+                boundary_ms,
+                left_source_text,
+                right_source_text,
+                left_translated_text,
+                right_translated_text,
+            )
+            .await
+    }
+
+    pub async fn merge_subtitles(
+        &self,
+        job_id: &str,
+        left_segment_id: &str,
+        right_segment_id: &str,
+        source_text: String,
+        translated_text: Option<String>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        self.database
+            .merge_adjacent_segments(
+                job_id,
+                left_segment_id,
+                right_segment_id,
+                source_text,
+                translated_text,
+            )
+            .await
+    }
+
+    pub async fn restore_subtitle_structure(
+        &self,
+        job_id: &str,
+        before_segments: &[LocalSubtitleSegmentRecord],
+        after_segments: &[LocalSubtitleSegmentRecord],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        self.database
+            .restore_segment_structure(job_id, before_segments, after_segments)
+            .await
+    }
+
     pub async fn translate_segment(
         &self,
         job_id: &str,
@@ -594,7 +648,7 @@ mod tests {
     use crate::{
         application::{
             TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
-            job_manifest::JobManifest, job_snapshot::JobSnapshot,
+            job_manifest::JobManifest, job_snapshot::JobSnapshot, job_status::JobStatus,
         },
         domain::{LanguageCode, LanguagePair, TranscriptSegment},
         infrastructure::{
@@ -774,6 +828,72 @@ mod tests {
         assert!(context.contains("The second line"));
         assert!(requests[0].4.is_empty());
         drop(requests);
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn structurally_edited_segments_translate_and_export_in_new_order() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-structure-workspace-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let first = TranscriptSegment::new(0, 1_000, "Good morning everyone".to_string());
+        let second = TranscriptSegment::new(1_000, 2_000, "Welcome back".to_string());
+        let mut manifest = JobManifest::new(
+            &job,
+            None,
+            None,
+            LanguagePair::english_to_simplified_chinese(),
+        );
+        manifest.mark(JobStatus::Done);
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first.clone(), second],
+            })
+            .await
+            .unwrap();
+        let provider = Arc::new(FakeTranslationProvider::new(false));
+        let service = LocalWorkspaceService::with_provider(database.clone(), provider);
+
+        let split = service
+            .split_subtitle(
+                &manifest.job_id,
+                &first.id,
+                500,
+                "Good morning".to_string(),
+                "everyone".to_string(),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(split.len(), 3);
+        let translated = service.translate_all(&manifest.job_id).await.unwrap();
+        assert_eq!(translated.len(), 3);
+        assert_eq!(
+            translated[0].translated_text.as_deref(),
+            Some("译：Good morning")
+        );
+        assert_eq!(
+            translated[1].translated_text.as_deref(),
+            Some("译：everyone")
+        );
+
+        let exported = service.export_subtitles(&manifest.job_id).await.unwrap();
+        let source = fs::read_to_string(exported.source_srt).unwrap();
+        let translated_srt = fs::read_to_string(exported.translated_srt).unwrap();
+        assert!(source.contains("Good morning"));
+        assert!(source.contains("everyone"));
+        assert!(translated_srt.contains("译：Good morning"));
+        assert!(translated_srt.contains("译：everyone"));
 
         drop(service);
         drop(database);
