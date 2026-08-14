@@ -98,6 +98,7 @@ type SubtitleSegment = {
   source_edited: boolean;
   translation_edited: boolean;
   translation_stale: boolean;
+  timing_edited: boolean;
 };
 
 type JobDetail = {
@@ -314,6 +315,24 @@ app.innerHTML = `
       <div class="review-grid">
         <section class="media-panel" aria-label="媒体播放器">
           <div id="media-host" class="media-host"></div>
+          <div class="playback-tools" aria-label="播放快捷操作">
+            <button id="previous-subtitle" type="button" class="secondary" title="上一句（[）">上一句</button>
+            <button id="rewind-media" type="button" class="secondary" title="后退 5 秒（← 或 J）">−5 秒</button>
+            <button id="toggle-playback" type="button" title="播放／暂停（空格或 K）">播放</button>
+            <button id="forward-media" type="button" class="secondary" title="前进 5 秒（→ 或 L）">+5 秒</button>
+            <button id="next-subtitle" type="button" class="secondary" title="下一句（]）">下一句</button>
+            <label>速度
+              <select id="playback-rate" aria-label="播放速度">
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.25">1.25×</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
+              </select>
+            </label>
+          </div>
+          <p class="shortcut-help">快捷键：空格/K 播放暂停 · ←/J 与 →/L 跳 5 秒 · [ ] 切换字幕 · , . 调整速度 · O 开关悬浮字幕</p>
           <p id="media-message" class="media-message"></p>
           <div class="current-caption" aria-live="polite">
             <p id="current-source">播放时将在这里显示当前原文。</p>
@@ -501,6 +520,12 @@ const workspaceTitle = document.querySelector<HTMLHeadingElement>("#workspace-ti
 const workspaceMessage = document.querySelector<HTMLParagraphElement>("#workspace-message");
 const mediaHost = document.querySelector<HTMLDivElement>("#media-host");
 const mediaMessage = document.querySelector<HTMLParagraphElement>("#media-message");
+const previousSubtitleButton = document.querySelector<HTMLButtonElement>("#previous-subtitle");
+const rewindMediaButton = document.querySelector<HTMLButtonElement>("#rewind-media");
+const togglePlaybackButton = document.querySelector<HTMLButtonElement>("#toggle-playback");
+const forwardMediaButton = document.querySelector<HTMLButtonElement>("#forward-media");
+const nextSubtitleButton = document.querySelector<HTMLButtonElement>("#next-subtitle");
+const playbackRateSelect = document.querySelector<HTMLSelectElement>("#playback-rate");
 const subtitleList = document.querySelector<HTMLDivElement>("#subtitle-list");
 const segmentCount = document.querySelector<HTMLSpanElement>("#segment-count");
 const currentSource = document.querySelector<HTMLParagraphElement>("#current-source");
@@ -1370,6 +1395,7 @@ function isAudioPath(path: string): boolean {
 function mountMedia(primaryPath: string | null, fallbackPath: string | null): void {
   if (!mediaHost || !mediaMessage) return;
   activeMedia = null;
+  updatePlaybackControls();
   mediaHost.replaceChildren();
   const firstPath = primaryPath ?? fallbackPath;
   if (!firstPath) {
@@ -1384,6 +1410,11 @@ function mountMedia(primaryPath: string | null, fallbackPath: string | null): vo
     element.src = convertFileSrc(path);
     element.addEventListener("timeupdate", () => updateActiveSubtitle(element.currentTime * 1_000));
     element.addEventListener("seeked", () => updateActiveSubtitle(element.currentTime * 1_000));
+    element.addEventListener("play", updatePlaybackControls);
+    element.addEventListener("pause", updatePlaybackControls);
+    element.addEventListener("ended", updatePlaybackControls);
+    element.addEventListener("ratechange", updatePlaybackControls);
+    element.addEventListener("loadedmetadata", updatePlaybackControls);
     element.addEventListener(
       "error",
       () => {
@@ -1397,14 +1428,16 @@ function mountMedia(primaryPath: string | null, fallbackPath: string | null): vo
       { once: true },
     );
     activeMedia = element;
+    element.playbackRate = Number(playbackRateSelect?.value || "1");
     mediaHost.replaceChildren(element);
+    updatePlaybackControls();
     if (!isFallback) mediaMessage.textContent = path;
   };
 
   loadPath(firstPath, firstPath === fallbackPath && primaryPath === null);
 }
 
-function renderSubtitleList(segments: SubtitleSegment[]): void {
+function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: string): void {
   if (!subtitleList) return;
   subtitleList.replaceChildren();
   if (segments.length === 0) {
@@ -1472,25 +1505,114 @@ function renderSubtitleList(segments: SubtitleSegment[]): void {
     };
     sourceInput.addEventListener("input", markDirty);
     translationInput.addEventListener("input", markDirty);
-    save.addEventListener("click", () => void saveSegment(segment, sourceInput, translationInput, save, state));
-    translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, state));
+
+    const timing = document.createElement("details");
+    timing.className = "timing-editor";
+    timing.open = segment.id === expandedSegmentId;
+    const timingSummary = document.createElement("summary");
+    timingSummary.textContent = "编辑时间轴";
+    const timingGrid = document.createElement("div");
+    timingGrid.className = "timing-grid";
+    const startInput = document.createElement("input");
+    startInput.value = formatEditableTime(segment.start_ms);
+    startInput.inputMode = "decimal";
+    startInput.setAttribute("aria-label", "字幕开始时间");
+    const endInput = document.createElement("input");
+    endInput.value = formatEditableTime(segment.end_ms);
+    endInput.inputMode = "decimal";
+    endInput.setAttribute("aria-label", "字幕结束时间");
+    const timingHint = document.createElement("p");
+    timingHint.className = "timing-hint";
+    const refreshTimingDraft = (): void => {
+      try {
+        const { startMs, endMs } = readTimingDraft(startInput, endInput);
+        time.textContent = `${formatTime(startMs)} → ${formatTime(endMs)}`;
+        const overlap = timingOverlapWarning(segment, startMs, endMs);
+        timingHint.textContent = overlap || "时间重叠允许保存；导出与烧录会使用修改后的时间。";
+        timingHint.classList.toggle("warning", Boolean(overlap));
+      } catch (error) {
+        timingHint.textContent = String(error);
+        timingHint.classList.add("warning");
+      }
+    };
+    const changeTiming = (input: HTMLInputElement, deltaMs?: number): void => {
+      if (deltaMs === undefined) {
+        input.value = formatEditableTime(Math.round((activeMedia?.currentTime ?? 0) * 1_000));
+      } else {
+        const current = parseTimecode(input.value);
+        if (current !== null) input.value = formatEditableTime(Math.max(0, current + deltaMs));
+      }
+      markDirty();
+      refreshTimingDraft();
+    };
+    const timingField = (label: string, input: HTMLInputElement): HTMLDivElement => {
+      const field = document.createElement("div");
+      field.className = "timing-field";
+      const caption = document.createElement("span");
+      caption.textContent = label;
+      const actions = document.createElement("div");
+      actions.className = "timing-actions";
+      const minus = document.createElement("button");
+      minus.type = "button";
+      minus.className = "secondary";
+      minus.textContent = "−0.1 秒";
+      minus.addEventListener("click", () => changeTiming(input, -100));
+      const current = document.createElement("button");
+      current.type = "button";
+      current.className = "secondary";
+      current.textContent = "取播放位置";
+      current.addEventListener("click", () => changeTiming(input));
+      const plus = document.createElement("button");
+      plus.type = "button";
+      plus.className = "secondary";
+      plus.textContent = "+0.1 秒";
+      plus.addEventListener("click", () => changeTiming(input, 100));
+      actions.append(minus, current, plus);
+      field.append(caption, input, actions);
+      return field;
+    };
+    startInput.addEventListener("input", () => {
+      markDirty();
+      refreshTimingDraft();
+    });
+    endInput.addEventListener("input", () => {
+      markDirty();
+      refreshTimingDraft();
+    });
+    timingGrid.append(timingField("开始时间（时:分:秒.毫秒）", startInput), timingField("结束时间（时:分:秒.毫秒）", endInput), timingHint);
+    timing.append(timingSummary, timingGrid);
+    refreshTimingDraft();
+
+    save.addEventListener("click", () => void saveSegment(segment, sourceInput, translationInput, startInput, endInput, save, state));
+    translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, startInput, endInput, state));
     capture.addEventListener("click", () => void captureGlossaryCorrection(segment, sourceInput, state));
     const actions = document.createElement("div");
     actions.className = "subtitle-actions";
     actions.append(capture, translate, save);
     footer.append(state, actions);
 
-    card.append(meta, sourceLabel, translationLabel, footer);
+    card.append(meta, timing, sourceLabel, translationLabel, footer);
     subtitleList.append(card);
   }
   highlightSegment(activeSegmentId);
   updateTranslationControls();
 }
 
+function renderSubtitleListPreservingView(segments: SubtitleSegment[], expandedSegmentId?: string): void {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  renderSubtitleList(segments, expandedSegmentId);
+  const restoreScroll = (): void => window.scrollTo(scrollX, scrollY);
+  restoreScroll();
+  requestAnimationFrame(restoreScroll);
+}
+
 async function saveSegment(
   segment: SubtitleSegment,
   sourceInput: HTMLTextAreaElement,
   translationInput: HTMLTextAreaElement,
+  startInput: HTMLInputElement,
+  endInput: HTMLInputElement,
   button: HTMLButtonElement,
   state: HTMLSpanElement,
 ): Promise<void> {
@@ -1498,9 +1620,10 @@ async function saveSegment(
   button.disabled = true;
   state.textContent = "正在保存…";
   try {
-    const updated = await persistSegment(segment.id, sourceInput.value, translationInput.value);
+    const { startMs, endMs } = readTimingDraft(startInput, endInput);
+    const updated = await persistSegment(segment.id, sourceInput.value, translationInput.value, startMs, endMs);
     replaceActiveSegment(updated);
-    renderSubtitleList(activeDetail.segments);
+    renderSubtitleListPreservingView(activeDetail.segments, segment.id);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
   } catch (error) {
     state.textContent = `保存失败：${String(error)}`;
@@ -1509,14 +1632,24 @@ async function saveSegment(
   }
 }
 
-async function persistSegment(segmentId: string, sourceText: string, translatedText: string): Promise<SubtitleSegment> {
+async function persistSegment(
+  segmentId: string,
+  sourceText: string,
+  translatedText: string,
+  startMs?: number,
+  endMs?: number,
+): Promise<SubtitleSegment> {
   if (!activeDetail) throw new Error("没有打开的字幕任务");
+  const current = activeDetail.segments.find((segment) => segment.id === segmentId);
+  if (!current) throw new Error("字幕段已经不存在");
   return invoke<SubtitleSegment>("update_subtitle", {
     request: {
       jobId: activeDetail.job.job_id,
       segmentId,
       sourceText,
       translatedText: translatedText.trim() || null,
+      startMs: startMs ?? current.start_ms,
+      endMs: endMs ?? current.end_ms,
     },
   });
 }
@@ -1531,7 +1664,7 @@ async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
   if (!activeDetail || activeDetail.job.job_id !== jobId) return;
   activeDetail.job = detail.job;
   activeDetail.segments = detail.segments;
-  renderSubtitleList(activeDetail.segments);
+  renderSubtitleListPreservingView(activeDetail.segments);
   updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
 }
 
@@ -1539,6 +1672,8 @@ async function translateSegment(
   segment: SubtitleSegment,
   sourceInput: HTMLTextAreaElement,
   translationInput: HTMLTextAreaElement,
+  startInput: HTMLInputElement,
+  endInput: HTMLInputElement,
   state: HTMLSpanElement,
 ): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
@@ -1547,14 +1682,15 @@ async function translateSegment(
   state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
   state.classList.remove("warning");
   try {
-    const saved = await persistSegment(segment.id, sourceInput.value, translationInput.value);
+    const { startMs, endMs } = readTimingDraft(startInput, endInput);
+    const saved = await persistSegment(segment.id, sourceInput.value, translationInput.value, startMs, endMs);
     replaceActiveSegment(saved);
     const translated = await invoke<SubtitleSegment>("translate_subtitle", {
       jobId: activeDetail.job.job_id,
       segmentId: segment.id,
     });
     replaceActiveSegment(translated);
-    renderSubtitleList(activeDetail.segments);
+    renderSubtitleListPreservingView(activeDetail.segments, segment.id);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
     try {
       await reloadTranslatedWorkspace(activeDetail.job.job_id);
@@ -1577,6 +1713,7 @@ function editFlags(segment: SubtitleSegment): string {
   if (segment.source_edited) flags.push("原文已编辑");
   if (segment.translation_edited) flags.push("译文已编辑");
   if (segment.translation_stale) flags.push("待重译");
+  if (segment.timing_edited) flags.push("时间轴已编辑");
   return flags.join(" · ");
 }
 
@@ -1588,10 +1725,102 @@ function formatTime(milliseconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
 }
 
-function seekTo(milliseconds: number): void {
+function formatEditableTime(milliseconds: number): string {
+  const safe = Math.max(0, Math.round(milliseconds));
+  const hours = Math.floor(safe / 3_600_000);
+  const minutes = Math.floor((safe % 3_600_000) / 60_000);
+  const seconds = Math.floor((safe % 60_000) / 1_000);
+  const millis = safe % 1_000;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+}
+
+function parseTimecode(value: string): number | null {
+  const parts = value.trim().replace(",", ".").split(":");
+  if (parts.length < 1 || parts.length > 3 || parts.some((part) => part.trim() === "")) return null;
+  const numbers = parts.map(Number);
+  if (numbers.some((part) => !Number.isFinite(part) || part < 0)) return null;
+  const seconds = numbers.at(-1) ?? 0;
+  const minutes = numbers.length >= 2 ? numbers.at(-2) ?? 0 : 0;
+  const hours = numbers.length === 3 ? numbers[0] : 0;
+  if (seconds >= 60 || (numbers.length === 3 && minutes >= 60)) return null;
+  return Math.round((hours * 3_600 + minutes * 60 + seconds) * 1_000);
+}
+
+function readTimingDraft(
+  startInput: HTMLInputElement,
+  endInput: HTMLInputElement,
+): { startMs: number; endMs: number } {
+  const startMs = parseTimecode(startInput.value);
+  const endMs = parseTimecode(endInput.value);
+  if (startMs === null || endMs === null) {
+    throw new Error("时间格式无效，请使用 时:分:秒.毫秒");
+  }
+  if (endMs <= startMs) throw new Error("结束时间必须晚于开始时间");
+  return { startMs, endMs };
+}
+
+function timingOverlapWarning(segment: SubtitleSegment, startMs: number, endMs: number): string | null {
+  if (!activeDetail) return null;
+  const index = activeDetail.segments.findIndex((item) => item.id === segment.id);
+  const previous = index > 0 ? activeDetail.segments[index - 1] : null;
+  const next = index >= 0 && index + 1 < activeDetail.segments.length ? activeDetail.segments[index + 1] : null;
+  const messages = [];
+  if (previous && startMs < previous.end_ms) messages.push(`与上一段重叠 ${formatTime(previous.end_ms - startMs)}`);
+  if (next && endMs > next.start_ms) messages.push(`与下一段重叠 ${formatTime(endMs - next.start_ms)}`);
+  return messages.length > 0 ? `${messages.join("；")}（允许保存）` : null;
+}
+
+function seekTo(milliseconds: number, autoplay = true): void {
   if (!activeMedia) return;
-  activeMedia.currentTime = milliseconds / 1_000;
-  void activeMedia.play().catch(() => undefined);
+  const durationMs = Number.isFinite(activeMedia.duration) ? activeMedia.duration * 1_000 : milliseconds;
+  activeMedia.currentTime = Math.max(0, Math.min(milliseconds, durationMs)) / 1_000;
+  if (autoplay) void activeMedia.play().catch(() => undefined);
+}
+
+function updatePlaybackControls(): void {
+  const disabled = !activeMedia;
+  for (const button of [previousSubtitleButton, rewindMediaButton, togglePlaybackButton, forwardMediaButton, nextSubtitleButton]) {
+    if (button) button.disabled = disabled;
+  }
+  if (playbackRateSelect) playbackRateSelect.disabled = disabled;
+  if (togglePlaybackButton) togglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
+  if (playbackRateSelect && activeMedia) playbackRateSelect.value = String(activeMedia.playbackRate);
+}
+
+function togglePlayback(): void {
+  if (!activeMedia) return;
+  if (activeMedia.paused) void activeMedia.play().catch(() => undefined);
+  else activeMedia.pause();
+}
+
+function seekRelative(seconds: number): void {
+  if (!activeMedia) return;
+  seekTo((activeMedia.currentTime + seconds) * 1_000, false);
+}
+
+function seekAdjacentSubtitle(direction: -1 | 1): void {
+  if (!activeMedia || !activeDetail || activeDetail.segments.length === 0) return;
+  const currentMs = activeMedia.currentTime * 1_000;
+  const activeIndex = activeDetail.segments.findIndex((segment) => segment.id === activeSegmentId);
+  let targetIndex: number;
+  if (activeIndex >= 0) {
+    targetIndex = Math.max(0, Math.min(activeDetail.segments.length - 1, activeIndex + direction));
+  } else if (direction > 0) {
+    const nextIndex = activeDetail.segments.findIndex((segment) => segment.start_ms > currentMs);
+    targetIndex = nextIndex < 0 ? activeDetail.segments.length - 1 : nextIndex;
+  } else {
+    const previous = activeDetail.segments.filter((segment) => segment.end_ms <= currentMs);
+    targetIndex = Math.max(0, previous.length - 1);
+  }
+  seekTo(activeDetail.segments[targetIndex].start_ms, false);
+}
+
+function changePlaybackRate(direction: -1 | 1): void {
+  if (!activeMedia || !playbackRateSelect) return;
+  const rates = Array.from(playbackRateSelect.options).map((option) => Number(option.value));
+  const currentIndex = rates.findIndex((rate) => rate === activeMedia?.playbackRate);
+  const nextIndex = Math.max(0, Math.min(rates.length - 1, (currentIndex < 0 ? rates.indexOf(1) : currentIndex) + direction));
+  activeMedia.playbackRate = rates[nextIndex];
 }
 
 function subtitleAt(milliseconds: number): SubtitleSegment | undefined {
@@ -1705,7 +1934,7 @@ async function translateAllSubtitles(): Promise<void> {
     activeDetail.segments = await invoke<SubtitleSegment[]>("translate_all_subtitles", {
       jobId,
     });
-    renderSubtitleList(activeDetail.segments);
+    renderSubtitleListPreservingView(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
     try {
       await reloadTranslatedWorkspace(jobId);
@@ -2379,7 +2608,7 @@ async function applyPreviewedGlossary(): Promise<void> {
     });
     activeDetail.segments = applied.segments;
     clearGlossaryPreview();
-    renderSubtitleList(activeDetail.segments);
+    renderSubtitleListPreservingView(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
     setWorkspaceAction(
       `已修正 ${applied.changed_segments} 段并保存到 SQLite；${applied.stale_translations} 段译文需要重译。`,
@@ -2426,6 +2655,7 @@ document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("cl
   hideSubtitleOverlay();
   activeDetail = null;
   activeMedia = null;
+  updatePlaybackControls();
   activeSegmentId = null;
   showWorkspace(false);
   void refresh();
@@ -2435,6 +2665,14 @@ document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("c
 });
 translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
 openSubtitleOverlayButton?.addEventListener("click", () => void openSubtitleOverlay());
+previousSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(-1));
+rewindMediaButton?.addEventListener("click", () => seekRelative(-5));
+togglePlaybackButton?.addEventListener("click", togglePlayback);
+forwardMediaButton?.addEventListener("click", () => seekRelative(5));
+nextSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(1));
+playbackRateSelect?.addEventListener("change", () => {
+  if (activeMedia && playbackRateSelect) activeMedia.playbackRate = Number(playbackRateSelect.value);
+});
 exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
 revealExportButton?.addEventListener("click", () => void revealExportedSubtitle());
@@ -2494,6 +2732,29 @@ document.querySelector<HTMLButtonElement>("#cancel-glossary-correction")?.addEve
 glossaryCorrectionDialog?.addEventListener("close", () => {
   pendingGlossaryCorrection = null;
   if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
+});
+
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || (target instanceof HTMLElement && target.isContentEditable);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (!activeDetail || !activeMedia || event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return;
+  if (document.querySelector("dialog[open]")) return;
+  const key = event.key.toLowerCase();
+  if ((key === " " || key === "k") && !event.repeat) togglePlayback();
+  else if (key === "arrowleft" || key === "j") seekRelative(-5);
+  else if (key === "arrowright" || key === "l") seekRelative(5);
+  else if (key === "[") seekAdjacentSubtitle(-1);
+  else if (key === "]") seekAdjacentSubtitle(1);
+  else if (key === ",") changePlaybackRate(-1);
+  else if (key === ".") changePlaybackRate(1);
+  else if (key === "o" && !event.repeat) void openSubtitleOverlay();
+  else return;
+  event.preventDefault();
 });
 
 async function chooseFile(kind: "media" | "model" | "vad"): Promise<void> {

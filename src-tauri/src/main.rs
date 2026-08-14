@@ -371,6 +371,8 @@ struct UpdateSubtitleRequest {
     segment_id: String,
     source_text: String,
     translated_text: Option<String>,
+    start_ms: i64,
+    end_ms: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -664,11 +666,13 @@ async fn update_subtitle(
 ) -> Result<LocalSubtitleSegmentRecord, String> {
     state
         .workspace_service
-        .update_subtitle_text(
+        .update_subtitle(
             &request.job_id,
             &request.segment_id,
             request.source_text,
             request.translated_text,
+            request.start_ms,
+            request.end_ms,
         )
         .await
         .map_err(|error| error.to_string())
