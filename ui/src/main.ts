@@ -381,6 +381,19 @@ app.innerHTML = `
             </div>
             <select id="workspace-glossary"><option value="">选择词表…</option></select>
             <button id="preview-glossary" type="button" class="secondary">预览应用</button>
+            <button id="manage-workspace-glossary" type="button" class="secondary">管理完整词表</button>
+          </div>
+          <div class="workspace-glossary-inspection">
+            <section>
+              <strong>可应用的修正映射</strong>
+              <p>这里只列出会修改当前原文的规则；纯提示词不会改写已有字幕。</p>
+              <div id="workspace-glossary-mappings" class="glossary-mapping-list muted">请选择词表。</div>
+            </section>
+            <details>
+              <summary>查看转写时冻结的词表快照</summary>
+              <p>该快照只用于说明本任务当时的识别输入，不会随当前词表修改而变化。</p>
+              <pre id="job-glossary-snapshot">当前任务没有词表快照。</pre>
+            </details>
           </div>
           <div id="glossary-preview" class="glossary-preview hidden"></div>
         </section>
@@ -606,6 +619,8 @@ const revealExportButton = document.querySelector<HTMLButtonElement>("#reveal-ex
 const workspaceActionMessage = document.querySelector<HTMLParagraphElement>("#workspace-action-message");
 const workspaceGlossary = document.querySelector<HTMLSelectElement>("#workspace-glossary");
 const jobGlossaryStatus = document.querySelector<HTMLSpanElement>("#job-glossary-status");
+const workspaceGlossaryMappings = document.querySelector<HTMLDivElement>("#workspace-glossary-mappings");
+const jobGlossarySnapshot = document.querySelector<HTMLElement>("#job-glossary-snapshot");
 const glossaryPreviewHost = document.querySelector<HTMLDivElement>("#glossary-preview");
 const glossaryDialog = document.querySelector<HTMLDialogElement>("#glossary-dialog");
 const glossaryListHost = document.querySelector<HTMLDivElement>("#glossary-list");
@@ -1091,6 +1106,40 @@ function renderGlossaryOptions(): void {
   renderGlossaryList();
 }
 
+async function renderWorkspaceGlossaryInspection(): Promise<void> {
+  const glossaryId = workspaceGlossary?.value;
+  if (!workspaceGlossaryMappings) return;
+  if (!glossaryId) {
+    workspaceGlossaryMappings.classList.add("muted");
+    workspaceGlossaryMappings.textContent = "请选择词表。";
+    return;
+  }
+  workspaceGlossaryMappings.classList.add("muted");
+  workspaceGlossaryMappings.textContent = "正在读取修正规则…";
+  try {
+    const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
+    const mappings = detail.terms.filter((term) => term.target_text?.trim());
+    workspaceGlossaryMappings.classList.toggle("muted", mappings.length === 0);
+    workspaceGlossaryMappings.innerHTML = mappings.length
+      ? mappings.map((term) => `<div><span>${escapeHtml(term.source_text)}</span><b aria-hidden="true">→</b><span>${escapeHtml(term.target_text ?? "")}</span></div>`).join("")
+      : "这个词表没有识别后修正规则，只会作为新任务的 Whisper 提示词。";
+  } catch (error) {
+    workspaceGlossaryMappings.classList.add("muted");
+    workspaceGlossaryMappings.textContent = `读取失败：${String(error)}`;
+  }
+}
+
+async function renderJobGlossarySnapshot(jobId: string): Promise<void> {
+  if (!jobGlossarySnapshot) return;
+  jobGlossarySnapshot.textContent = "正在读取任务快照…";
+  try {
+    const snapshot = await invoke<string | null>("get_job_glossary_snapshot", { jobId });
+    jobGlossarySnapshot.textContent = snapshot?.trim() || "当前任务没有词表快照。";
+  } catch (error) {
+    jobGlossarySnapshot.textContent = `快照读取失败：${String(error)}`;
+  }
+}
+
 async function refreshTaskGlossaryConfiguration(): Promise<void> {
   const glossaryId = taskGlossary?.value || null;
   if (!glossaryId) {
@@ -1471,6 +1520,8 @@ function renderWorkspace(detail: JobDetail): void {
   if (workspaceGlossary && detail.job.glossary_id && glossaries.some((item) => item.id === detail.job.glossary_id)) {
     workspaceGlossary.value = detail.job.glossary_id;
   }
+  void renderWorkspaceGlossaryInspection();
+  void renderJobGlossarySnapshot(detail.job.job_id);
   clearGlossaryPreview();
   mountMedia(detail.playback_path, detail.audio_fallback_path);
   renderSubtitleList(detail.segments);
@@ -2859,10 +2910,10 @@ async function editGlossary(glossaryId: string | null): Promise<void> {
   }
 }
 
-async function openGlossaryManager(): Promise<void> {
+async function openGlossaryManager(preferredGlossaryId?: string | null): Promise<void> {
   await refreshGlossaries();
   glossaryDialog?.showModal();
-  const preferred = taskGlossary?.value || glossaries[0]?.id || null;
+  const preferred = preferredGlossaryId || taskGlossary?.value || glossaries[0]?.id || null;
   await editGlossary(preferred);
 }
 
@@ -3184,6 +3235,7 @@ videoSubtitleTrack?.addEventListener("change", () => {
   if (videoOutputPath && !videoOutputPath.value) videoOutputPath.placeholder = suggestedVideoName();
 });
 document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());
+document.querySelector<HTMLButtonElement>("#manage-workspace-glossary")?.addEventListener("click", () => void openGlossaryManager(workspaceGlossary?.value));
 document.querySelector<HTMLButtonElement>("#close-glossaries")?.addEventListener("click", () => glossaryDialog?.close());
 document.querySelector<HTMLButtonElement>("#new-glossary")?.addEventListener("click", () => void editGlossary(null));
 document.querySelector<HTMLButtonElement>("#add-glossary-term")?.addEventListener("click", () => addGlossaryTermRow());
@@ -3192,6 +3244,7 @@ deleteGlossaryButton?.addEventListener("click", () => void deleteGlossaryEditor(
 document.querySelector<HTMLButtonElement>("#preview-glossary")?.addEventListener("click", () => void previewGlossaryApplication());
 workspaceGlossary?.addEventListener("change", () => {
   clearGlossaryPreview();
+  void renderWorkspaceGlossaryInspection();
   updateTranslationControls();
 });
 renameJobForm?.addEventListener("submit", (event) => {

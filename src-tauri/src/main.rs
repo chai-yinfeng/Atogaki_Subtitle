@@ -599,6 +599,25 @@ async fn get_glossary(
 }
 
 #[tauri::command]
+async fn get_job_glossary_snapshot(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Option<String>, String> {
+    let workspace = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let Some(path) = workspace.job.glossary_snapshot_path else {
+        return Ok(None);
+    };
+    tokio::fs::read_to_string(&path)
+        .await
+        .map(Some)
+        .map_err(|error| format!("failed to read task glossary snapshot {path}: {error}"))
+}
+
+#[tauri::command]
 async fn preview_glossary_prompt(
     state: State<'_, DesktopState>,
     request: PromptPreviewRequest,
@@ -1327,6 +1346,7 @@ fn main() {
             delete_glossary,
             export_workspace_subtitles,
             get_glossary,
+            get_job_glossary_snapshot,
             get_job_detail,
             list_glossaries,
             list_jobs,
