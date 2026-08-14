@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -25,6 +25,7 @@ use crate::{
 const TRANSLATION_BATCH_SIZE: usize = 12;
 const TRANSLATION_CONTEXT_WINDOW_MS: i64 = 30_000;
 const TRANSLATION_CONTEXT_MAX_CHARS: usize = 2_000;
+const PLAYBACK_POSITION_PREFIX: &str = "listening.playback_position_ms.";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalWorkspaceJob {
@@ -61,6 +62,15 @@ pub struct LocalSubtitleExportPlan {
     pub existing_files: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalSubtitleExportArtifact {
+    SourceSrt,
+    TranslatedSrt,
+    BilingualSrt,
+    BilingualAss,
+}
+
 /// Application boundary for browsing, translating, editing and exporting the
 /// durable desktop workspace.
 ///
@@ -88,6 +98,37 @@ impl LocalWorkspaceService {
             translation_provider,
             translation_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    pub async fn playback_position(&self, job_id: &str) -> Result<i64> {
+        self.database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        let key = format!("{PLAYBACK_POSITION_PREFIX}{job_id}");
+        Ok(self
+            .database
+            .get_setting(&key)
+            .await?
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(0)
+            .max(0))
+    }
+
+    pub async fn save_playback_position(&self, job_id: &str, position_ms: i64) -> Result<()> {
+        if position_ms < 0 {
+            return Err(anyhow!("playback position cannot be negative"));
+        }
+        self.database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        self.database
+            .set_setting(
+                &format!("{PLAYBACK_POSITION_PREFIX}{job_id}"),
+                &position_ms.to_string(),
+            )
+            .await
     }
 
     pub fn translation_status(&self) -> LocalTranslationStatus {
@@ -319,13 +360,14 @@ impl LocalWorkspaceService {
         &self,
         job_id: &str,
         output_directory: &Path,
+        artifacts: &[LocalSubtitleExportArtifact],
     ) -> Result<LocalSubtitleExportPlan> {
         let job = self
             .database
             .get_job(job_id)
             .await?
             .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
-        planned_subtitle_export(&job, output_directory)
+        planned_subtitle_export(&job, output_directory, artifacts)
     }
 
     pub async fn export_subtitles_to(
@@ -333,8 +375,14 @@ impl LocalWorkspaceService {
         job_id: &str,
         output_directory: &Path,
         overwrite_existing: bool,
+        artifacts: &[LocalSubtitleExportArtifact],
     ) -> Result<LocalSubtitleExport> {
-        let plan = self.subtitle_export_plan(job_id, output_directory).await?;
+        if artifacts.is_empty() {
+            return Err(anyhow!("select at least one subtitle export format"));
+        }
+        let plan = self
+            .subtitle_export_plan(job_id, output_directory, artifacts)
+            .await?;
         if !overwrite_existing && !plan.existing_files.is_empty() {
             return Err(anyhow!(
                 "subtitle export would overwrite {} existing file(s)",
@@ -342,32 +390,78 @@ impl LocalWorkspaceService {
             ));
         }
 
-        // Always refresh the task-local projections first. The selected export
-        // is a copy of the same current SQLite state used by future rendering.
-        let generated = self.export_subtitles(job_id).await?;
-        copy_export_file(&generated.source_srt, &plan.source_srt, overwrite_existing)?;
-        copy_export_file(
-            &generated.translated_srt,
-            &plan.translated_srt,
-            overwrite_existing,
-        )?;
-        copy_export_file(
-            &generated.bilingual_srt,
-            &plan.bilingual_srt,
-            overwrite_existing,
-        )?;
-        copy_export_file(
-            &generated.bilingual_ass,
-            &plan.bilingual_ass,
-            overwrite_existing,
-        )?;
+        let workspace = self.get_job(job_id).await?;
+        if workspace.segments.is_empty() {
+            return Err(anyhow!(
+                "cannot export a workspace without subtitle segments"
+            ));
+        }
+        let selected = artifacts.iter().copied().collect::<HashSet<_>>();
+        let requires_translation = selected
+            .iter()
+            .any(|artifact| !matches!(artifact, LocalSubtitleExportArtifact::SourceSrt));
+        let stale_count = workspace
+            .segments
+            .iter()
+            .filter(|segment| segment.translation_stale)
+            .count();
+        let missing_translation_count = workspace
+            .segments
+            .iter()
+            .filter(|segment| segment.translated_text.as_deref().is_none_or(str::is_empty))
+            .count();
+        if requires_translation && stale_count > 0 {
+            return Err(anyhow!(
+                "{stale_count} subtitle translation(s) are stale; retranslate them before exporting translated subtitles"
+            ));
+        }
+        if requires_translation && missing_translation_count > 0 {
+            return Err(anyhow!(
+                "{missing_translation_count} subtitle translation(s) are missing; finish translation or export only the source SRT"
+            ));
+        }
+        let segments = workspace_segments(&workspace.segments)?;
+        let task_job = Job::open(PathBuf::from(&workspace.job.storage_dir))?;
+        for artifact in &selected {
+            let (generated, destination) = match artifact {
+                LocalSubtitleExportArtifact::SourceSrt => {
+                    subtitle::write_srt(
+                        &task_job.source_srt,
+                        &segments,
+                        subtitle::SubtitleTrack::Source,
+                    )?;
+                    (&task_job.source_srt, &plan.source_srt)
+                }
+                LocalSubtitleExportArtifact::TranslatedSrt => {
+                    subtitle::write_srt(
+                        &task_job.translated_srt,
+                        &segments,
+                        subtitle::SubtitleTrack::Translation,
+                    )?;
+                    (&task_job.translated_srt, &plan.translated_srt)
+                }
+                LocalSubtitleExportArtifact::BilingualSrt => {
+                    subtitle::write_srt(
+                        &task_job.bilingual_srt,
+                        &segments,
+                        subtitle::SubtitleTrack::Bilingual,
+                    )?;
+                    (&task_job.bilingual_srt, &plan.bilingual_srt)
+                }
+                LocalSubtitleExportArtifact::BilingualAss => {
+                    subtitle::write_ass(&task_job.bilingual_ass, &segments)?;
+                    (&task_job.bilingual_ass, &plan.bilingual_ass)
+                }
+            };
+            copy_export_file(generated, destination, overwrite_existing)?;
+        }
 
         Ok(LocalSubtitleExport {
             source_srt: plan.source_srt,
             translated_srt: plan.translated_srt,
             bilingual_srt: plan.bilingual_srt,
             bilingual_ass: plan.bilingual_ass,
-            missing_translation_count: generated.missing_translation_count,
+            missing_translation_count,
         })
     }
 
@@ -456,6 +550,7 @@ impl LocalWorkspaceService {
 fn planned_subtitle_export(
     job: &LocalJobRecord,
     output_directory: &Path,
+    artifacts: &[LocalSubtitleExportArtifact],
 ) -> Result<LocalSubtitleExportPlan> {
     if !output_directory.is_dir() {
         return Err(anyhow!(
@@ -472,11 +567,17 @@ fn planned_subtitle_export(
     let translated_srt = output_directory.join(format!("{base_name}.{target_language}.srt"));
     let bilingual_srt = output_directory.join(format!("{base_name}.bilingual.srt"));
     let bilingual_ass = output_directory.join(format!("{base_name}.bilingual.ass"));
-    let paths = [&source_srt, &translated_srt, &bilingual_srt, &bilingual_ass];
+    let selected = artifacts.iter().copied().collect::<HashSet<_>>();
+    let paths = [
+        (LocalSubtitleExportArtifact::SourceSrt, &source_srt),
+        (LocalSubtitleExportArtifact::TranslatedSrt, &translated_srt),
+        (LocalSubtitleExportArtifact::BilingualSrt, &bilingual_srt),
+        (LocalSubtitleExportArtifact::BilingualAss, &bilingual_ass),
+    ];
     let existing_files = paths
         .iter()
-        .filter(|path| path.exists())
-        .map(|path| path.display().to_string())
+        .filter(|(artifact, path)| selected.contains(artifact) && path.exists())
+        .map(|(_, path)| path.display().to_string())
         .collect();
 
     Ok(LocalSubtitleExportPlan {
@@ -530,9 +631,13 @@ fn subtitle_export_base_name(job: &LocalJobRecord) -> String {
     }
 }
 
-fn copy_export_file(source: &str, destination: &str, overwrite_existing: bool) -> Result<()> {
-    let source = Path::new(source);
-    let destination = Path::new(destination);
+fn copy_export_file(
+    source: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    overwrite_existing: bool,
+) -> Result<()> {
+    let source = source.as_ref();
+    let destination = destination.as_ref();
     if overwrite_existing {
         fs::copy(source, destination).with_context(|| {
             format!(
@@ -641,10 +746,14 @@ fn workspace_segments(records: &[LocalSubtitleSegmentRecord]) -> Result<Vec<Tran
 mod tests {
     use std::{
         fs,
+        path::Path,
         sync::{Arc, Mutex as StdMutex},
     };
 
-    use super::{LocalWorkspaceService, TRANSLATION_CONTEXT_MAX_CHARS, translation_context};
+    use super::{
+        LocalSubtitleExportArtifact, LocalWorkspaceService, TRANSLATION_CONTEXT_MAX_CHARS,
+        translation_context,
+    };
     use crate::{
         application::{
             TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
@@ -1030,9 +1139,15 @@ mod tests {
             .await
             .unwrap();
         let service = LocalWorkspaceService::new(database.clone());
+        let artifacts = [
+            LocalSubtitleExportArtifact::SourceSrt,
+            LocalSubtitleExportArtifact::TranslatedSrt,
+            LocalSubtitleExportArtifact::BilingualSrt,
+            LocalSubtitleExportArtifact::BilingualAss,
+        ];
 
         let plan = service
-            .subtitle_export_plan(&manifest.job_id, &export_directory)
+            .subtitle_export_plan(&manifest.job_id, &export_directory, &artifacts)
             .await
             .unwrap();
         assert_eq!(plan.base_name, "深夜电台_ 第_12回");
@@ -1044,7 +1159,7 @@ mod tests {
         );
 
         let exported = service
-            .export_subtitles_to(&manifest.job_id, &export_directory, false)
+            .export_subtitles_to(&manifest.job_id, &export_directory, false, &artifacts)
             .await
             .unwrap();
         assert!(
@@ -1059,19 +1174,37 @@ mod tests {
         );
 
         let conflicting = service
-            .subtitle_export_plan(&manifest.job_id, &export_directory)
+            .subtitle_export_plan(&manifest.job_id, &export_directory, &artifacts)
             .await
             .unwrap();
         assert_eq!(conflicting.existing_files.len(), 4);
         let error = service
-            .export_subtitles_to(&manifest.job_id, &export_directory, false)
+            .export_subtitles_to(&manifest.job_id, &export_directory, false, &artifacts)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("would overwrite 4"));
         service
-            .export_subtitles_to(&manifest.job_id, &export_directory, true)
+            .export_subtitles_to(&manifest.job_id, &export_directory, true, &artifacts)
             .await
             .unwrap();
+        assert_eq!(
+            service.playback_position(&manifest.job_id).await.unwrap(),
+            0
+        );
+        service
+            .save_playback_position(&manifest.job_id, 42_500)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.playback_position(&manifest.job_id).await.unwrap(),
+            42_500
+        );
+        assert!(
+            service
+                .save_playback_position(&manifest.job_id, -1)
+                .await
+                .is_err()
+        );
 
         drop(service);
         drop(database);
@@ -1168,6 +1301,23 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("stale"));
         assert!(!job.bilingual_srt.exists());
+
+        let export_directory = root.join("selected-export");
+        fs::create_dir(&export_directory).unwrap();
+        let source_only = [LocalSubtitleExportArtifact::SourceSrt];
+        let exported = service
+            .export_subtitles_to(&manifest.job_id, &export_directory, false, &source_only)
+            .await
+            .unwrap();
+        assert!(Path::new(&exported.source_srt).exists());
+        assert!(!Path::new(&exported.bilingual_srt).exists());
+
+        let translated = [LocalSubtitleExportArtifact::TranslatedSrt];
+        let error = service
+            .export_subtitles_to(&manifest.job_id, &export_directory, false, &translated)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("stale"));
 
         drop(service);
         drop(database);

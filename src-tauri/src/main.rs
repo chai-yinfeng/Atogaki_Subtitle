@@ -13,8 +13,9 @@ use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
         LocalGlossaryService, LocalGlossaryTermDraft, LocalRenderRequest, LocalRenderService,
-        LocalSubtitleExport, LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus,
-        LocalWorkspaceService, MutableTranslationProvider, TranscriptionOptions,
+        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan, LocalTaskService,
+        LocalTranslationStatus, LocalWorkspaceService, MutableTranslationProvider,
+        TranscriptionOptions,
         UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
     },
     domain::{LanguageCode, subtitle::SubtitleTrack},
@@ -416,6 +417,7 @@ struct SubtitleExportRequest {
     job_id: String,
     output_directory: String,
     overwrite_existing: bool,
+    artifacts: Vec<LocalSubtitleExportArtifact>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -423,6 +425,7 @@ struct SubtitleExportRequest {
 struct SubtitleExportPlanRequest {
     job_id: String,
     output_directory: String,
+    artifacts: Vec<LocalSubtitleExportArtifact>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -432,6 +435,13 @@ struct VideoRenderRequest {
     output_path: String,
     subtitle_track: SubtitleTrack,
     overwrite_existing: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavePlaybackPositionRequest {
+    job_id: String,
+    position_ms: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -596,6 +606,25 @@ async fn get_glossary(
         .get(&glossary_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_job_glossary_snapshot(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Option<String>, String> {
+    let workspace = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let Some(path) = workspace.job.glossary_snapshot_path else {
+        return Ok(None);
+    };
+    tokio::fs::read_to_string(&path)
+        .await
+        .map(Some)
+        .map_err(|error| format!("failed to read task glossary snapshot {path}: {error}"))
 }
 
 #[tauri::command]
@@ -820,6 +849,7 @@ async fn export_workspace_subtitles(
             &request.job_id,
             &PathBuf::from(request.output_directory),
             request.overwrite_existing,
+            &request.artifacts,
         )
         .await
         .map_err(|error| error.to_string())
@@ -832,7 +862,35 @@ async fn preview_workspace_subtitle_export(
 ) -> Result<LocalSubtitleExportPlan, String> {
     state
         .workspace_service
-        .subtitle_export_plan(&request.job_id, &PathBuf::from(request.output_directory))
+        .subtitle_export_plan(
+            &request.job_id,
+            &PathBuf::from(request.output_directory),
+            &request.artifacts,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_playback_position(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<i64, String> {
+    state
+        .workspace_service
+        .playback_position(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_playback_position(
+    state: State<'_, DesktopState>,
+    request: SavePlaybackPositionRequest,
+) -> Result<(), String> {
+    state
+        .workspace_service
+        .save_playback_position(&request.job_id, request.position_ms)
         .await
         .map_err(|error| error.to_string())
 }
@@ -1327,7 +1385,9 @@ fn main() {
             delete_glossary,
             export_workspace_subtitles,
             get_glossary,
+            get_job_glossary_snapshot,
             get_job_detail,
+            get_playback_position,
             list_glossaries,
             list_jobs,
             list_video_renders,
@@ -1353,6 +1413,7 @@ fn main() {
             save_download_network_settings,
             save_desktop_settings,
             save_glossary,
+            save_playback_position,
             submit_transcription,
             start_model_download,
             test_network_connection,

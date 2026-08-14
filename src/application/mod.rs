@@ -20,8 +20,8 @@ pub use local_glossary_service::{
 pub use local_render_service::{LocalRenderRequest, LocalRenderService};
 pub use local_task_service::LocalTaskService;
 pub use local_workspace_service::{
-    LocalSubtitleExport, LocalSubtitleExportPlan, LocalTranslationStatus, LocalWorkspaceJob,
-    LocalWorkspaceService,
+    LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
+    LocalTranslationStatus, LocalWorkspaceJob, LocalWorkspaceService,
 };
 pub use transcription_options::TranscriptionOptions;
 pub use translation_options::TranslationOptions;

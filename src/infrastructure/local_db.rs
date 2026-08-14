@@ -556,6 +556,11 @@ impl LocalDatabase {
         if result.rows_affected() != 1 {
             return Err(anyhow!("local task not found: {job_id}"));
         }
+        sqlx::query("DELETE FROM local_settings WHERE key = ?")
+            .bind(format!("listening.playback_position_ms.{job_id}"))
+            .execute(&self.pool)
+            .await
+            .context("failed to delete local task playback position")?;
         Ok(())
     }
 
