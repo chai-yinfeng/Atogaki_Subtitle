@@ -225,6 +225,13 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .network-settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .settings-grid .settings-span { grid-column: 1 / -1; }
+
+.credential-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--muted);
+}
 .disabled-field { opacity: .52; }
 .network-test-row { display: flex; align-items: center; gap: 12px; }
 .network-test-row span { color: #70736b; font-size: 10px; line-height: 1.5; }

@@ -34,7 +34,10 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
-    desktop_settings::{DesktopSettings, DesktopSettingsService, SaveDesktopSettingsRequest},
+    desktop_settings::{
+        DesktopSettings, DesktopSettingsService, SaveDesktopSettingsRequest,
+        TranslationCredentialCheck,
+    },
     model_download::{
         ModelCatalogItem, ModelDownloadService, ModelDownloadState, NetworkSourceCheck,
         test_download_network,
@@ -1104,6 +1107,18 @@ async fn desktop_settings(state: State<'_, DesktopState>) -> Result<DesktopSetti
 }
 
 #[tauri::command]
+async fn check_translation_api_key(
+    state: State<'_, DesktopState>,
+    provider_id: String,
+) -> Result<TranslationCredentialCheck, String> {
+    state
+        .settings_service
+        .check_translation_api_key(&provider_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn save_desktop_settings(
     state: State<'_, DesktopState>,
     request: SaveDesktopSettingsRequest,
@@ -1383,6 +1398,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            check_translation_api_key,
             data_directory,
             desktop_settings,
             delete_job,

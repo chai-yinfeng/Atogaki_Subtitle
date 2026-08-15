@@ -24,7 +24,7 @@ MyMemory 提供无需复杂 SDK 的公共 REST 接口，但[官方技术规格](
 ## 推荐的实现顺序
 
 1. 先把“LLM 翻译”设计成通用 OpenAI-compatible provider，而不是为每家 LLM 写一套核心逻辑。配置至少包括 Base URL、模型名、API Key、风格提示和是否允许把内容发送给第三方。
-2. 首个预设使用国内可直接访问和充值的 DeepSeek，默认模型为 `deepseek-v4-flash`，关闭思考模式并要求带字幕段 ID 的 JSON 输出；对真实日语／英语电台与 DeepL 做 A/B，重点验证口语自然度、段落连续性、占位术语恢复、输出段 ID、重试和实际成本。
+2. 首个 LLM API 预设使用 DeepSeek，默认模型为 `deepseek-v4-flash`，关闭思考模式并要求带字幕段 ID 的 JSON 输出；对真实日语／英语电台与 DeepL 做 A/B，重点验证口语自然度、段落连续性、占位术语恢复、输出段 ID、重试和实际成本。
 3. 保留自定义兼容端点和模型入口，让有条件的用户连接 OpenAI、Gemini 兼容网关或其他海外服务；Atogaki 不内置共享 Key，也不假设所有测试者具备海外网络和支付渠道。
 4. 阿里云机器翻译作为国内传统机器翻译备选；Azure、Google Cloud 与 Amazon 不作为当前默认接入顺序。后续可用同一兼容接口接 Ollama，提供不把模型随 App 分发的本机翻译路径。
 

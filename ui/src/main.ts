@@ -172,6 +172,14 @@ type DesktopSettings = {
   modelMirrorUrl: string | null;
 };
 
+type TranslationCredentialCheck = {
+  providerId: string;
+  providerName: string;
+  storedInSystem: boolean;
+  availableFromEnvironment: boolean;
+  credentialStore: string;
+};
+
 type ModelCatalogItem = {
   id: string;
   kind: "whisper" | "vad";
@@ -626,8 +634,8 @@ app.innerHTML = `
           <div class="settings-section-heading"><div><strong>3. 云端翻译（可选）</strong><span>不配置也可以完成本地转写、编辑和原文字幕导出。</span></div><span id="credential-store-label"></span></div>
           <label>翻译 provider
             <select id="settings-provider">
-              <option value="deepl">DeepL</option>
-              <option value="deepseek">DeepSeek（推荐的国内 LLM）</option>
+              <option value="deepl">DeepL（传统翻译 API）</option>
+              <option value="deepseek">DeepSeek（LLM API）</option>
               <option value="openai-compatible">OpenAI-compatible（高级）</option>
               <option value="none">关闭云端翻译</option>
             </select>
@@ -647,6 +655,7 @@ app.innerHTML = `
             <input id="settings-api-key" type="password" autocomplete="off" placeholder="留空则保持当前密钥" />
           </label>
           <label class="clear-secret"><input id="settings-clear-api-key" type="checkbox" /><span id="clear-api-key-label">删除系统凭据库中已保存的 DeepL Key</span></label>
+          <div class="credential-check-row"><button id="check-api-key" type="button" class="secondary">检查所选 Key</button><span>仅检查系统凭据条目，不会回显 Key 或调用翻译 API。</span></div>
           <p id="api-key-status" class="settings-message"></p>
         </section>
         <div class="settings-footer">
@@ -777,6 +786,7 @@ const settingsProviderModel = document.querySelector<HTMLInputElement>("#setting
 const settingsTranslationStyle = document.querySelector<HTMLInputElement>("#settings-translation-style");
 const settingsApiKey = document.querySelector<HTMLInputElement>("#settings-api-key");
 const settingsClearApiKey = document.querySelector<HTMLInputElement>("#settings-clear-api-key");
+const checkApiKeyButton = document.querySelector<HTMLButtonElement>("#check-api-key");
 const settingsMessage = document.querySelector<HTMLSpanElement>("#settings-message");
 const apiKeyStatus = document.querySelector<HTMLParagraphElement>("#api-key-status");
 const credentialStoreLabel = document.querySelector<HTMLSpanElement>("#credential-store-label");
@@ -968,6 +978,7 @@ function syncProviderSettings(): void {
   const customEndpoint = provider === "openai-compatible";
   document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !enabled);
   settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !enabled);
+  checkApiKeyButton?.closest("div")?.classList.toggle("hidden", !enabled);
   document.querySelector<HTMLElement>("#llm-provider-fields")?.classList.toggle("hidden", !llmEnabled);
   document.querySelector<HTMLElement>("#provider-base-url-field")?.classList.toggle("hidden", !customEndpoint);
   const providerLabel = provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
@@ -975,6 +986,28 @@ function syncProviderSettings(): void {
   const clearApiKeyLabel = document.querySelector<HTMLSpanElement>("#clear-api-key-label");
   if (apiKeyLabel) apiKeyLabel.textContent = `${providerLabel} API Key`;
   if (clearApiKeyLabel) clearApiKeyLabel.textContent = `删除系统凭据库中已保存的 ${providerLabel} Key`;
+}
+
+async function checkSelectedApiKey(): Promise<void> {
+  if (!settingsProvider || !checkApiKeyButton || !apiKeyStatus || settingsProvider.value === "none") return;
+  checkApiKeyButton.disabled = true;
+  apiKeyStatus.textContent = `正在检查 ${settingsProvider.value} 的系统凭据；macOS 可能请求解锁 Keychain…`;
+  apiKeyStatus.classList.remove("warning");
+  try {
+    const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", {
+      providerId: settingsProvider.value,
+    });
+    const environment = result.availableFromEnvironment ? "；启动环境中也有兼容 Key" : "";
+    apiKeyStatus.textContent = result.storedInSystem
+      ? `${result.providerName} Key 存在于 ${result.credentialStore}${environment}；内容不会回显。`
+      : `${result.credentialStore} 中没有 ${result.providerName} Key${environment}。`;
+    apiKeyStatus.classList.toggle("warning", !result.storedInSystem && !result.availableFromEnvironment);
+  } catch (error) {
+    apiKeyStatus.textContent = `检查失败：${String(error)}`;
+    apiKeyStatus.classList.add("warning");
+  } finally {
+    checkApiKeyButton.disabled = false;
+  }
 }
 
 function syncNetworkSettings(): void {
@@ -3561,7 +3594,12 @@ settingsProvider?.addEventListener("change", () => {
     settingsTranslationStyle.value = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
   }
   syncProviderSettings();
+  if (apiKeyStatus && settingsProvider.value !== "none") {
+    apiKeyStatus.textContent = "尚未检查当前 provider；可点击“检查所选 Key”确认系统凭据是否存在。";
+    apiKeyStatus.classList.remove("warning");
+  }
 });
+checkApiKeyButton?.addEventListener("click", () => void checkSelectedApiKey());
 settingsProxyMode?.addEventListener("change", syncNetworkSettings);
 testNetworkButton?.addEventListener("click", () => void testNetworkConnection());
 settingsForm?.addEventListener("submit", (event) => {

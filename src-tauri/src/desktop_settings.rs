@@ -69,6 +69,16 @@ pub struct DesktopSettings {
     pub model_mirror_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationCredentialCheck {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub stored_in_system: bool,
+    pub available_from_environment: bool,
+    pub credential_store: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveDesktopSettingsRequest {
@@ -561,6 +571,46 @@ impl DesktopSettingsService {
         self.load().await
     }
 
+    /// Explicitly checks one provider credential after a user action. Normal startup and
+    /// settings loading remain credential-free so macOS does not show Keychain prompts merely
+    /// because the application was opened.
+    pub async fn check_translation_api_key(
+        &self,
+        provider_id: &str,
+    ) -> Result<TranslationCredentialCheck> {
+        validate_provider_id(provider_id)?;
+        if provider_id == "none" {
+            bail!("select a translation provider before checking its API key");
+        }
+        let secret = match self.credentials.get(provider_id) {
+            Ok(secret) => normalized_secret(secret),
+            Err(error) => {
+                self.replace_cached_provider_key(provider_id, None, Some(format!("{error:#}")));
+                return Err(error);
+            }
+        };
+        self.replace_cached_provider_key(provider_id, secret.clone(), None);
+        if let Some(key) = key_saved_setting(provider_id) {
+            if secret.is_some() {
+                self.database.set_setting(key, "true").await?;
+            } else {
+                self.database.delete_setting(key).await?;
+            }
+        }
+        let available_from_environment = match provider_id {
+            DEEPL_PROVIDER_ID => self.environment_deepl_key.is_some(),
+            DEEPSEEK_PROVIDER_ID => self.environment_deepseek_key.is_some(),
+            _ => false,
+        };
+        Ok(TranslationCredentialCheck {
+            provider_id: provider_id.to_string(),
+            provider_name: provider_display_name(provider_id).to_string(),
+            stored_in_system: secret.is_some(),
+            available_from_environment,
+            credential_store: self.credentials.backend_name().to_string(),
+        })
+    }
+
     /// Persists only the non-secret network draft used by the model downloader.
     /// This deliberately bypasses provider construction and credential-store access so a
     /// download can use the visible proxy settings without prompting for a DeepL key.
@@ -751,6 +801,15 @@ fn key_saved_setting(provider_id: &str) -> Option<&'static str> {
         DEEPSEEK_PROVIDER_ID => Some(DEEPSEEK_KEY_SAVED),
         OPENAI_COMPATIBLE_PROVIDER_ID => Some(OPENAI_COMPATIBLE_KEY_SAVED),
         _ => None,
+    }
+}
+
+fn provider_display_name(provider_id: &str) -> &'static str {
+    match provider_id {
+        DEEPL_PROVIDER_ID => "DeepL",
+        DEEPSEEK_PROVIDER_ID => "DeepSeek",
+        OPENAI_COMPATIBLE_PROVIDER_ID => "OpenAI-compatible",
+        _ => "翻译服务",
     }
 }
 
@@ -1108,6 +1167,49 @@ mod tests {
                 .await
                 .unwrap()
                 .is_none()
+        );
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_credential_check_reads_once_and_repairs_the_saved_marker() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-key-check-test-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        *credentials.secret.lock().unwrap() = Some("existing-deepseek-key".to_string());
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            credentials.clone(),
+        );
+
+        let checked = service
+            .check_translation_api_key("deepseek")
+            .await
+            .unwrap();
+
+        assert!(checked.stored_in_system);
+        assert!(!checked.available_from_environment);
+        assert_eq!(checked.provider_name, "DeepSeek");
+        assert_eq!(*credentials.reads.lock().unwrap(), 1);
+        assert_eq!(
+            database
+                .get_setting("translation.deepseek_key_saved")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("true")
         );
 
         drop(service);

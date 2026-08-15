@@ -71,9 +71,9 @@ _最后更新：2026-08-16_
 
 - [x] 将 provider 输入输出升级为带稳定字幕段 ID 的结构化契约；工作区统一校验数量、重复／缺失 ID 和空译文后再原子写入。
 - [x] 为翻译批次持久化 provider ID、返回模型、端点类型、段数、可得的 token 用量和完成时间，不保存 API Key、请求正文或译文副本。
-- [x] 实现通用 OpenAI-compatible Chat Completions adapter，并提供国内可直接配置的 DeepSeek 预设；空响应、协议错误和请求失败会统一重试一次。
+- [x] 实现通用 OpenAI-compatible Chat Completions adapter，并提供 DeepSeek LLM API 预设；空响应、协议错误和请求失败会统一重试一次。
 - [x] 保留自定义兼容端点／模型入口，让有条件的用户配置 OpenAI、Gemini 兼容网关或其他服务；界面明确原文会发送到用户选择的第三方。
-- [ ] 对同一真实节目执行 DeepL 与 DeepSeek 的口语自然度、上下文、专名保护、段 ID 对齐、失败重试和成本 A/B。结构化契约与离线测试已经完成；当前开发环境没有 `DEEPSEEK_API_KEY`，真实调用等待用户配置后执行。
+- [ ] 对同一真实节目执行 DeepL 与 DeepSeek 的口语自然度、上下文、专名保护、段 ID 对齐、失败重试和成本 A/B。结构化契约与离线测试已经完成，DeepL／DeepSeek 的 Keychain 条目也已通过隔离 App 显式检查；发送真实字幕内容的调用等待用户单独授权后执行。
 
 ## 1.4. Windows 基础发行
 
@@ -134,7 +134,7 @@ _最后更新：2026-08-16_
 - 首页任务、活动任务详情和烧录进度已自动轮询；转写任务同步当前阶段，运行耗时由界面本机时钟逐秒更新，不再依赖 Whisper 阶段内的数据库写入。Whisper 当前没有稳定的机器可读进度协议，故不显示伪百分比或单次 ETA；后续应基于本机历史速度、媒体时长和模型档位生成区间预测。
 - 系统 WebView 不能播放所有 ffmpeg 支持的容器或编码；当前失败时回退任务 `audio.wav`，后续需按需生成视频代理文件。
 - 桌面 DeepL 单段/批量翻译与重启持久化已通过真实 API 窗口回归；`LocalWorkspaceService` 注入可热切换的结构化 provider。DeepL、DeepSeek 和自定义 OpenAI-compatible Key 按 provider ID 写入系统凭据库（macOS Keychain、Windows Credential Manager 或 Linux Secret Service），`DEEPL_AUTH_KEY`／`DEEPSEEK_API_KEY` 仅作兼容回退；SQLite 只保留非敏感设置、“曾成功保存”标记与 provider 批次元数据，启动、设置和模型下载不读取凭据，首次实际翻译才访问系统凭据库并在进程内缓存。
-- 第二批翻译 provider 的官方额度与条款初步调研见 `docs/translation-provider-options.md`。通用 OpenAI-compatible adapter、DeepSeek 国内预设和用户自配兼容入口已经实现；Google、Azure 等不作为要求所有测试者具备海外支付／网络条件的默认路径。发布前仍需用同一真实节目完成 DeepL／DeepSeek 质量与成本 A/B。
+- 第二批翻译 provider 的官方额度与条款初步调研见 `docs/translation-provider-options.md`。通用 OpenAI-compatible adapter、DeepSeek LLM API 预设和用户自配兼容入口已经实现；Google、Azure 等不作为要求所有测试者具备海外支付／网络条件的默认路径。发布前仍需用同一真实节目完成 DeepL／DeepSeek 质量与成本 A/B。
 - 桌面 SRT/ASS 与带字幕 MP4 均从 SQLite 当前工作区派生；视频烧录使用独立 SQLite 记录和不可变 ASS 快照，支持取消、安全覆盖与 Finder 定位。VideoToolbox 运行时失败会记录原始错误并回退内置 MPEG-4；两者均失败才标记任务失败。应用重启时未完成烧录会标记失败，尚不自动恢复。
 - 硬字幕需要重编码，旧版 VideoToolbox 固定质量参数会把低码率源视频放大数倍。桌面烧录现在优先按输入视频码率加约 20% 余量设定目标码率；没有可用流码率时保留质量模式。VideoToolbox H.264 可较好跟随该策略，但 LGPL MPEG-4 回退在低码率 720p 样本上可能触及量化器上限而输出更大；后续如出现质量或体积偏好需求，再设计可选档位或评估额外的非 GPL H.264 编码依赖。
 - 识别词表已支持核心、任务内容包和仅修正；Yorushika 内置词表当前以人物为核心、作品分为内容包，并为人名常见的平假名识别结果提供不占 prompt 的回退修正。任务选中的词表快照还会保护其中的提示词，使 DeepL 保留作品、人名等原文而不把它们按普通词义翻译；这不等同于译名映射，后者如有真实需求应另设字段。最终 prompt 会预览并保存，但精确 tokenizer 预算和真实节目质量仍需继续评估。
