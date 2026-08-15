@@ -5,4 +5,5 @@ pub mod job_store;
 pub mod local_db;
 pub mod media;
 pub mod network;
+pub mod openai_compatible;
 pub mod whisper;

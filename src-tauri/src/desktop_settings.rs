@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -7,13 +8,16 @@ use std::{
 use anyhow::{Result, anyhow, bail};
 use atogaki_subtitle::{
     application::{
-        MutableTranslationProvider, TranslationFuture, TranslationOptions, TranslationProvider,
-        TranslationProviderStatus, UnconfiguredTranslationProvider,
+        MutableTranslationProvider, TranslationFuture, TranslationProvider,
+        TranslationProviderStatus, TranslationRequest, UnconfiguredTranslationProvider,
     },
     infrastructure::{
         deepl::DeepLTranslationProvider,
         local_db::LocalDatabase,
         network::{NetworkClientConfig, normalize_https_endpoint},
+        openai_compatible::{
+            OpenAiCompatibleConfig, OpenAiCompatibleTranslationProvider,
+        },
     },
 };
 use serde::{Deserialize, Serialize};
@@ -25,10 +29,22 @@ const WHISPER_MODEL_PATH: &str = "recognition.whisper_model_path";
 const VAD_MODEL_PATH: &str = "recognition.vad_model_path";
 const TRANSLATION_PROVIDER: &str = "translation.provider";
 const DEEPL_KEY_SAVED: &str = "translation.deepl_key_saved";
+const DEEPSEEK_KEY_SAVED: &str = "translation.deepseek_key_saved";
+const OPENAI_COMPATIBLE_KEY_SAVED: &str = "translation.openai_compatible_key_saved";
+const DEEPSEEK_MODEL: &str = "translation.deepseek_model";
+const OPENAI_BASE_URL: &str = "translation.openai_base_url";
+const OPENAI_MODEL: &str = "translation.openai_model";
+const LLM_STYLE_INSTRUCTION: &str = "translation.llm_style_instruction";
 const NETWORK_PROXY_MODE: &str = "network.proxy_mode";
 const NETWORK_PROXY_URL: &str = "network.proxy_url";
 const MODEL_MIRROR_URL: &str = "network.model_mirror_url";
 const DEEPL_PROVIDER_ID: &str = "deepl";
+const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
+const OPENAI_COMPATIBLE_PROVIDER_ID: &str = "openai-compatible";
+const DEFAULT_DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
+const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
+const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+const DEFAULT_LLM_STYLE: &str = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +56,9 @@ pub struct DesktopSettings {
     pub vad_model_path: Option<String>,
     pub vad_model_ready: bool,
     pub translation_provider_id: String,
+    pub translation_model: Option<String>,
+    pub translation_base_url: Option<String>,
+    pub translation_style_instruction: String,
     pub translation_api_key_configured: bool,
     pub translation_api_key_source: Option<String>,
     pub credential_store: String,
@@ -56,6 +75,9 @@ pub struct SaveDesktopSettingsRequest {
     pub whisper_model_path: Option<String>,
     pub vad_model_path: Option<String>,
     pub translation_provider_id: String,
+    pub translation_model: Option<String>,
+    pub translation_base_url: Option<String>,
+    pub translation_style_instruction: Option<String>,
     pub api_key: Option<String>,
     pub network_proxy_mode: String,
     pub network_proxy_url: Option<String>,
@@ -79,9 +101,10 @@ pub struct DesktopSettingsService {
     provider: MutableTranslationProvider,
     models_directory: PathBuf,
     environment_deepl_key: Option<String>,
+    environment_deepseek_key: Option<String>,
     environment_whisper_model: Option<PathBuf>,
     environment_vad_model: Option<PathBuf>,
-    credential_cache: Arc<Mutex<CredentialCache>>,
+    credential_cache: Arc<Mutex<HashMap<String, CredentialCache>>>,
 }
 
 #[derive(Debug, Default)]
@@ -97,7 +120,7 @@ struct CredentialCache {
 #[derive(Clone)]
 struct DeferredDeepLTranslationProvider {
     credentials: Arc<dyn CredentialStore>,
-    credential_cache: Arc<Mutex<CredentialCache>>,
+    credential_cache: Arc<Mutex<HashMap<String, CredentialCache>>>,
     environment_key: Option<String>,
     network: NetworkClientConfig,
 }
@@ -105,7 +128,7 @@ struct DeferredDeepLTranslationProvider {
 impl DeferredDeepLTranslationProvider {
     fn new(
         credentials: Arc<dyn CredentialStore>,
-        credential_cache: Arc<Mutex<CredentialCache>>,
+        credential_cache: Arc<Mutex<HashMap<String, CredentialCache>>>,
         environment_key: Option<String>,
         network: NetworkClientConfig,
     ) -> Self {
@@ -119,7 +142,11 @@ impl DeferredDeepLTranslationProvider {
 
     fn resolve(&self) -> Result<DeepLTranslationProvider> {
         let (stored_key, credential_error) =
-            cached_deepl_key(self.credentials.as_ref(), self.credential_cache.as_ref());
+            cached_provider_key(
+                DEEPL_PROVIDER_ID,
+                self.credentials.as_ref(),
+                self.credential_cache.as_ref(),
+            );
         let key = if let Some(key) = stored_key.or_else(|| self.environment_key.clone()) {
             key
         } else if let Some(error) = credential_error {
@@ -137,7 +164,10 @@ impl fmt::Debug for DeferredDeepLTranslationProvider {
             .debug_struct("DeferredDeepLTranslationProvider")
             .field(
                 "credential_loaded",
-                &credential_cache_loaded(self.credential_cache.as_ref()),
+                &credential_cache_loaded(
+                    DEEPL_PROVIDER_ID,
+                    self.credential_cache.as_ref(),
+                ),
             )
             .finish()
     }
@@ -152,24 +182,90 @@ impl TranslationProvider for DeferredDeepLTranslationProvider {
             // secret is reported on the first translation rather than during local startup.
             configured: true,
             model: None,
+            endpoint_kind: "deepl-v2".to_string(),
             configuration_hint: Some("将在首次翻译时从系统凭据库读取 DeepL Key。".to_string()),
         }
     }
 
-    fn translate<'a>(
-        &'a self,
-        options: &'a TranslationOptions,
-        texts: &'a [String],
-        context: Option<&'a str>,
-    ) -> TranslationFuture<'a> {
-        let options = options.clone();
-        let texts = texts.to_vec();
-        let context = context.map(str::to_string);
-        Box::pin(async move {
-            self.resolve()?
-                .translate(&options, &texts, context.as_deref())
-                .await
-        })
+    fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+        Box::pin(async move { self.resolve()?.translate(request).await })
+    }
+}
+
+#[derive(Clone)]
+struct DeferredOpenAiCompatibleTranslationProvider {
+    provider_id: String,
+    provider_name: String,
+    credentials: Arc<dyn CredentialStore>,
+    credential_cache: Arc<Mutex<HashMap<String, CredentialCache>>>,
+    environment_key: Option<String>,
+    network: NetworkClientConfig,
+    base_url: String,
+    model: String,
+    style_instruction: String,
+    disable_deepseek_thinking: bool,
+}
+
+impl DeferredOpenAiCompatibleTranslationProvider {
+    fn resolve(&self) -> Result<OpenAiCompatibleTranslationProvider> {
+        let (stored_key, credential_error) = cached_provider_key(
+            &self.provider_id,
+            self.credentials.as_ref(),
+            self.credential_cache.as_ref(),
+        );
+        let key = if let Some(key) = stored_key.or_else(|| self.environment_key.clone()) {
+            key
+        } else if let Some(error) = credential_error {
+            return Err(anyhow!("无法读取 {} Key：{error}", self.provider_name));
+        } else {
+            return Err(anyhow!("请先在设置中配置 {} API Key。", self.provider_name));
+        };
+        OpenAiCompatibleTranslationProvider::with_network_config(
+            OpenAiCompatibleConfig {
+                provider_id: self.provider_id.clone(),
+                provider_name: self.provider_name.clone(),
+                api_key: Some(key),
+                base_url: self.base_url.clone(),
+                model: self.model.clone(),
+                style_instruction: self.style_instruction.clone(),
+                disable_deepseek_thinking: self.disable_deepseek_thinking,
+            },
+            &self.network,
+        )
+    }
+}
+
+impl fmt::Debug for DeferredOpenAiCompatibleTranslationProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DeferredOpenAiCompatibleTranslationProvider")
+            .field("provider_id", &self.provider_id)
+            .field("model", &self.model)
+            .field(
+                "credential_loaded",
+                &credential_cache_loaded(&self.provider_id, self.credential_cache.as_ref()),
+            )
+            .finish()
+    }
+}
+
+impl TranslationProvider for DeferredOpenAiCompatibleTranslationProvider {
+    fn status(&self) -> TranslationProviderStatus {
+        TranslationProviderStatus {
+            id: self.provider_id.clone(),
+            name: self.provider_name.clone(),
+            configured: true,
+            model: Some(self.model.clone()),
+            endpoint_kind: "openai-chat-completions".to_string(),
+            configuration_hint: Some(format!(
+                "将在首次翻译时从系统凭据库读取 {} Key。",
+                self.provider_name
+            )),
+        }
+    }
+
+    fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+        Box::pin(async move { self.resolve()?.translate(request).await })
     }
 }
 
@@ -179,6 +275,7 @@ impl DesktopSettingsService {
         provider: MutableTranslationProvider,
         models_directory: PathBuf,
         environment_deepl_key: Option<String>,
+        environment_deepseek_key: Option<String>,
         environment_whisper_model: Option<PathBuf>,
         environment_vad_model: Option<PathBuf>,
     ) -> Self {
@@ -188,9 +285,10 @@ impl DesktopSettingsService {
             provider,
             models_directory,
             environment_deepl_key: normalized_secret(environment_deepl_key),
+            environment_deepseek_key: normalized_secret(environment_deepseek_key),
             environment_whisper_model: existing_file(environment_whisper_model),
             environment_vad_model: existing_file(environment_vad_model),
-            credential_cache: Arc::new(Mutex::new(CredentialCache::default())),
+            credential_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -207,9 +305,10 @@ impl DesktopSettingsService {
             provider,
             models_directory,
             environment_deepl_key: None,
+            environment_deepseek_key: None,
             environment_whisper_model: None,
             environment_vad_model: None,
-            credential_cache: Arc::new(Mutex::new(CredentialCache::default())),
+            credential_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -220,7 +319,13 @@ impl DesktopSettingsService {
             &settings.network_proxy_mode,
             settings.network_proxy_url.clone(),
         )?;
-        self.replace_provider(&settings.translation_provider_id, &network)?;
+        self.replace_provider(
+            &settings.translation_provider_id,
+            &network,
+            settings.translation_model.as_deref(),
+            settings.translation_base_url.as_deref(),
+            &settings.translation_style_instruction,
+        )?;
         Ok(settings)
     }
 
@@ -249,22 +354,60 @@ impl DesktopSettingsService {
             .database
             .get_setting(TRANSLATION_PROVIDER)
             .await?
-            .filter(|provider_id| matches!(provider_id.as_str(), "none" | DEEPL_PROVIDER_ID))
+            .filter(|provider_id| {
+                matches!(
+                    provider_id.as_str(),
+                    "none"
+                        | DEEPL_PROVIDER_ID
+                        | DEEPSEEK_PROVIDER_ID
+                        | OPENAI_COMPATIBLE_PROVIDER_ID
+                )
+            })
             .unwrap_or_else(|| "none".to_string());
-        let deepl_key_saved = self
+        let translation_model = match translation_provider_id.as_str() {
+            DEEPSEEK_PROVIDER_ID => Some(
+                self.database
+                    .get_setting(DEEPSEEK_MODEL)
+                    .await?
+                    .unwrap_or_else(|| DEFAULT_DEEPSEEK_MODEL.to_string()),
+            ),
+            OPENAI_COMPATIBLE_PROVIDER_ID => self.database.get_setting(OPENAI_MODEL).await?,
+            _ => None,
+        };
+        let translation_base_url = match translation_provider_id.as_str() {
+            DEEPSEEK_PROVIDER_ID => Some(DEFAULT_DEEPSEEK_BASE_URL.to_string()),
+            OPENAI_COMPATIBLE_PROVIDER_ID => Some(
+                self.database
+                    .get_setting(OPENAI_BASE_URL)
+                    .await?
+                    .unwrap_or_else(|| DEFAULT_OPENAI_BASE_URL.to_string()),
+            ),
+            _ => None,
+        };
+        let translation_style_instruction = self
             .database
-            .get_setting(DEEPL_KEY_SAVED)
+            .get_setting(LLM_STYLE_INSTRUCTION)
             .await?
-            .as_deref()
-            == Some("true");
-        let (stored_key, credential_error, credential_loaded) = self.cached_deepl_key_snapshot();
+            .unwrap_or_else(|| DEFAULT_LLM_STYLE.to_string());
+        let key_saved = if let Some(key) = key_saved_setting(&translation_provider_id) {
+            self.database.get_setting(key).await?.as_deref() == Some("true")
+        } else {
+            false
+        };
+        let (stored_key, credential_error, credential_loaded) =
+            self.cached_provider_key_snapshot(&translation_provider_id);
+        let environment_key = match translation_provider_id.as_str() {
+            DEEPL_PROVIDER_ID => self.environment_deepl_key.as_ref(),
+            DEEPSEEK_PROVIDER_ID => self.environment_deepseek_key.as_ref(),
+            _ => None,
+        };
         let (translation_api_key_configured, translation_api_key_source) = if stored_key.is_some() {
             (true, Some("system".to_string()))
-        } else if self.environment_deepl_key.is_some() {
+        } else if environment_key.is_some() {
             (true, Some("environment".to_string()))
-        } else if deepl_key_saved {
+        } else if key_saved {
             (true, Some("saved".to_string()))
-        } else if translation_provider_id == DEEPL_PROVIDER_ID && !credential_loaded {
+        } else if translation_provider_id != "none" && !credential_loaded {
             (false, Some("deferred".to_string()))
         } else {
             (false, None)
@@ -281,6 +424,9 @@ impl DesktopSettingsService {
             vad_model_path: display_path(vad_model.as_ref()),
             vad_model_ready,
             translation_provider_id,
+            translation_model,
+            translation_base_url,
+            translation_style_instruction,
             translation_api_key_configured,
             translation_api_key_source,
             credential_store: self.credentials.backend_name().to_string(),
@@ -306,11 +452,68 @@ impl DesktopSettingsService {
             request.network_proxy_url.clone(),
         )?;
         let model_mirror_url = normalize_https_endpoint(request.model_mirror_url.clone())?;
+        let translation_model = request
+            .translation_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let translation_base_url = request
+            .translation_base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let translation_style_instruction = request
+            .translation_style_instruction
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(DEFAULT_LLM_STYLE)
+            .to_string();
+        validate_llm_settings(
+            &request.translation_provider_id,
+            translation_model.as_deref(),
+            translation_base_url.as_deref(),
+            &translation_style_instruction,
+            &network,
+        )?;
 
         save_optional_path(&self.database, WHISPER_MODEL_PATH, whisper_model.as_ref()).await?;
         save_optional_path(&self.database, VAD_MODEL_PATH, vad_model.as_ref()).await?;
         self.database
             .set_setting(TRANSLATION_PROVIDER, &request.translation_provider_id)
+            .await?;
+        if request.translation_provider_id == DEEPSEEK_PROVIDER_ID {
+            self.database
+                .set_setting(
+                    DEEPSEEK_MODEL,
+                    translation_model
+                        .as_deref()
+                        .unwrap_or(DEFAULT_DEEPSEEK_MODEL),
+                )
+                .await?;
+        }
+        if request.translation_provider_id == OPENAI_COMPATIBLE_PROVIDER_ID {
+            self.database
+                .set_setting(
+                    OPENAI_BASE_URL,
+                    translation_base_url
+                        .as_deref()
+                        .unwrap_or(DEFAULT_OPENAI_BASE_URL),
+                )
+                .await?;
+            self.database
+                .set_setting(
+                    OPENAI_MODEL,
+                    translation_model
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("OpenAI-compatible model cannot be empty"))?,
+                )
+                .await?;
+        }
+        self.database
+            .set_setting(LLM_STYLE_INSTRUCTION, &translation_style_instruction)
             .await?;
         self.database
             .set_setting(
@@ -325,18 +528,36 @@ impl DesktopSettingsService {
         self.persist_download_network_settings(&network, model_mirror_url.as_deref())
             .await?;
 
-        if request.clear_api_key {
-            self.credentials.delete(DEEPL_PROVIDER_ID)?;
-            self.replace_cached_deepl_key(None, None);
-            self.database.delete_setting(DEEPL_KEY_SAVED).await?;
+        if request.clear_api_key && request.translation_provider_id != "none" {
+            self.credentials.delete(&request.translation_provider_id)?;
+            self.replace_cached_provider_key(&request.translation_provider_id, None, None);
+            if let Some(key) = key_saved_setting(&request.translation_provider_id) {
+                self.database.delete_setting(key).await?;
+            }
         }
         if let Some(secret) = normalized_secret(request.api_key) {
-            self.credentials.set(DEEPL_PROVIDER_ID, &secret)?;
-            self.replace_cached_deepl_key(Some(secret), None);
-            self.database.set_setting(DEEPL_KEY_SAVED, "true").await?;
+            if request.translation_provider_id == "none" {
+                bail!("cannot save an API key while translation is disabled");
+            }
+            self.credentials
+                .set(&request.translation_provider_id, &secret)?;
+            self.replace_cached_provider_key(
+                &request.translation_provider_id,
+                Some(secret),
+                None,
+            );
+            if let Some(key) = key_saved_setting(&request.translation_provider_id) {
+                self.database.set_setting(key, "true").await?;
+            }
         }
 
-        self.replace_provider(&request.translation_provider_id, &network)?;
+        self.replace_provider(
+            &request.translation_provider_id,
+            &network,
+            translation_model.as_deref(),
+            translation_base_url.as_deref(),
+            &translation_style_instruction,
+        )?;
         self.load().await
     }
 
@@ -381,7 +602,14 @@ impl DesktopSettingsService {
             .await
     }
 
-    fn replace_provider(&self, provider_id: &str, network: &NetworkClientConfig) -> Result<()> {
+    fn replace_provider(
+        &self,
+        provider_id: &str,
+        network: &NetworkClientConfig,
+        model: Option<&str>,
+        base_url: Option<&str>,
+        style_instruction: &str,
+    ) -> Result<()> {
         let provider: Arc<dyn TranslationProvider> = match provider_id {
             "none" => Arc::new(UnconfiguredTranslationProvider),
             DEEPL_PROVIDER_ID => Arc::new(DeferredDeepLTranslationProvider::new(
@@ -390,6 +618,34 @@ impl DesktopSettingsService {
                 self.environment_deepl_key.clone(),
                 network.clone(),
             )),
+            DEEPSEEK_PROVIDER_ID => Arc::new(DeferredOpenAiCompatibleTranslationProvider {
+                provider_id: DEEPSEEK_PROVIDER_ID.to_string(),
+                provider_name: "DeepSeek".to_string(),
+                credentials: Arc::clone(&self.credentials),
+                credential_cache: Arc::clone(&self.credential_cache),
+                environment_key: self.environment_deepseek_key.clone(),
+                network: network.clone(),
+                base_url: DEFAULT_DEEPSEEK_BASE_URL.to_string(),
+                model: model.unwrap_or(DEFAULT_DEEPSEEK_MODEL).to_string(),
+                style_instruction: style_instruction.to_string(),
+                disable_deepseek_thinking: true,
+            }),
+            OPENAI_COMPATIBLE_PROVIDER_ID => {
+                Arc::new(DeferredOpenAiCompatibleTranslationProvider {
+                    provider_id: OPENAI_COMPATIBLE_PROVIDER_ID.to_string(),
+                    provider_name: "OpenAI-compatible".to_string(),
+                    credentials: Arc::clone(&self.credentials),
+                    credential_cache: Arc::clone(&self.credential_cache),
+                    environment_key: None,
+                    network: network.clone(),
+                    base_url: base_url.unwrap_or(DEFAULT_OPENAI_BASE_URL).to_string(),
+                    model: model
+                        .ok_or_else(|| anyhow!("OpenAI-compatible model cannot be empty"))?
+                        .to_string(),
+                    style_instruction: style_instruction.to_string(),
+                    disable_deepseek_thinking: false,
+                })
+            }
             _ => return Err(anyhow!("unsupported translation provider: {provider_id}")),
         };
         self.provider.replace(provider);
@@ -413,35 +669,53 @@ impl DesktopSettingsService {
         save_optional_string(&self.database, MODEL_MIRROR_URL, model_mirror_url).await
     }
 
-    fn cached_deepl_key_snapshot(&self) -> (Option<String>, Option<String>, bool) {
+    fn cached_provider_key_snapshot(
+        &self,
+        provider_id: &str,
+    ) -> (Option<String>, Option<String>, bool) {
         let cache = self
             .credential_cache
             .lock()
             .expect("credential cache lock poisoned");
-        (cache.secret.clone(), cache.error.clone(), cache.loaded)
+        cache
+            .get(provider_id)
+            .map(|entry| (entry.secret.clone(), entry.error.clone(), entry.loaded))
+            .unwrap_or((None, None, false))
     }
 
-    fn replace_cached_deepl_key(&self, secret: Option<String>, error: Option<String>) {
-        let mut cache = self
+    fn replace_cached_provider_key(
+        &self,
+        provider_id: &str,
+        secret: Option<String>,
+        error: Option<String>,
+    ) {
+        let mut caches = self
             .credential_cache
             .lock()
             .expect("credential cache lock poisoned");
-        cache.loaded = true;
-        cache.secret = secret;
-        cache.error = error;
+        caches.insert(
+            provider_id.to_string(),
+            CredentialCache {
+                loaded: true,
+                secret,
+                error,
+            },
+        );
     }
 }
 
-fn cached_deepl_key(
+fn cached_provider_key(
+    provider_id: &str,
     credentials: &dyn CredentialStore,
-    credential_cache: &Mutex<CredentialCache>,
+    credential_cache: &Mutex<HashMap<String, CredentialCache>>,
 ) -> (Option<String>, Option<String>) {
-    let mut cache = credential_cache
+    let mut caches = credential_cache
         .lock()
         .expect("credential cache lock poisoned");
+    let cache = caches.entry(provider_id.to_string()).or_default();
     if !cache.loaded {
         cache.loaded = true;
-        match credentials.get(DEEPL_PROVIDER_ID) {
+        match credentials.get(provider_id) {
             Ok(secret) => cache.secret = normalized_secret(secret),
             Err(error) => cache.error = Some(format!("{error:#}")),
         }
@@ -449,19 +723,69 @@ fn cached_deepl_key(
     (cache.secret.clone(), cache.error.clone())
 }
 
-fn credential_cache_loaded(credential_cache: &Mutex<CredentialCache>) -> bool {
+fn credential_cache_loaded(
+    provider_id: &str,
+    credential_cache: &Mutex<HashMap<String, CredentialCache>>,
+) -> bool {
     credential_cache
         .lock()
         .expect("credential cache lock poisoned")
-        .loaded
+        .get(provider_id)
+        .is_some_and(|cache| cache.loaded)
 }
 
 fn validate_provider_id(provider_id: &str) -> Result<()> {
-    if matches!(provider_id, "none" | DEEPL_PROVIDER_ID) {
+    if matches!(
+        provider_id,
+        "none" | DEEPL_PROVIDER_ID | DEEPSEEK_PROVIDER_ID | OPENAI_COMPATIBLE_PROVIDER_ID
+    ) {
         Ok(())
     } else {
         bail!("unsupported translation provider: {provider_id}")
     }
+}
+
+fn key_saved_setting(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        DEEPL_PROVIDER_ID => Some(DEEPL_KEY_SAVED),
+        DEEPSEEK_PROVIDER_ID => Some(DEEPSEEK_KEY_SAVED),
+        OPENAI_COMPATIBLE_PROVIDER_ID => Some(OPENAI_COMPATIBLE_KEY_SAVED),
+        _ => None,
+    }
+}
+
+fn validate_llm_settings(
+    provider_id: &str,
+    model: Option<&str>,
+    base_url: Option<&str>,
+    style_instruction: &str,
+    network: &NetworkClientConfig,
+) -> Result<()> {
+    let config = match provider_id {
+        DEEPSEEK_PROVIDER_ID => Some(OpenAiCompatibleConfig {
+            provider_id: provider_id.to_string(),
+            provider_name: "DeepSeek".to_string(),
+            api_key: Some("validation-only".to_string()),
+            base_url: DEFAULT_DEEPSEEK_BASE_URL.to_string(),
+            model: model.unwrap_or(DEFAULT_DEEPSEEK_MODEL).to_string(),
+            style_instruction: style_instruction.to_string(),
+            disable_deepseek_thinking: true,
+        }),
+        OPENAI_COMPATIBLE_PROVIDER_ID => Some(OpenAiCompatibleConfig {
+            provider_id: provider_id.to_string(),
+            provider_name: "OpenAI-compatible".to_string(),
+            api_key: Some("validation-only".to_string()),
+            base_url: base_url.unwrap_or(DEFAULT_OPENAI_BASE_URL).to_string(),
+            model: model.unwrap_or_default().to_string(),
+            style_instruction: style_instruction.to_string(),
+            disable_deepseek_thinking: false,
+        }),
+        _ => None,
+    };
+    if let Some(config) = config {
+        OpenAiCompatibleTranslationProvider::with_network_config(config, network)?;
+    }
+    Ok(())
 }
 
 fn normalized_secret(secret: Option<String>) -> Option<String> {
@@ -526,7 +850,8 @@ mod tests {
 
     use anyhow::Result;
     use atogaki_subtitle::application::{
-        MutableTranslationProvider, TranslationOptions, TranslationProvider,
+        MutableTranslationProvider, TranslationOptions, TranslationProvider, TranslationRequest,
+        TranslationTargetSegment,
         UnconfiguredTranslationProvider,
     };
 
@@ -609,6 +934,9 @@ mod tests {
                 whisper_model_path: Some(model.display().to_string()),
                 vad_model_path: None,
                 translation_provider_id: "deepl".to_string(),
+                translation_model: None,
+                translation_base_url: None,
+                translation_style_instruction: None,
                 api_key: Some("test-secret:fx".to_string()),
                 network_proxy_mode: "custom".to_string(),
                 network_proxy_url: Some("http://127.0.0.1:7897".to_string()),
@@ -706,6 +1034,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn saves_deepseek_configuration_without_putting_the_secret_in_sqlite() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-deepseek-settings-test-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let provider = MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider));
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            provider.clone(),
+            root.join("models"),
+            credentials.clone(),
+        );
+
+        let saved = service
+            .save(SaveDesktopSettingsRequest {
+                whisper_model_path: None,
+                vad_model_path: None,
+                translation_provider_id: "deepseek".to_string(),
+                translation_model: Some("deepseek-v4-flash".to_string()),
+                translation_base_url: Some("https://ignored.example/v1".to_string()),
+                translation_style_instruction: Some("自然、简洁的电台口语字幕。".to_string()),
+                api_key: Some("deepseek-test-secret".to_string()),
+                network_proxy_mode: "direct".to_string(),
+                network_proxy_url: None,
+                model_mirror_url: None,
+                clear_api_key: false,
+                onboarding_completed: true,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(saved.translation_provider_id, "deepseek");
+        assert_eq!(
+            saved.translation_model.as_deref(),
+            Some("deepseek-v4-flash")
+        );
+        assert_eq!(
+            saved.translation_base_url.as_deref(),
+            Some("https://api.deepseek.com")
+        );
+        assert_eq!(provider.status().id, "deepseek");
+        assert_eq!(provider.status().model.as_deref(), Some("deepseek-v4-flash"));
+        assert_eq!(
+            credentials.secret.lock().unwrap().as_deref(),
+            Some("deepseek-test-secret")
+        );
+        assert_eq!(
+            database
+                .get_setting("translation.deepseek_key_saved")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            database
+                .get_setting("translation.deepseek_model")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("deepseek-v4-flash")
+        );
+        assert!(
+            database
+                .get_setting("deepseek-test-secret")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn startup_defers_keychain_access_until_a_translation_is_requested() {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -768,11 +1178,16 @@ mod tests {
         service.initialize().await.unwrap();
 
         let error = provider
-            .translate(
-                &TranslationOptions::default(),
-                &["字幕".to_string()],
-                None,
-            )
+            .translate(TranslationRequest {
+                options: TranslationOptions::default(),
+                before_context: Vec::new(),
+                targets: vec![TranslationTargetSegment {
+                    segment_id: "segment-1".to_string(),
+                    source_text: "字幕".to_string(),
+                }],
+                after_context: Vec::new(),
+                style_instruction: None,
+            })
             .await
             .unwrap_err();
 

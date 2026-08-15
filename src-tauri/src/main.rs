@@ -24,6 +24,7 @@ use atogaki_subtitle::{
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
             LocalJobTranslationStats, LocalRenderJobRecord, LocalSubtitleSegmentRecord,
+            LocalTranslationRunRecord,
         },
         media::MediaCapabilities,
     },
@@ -455,6 +456,7 @@ struct VideoOutputSelection {
 struct DesktopJobDetail {
     job: LocalJobRecord,
     segments: Vec<LocalSubtitleSegmentRecord>,
+    translation_runs: Vec<LocalTranslationRunRecord>,
     playback_path: Option<String>,
     audio_fallback_path: Option<String>,
 }
@@ -718,6 +720,7 @@ async fn get_job_detail(
     Ok(DesktopJobDetail {
         job: detail.job,
         segments: detail.segments,
+        translation_runs: detail.translation_runs,
         playback_path,
         audio_fallback_path,
     })
@@ -1310,6 +1313,7 @@ fn main() {
                 translation_provider.clone(),
                 models_directory.clone(),
                 config.deepl_auth_key.clone(),
+                std::env::var("DEEPSEEK_API_KEY").ok(),
                 configured_file("ATOGAKI_WHISPER_MODEL"),
                 configured_file("ATOGAKI_VAD_MODEL"),
             );

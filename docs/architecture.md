@@ -44,7 +44,7 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService` 与 `LocalRenderService`：前者负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
-`DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。模型下载与 DeepL 共用可热切换的网络配置：跟随启动环境、强制直连或自定义 HTTP 代理；模型还可使用用户提供的 HTTPS 镜像根地址。`ModelDownloadService` 每次只运行一个下载，按镜像到官方源回退，写入应用管理目录中的 `.part` 文件，校验固定 SHA-256 后原子安装并更新模型设置；UI 只轮询进度，不直接访问网络或模型文件。
+`DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 按 provider ID 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。模型下载与云端翻译共用可热切换的网络配置：跟随启动环境、强制直连或自定义 HTTP 代理；模型还可使用用户提供的 HTTPS 镜像根地址。DeepL、DeepSeek 与自定义 OpenAI-compatible provider 都延迟到首次实际翻译才读取对应密钥。`ModelDownloadService` 每次只运行一个下载，按镜像到官方源回退，写入应用管理目录中的 `.part` 文件，校验固定 SHA-256 后原子安装并更新模型设置；UI 只轮询进度，不直接访问网络或模型文件。
 
 正式桌面 App 把固定版本的 `whisper-cli`、`ffmpeg` 和 `ffprobe` 作为按平台/CPU 架构生成的 Tauri sidecar 放在主程序同目录；Finder 启动不依赖 shell、Homebrew 或用户 `PATH`。模型仍按设备下载到应用数据目录或由用户选择，不进入 Bundle。开发环境可用 `ATOGAKI_WHISPER_CLI`、`ATOGAKI_FFMPEG` 和 `ATOGAKI_FFPROBE` 覆盖 sidecar。macOS FFmpeg 从固定源码构建 libass 字体栈与 LGPL 配置，发布物附带许可证和构建清单，不包含 libx264。
 
@@ -58,8 +58,8 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 - 媒体、模型、任务产物：默认本地文件系统。
 - 任务元数据（包括源语言和目标语言）、字幕段、带源语言的词表与编辑状态：桌面 MVP 使用 SQLite；生成快照首次导入后，人工编辑和 SQLite 生成的机器译文以 SQLite 为准，后续快照同步不会用旧 `segments.json` 清空它们。
-- 密钥：通过统一凭据接口写入 macOS Keychain、Windows Credential Manager 或 Linux Secret Service，不写入 SQLite、任务 JSON 或日志；`DEEPL_AUTH_KEY` 仅作为兼容环境变量回退，且不会被自动迁移或回显。
-- 桌面设置：模型路径、翻译 provider ID、引导状态、无凭据代理配置与可选镜像地址写入 SQLite；模型二进制位于用户选择的位置或应用数据目录的 `models/`，不打入 App Bundle。
+- 密钥：通过统一凭据接口按 provider ID 写入 macOS Keychain、Windows Credential Manager 或 Linux Secret Service，不写入 SQLite、任务 JSON 或日志；`DEEPL_AUTH_KEY`／`DEEPSEEK_API_KEY` 仅作为兼容环境变量回退，且不会被自动迁移或回显。
+- 桌面设置：模型路径、翻译 provider ID、非敏感模型／端点／风格、引导状态、无凭据代理配置与可选镜像地址写入 SQLite；模型二进制位于用户选择的位置或应用数据目录的 `models/`，不打入 App Bundle。
 - `status.json`：保留为任务产物与故障恢复副本，不作为唯一长期数据库。
 
 ## 核心数据约定
@@ -67,12 +67,13 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 - 任务目录以 UUID 命名，避免并发任务冲突。
 - 新任务把 Whisper/VAD 模型路径、VAD 阈值、分段和运行选项写入 `recognition-options.json`。该文件是识别结果的可复现记录；既有任务不反向补造当时未记录的参数。
 - 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态、时间轴编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。SQLite 是人工时间轴的主数据源，手动时间在任务快照再次同步时必须保留；时间改变不使译文过期，但后续字幕导出和烧录使用新时间。
-- 每个任务用规范代码持久化源语言和目标语言；首批桌面组合为 `ja` 或 `en` 到 `zh-Hans`，旧任务迁移为 `ja` 到 `zh-Hans`。Whisper 与翻译 provider 只在各自基础设施适配器中转换服务专用代码。
+- 每个任务用规范代码持久化源语言和目标语言；首批桌面组合为 `ja`、`en` 或 `ko` 到 `zh-Hans`，旧任务迁移为 `ja` 到 `zh-Hans`。Whisper 与翻译 provider 只在各自基础设施适配器中转换服务专用代码。
 - SQLite 另外记录译文是否人工编辑；只修改原文时保留旧译文并标记为过期，同时修改译文时视为已人工校正。
 - SQLite 词表是带源语言的可编辑主数据；每个转写任务只能选择同语言词表，并使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新原文并把已有译文标记为过期。
 - 词表分类只存在于 SQLite 主数据和桌面应用层；处理核心读取已解析的文本快照，避免把 UI 的内容包概念耦合进 Whisper 适配器。
-- 翻译 provider 接收任务语言对、有序的字幕文本和可选上下文，并必须返回数量、顺序一一对应的译文。应用层保留稳定段 ID，校验返回数量，并在所有批次完成后使用带原文校验的 SQLite 事务一次性写入；翻译期间若原文已被修改，本次结果整体拒绝，避免译文错配。
-- 当前 DeepL provider 按 12 段分批；单段和批量请求都会从 SQLite 当前原文读取前后 30 秒、最多 2000 字的共享局部上下文。上下文用于消歧，但每个字幕段仍是独立翻译单元，不负责修复 ASR 跨段断句。
+- 翻译 provider 接收任务语言对、带稳定 ID 的目标字幕段、语义分离的前后文、风格提示和受保护术语，并返回带相同 ID 的结构化译文。应用层校验结果数量、重复／遗漏 ID 和空译文，在所有批次完成后使用带原文校验的 SQLite 事务一次性写入；翻译期间若原文已被修改，本次结果整体拒绝，避免译文错配。
+- 当前 provider 按 12 段分批；单段和批量请求都会从 SQLite 当前原文读取前后 30 秒、最多 2000 字的局部上下文。DeepL adapter 将其编码为共享 `context`；OpenAI-compatible adapter 显式发送前文、目标段和后文，并要求只返回目标 ID 的 JSON。上下文用于消歧，但不负责修复 ASR 跨段断句。
+- SQLite 为每个成功的 provider 批次记录 provider ID、返回模型、端点类型、段数、可得的 token 用量和完成时间，不保存请求正文、译文副本或 API Key。这些运行记录用于状态展示与真实节目 A/B，不是可恢复的译文版本历史。
 - 桌面 SRT/ASS 是 SQLite 工作区的派生输出。每次用户导出会先刷新任务目录内的 `source.srt`、`translation.srt` 等固定投影，再将原文、译文和双语 SRT/ASS 复制到用户选择的目录；单语文件以规范语言代码命名（如 `.en.srt`、`.zh-Hans.srt`）。目标文件使用经过文件系统安全化的任务显示名称作为前缀，已存在时必须由界面显式确认覆盖。存在过期译文时拒绝导出；缺失译文时允许导出并显式报告缺失段数。
 - 桌面视频烧录是独立派生任务。提交时把 SQLite 当前原文、译文或双语内容冻结到任务目录 `renders/` 的 ASS 快照，再写入 `local_render_jobs` 并交给单 worker；最终 MP4 写到用户选择的位置。进度、取消、VideoToolbox 回退原因和实际编码器均持久化，临时文件不会直接暴露为最终输出。能取得输入视频流码率时，编码目标为源码率加约 20% 余量，避免低码率源在固定质量模式下被无谓放大；无可用码率时回退固定质量参数。
 - 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。

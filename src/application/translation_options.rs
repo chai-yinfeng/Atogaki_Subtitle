@@ -1,7 +1,7 @@
 use crate::domain::{LanguageCode, LanguagePair};
 
 /// Options for a translation run, independent from a particular user interface.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranslationOptions {
     pub source_language: LanguageCode,
     pub target_language: LanguageCode,
