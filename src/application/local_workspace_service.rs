@@ -12,12 +12,16 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::{
-    application::{TranslationOptions, TranslationProvider, UnconfiguredTranslationProvider},
+    application::{
+        TranslationContextSegment, TranslationOptions, TranslationProvider, TranslationRequest,
+        TranslationTargetSegment, UnconfiguredTranslationProvider,
+    },
     domain::{LanguageCode, TranscriptSegment, subtitle},
     infrastructure::{
         job_store::Job,
         local_db::{
             LocalDatabase, LocalJobRecord, LocalMachineTranslation, LocalSubtitleSegmentRecord,
+            LocalTranslationRunRecord, NewLocalTranslationRun,
         },
     },
 };
@@ -31,6 +35,7 @@ const PLAYBACK_POSITION_PREFIX: &str = "listening.playback_position_ms.";
 pub struct LocalWorkspaceJob {
     pub job: LocalJobRecord,
     pub segments: Vec<LocalSubtitleSegmentRecord>,
+    pub translation_runs: Vec<LocalTranslationRunRecord>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,6 +44,7 @@ pub struct LocalTranslationStatus {
     pub provider: String,
     pub configured: bool,
     pub model: Option<String>,
+    pub endpoint_kind: String,
     pub configuration_hint: Option<String>,
 }
 
@@ -138,6 +144,7 @@ impl LocalWorkspaceService {
             provider: provider.name,
             configured: provider.configured,
             model: provider.model,
+            endpoint_kind: provider.endpoint_kind,
             configuration_hint: provider.configuration_hint,
         }
     }
@@ -149,7 +156,12 @@ impl LocalWorkspaceService {
             .await?
             .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
         let segments = self.database.list_segments(job_id).await?;
-        Ok(LocalWorkspaceJob { job, segments })
+        let translation_runs = self.database.list_translation_runs(job_id).await?;
+        Ok(LocalWorkspaceJob {
+            job,
+            segments,
+            translation_runs,
+        })
     }
 
     pub async fn update_subtitle(
@@ -507,14 +519,23 @@ impl LocalWorkspaceService {
         .with_protected_terms(protected_terms);
         let mut updates = Vec::with_capacity(segments_to_translate.len());
         for batch in segments_to_translate.chunks(TRANSLATION_BATCH_SIZE) {
-            let source_texts = batch
+            let targets = batch
                 .iter()
-                .map(|segment| segment.source_text.clone())
+                .map(|segment| TranslationTargetSegment {
+                    segment_id: segment.id.clone(),
+                    source_text: segment.source_text.clone(),
+                })
                 .collect::<Vec<_>>();
-            let context = translation_context(context_segments, batch);
-            let translated = self
+            let (before_context, after_context) = translation_context(context_segments, batch);
+            let response = self
                 .translation_provider
-                .translate(&options, &source_texts, context.as_deref())
+                .translate(TranslationRequest {
+                    options: options.clone(),
+                    before_context,
+                    targets,
+                    after_context,
+                    style_instruction: None,
+                })
                 .await
                 .with_context(|| {
                     format!(
@@ -522,24 +543,57 @@ impl LocalWorkspaceService {
                         provider.name
                     )
                 })?;
-            if translated.len() != batch.len() {
+            if response.translations.len() != batch.len() {
                 return Err(anyhow!(
                     "{} returned {} translations for {} subtitle segments",
                     provider.name,
-                    translated.len(),
+                    response.translations.len(),
                     batch.len()
                 ));
             }
-            updates.extend(
-                batch
-                    .iter()
-                    .zip(translated)
-                    .map(|(segment, translated_text)| LocalMachineTranslation {
-                        segment_id: segment.id.clone(),
-                        source_text: segment.source_text.clone(),
-                        translated_text,
-                    }),
-            );
+            let mut translated_by_id = response
+                .translations
+                .into_iter()
+                .map(|translation| (translation.segment_id.clone(), translation))
+                .collect::<std::collections::HashMap<_, _>>();
+            if translated_by_id.len() != batch.len() {
+                return Err(anyhow!("{} returned duplicate subtitle IDs", provider.name));
+            }
+            for segment in batch {
+                let translation = translated_by_id.remove(&segment.id).ok_or_else(|| {
+                    anyhow!(
+                        "{} did not return translation for subtitle {}",
+                        provider.name,
+                        segment.id
+                    )
+                })?;
+                if translation.translated_text.trim().is_empty() {
+                    return Err(anyhow!(
+                        "{} returned an empty translation for subtitle {}",
+                        provider.name,
+                        segment.id
+                    ));
+                }
+                updates.push(LocalMachineTranslation {
+                    segment_id: segment.id.clone(),
+                    source_text: segment.source_text.clone(),
+                    translated_text: translation.translated_text,
+                });
+            }
+            self.database
+                .record_translation_run(&NewLocalTranslationRun {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    job_id: job_id.to_string(),
+                    provider_id: provider.id.clone(),
+                    provider_name: provider.name.clone(),
+                    model: response.model.or_else(|| provider.model.clone()),
+                    endpoint_kind: provider.endpoint_kind.clone(),
+                    segment_count: i64::try_from(batch.len())
+                        .context("translation batch size exceeds SQLite i64")?,
+                    input_tokens: response.usage.input_tokens,
+                    output_tokens: response.usage.output_tokens,
+                })
+                .await?;
         }
         self.database
             .apply_machine_translations(job_id, &updates)
@@ -674,9 +728,16 @@ fn copy_export_file(
 fn translation_context(
     all_segments: &[LocalSubtitleSegmentRecord],
     batch: &[LocalSubtitleSegmentRecord],
-) -> Option<String> {
-    let first = batch.first()?;
-    let last = batch.last()?;
+) -> (
+    Vec<TranslationContextSegment>,
+    Vec<TranslationContextSegment>,
+) {
+    let Some(first) = batch.first() else {
+        return (Vec::new(), Vec::new());
+    };
+    let Some(last) = batch.last() else {
+        return (Vec::new(), Vec::new());
+    };
     let window_start = first.start_ms.saturating_sub(TRANSLATION_CONTEXT_WINDOW_MS);
     let window_end = last.end_ms.saturating_add(TRANSLATION_CONTEXT_WINDOW_MS);
     let target_ids = batch
@@ -684,43 +745,72 @@ fn translation_context(
         .map(|segment| segment.id.as_str())
         .collect::<HashSet<_>>();
 
-    let mut context = String::new();
-    let mut context_chars = 0;
-    let mut target_start = None;
-    let mut target_end = 0;
-    for segment in all_segments
+    let candidates = all_segments
         .iter()
         .filter(|segment| segment.end_ms >= window_start && segment.start_ms <= window_end)
+        .filter(|segment| !target_ids.contains(segment.id.as_str()))
+        .collect::<Vec<_>>();
+    let mut before = Vec::new();
+    let mut used = 0usize;
+    for segment in candidates
+        .iter()
+        .copied()
+        .filter(|segment| segment.segment_index < first.segment_index)
+        .rev()
     {
-        if !context.is_empty() {
-            context.push('\n');
-            context_chars += 1;
+        let separator = usize::from(used > 0);
+        let available = (TRANSLATION_CONTEXT_MAX_CHARS / 2).saturating_sub(used + separator);
+        if available == 0 {
+            break;
         }
-        let line_start = context_chars;
-        context.push_str(&segment.source_text);
-        context_chars += segment.source_text.chars().count();
-        if target_ids.contains(segment.id.as_str()) {
-            target_start.get_or_insert(line_start);
-            target_end = context_chars;
+        let length = segment.source_text.chars().count();
+        let truncated = length > available;
+        let source_text = if truncated {
+            segment
+                .source_text
+                .chars()
+                .skip(length - available)
+                .collect()
+        } else {
+            segment.source_text.clone()
+        };
+        used += separator + source_text.chars().count();
+        before.push(TranslationContextSegment {
+            segment_id: segment.id.clone(),
+            source_text,
+        });
+        if truncated {
+            break;
         }
     }
-
-    if context.trim().is_empty() {
-        return None;
+    before.reverse();
+    let mut after = Vec::new();
+    for segment in candidates
+        .into_iter()
+        .filter(|segment| segment.segment_index > last.segment_index)
+    {
+        let separator = usize::from(used > 0);
+        let available = TRANSLATION_CONTEXT_MAX_CHARS.saturating_sub(used + separator);
+        if available == 0 {
+            break;
+        }
+        let length = segment.source_text.chars().count();
+        let truncated = length > available;
+        let source_text = if truncated {
+            segment.source_text.chars().take(available).collect()
+        } else {
+            segment.source_text.clone()
+        };
+        used += separator + source_text.chars().count();
+        after.push(TranslationContextSegment {
+            segment_id: segment.id.clone(),
+            source_text,
+        });
+        if truncated {
+            break;
+        }
     }
-    if context_chars <= TRANSLATION_CONTEXT_MAX_CHARS {
-        return Some(context);
-    }
-
-    let chars = context.chars().collect::<Vec<_>>();
-    let target_start = target_start.unwrap_or(0);
-    let target_length = target_end.saturating_sub(target_start);
-    let surrounding_budget = TRANSLATION_CONTEXT_MAX_CHARS.saturating_sub(target_length);
-    let desired_start = target_start.saturating_sub(surrounding_budget / 2);
-    let latest_start = chars.len().saturating_sub(TRANSLATION_CONTEXT_MAX_CHARS);
-    let start = desired_start.min(latest_start);
-    let end = (start + TRANSLATION_CONTEXT_MAX_CHARS).min(chars.len());
-    Some(chars[start..end].iter().collect())
+    (before, after)
 }
 
 fn workspace_segments(records: &[LocalSubtitleSegmentRecord]) -> Result<Vec<TranscriptSegment>> {
@@ -756,8 +846,9 @@ mod tests {
     };
     use crate::{
         application::{
-            TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
-            job_manifest::JobManifest, job_snapshot::JobSnapshot, job_status::JobStatus,
+            TranslationFuture, TranslationProvider, TranslationProviderStatus, TranslationRequest,
+            TranslationResponse, TranslationResult, TranslationUsage, job_manifest::JobManifest,
+            job_snapshot::JobSnapshot, job_status::JobStatus,
         },
         domain::{LanguageCode, LanguagePair, TranscriptSegment},
         infrastructure::{
@@ -766,17 +857,9 @@ mod tests {
         },
     };
 
-    type CapturedTranslationRequest = (
-        LanguageCode,
-        LanguageCode,
-        Vec<String>,
-        Option<String>,
-        Vec<String>,
-    );
-
     #[derive(Debug, Clone)]
     struct FakeTranslationProvider {
-        requests: Arc<StdMutex<Vec<CapturedTranslationRequest>>>,
+        requests: Arc<StdMutex<Vec<TranslationRequest>>>,
         omit_last_result: bool,
     }
 
@@ -796,34 +879,34 @@ mod tests {
                 name: "Fake Translate".to_string(),
                 configured: true,
                 model: Some("deterministic-v1".to_string()),
+                endpoint_kind: "test".to_string(),
                 configuration_hint: None,
             }
         }
 
-        fn translate<'a>(
-            &'a self,
-            options: &'a TranslationOptions,
-            texts: &'a [String],
-            context: Option<&'a str>,
-        ) -> TranslationFuture<'a> {
-            let source_texts = texts.to_vec();
-            self.requests.lock().unwrap().push((
-                options.source_language,
-                options.target_language,
-                source_texts.clone(),
-                context.map(str::to_string),
-                options.protected_terms.clone(),
-            ));
+        fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+            self.requests.lock().unwrap().push(request.clone());
             let omit_last_result = self.omit_last_result;
             Box::pin(async move {
-                let mut translated = source_texts
+                let mut translations = request
+                    .targets
                     .into_iter()
-                    .map(|text| format!("译：{text}"))
+                    .map(|target| TranslationResult {
+                        segment_id: target.segment_id,
+                        translated_text: format!("译：{}", target.source_text),
+                    })
                     .collect::<Vec<_>>();
                 if omit_last_result {
-                    translated.pop();
+                    translations.pop();
                 }
-                Ok(translated)
+                Ok(TranslationResponse {
+                    translations,
+                    model: Some("deterministic-v1".to_string()),
+                    usage: TranslationUsage {
+                        input_tokens: Some(42),
+                        output_tokens: Some(12),
+                    },
+                })
             })
         }
     }
@@ -859,13 +942,10 @@ mod tests {
             subtitle_record(4, 80_000, 81_000, "远处的新内容"),
         ];
 
-        let context = translation_context(&segments, &segments[2..3]).unwrap();
+        let (before, after) = translation_context(&segments, &segments[2..3]);
 
-        assert!(context.contains("刚才提到的名字"));
-        assert!(context.contains("当前 SQLite 日文"));
-        assert!(context.contains("接下来的话题"));
-        assert!(!context.contains("远处的旧内容"));
-        assert!(!context.contains("远处的新内容"));
+        assert_eq!(before[0].source_text, "刚才提到的名字");
+        assert_eq!(after[0].source_text, "接下来的话题");
     }
 
     #[test]
@@ -876,10 +956,17 @@ mod tests {
             subtitle_record(2, 2_000, 3_000, "后".repeat(1_500)),
         ];
 
-        let context = translation_context(&segments, &segments[1..2]).unwrap();
+        let (before, after) = translation_context(&segments, &segments[1..2]);
+        let context_chars = before
+            .iter()
+            .chain(after.iter())
+            .map(|segment| segment.source_text.chars().count())
+            .sum::<usize>()
+            + before.len().saturating_add(after.len()).saturating_sub(1);
 
-        assert_eq!(context.chars().count(), TRANSLATION_CONTEXT_MAX_CHARS);
-        assert!(context.contains("当前中心"));
+        assert!(!before.is_empty());
+        assert!(!after.is_empty());
+        assert!(context_chars <= TRANSLATION_CONTEXT_MAX_CHARS);
     }
 
     #[tokio::test]
@@ -927,16 +1014,39 @@ mod tests {
             Some("译：The second line")
         );
 
-        let requests = provider.requests.lock().unwrap();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].0, LanguageCode::English);
-        assert_eq!(requests[0].1, LanguageCode::SimplifiedChinese);
-        assert_eq!(requests[0].2, ["The first line", "The second line"]);
-        let context = requests[0].3.as_deref().unwrap();
-        assert!(context.contains("The first line"));
-        assert!(context.contains("The second line"));
-        assert!(requests[0].4.is_empty());
-        drop(requests);
+        {
+            let requests = provider.requests.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].options.source_language, LanguageCode::English);
+            assert_eq!(
+                requests[0].options.target_language,
+                LanguageCode::SimplifiedChinese
+            );
+            assert_eq!(
+                requests[0]
+                    .targets
+                    .iter()
+                    .map(|target| target.source_text.as_str())
+                    .collect::<Vec<_>>(),
+                ["The first line", "The second line"]
+            );
+            assert!(requests[0].before_context.is_empty());
+            assert!(requests[0].after_context.is_empty());
+            assert!(requests[0].options.protected_terms.is_empty());
+        }
+
+        let runs = database
+            .list_translation_runs(&manifest.job_id)
+            .await
+            .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].provider_id, "fake");
+        assert_eq!(runs[0].provider_name, "Fake Translate");
+        assert_eq!(runs[0].model.as_deref(), Some("deterministic-v1"));
+        assert_eq!(runs[0].endpoint_kind, "test");
+        assert_eq!(runs[0].segment_count, 2);
+        assert_eq!(runs[0].input_tokens, Some(42));
+        assert_eq!(runs[0].output_tokens, Some(12));
 
         drop(service);
         drop(database);
@@ -1059,7 +1169,10 @@ mod tests {
 
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].4, ["n-buna", "ナブナ", "盗作"]);
+        assert_eq!(
+            requests[0].options.protected_terms,
+            ["n-buna", "ナブナ", "盗作"]
+        );
         drop(requests);
         drop(service);
         drop(database);

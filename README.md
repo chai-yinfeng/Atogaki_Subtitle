@@ -7,10 +7,10 @@ Atogaki 是一个本地优先的外语音视频理解、字幕校对与导出工
 
 ## 能做什么
 
-- 导入本机音频或视频，用内置 `whisper-cli` 和用户下载的 Whisper 模型在本地识别日语或英语。
+- 导入本机音频或视频，用内置 `whisper-cli` 和用户下载的 Whisper 模型在本地识别日语、英语或韩语。
 - 使用 Silero VAD 过滤静音、音乐和环境声，并通过词表提高人名与作品名的一致性。
 - 在播放器中按时间轴查看、跳转和编辑字幕；原文修改后会标记对应译文为待重译。
-- 可选使用 DeepL 将日语或英语翻译为简体中文。翻译接口已与工作区解耦，后续可以增加 Google Translate 或 LLM provider。
+- 可选使用 DeepL 或 DeepSeek 将日语、英语或韩语翻译为简体中文；也可填写自定义 OpenAI-compatible Base URL 与模型。
 - 从当前 SQLite 工作区导出原文、简体中文和双语 SRT/ASS，或把字幕烧录到 MP4。
 - 记录任务、失败阶段、重试来源和烧录历史；重启后会识别被中断的任务，并允许从冻结参数创建新任务重试。
 
@@ -24,7 +24,7 @@ Atogaki 是一个本地优先的外语音视频理解、字幕校对与导出工
 
 1. **本地模型。** 选择已有 `ggml-*.bin`，或下载 Whisper 与 Silero VAD。App 管理的默认目录通常是 `~/Library/Application Support/com.chai-yinfeng.atogaki/models/`，界面会显示本机的实际路径。
 2. **网络。** 选择跟随启动环境、强制直连或自定义 HTTP/HTTPS 代理；也可以填写 HTTPS 模型镜像。连接测试使用当前输入；点击下载会自动保存当前网络草稿。
-3. **云端翻译。** DeepL 是可选项。不配置仍可完成本地识别、编辑和原文字幕导出；启动时不访问 Keychain，首次翻译才读取已有 Key。
+3. **云端翻译。** 可选择 DeepL、DeepSeek 或高级 OpenAI-compatible 入口。不配置仍可完成本地识别、编辑和原文字幕导出；启动时不访问 Keychain，首次翻译才读取当前 provider 的已有 Key。LLM 入口还可配置模型与口语风格。
 
 Whisper 模型建议：
 
@@ -41,11 +41,11 @@ Whisper 模型建议：
 
 Finder 启动的 App 不会执行 `.zshrc`，因此终端中的 `proxy_on` 不一定传给它。透明/TUN 代理通常可以直接生效；使用本地 HTTP 代理端口时，请在 App 设置中填写，例如 `http://127.0.0.1:7897`。模型镜像失败后会回退 Hugging Face 官方源。
 
-DeepL API Key 在 macOS 写入 Keychain；SQLite 只保存 provider、其他非敏感设置及“曾成功保存 Key”的状态标记，任务目录也不会复制 Key。启动和设置页不读取 Keychain；旧版已保存的 Key 如需显示状态，可重新填写并保存一次。Windows 版本将使用 Credential Manager，Linux 版本将使用 Secret Service。`DEEPL_AUTH_KEY` 仅作为开发兼容回退。
+各 provider 的 API Key 在 macOS 按独立条目写入 Keychain；SQLite 只保存 provider、模型、端点、风格等非敏感设置及“曾成功保存 Key”的状态标记，任务目录也不会复制 Key。启动和普通设置加载不读取 Keychain；忘记是否保存过时，可切换到对应 provider 后点击“检查所选 Key”，它只确认系统凭据条目是否存在，不会回显 Key 或调用翻译 API。Windows 版本将使用 Credential Manager，Linux 版本将使用 Secret Service。`DEEPL_AUTH_KEY` 和 `DEEPSEEK_API_KEY` 仅作为开发兼容回退。
 
 ## 基本使用
 
-1. 在“设置”中选好或下载 Whisper 模型，建议同时启用 VAD；需要中文时再配置 DeepL。
+1. 在“设置”中选好或下载 Whisper 模型，建议同时启用 VAD；需要中文时再配置一个翻译 provider。
 2. 在首页选择节目语言、本地媒体、识别模型，以及同语言的可选词表，创建转写任务。
    随 App 提供的内置词表会按仓库 TXT 内容自动升级；第一次编辑内置词表时，App 会创建独立的自定义副本，后续升级不会覆盖该副本或旧任务的词表快照。
 3. 等待任务完成后进入工作区，点击时间码定位原音，检查并修正原文。

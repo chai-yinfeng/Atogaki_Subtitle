@@ -110,6 +110,33 @@ pub struct LocalMachineTranslation {
     pub translated_text: String,
 }
 
+#[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
+pub struct LocalTranslationRunRecord {
+    pub id: String,
+    pub job_id: String,
+    pub provider_id: String,
+    pub provider_name: String,
+    pub model: Option<String>,
+    pub endpoint_kind: String,
+    pub segment_count: i64,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub completed_at_unix: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewLocalTranslationRun {
+    pub id: String,
+    pub job_id: String,
+    pub provider_id: String,
+    pub provider_name: String,
+    pub model: Option<String>,
+    pub endpoint_kind: String,
+    pub segment_count: i64,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct LocalRenderJobRecord {
     pub id: String,
@@ -981,6 +1008,46 @@ impl LocalDatabase {
             .await
             .context("failed to commit local translation transaction")?;
         self.list_segments(job_id).await
+    }
+
+    pub async fn record_translation_run(&self, run: &NewLocalTranslationRun) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO local_translation_runs (
+                id, job_id, provider_id, provider_name, model, endpoint_kind,
+                segment_count, input_tokens, output_tokens, completed_at_unix
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&run.id)
+        .bind(&run.job_id)
+        .bind(&run.provider_id)
+        .bind(&run.provider_name)
+        .bind(&run.model)
+        .bind(&run.endpoint_kind)
+        .bind(run.segment_count)
+        .bind(run.input_tokens)
+        .bind(run.output_tokens)
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await
+        .context("failed to record local translation run")?;
+        Ok(())
+    }
+
+    pub async fn list_translation_runs(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<LocalTranslationRunRecord>> {
+        sqlx::query_as(
+            "SELECT id, job_id, provider_id, provider_name, model, endpoint_kind,
+                    segment_count, input_tokens, output_tokens, completed_at_unix
+             FROM local_translation_runs
+             WHERE job_id = ?
+             ORDER BY completed_at_unix DESC, id DESC",
+        )
+        .bind(job_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list local translation runs")
     }
 
     pub async fn apply_glossary_corrections(

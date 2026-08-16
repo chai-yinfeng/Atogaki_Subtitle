@@ -7,6 +7,7 @@ use serde::Deserialize;
 use crate::{
     application::{
         TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
+        TranslationRequest, TranslationResponse, TranslationResult, TranslationUsage,
     },
     domain::{LanguagePair, TranscriptSegment},
     infrastructure::network::NetworkClientConfig,
@@ -55,6 +56,7 @@ impl TranslationProvider for DeepLTranslationProvider {
             name: "DeepL".to_string(),
             configured: self.auth_key.is_some(),
             model: None,
+            endpoint_kind: "deepl-v2".to_string(),
             configuration_hint: self
                 .auth_key
                 .is_none()
@@ -62,28 +64,64 @@ impl TranslationProvider for DeepLTranslationProvider {
         }
     }
 
-    fn translate<'a>(
-        &'a self,
-        options: &'a TranslationOptions,
-        texts: &'a [String],
-        context: Option<&'a str>,
-    ) -> TranslationFuture<'a> {
+    fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
         Box::pin(async move {
             let auth_key = self
                 .auth_key
                 .as_deref()
                 .ok_or_else(|| anyhow!("DeepL API key is not configured"))?;
-            translate_lines(
+            let texts = request
+                .targets
+                .iter()
+                .map(|target| target.source_text.clone())
+                .collect::<Vec<_>>();
+            let context = deepl_context(&request);
+            let translated = translate_lines(
                 &self.client,
                 deepl_endpoint(auth_key),
                 auth_key,
-                options,
-                texts,
-                context,
+                &request.options,
+                &texts,
+                context.as_deref(),
             )
-            .await
+            .await?;
+            Ok(TranslationResponse {
+                translations: request
+                    .targets
+                    .into_iter()
+                    .zip(translated)
+                    .map(|(target, translated_text)| TranslationResult {
+                        segment_id: target.segment_id,
+                        translated_text,
+                    })
+                    .collect(),
+                model: None,
+                usage: TranslationUsage::default(),
+            })
         })
     }
+}
+
+fn deepl_context(request: &TranslationRequest) -> Option<String> {
+    let context = request
+        .before_context
+        .iter()
+        .map(|segment| segment.source_text.as_str())
+        .chain(
+            request
+                .targets
+                .iter()
+                .map(|segment| segment.source_text.as_str()),
+        )
+        .chain(
+            request
+                .after_context
+                .iter()
+                .map(|segment| segment.source_text.as_str()),
+        )
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!context.trim().is_empty()).then_some(context)
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,11 +263,11 @@ fn translation_form(
     }
     if let Some(context) = context.map(str::trim).filter(|context| !context.is_empty()) {
         body.push_str("&context=");
-        let context = options
-            .protected_terms
-            .is_empty()
-            .then_some(context.to_string())
-            .unwrap_or_else(|| escape_xml(context));
+        let context = if options.protected_terms.is_empty() {
+            context.to_string()
+        } else {
+            escape_xml(context)
+        };
         body.push_str(&urlencoding::encode(&context));
     }
     body
@@ -395,7 +433,11 @@ mod tests {
         let options = TranslationOptions::default()
             .with_protected_terms(["盗作".to_string(), "ヨルシカ".to_string()]);
         let protected = protect_translation_terms("ヨルシカの盗作を聴く", &options.protected_terms);
-        let body = translation_form(&options, &[protected.request_text.clone()], None);
+        let body = translation_form(
+            &options,
+            std::slice::from_ref(&protected.request_text),
+            None,
+        );
 
         assert_eq!(
             protected.request_text,

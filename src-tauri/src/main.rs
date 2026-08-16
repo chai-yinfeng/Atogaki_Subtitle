@@ -24,6 +24,7 @@ use atogaki_subtitle::{
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
             LocalJobTranslationStats, LocalRenderJobRecord, LocalSubtitleSegmentRecord,
+            LocalTranslationRunRecord,
         },
         media::MediaCapabilities,
     },
@@ -33,7 +34,10 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
-    desktop_settings::{DesktopSettings, DesktopSettingsService, SaveDesktopSettingsRequest},
+    desktop_settings::{
+        DesktopSettings, DesktopSettingsService, SaveDesktopSettingsRequest,
+        TranslationCredentialCheck,
+    },
     model_download::{
         ModelCatalogItem, ModelDownloadService, ModelDownloadState, NetworkSourceCheck,
         test_download_network,
@@ -455,6 +459,7 @@ struct VideoOutputSelection {
 struct DesktopJobDetail {
     job: LocalJobRecord,
     segments: Vec<LocalSubtitleSegmentRecord>,
+    translation_runs: Vec<LocalTranslationRunRecord>,
     playback_path: Option<String>,
     audio_fallback_path: Option<String>,
 }
@@ -718,6 +723,7 @@ async fn get_job_detail(
     Ok(DesktopJobDetail {
         job: detail.job,
         segments: detail.segments,
+        translation_runs: detail.translation_runs,
         playback_path,
         audio_fallback_path,
     })
@@ -1101,6 +1107,18 @@ async fn desktop_settings(state: State<'_, DesktopState>) -> Result<DesktopSetti
 }
 
 #[tauri::command]
+async fn check_translation_api_key(
+    state: State<'_, DesktopState>,
+    provider_id: String,
+) -> Result<TranslationCredentialCheck, String> {
+    state
+        .settings_service
+        .check_translation_api_key(&provider_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn save_desktop_settings(
     state: State<'_, DesktopState>,
     request: SaveDesktopSettingsRequest,
@@ -1310,6 +1328,7 @@ fn main() {
                 translation_provider.clone(),
                 models_directory.clone(),
                 config.deepl_auth_key.clone(),
+                std::env::var("DEEPSEEK_API_KEY").ok(),
                 configured_file("ATOGAKI_WHISPER_MODEL"),
                 configured_file("ATOGAKI_VAD_MODEL"),
             );
@@ -1379,6 +1398,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            check_translation_api_key,
             data_directory,
             desktop_settings,
             delete_job,

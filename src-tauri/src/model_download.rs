@@ -213,7 +213,7 @@ impl ModelDownloadService {
         self.update_state(model.id, |state| state.total_bytes = total_bytes)
             .await;
 
-        let part_path = self.partial_path(&model);
+        let part_path = self.partial_path(model);
         let _ = fs::remove_file(&part_path).await;
         let mut output = fs::File::create(&part_path)
             .await
@@ -251,7 +251,7 @@ impl ModelDownloadService {
             .await
             .with_context(|| format!("failed to install {}", output_path.display()))?;
         self.settings
-            .set_downloaded_model(model.kind, &output_path)
+            .set_downloaded_model(model.kind, output_path)
             .await?;
         self.update_state(model.id, |state| {
             state.status = "done".to_string();

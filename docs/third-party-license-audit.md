@@ -87,7 +87,7 @@ src-tauri/target/release/bundle/sources/
 
 Whisper/VAD 模型不打包进 App 或 DMG，由用户在设备上选择或下载。内建目录只保存下载地址、固定 SHA-256 和上游许可/说明链接；正式发布前仍应逐项复核模型页面的许可证与使用条件。模型镜像只改变传输来源，不改变已接受的模型字节。
 
-DeepL API 不向 App 分发 SDK；当前通过 HTTPS API 调用。用户仍需遵守自己的服务条款、配额和内容处理要求。未来增加 Google Translate 或 LLM provider 时，应同时审计 SDK/协议依赖、服务条款、数据发送说明和输出归属。
+DeepL、DeepSeek 与自定义 OpenAI-compatible 服务都通过现有 HTTPS 客户端直接调用，App 不分发这些服务的 SDK。用户仍需遵守所选服务的条款、配额和内容处理要求；自定义端点由用户自行确认运营方。后续增加带新 SDK 的翻译服务时，仍需审计新增依赖、服务条款、数据发送说明和输出归属。
 
 ## 每次 Release 的合规检查
 

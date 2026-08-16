@@ -120,8 +120,21 @@ type PendingSubtitleStructureAction =
 type JobDetail = {
   job: LocalJob;
   segments: SubtitleSegment[];
+  translation_runs: TranslationRun[];
   playback_path: string | null;
   audio_fallback_path: string | null;
+};
+
+type TranslationRun = {
+  id: string;
+  provider_id: string;
+  provider_name: string;
+  model: string | null;
+  endpoint_kind: string;
+  segment_count: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  completed_at_unix: number;
 };
 
 type TranslationStatus = {
@@ -129,6 +142,7 @@ type TranslationStatus = {
   provider: string;
   configured: boolean;
   model: string | null;
+  endpoint_kind: string;
   configuration_hint: string | null;
 };
 
@@ -144,7 +158,10 @@ type DesktopSettings = {
   whisperModelReady: boolean;
   vadModelPath: string | null;
   vadModelReady: boolean;
-  translationProviderId: "none" | "deepl";
+  translationProviderId: "none" | "deepl" | "deepseek" | "openai-compatible";
+  translationModel: string | null;
+  translationBaseUrl: string | null;
+  translationStyleInstruction: string;
   translationApiKeyConfigured: boolean;
   translationApiKeySource: "system" | "environment" | "saved" | "deferred" | null;
   credentialStore: string;
@@ -153,6 +170,14 @@ type DesktopSettings = {
   networkProxyMode: "environment" | "direct" | "custom";
   networkProxyUrl: string | null;
   modelMirrorUrl: string | null;
+};
+
+type TranslationCredentialCheck = {
+  providerId: string;
+  providerName: string;
+  storedInSystem: boolean;
+  availableFromEnvironment: boolean;
+  credentialStore: string;
 };
 
 type ModelCatalogItem = {
@@ -406,6 +431,7 @@ app.innerHTML = `
           <div>
             <strong>简体中文翻译</strong>
             <span id="translation-status">正在读取翻译配置…</span>
+            <span id="translation-run-status" class="muted"></span>
           </div>
           <div class="workspace-action-buttons">
             <button id="translate-all" type="button">全部翻译／重译</button>
@@ -583,7 +609,7 @@ app.innerHTML = `
           </div>
         </section>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>2. 网络与模型下载</strong><span>代理同时用于模型下载与 DeepL；镜像只用于模型下载，失败会回退官方源。</span></div><span>每个模型都会校验 SHA-256</span></div>
+          <div class="settings-section-heading"><div><strong>2. 网络与模型下载</strong><span>代理同时用于模型下载与所选云端翻译；镜像只用于模型下载，失败会回退官方源。</span></div><span>每个模型都会校验 SHA-256</span></div>
           <div class="network-settings-grid">
             <label>代理模式
               <select id="settings-proxy-mode">
@@ -608,14 +634,28 @@ app.innerHTML = `
           <div class="settings-section-heading"><div><strong>3. 云端翻译（可选）</strong><span>不配置也可以完成本地转写、编辑和原文字幕导出。</span></div><span id="credential-store-label"></span></div>
           <label>翻译 provider
             <select id="settings-provider">
-              <option value="deepl">DeepL</option>
+              <option value="deepl">DeepL（传统翻译 API）</option>
+              <option value="deepseek">DeepSeek（LLM API）</option>
+              <option value="openai-compatible">OpenAI-compatible（高级）</option>
               <option value="none">关闭云端翻译</option>
             </select>
           </label>
-          <label id="api-key-field">DeepL API Key
+          <div id="llm-provider-fields" class="settings-grid hidden">
+            <label id="provider-base-url-field">OpenAI-compatible Base URL
+              <input id="settings-provider-base-url" type="url" placeholder="https://api.openai.com/v1" />
+            </label>
+            <label>模型
+              <input id="settings-provider-model" type="text" placeholder="模型 ID" />
+            </label>
+            <label class="settings-span">翻译风格
+              <input id="settings-translation-style" type="text" placeholder="准确、自然的简体中文口语字幕" />
+            </label>
+          </div>
+          <label id="api-key-field"><span id="api-key-label">DeepL API Key</span>
             <input id="settings-api-key" type="password" autocomplete="off" placeholder="留空则保持当前密钥" />
           </label>
-          <label class="clear-secret"><input id="settings-clear-api-key" type="checkbox" />删除系统凭据库中已保存的 DeepL Key</label>
+          <label class="clear-secret"><input id="settings-clear-api-key" type="checkbox" /><span id="clear-api-key-label">删除系统凭据库中已保存的 DeepL Key</span></label>
+          <div class="credential-check-row"><button id="check-api-key" type="button" class="secondary">检查所选 Key</button><span>仅检查系统凭据条目，不会回显 Key 或调用翻译 API。</span></div>
           <p id="api-key-status" class="settings-message"></p>
         </section>
         <div class="settings-footer">
@@ -678,6 +718,7 @@ const listeningForwardMediaButton = document.querySelector<HTMLButtonElement>("#
 const listeningNextSubtitleButton = document.querySelector<HTMLButtonElement>("#listening-next-subtitle");
 const listeningPlaybackRateSelect = document.querySelector<HTMLSelectElement>("#listening-playback-rate");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
+const translationRunStatusText = document.querySelector<HTMLSpanElement>("#translation-run-status");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
 const openSubtitleOverlayButton = document.querySelector<HTMLButtonElement>("#open-subtitle-overlay");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
@@ -740,8 +781,12 @@ const settingsModelMirror = document.querySelector<HTMLInputElement>("#settings-
 const testNetworkButton = document.querySelector<HTMLButtonElement>("#test-network");
 const networkTestResults = document.querySelector<HTMLDivElement>("#network-test-results");
 const settingsProvider = document.querySelector<HTMLSelectElement>("#settings-provider");
+const settingsProviderBaseUrl = document.querySelector<HTMLInputElement>("#settings-provider-base-url");
+const settingsProviderModel = document.querySelector<HTMLInputElement>("#settings-provider-model");
+const settingsTranslationStyle = document.querySelector<HTMLInputElement>("#settings-translation-style");
 const settingsApiKey = document.querySelector<HTMLInputElement>("#settings-api-key");
 const settingsClearApiKey = document.querySelector<HTMLInputElement>("#settings-clear-api-key");
+const checkApiKeyButton = document.querySelector<HTMLButtonElement>("#check-api-key");
 const settingsMessage = document.querySelector<HTMLSpanElement>("#settings-message");
 const apiKeyStatus = document.querySelector<HTMLParagraphElement>("#api-key-status");
 const credentialStoreLabel = document.querySelector<HTMLSpanElement>("#credential-store-label");
@@ -797,6 +842,7 @@ let translationStatus: TranslationStatus = {
   provider: "翻译服务",
   configured: false,
   model: null,
+  endpoint_kind: "none",
   configuration_hint: "请在设置中选择并配置翻译服务。",
 };
 
@@ -926,9 +972,42 @@ function formatBytes(bytes: number): string {
 }
 
 function syncProviderSettings(): void {
-  const deeplEnabled = settingsProvider?.value === "deepl";
-  document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !deeplEnabled);
-  settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !deeplEnabled);
+  const provider = settingsProvider?.value ?? "none";
+  const enabled = provider !== "none";
+  const llmEnabled = provider === "deepseek" || provider === "openai-compatible";
+  const customEndpoint = provider === "openai-compatible";
+  document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !enabled);
+  settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !enabled);
+  checkApiKeyButton?.closest("div")?.classList.toggle("hidden", !enabled);
+  document.querySelector<HTMLElement>("#llm-provider-fields")?.classList.toggle("hidden", !llmEnabled);
+  document.querySelector<HTMLElement>("#provider-base-url-field")?.classList.toggle("hidden", !customEndpoint);
+  const providerLabel = provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
+  const apiKeyLabel = document.querySelector<HTMLSpanElement>("#api-key-label");
+  const clearApiKeyLabel = document.querySelector<HTMLSpanElement>("#clear-api-key-label");
+  if (apiKeyLabel) apiKeyLabel.textContent = `${providerLabel} API Key`;
+  if (clearApiKeyLabel) clearApiKeyLabel.textContent = `删除系统凭据库中已保存的 ${providerLabel} Key`;
+}
+
+async function checkSelectedApiKey(): Promise<void> {
+  if (!settingsProvider || !checkApiKeyButton || !apiKeyStatus || settingsProvider.value === "none") return;
+  checkApiKeyButton.disabled = true;
+  apiKeyStatus.textContent = `正在检查 ${settingsProvider.value} 的系统凭据；macOS 可能请求解锁 Keychain…`;
+  apiKeyStatus.classList.remove("warning");
+  try {
+    const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", {
+      providerId: settingsProvider.value,
+    });
+    const environment = result.availableFromEnvironment ? "；启动环境中也有兼容 Key" : "";
+    apiKeyStatus.textContent = result.storedInSystem
+      ? `${result.providerName} Key 存在于 ${result.credentialStore}${environment}；内容不会回显。`
+      : `${result.credentialStore} 中没有 ${result.providerName} Key${environment}。`;
+    apiKeyStatus.classList.toggle("warning", !result.storedInSystem && !result.availableFromEnvironment);
+  } catch (error) {
+    apiKeyStatus.textContent = `检查失败：${String(error)}`;
+    apiKeyStatus.classList.add("warning");
+  } finally {
+    checkApiKeyButton.disabled = false;
+  }
 }
 
 function syncNetworkSettings(): void {
@@ -952,6 +1031,9 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   overwriteSettingsField(settingsProxyUrl, settings.networkProxyUrl ?? "");
   overwriteSettingsField(settingsModelMirror, settings.modelMirrorUrl ?? "");
   overwriteSettingsField(settingsProvider, settings.translationProviderId);
+  overwriteSettingsField(settingsProviderModel, settings.translationModel ?? "");
+  overwriteSettingsField(settingsProviderBaseUrl, settings.translationBaseUrl ?? "");
+  overwriteSettingsField(settingsTranslationStyle, settings.translationStyleInstruction);
   overwriteSettingsField(settingsApiKey, "");
   overwriteSettingsField(settingsClearApiKey, false);
   if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
@@ -1039,7 +1121,7 @@ async function refreshTranslationStatus(): Promise<void> {
 }
 
 async function saveSettings(finishOnboarding: boolean): Promise<void> {
-  if (!settingsWhisperModel || !settingsVadModel || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return;
+  if (!settingsWhisperModel || !settingsVadModel || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !settingsProviderModel || !settingsProviderBaseUrl || !settingsTranslationStyle) return;
   if (finishOnboarding && !settingsWhisperModel.value.trim()) {
     if (settingsMessage) settingsMessage.textContent = "请先选择或下载一个 Whisper 模型。";
     settingsWhisperModel.focus();
@@ -1052,6 +1134,9 @@ async function saveSettings(finishOnboarding: boolean): Promise<void> {
         whisperModelPath: settingsWhisperModel.value.trim() || null,
         vadModelPath: settingsVadModel.value.trim() || null,
         translationProviderId: settingsProvider.value,
+        translationModel: settingsProviderModel.value.trim() || null,
+        translationBaseUrl: settingsProviderBaseUrl.value.trim() || null,
+        translationStyleInstruction: settingsTranslationStyle.value.trim() || null,
         apiKey: settingsApiKey.value.trim() || null,
         clearApiKey: settingsClearApiKey?.checked ?? false,
         networkProxyMode: settingsProxyMode.value,
@@ -1323,6 +1408,18 @@ function updateTranslationControls(): void {
       ? `${translationStatus.provider}${model} 已配置 · ${source}原文会发送到云端翻译为${target}`
       : `未配置 ${translationStatus.provider}；${translationStatus.configuration_hint ?? "请完成翻译服务配置"}`;
     translationStatusText.classList.toggle("warning", !translationStatus.configured);
+  }
+  if (translationRunStatusText) {
+    const latest = activeDetail?.translation_runs[0];
+    if (!latest) {
+      translationRunStatusText.textContent = "当前任务还没有机器翻译运行记录。";
+    } else {
+      const model = latest.model ? ` · ${latest.model}` : "";
+      const tokens = latest.input_tokens !== null || latest.output_tokens !== null
+        ? ` · Token ${latest.input_tokens ?? "?"} 入 / ${latest.output_tokens ?? "?"} 出`
+        : "";
+      translationRunStatusText.textContent = `最近批次：${latest.provider_name}${model} · ${latest.segment_count} 段${tokens} · ${new Date(latest.completed_at_unix * 1_000).toLocaleString()}`;
+    }
   }
   if (translateAllButton) {
     translateAllButton.disabled = workspaceActionBusy || !hasSegments || !translationStatus.configured;
@@ -2392,7 +2489,9 @@ async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
   if (!activeDetail || activeDetail.job.job_id !== jobId) return;
   activeDetail.job = detail.job;
   activeDetail.segments = detail.segments;
+  activeDetail.translation_runs = detail.translation_runs;
   renderSubtitleListPreservingView(activeDetail.segments);
+  updateTranslationControls();
   updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
 }
 
@@ -3483,7 +3582,24 @@ settingsForm?.addEventListener("change", (event) => {
 });
 document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
-settingsProvider?.addEventListener("change", syncProviderSettings);
+settingsProvider?.addEventListener("change", () => {
+  if (settingsProvider.value === "deepseek") {
+    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.deepseek.com";
+    if (settingsProviderModel) settingsProviderModel.value = "deepseek-v4-flash";
+  } else if (settingsProvider.value === "openai-compatible") {
+    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.openai.com/v1";
+    if (settingsProviderModel) settingsProviderModel.value = "";
+  }
+  if ((settingsProvider.value === "deepseek" || settingsProvider.value === "openai-compatible") && settingsTranslationStyle && !settingsTranslationStyle.value.trim()) {
+    settingsTranslationStyle.value = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
+  }
+  syncProviderSettings();
+  if (apiKeyStatus && settingsProvider.value !== "none") {
+    apiKeyStatus.textContent = "尚未检查当前 provider；可点击“检查所选 Key”确认系统凭据是否存在。";
+    apiKeyStatus.classList.remove("warning");
+  }
+});
+checkApiKeyButton?.addEventListener("click", () => void checkSelectedApiKey());
 settingsProxyMode?.addEventListener("change", syncNetworkSettings);
 testNetworkButton?.addEventListener("click", () => void testNetworkConnection());
 settingsForm?.addEventListener("submit", (event) => {
