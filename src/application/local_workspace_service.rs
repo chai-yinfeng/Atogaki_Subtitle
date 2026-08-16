@@ -269,6 +269,17 @@ impl LocalWorkspaceService {
             .await
     }
 
+    pub async fn save_subtitle_timing(
+        &self,
+        job_id: &str,
+        before_segments: &[LocalSubtitleSegmentRecord],
+        after_segments: &[LocalSubtitleSegmentRecord],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        self.database
+            .save_segment_timing(job_id, before_segments, after_segments)
+            .await
+    }
+
     pub async fn translate_segment(
         &self,
         job_id: &str,

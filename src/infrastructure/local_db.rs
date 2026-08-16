@@ -1421,6 +1421,56 @@ impl LocalDatabase {
         Ok(restored)
     }
 
+    pub async fn save_segment_timing(
+        &self,
+        job_id: &str,
+        before_segments: &[LocalSubtitleSegmentRecord],
+        after_segments: &[LocalSubtitleSegmentRecord],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        if before_segments.len() != after_segments.len() {
+            return Err(anyhow!(
+                "timing edits cannot add or remove subtitle segments"
+            ));
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin subtitle timing transaction")?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let current = list_segments_in_transaction(&mut tx, job_id).await?;
+        if current != before_segments {
+            return Err(anyhow!(
+                "subtitle timing changed after editing started; reload before saving"
+            ));
+        }
+
+        let mut updated = after_segments.to_vec();
+        for (before, after) in before_segments.iter().zip(updated.iter_mut()) {
+            if before.id != after.id
+                || before.job_id != after.job_id
+                || before.segment_index != after.segment_index
+                || before.source_text != after.source_text
+                || before.translated_text != after.translated_text
+                || before.source_edited != after.source_edited
+                || before.translation_edited != after.translation_edited
+                || before.translation_stale != after.translation_stale
+            {
+                return Err(anyhow!(
+                    "timing edits cannot change subtitle text or structure"
+                ));
+            }
+            after.timing_edited = before.timing_edited
+                || before.start_ms != after.start_ms
+                || before.end_ms != after.end_ms;
+        }
+        persist_structure_segments(&mut tx, job_id, &mut updated).await?;
+        tx.commit()
+            .await
+            .context("failed to commit subtitle timing transaction")?;
+        Ok(updated)
+    }
+
     pub async fn replace_segments(
         &self,
         job_id: &str,
@@ -2060,6 +2110,37 @@ mod tests {
             .await
             .unwrap();
         let original = database.list_segments(&manifest.job_id).await.unwrap();
+
+        let mut timing_draft = original.clone();
+        timing_draft[0].end_ms = 1_050;
+        timing_draft[1].start_ms = 1_050;
+        let retimed = database
+            .save_segment_timing(&manifest.job_id, &original, &timing_draft)
+            .await
+            .unwrap();
+        assert_eq!(retimed[0].end_ms, 1_050);
+        assert_eq!(retimed[1].start_ms, 1_050);
+        assert!(retimed[0].timing_edited && retimed[1].timing_edited);
+        let stale_timing = database
+            .save_segment_timing(&manifest.job_id, &original, &timing_draft)
+            .await
+            .unwrap_err();
+        assert!(stale_timing.to_string().contains("reload before saving"));
+        database
+            .restore_segment_structure(&manifest.job_id, &original, &retimed)
+            .await
+            .unwrap();
+        let mut text_tamper = original.clone();
+        text_tamper[0].source_text = "timing endpoint must reject text".to_string();
+        let rejected_text = database
+            .save_segment_timing(&manifest.job_id, &original, &text_tamper)
+            .await
+            .unwrap_err();
+        assert!(
+            rejected_text
+                .to_string()
+                .contains("cannot change subtitle text")
+        );
 
         let split = database
             .split_segment(

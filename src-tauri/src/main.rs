@@ -418,6 +418,14 @@ struct RestoreSubtitleStructureRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SaveSubtitleTimingRequest {
+    job_id: String,
+    before_segments: Vec<LocalSubtitleSegmentRecord>,
+    after_segments: Vec<LocalSubtitleSegmentRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct WaveformWindowRequest {
     job_id: String,
     start_ms: i64,
@@ -816,6 +824,22 @@ async fn restore_subtitle_structure(
     state
         .workspace_service
         .restore_subtitle_structure(
+            &request.job_id,
+            &request.before_segments,
+            &request.after_segments,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_subtitle_timing(
+    state: State<'_, DesktopState>,
+    request: SaveSubtitleTimingRequest,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .workspace_service
+        .save_subtitle_timing(
             &request.job_id,
             &request.before_segments,
             &request.after_segments,
@@ -1476,7 +1500,8 @@ fn main() {
             restore_subtitle,
             split_subtitle,
             merge_subtitles,
-            restore_subtitle_structure
+            restore_subtitle_structure,
+            save_subtitle_timing
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Atogaki desktop application");

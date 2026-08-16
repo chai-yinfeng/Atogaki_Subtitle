@@ -138,6 +138,14 @@ type WaveformWindow = {
   peaks: WaveformPeak[];
 };
 
+type KaraokeTimingDrag = {
+  pointerId: number;
+  boundaryIndex: number;
+  before: SubtitleSegment[];
+  draft: SubtitleSegment[];
+  moved: boolean;
+};
+
 type TranslationRun = {
   id: string;
   provider_id: string;
@@ -380,7 +388,7 @@ app.innerHTML = `
     </section>
     <section id="karaoke-view" class="karaoke-view hidden" aria-labelledby="karaoke-title">
       <div class="module-heading karaoke-heading">
-        <div><p class="eyebrow">PRECISION TIMING WORKSPACE</p><h2 id="karaoke-title">烤肉</h2><p>在波形上反复听音和定位字幕。当前里程碑先提供精确播放底座，后续会继续加入边界拖动、连续打轴和 A/B 循环。</p></div>
+        <div><p class="eyebrow">PRECISION TIMING WORKSPACE</p><h2 id="karaoke-title">烤肉</h2><p>在波形上反复听音、拖动相邻字幕边界并精确保存。文字粗修仍可回到任务详情完成。</p></div>
       </div>
       <div class="karaoke-layout">
         <aside class="karaoke-library" aria-label="可精修任务">
@@ -414,14 +422,14 @@ app.innerHTML = `
           <section class="waveform-panel" aria-labelledby="waveform-heading">
             <div class="panel-heading compact">
               <div><p class="eyebrow">WAVEFORM</p><h3 id="waveform-heading">声音与字幕时间轴</h3></div>
-              <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-follow-playhead" type="button" class="secondary active">跟随播放头</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button></div>
+              <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-follow-playhead" type="button" class="secondary active">跟随播放头</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销上次打轴</button></div>
             </div>
-            <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。</div>
+            <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。拖动字幕间的菱形边界会联动左右两段，松开后原子保存。</div>
             <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="可点击定位的声音波形与字幕时间轴"></canvas>
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
             <div><span id="karaoke-segment-time">当前没有字幕</span><strong id="karaoke-current-source">原文字幕</strong><em id="karaoke-current-translation">译文字幕</em></div>
-            <p>第一里程碑先把听音定位做准；字幕边界拖动与保存会在下一里程碑接入同一 SQLite 时间轴。</p>
+            <div class="karaoke-segment-actions"><button id="karaoke-split-segment" type="button" class="secondary" disabled>拆分当前段</button><button id="karaoke-merge-segment" type="button" class="secondary" disabled>与下一段合并</button><p id="karaoke-timing-message">拖动边界时按 10 ms 网格吸附；修改会直接写入当前任务的 SQLite 字幕。</p></div>
           </section>
         </section>
       </div>
@@ -438,7 +446,7 @@ app.innerHTML = `
       </div>
       <nav class="workspace-sections" role="tablist" aria-label="任务详情功能">
         <button id="workspace-tab-review" class="workspace-section-tab active" type="button" role="tab" aria-selected="true" aria-controls="workspace-review-panel" data-workspace-section="review">
-          <strong>字幕校对</strong><span>播放、编辑与打轴</span>
+          <strong>字幕校对</strong><span>播放与文字粗修</span>
         </button>
         <button id="workspace-tab-translation" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-translation-panel" data-workspace-section="translation">
           <strong>翻译与词表</strong><span>批量翻译与识别修正</span>
@@ -479,8 +487,8 @@ app.innerHTML = `
           </section>
           <section class="timeline" aria-labelledby="timeline-title">
             <div class="section-heading">
-              <h2 id="timeline-title">字幕时间轴</h2>
-              <div class="timeline-heading-actions"><span id="segment-count"></span><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销上次拆分／合并</button></div>
+              <h2 id="timeline-title">字幕粗修</h2>
+              <span id="segment-count"></span>
             </div>
             <div id="subtitle-list" class="subtitle-list"></div>
           </section>
@@ -757,6 +765,9 @@ const karaokeWaveform = document.querySelector<HTMLCanvasElement>("#karaoke-wave
 const karaokeSegmentTime = document.querySelector<HTMLSpanElement>("#karaoke-segment-time");
 const karaokeCurrentSource = document.querySelector<HTMLElement>("#karaoke-current-source");
 const karaokeCurrentTranslation = document.querySelector<HTMLElement>("#karaoke-current-translation");
+const karaokeSplitSegmentButton = document.querySelector<HTMLButtonElement>("#karaoke-split-segment");
+const karaokeMergeSegmentButton = document.querySelector<HTMLButtonElement>("#karaoke-merge-segment");
+const karaokeTimingMessage = document.querySelector<HTMLParagraphElement>("#karaoke-timing-message");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
 const sourceLanguage = document.querySelector<HTMLSelectElement>("#source-language");
@@ -923,6 +934,8 @@ let karaokeWaveformLoading = false;
 let karaokeAnimationFrame: number | null = null;
 let karaokeSelectedJobId: string | null = null;
 let karaokeResumeMs = 0;
+let karaokeTimingDrag: KaraokeTimingDrag | null = null;
+let karaokeSuppressClick = false;
 type SubtitleFollowState = { userScrollingUntil: number; autoScrollingUntil: number; resumeTimer: number | null };
 const subtitleFollowStates = new WeakMap<HTMLElement, SubtitleFollowState>();
 let translationStatus: TranslationStatus = {
@@ -1540,6 +1553,15 @@ function setWorkspaceAction(message: string, isError = false): void {
   workspaceActionMessage.classList.toggle("warning", isError);
 }
 
+function setSubtitleEditAction(message: string, isError = false): void {
+  if (currentArea === "karaoke" && karaokeTimingMessage) {
+    karaokeTimingMessage.textContent = message;
+    karaokeTimingMessage.classList.toggle("warning", isError);
+    return;
+  }
+  setWorkspaceAction(message, isError);
+}
+
 function startWorkspaceElapsed(message: string): () => void {
   const startedAt = Date.now();
   const update = () => setWorkspaceAction(`${message} · 已运行 ${formatElapsed((Date.now() - startedAt) / 1_000)}`);
@@ -1774,6 +1796,7 @@ async function stopActivePlayback(): Promise<void> {
     window.cancelAnimationFrame(karaokeAnimationFrame);
     karaokeAnimationFrame = null;
   }
+  karaokeTimingDrag = null;
   activeMedia = null;
   if (playbackPositionSaveTimer !== null) {
     window.clearTimeout(playbackPositionSaveTimer);
@@ -1885,6 +1908,8 @@ async function openKaraokeJob(jobId: string): Promise<void> {
     renderKaraokeJobs(latestJobs);
     mountMedia(detail.playback_path, detail.audio_fallback_path, karaokeMediaHost, karaokeMediaMessage, karaokeResumeMs);
     updateActiveSubtitle(karaokeResumeMs);
+    updateStructureUndoButton();
+    setSubtitleEditAction("拖动菱形边界会联动左右两段并按 10 ms 吸附；松开后原子保存。黄色表示空隙，红色表示重叠。");
     await loadKaraokeWaveform(karaokeResumeMs, true);
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
@@ -1925,9 +1950,7 @@ async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promis
     if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke") return;
     karaokeWaveformWindow = waveform;
     karaokeViewStartMs = waveform.start_ms;
-    if (karaokeWaveformStatus) {
-      karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms`;
-    }
+    syncKaraokeWaveformStatus();
     renderKaraokeTimeline();
   } catch (error) {
     if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke") return;
@@ -2004,7 +2027,8 @@ function renderKaraokeTimeline(): void {
 
   const trackTop = waveformTop + waveformHeight + 14;
   const trackHeight = Math.max(38, cssHeight - trackTop - 10);
-  for (const segment of activeDetail?.segments ?? []) {
+  const timelineSegments = karaokeTimingDrag?.draft ?? activeDetail?.segments ?? [];
+  for (const segment of timelineSegments) {
     if (segment.end_ms < waveform.start_ms || segment.start_ms > waveform.end_ms) continue;
     const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
     const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
@@ -2029,6 +2053,41 @@ function renderKaraokeTimeline(): void {
     }
   }
 
+  for (let index = 0; index + 1 < timelineSegments.length; index += 1) {
+    const left = timelineSegments[index];
+    const right = timelineSegments[index + 1];
+    if (left.end_ms < waveform.start_ms && right.start_ms < waveform.start_ms) continue;
+    if (left.end_ms > waveform.end_ms && right.start_ms > waveform.end_ms) continue;
+    const leftX = (left.end_ms - waveform.start_ms) / range * cssWidth;
+    const rightX = (right.start_ms - waveform.start_ms) / range * cssWidth;
+    if (left.end_ms !== right.start_ms) {
+      const warningLeft = Math.max(0, Math.min(leftX, rightX));
+      const warningRight = Math.min(cssWidth, Math.max(leftX, rightX));
+      context.fillStyle = left.end_ms > right.start_ms ? "rgba(179, 75, 54, .26)" : "rgba(190, 139, 48, .22)";
+      context.fillRect(warningLeft, trackTop, Math.max(2, warningRight - warningLeft), trackHeight);
+    }
+    const boundaryMs = Math.round((left.end_ms + right.start_ms) / 2);
+    if (boundaryMs < waveform.start_ms || boundaryMs > waveform.end_ms) continue;
+    const x = (boundaryMs - waveform.start_ms) / range * cssWidth;
+    const activeBoundary = karaokeTimingDrag?.boundaryIndex === index;
+    context.strokeStyle = activeBoundary ? "#b34b36" : "#6d4f42";
+    context.lineWidth = activeBoundary ? 3 : 2;
+    context.beginPath();
+    context.moveTo(x, trackTop - 6);
+    context.lineTo(x, trackTop + trackHeight + 3);
+    context.stroke();
+    context.fillStyle = activeBoundary ? "#b34b36" : "#fffaf1";
+    context.strokeStyle = "#6d4f42";
+    context.beginPath();
+    context.moveTo(x, trackTop - 11);
+    context.lineTo(x + 6, trackTop - 5);
+    context.lineTo(x, trackTop + 1);
+    context.lineTo(x - 6, trackTop - 5);
+    context.closePath();
+    context.fill();
+    context.stroke();
+  }
+
   const currentMs = Math.round((activeMedia?.currentTime ?? 0) * 1_000);
   if (currentMs >= waveform.start_ms && currentMs <= waveform.end_ms) {
     const playheadX = (currentMs - waveform.start_ms) / range * cssWidth;
@@ -2048,6 +2107,112 @@ function renderKaraokeTimeline(): void {
   }
 }
 
+function karaokeBoundaryAtPoint(clientX: number, clientY: number): number | null {
+  const canvas = karaokeWaveform;
+  const waveform = karaokeWaveformWindow;
+  const segments = activeDetail?.segments;
+  if (!canvas || !waveform || !segments || segments.length < 2) return null;
+  const bounds = canvas.getBoundingClientRect();
+  const localY = clientY - bounds.top;
+  const waveformHeight = Math.max(70, bounds.height * 0.5);
+  const trackTop = 28 + waveformHeight + 14;
+  if (localY < trackTop - 18 || localY > bounds.height) return null;
+  const range = waveform.end_ms - waveform.start_ms;
+  let closest: { index: number; distance: number } | null = null;
+  for (let index = 0; index + 1 < segments.length; index += 1) {
+    const boundaryMs = Math.round((segments[index].end_ms + segments[index + 1].start_ms) / 2);
+    if (boundaryMs < waveform.start_ms || boundaryMs > waveform.end_ms) continue;
+    const x = bounds.left + (boundaryMs - waveform.start_ms) / range * bounds.width;
+    const distance = Math.abs(clientX - x);
+    if (distance <= 11 && (!closest || distance < closest.distance)) closest = { index, distance };
+  }
+  return closest?.index ?? null;
+}
+
+function karaokeTimingAnomalySummary(segments: SubtitleSegment[]): string {
+  let gaps = 0;
+  let overlaps = 0;
+  for (let index = 0; index + 1 < segments.length; index += 1) {
+    const difference = segments[index + 1].start_ms - segments[index].end_ms;
+    if (difference > 0) gaps += 1;
+    else if (difference < 0) overlaps += 1;
+  }
+  return [gaps ? `黄色空隙 ${gaps} 处` : "", overlaps ? `红色重叠 ${overlaps} 处` : ""]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function syncKaraokeWaveformStatus(): void {
+  if (!karaokeWaveformStatus || !karaokeWaveformWindow || !activeDetail) return;
+  const waveform = karaokeWaveformWindow;
+  const anomaly = karaokeTimingAnomalySummary(activeDetail.segments);
+  karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms${anomaly ? ` · ${anomaly}` : " · 相邻字幕连续"}`;
+}
+
+function updateKaraokeTimingDrag(clientX: number): void {
+  const drag = karaokeTimingDrag;
+  const waveform = karaokeWaveformWindow;
+  const canvas = karaokeWaveform;
+  if (!drag || !waveform || !canvas) return;
+  const bounds = canvas.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width));
+  const rawBoundary = waveform.start_ms + ratio * (waveform.end_ms - waveform.start_ms);
+  const left = drag.draft[drag.boundaryIndex];
+  const right = drag.draft[drag.boundaryIndex + 1];
+  const minimum = left.start_ms + 10;
+  const maximum = right.end_ms - 10;
+  if (maximum < minimum) return;
+  const boundary = Math.max(minimum, Math.min(maximum, Math.round(rawBoundary / 10) * 10));
+  drag.moved ||= left.end_ms !== boundary || right.start_ms !== boundary;
+  left.end_ms = boundary;
+  right.start_ms = boundary;
+  if (karaokeTimingMessage) {
+    karaokeTimingMessage.textContent = `预览：第 ${left.segment_index + 1}／${right.segment_index + 1} 段共用边界 ${formatPreciseTime(boundary)}；松开后保存。`;
+    karaokeTimingMessage.classList.remove("warning");
+  }
+  renderKaraokeTimeline();
+}
+
+async function commitKaraokeTimingDrag(): Promise<void> {
+  const drag = karaokeTimingDrag;
+  karaokeTimingDrag = null;
+  if (!drag || !drag.moved || !activeDetail) {
+    renderKaraokeTimeline();
+    return;
+  }
+  const jobId = activeDetail.job.job_id;
+  setSubtitleEditAction("正在原子保存相邻字幕边界…");
+  try {
+    const saved = await invoke<SubtitleSegment[]>("save_subtitle_timing", {
+      request: {
+        jobId,
+        beforeSegments: drag.before,
+        afterSegments: drag.draft,
+      },
+    });
+    if (!activeDetail || activeDetail.job.job_id !== jobId) return;
+    const left = saved[drag.boundaryIndex];
+    const right = saved[drag.boundaryIndex + 1];
+    rememberStructureEdit(drag.before, saved, `第 ${left.segment_index + 1}／${right.segment_index + 1} 段边界调整`);
+    activeDetail.segments = saved;
+    updateStructureUndoButton();
+    syncKaraokeWaveformStatus();
+    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    renderKaraokeTimeline();
+    setSubtitleEditAction(`边界已保存为 ${formatPreciseTime(left.end_ms)}；左右两段保持连续。`);
+  } catch (error) {
+    renderKaraokeTimeline();
+    setSubtitleEditAction(`边界保存失败：${String(error)}`, true);
+  }
+}
+
+function cancelKaraokeTimingDrag(): void {
+  karaokeTimingDrag = null;
+  karaokeSuppressClick = false;
+  renderKaraokeTimeline();
+  setSubtitleEditAction("已放弃本次边界拖动。");
+}
+
 function updateKaraokePosition(milliseconds: number): void {
   if (currentArea !== "karaoke") return;
   if (karaokeCurrentTime) karaokeCurrentTime.textContent = formatPreciseTime(milliseconds);
@@ -2059,6 +2224,15 @@ function updateKaraokePosition(milliseconds: number): void {
   }
   if (karaokeCurrentSource) karaokeCurrentSource.textContent = segment?.source_text ?? "当前时间没有原文字幕。";
   if (karaokeCurrentTranslation) karaokeCurrentTranslation.textContent = segment?.translated_text ?? "尚无译文。";
+  const segmentIndex = segment
+    ? activeDetail?.segments.findIndex((item) => item.id === segment.id) ?? -1
+    : -1;
+  if (karaokeSplitSegmentButton) {
+    karaokeSplitSegmentButton.disabled = !segment || !activeDetail || !matchesTerminalStatus(activeDetail.job.status);
+  }
+  if (karaokeMergeSegmentButton) {
+    karaokeMergeSegmentButton.disabled = segmentIndex < 0 || !activeDetail || segmentIndex + 1 >= activeDetail.segments.length;
+  }
   const waveform = karaokeWaveformWindow;
   if (karaokeFollowPlayhead && waveform && !karaokeWaveformLoading) {
     const margin = (waveform.end_ms - waveform.start_ms) * 0.12;
@@ -2272,7 +2446,7 @@ function updateStructureUndoButton(): void {
   undoSubtitleStructureButton.disabled = !available;
   undoSubtitleStructureButton.title = available
     ? `撤销${entry?.label ?? "上一次结构修改"}`
-    : "只有当前字幕仍与上一次拆分或合并结果一致时才能撤销";
+    : "当前会话还没有可撤销的打轴或结构修改";
 }
 
 function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment[], label: string): void {
@@ -2291,10 +2465,15 @@ function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?:
   if (!activeDetail) return;
   activeDetail.segments = segments;
   if (segmentCount) segmentCount.textContent = `${segments.length} 段`;
-  renderSubtitleListPreservingView(segments, expandedSegmentId);
+  if (currentArea === "workspace") renderSubtitleListPreservingView(segments, expandedSegmentId);
+  else {
+    syncKaraokeWaveformStatus();
+    renderKaraokeTimeline();
+  }
   updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
   lastSubtitleOverlayKey = "";
   updateStructureUndoButton();
+  renderKaraokeJobs(latestJobs);
 }
 
 function suggestedSplitIndex(text: string, preferred?: number): number {
@@ -2337,16 +2516,16 @@ function structureTextarea(id: string, label: string, value: string): HTMLLabelE
   return field;
 }
 
-function openSplitSubtitleDialog(segment: SubtitleSegment, sourceInput: HTMLTextAreaElement): void {
+function openSplitSubtitleDialog(segment: SubtitleSegment, sourceInput?: HTMLTextAreaElement): void {
   if (!subtitleStructureDialog || !subtitleStructureEditor || !subtitleStructureTitle || !subtitleStructureHelp || !submitSubtitleStructureButton) return;
   if (hasUnsavedSubtitleEdits()) {
-    setWorkspaceAction("拆分前请先保存或放弃当前任务中尚未保存的字幕修改。", true);
+    setSubtitleEditAction("拆分前请先保存或放弃当前任务中尚未保存的字幕修改。", true);
     return;
   }
-  const splitIndex = suggestedSplitIndex(segment.source_text, sourceInput.selectionStart ?? undefined);
+  const splitIndex = suggestedSplitIndex(segment.source_text, sourceInput?.selectionStart ?? undefined);
   const [leftSource, rightSource] = splitTextDraft(segment.source_text, splitIndex);
   if (!leftSource || !rightSource) {
-    setWorkspaceAction("当前原文无法拆成两个非空段；请先补充内容，或把光标放在正文内部。", true);
+    setSubtitleEditAction("当前原文无法拆成两个非空段；请先补充内容。", true);
     return;
   }
   const translationRatio = segment.source_text.length > 0 ? splitIndex / segment.source_text.length : 0.5;
@@ -2390,7 +2569,7 @@ function openSplitSubtitleDialog(segment: SubtitleSegment, sourceInput: HTMLText
 function openMergeSubtitleDialog(left: SubtitleSegment, right: SubtitleSegment): void {
   if (!subtitleStructureDialog || !subtitleStructureEditor || !subtitleStructureTitle || !subtitleStructureHelp || !submitSubtitleStructureButton) return;
   if (hasUnsavedSubtitleEdits()) {
-    setWorkspaceAction("合并前请先保存或放弃当前任务中尚未保存的字幕修改。", true);
+    setSubtitleEditAction("合并前请先保存或放弃当前任务中尚未保存的字幕修改。", true);
     return;
   }
   const bothTranslated = Boolean(left.translated_text && right.translated_text);
@@ -2467,7 +2646,7 @@ async function submitSubtitleStructure(): Promise<void> {
     applySubtitleStructure(after, expandedId);
     subtitleStructureDialog?.close();
     pendingSubtitleStructureAction = null;
-    setWorkspaceAction(`已完成${label}；可在时间轴标题旁撤销本次结构修改。`);
+    setSubtitleEditAction(`已完成${label}；可在波形上方撤销本次结构修改。`);
   } catch (error) {
     subtitleStructureMessage.textContent = `保存失败：${String(error)}`;
   } finally {
@@ -2492,9 +2671,9 @@ async function undoSubtitleStructure(): Promise<void> {
     history?.pop();
     if (history?.length === 0) subtitleStructureUndoHistory.delete(activeDetail.job.job_id);
     applySubtitleStructure(restored, restored[0]?.id);
-    setWorkspaceAction(`已撤销${entry.label}。结构撤销历史只在当前 App 会话内保留。`);
+    setSubtitleEditAction(`已撤销${entry.label}。撤销历史只在当前 App 会话内保留。`);
   } catch (error) {
-    setWorkspaceAction(`无法撤销结构修改：${String(error)}`, true);
+    setSubtitleEditAction(`无法撤销结构修改：${String(error)}`, true);
   } finally {
     updateStructureUndoButton();
   }
@@ -2508,7 +2687,7 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     return;
   }
 
-  for (const [segmentPosition, segment] of segments.entries()) {
+  for (const segment of segments) {
     const card = document.createElement("article");
     card.className = "subtitle-card";
     card.dataset.segmentId = segment.id;
@@ -2580,127 +2759,27 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     sourceInput.addEventListener("input", markDirty);
     translationInput.addEventListener("input", markDirty);
 
-    const timing = document.createElement("details");
-    timing.className = "timing-editor";
-    timing.open = segment.id === expandedSegmentId;
-    const timingSummary = document.createElement("summary");
-    timingSummary.textContent = "编辑时间轴";
-    const timingGrid = document.createElement("div");
-    timingGrid.className = "timing-grid";
-    const startInput = document.createElement("input");
-    startInput.value = formatEditableTime(segment.start_ms);
-    startInput.inputMode = "decimal";
-    startInput.setAttribute("aria-label", "字幕开始时间");
-    const endInput = document.createElement("input");
-    endInput.value = formatEditableTime(segment.end_ms);
-    endInput.inputMode = "decimal";
-    endInput.setAttribute("aria-label", "字幕结束时间");
-    const timingHint = document.createElement("p");
-    timingHint.className = "timing-hint";
-    const refreshTimingDraft = (): void => {
-      try {
-        const { startMs, endMs } = readTimingDraft(startInput, endInput);
-        time.textContent = `${formatTime(startMs)} → ${formatTime(endMs)}`;
-        const overlap = timingOverlapWarning(segment, startMs, endMs);
-        timingHint.textContent = overlap || "时间重叠允许保存；导出与烧录会使用修改后的时间。";
-        timingHint.classList.toggle("warning", Boolean(overlap));
-      } catch (error) {
-        timingHint.textContent = String(error);
-        timingHint.classList.add("warning");
-      }
-    };
-    const changeTiming = (input: HTMLInputElement, deltaMs?: number): void => {
-      if (deltaMs === undefined) {
-        input.value = formatEditableTime(Math.round((activeMedia?.currentTime ?? 0) * 1_000));
-      } else {
-        const current = parseTimecode(input.value);
-        if (current !== null) input.value = formatEditableTime(Math.max(0, current + deltaMs));
-      }
-      markDirty();
-      refreshTimingDraft();
-    };
-    const timingField = (label: string, input: HTMLInputElement): HTMLDivElement => {
-      const field = document.createElement("div");
-      field.className = "timing-field";
-      const caption = document.createElement("span");
-      caption.textContent = label;
-      const actions = document.createElement("div");
-      actions.className = "timing-actions";
-      const minus = document.createElement("button");
-      minus.type = "button";
-      minus.className = "secondary";
-      minus.textContent = "−0.1 秒";
-      minus.addEventListener("click", () => changeTiming(input, -100));
-      const current = document.createElement("button");
-      current.type = "button";
-      current.className = "secondary";
-      current.textContent = "取播放位置";
-      current.addEventListener("click", () => changeTiming(input));
-      const plus = document.createElement("button");
-      plus.type = "button";
-      plus.className = "secondary";
-      plus.textContent = "+0.1 秒";
-      plus.addEventListener("click", () => changeTiming(input, 100));
-      actions.append(minus, current, plus);
-      field.append(caption, input, actions);
-      return field;
-    };
-    startInput.addEventListener("input", () => {
-      markDirty();
-      refreshTimingDraft();
-    });
-    endInput.addEventListener("input", () => {
-      markDirty();
-      refreshTimingDraft();
-    });
-    timingGrid.append(timingField("开始时间（时:分:秒.毫秒）", startInput), timingField("结束时间（时:分:秒.毫秒）", endInput), timingHint);
-    timing.append(timingSummary, timingGrid);
-    refreshTimingDraft();
-
-    const structureActions = document.createElement("div");
-    structureActions.className = "subtitle-structure-actions";
-    const split = document.createElement("button");
-    split.type = "button";
-    split.className = "secondary";
-    split.textContent = "从原文光标拆分";
-    split.title = "先在原文中放置光标，再预览左右字幕与分界时间";
-    split.disabled = !activeDetail || !matchesTerminalStatus(activeDetail.job.status);
-    split.addEventListener("click", () => openSplitSubtitleDialog(segment, sourceInput));
-    const merge = document.createElement("button");
-    merge.type = "button";
-    merge.className = "secondary";
-    merge.textContent = "与下一段合并";
-    merge.disabled = segmentPosition + 1 >= segments.length || !activeDetail || !matchesTerminalStatus(activeDetail.job.status);
-    merge.addEventListener("click", () => {
-      const next = activeDetail?.segments[segmentPosition + 1];
-      if (next) openMergeSubtitleDialog(segment, next);
-    });
-    structureActions.append(split, merge);
-
     discard.addEventListener("click", () => {
       const saved = activeDetail?.segments.find((item) => item.id === segment.id) ?? segment;
       sourceInput.value = saved.source_text;
       translationInput.value = saved.translated_text ?? "";
-      startInput.value = formatEditableTime(saved.start_ms);
-      endInput.value = formatEditableTime(saved.end_ms);
       card.dataset.dirty = "false";
       save.disabled = true;
       discard.disabled = true;
       state.textContent = savedSegmentState(saved);
       state.classList.toggle("warning", saved.translation_stale);
-      refreshTimingDraft();
     });
 
-    save.addEventListener("click", () => void saveSegment(segment, sourceInput, translationInput, startInput, endInput, save, state));
+    save.addEventListener("click", () => void saveSegment(segment, sourceInput, translationInput, save, state));
     undo.addEventListener("click", () => void undoSegment(segment, undo, state));
-    translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, startInput, endInput, state));
+    translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, state));
     capture.addEventListener("click", () => void captureGlossaryCorrection(segment, sourceInput, state));
     const actions = document.createElement("div");
     actions.className = "subtitle-actions";
     actions.append(capture, discard, undo, translate, save);
     footer.append(state, actions);
 
-    card.append(meta, timing, structureActions, sourceLabel, translationLabel, footer);
+    card.append(meta, sourceLabel, translationLabel, footer);
     subtitleList.append(card);
   }
   highlightSegment(activeSegmentId);
@@ -2757,8 +2836,6 @@ async function saveSegment(
   segment: SubtitleSegment,
   sourceInput: HTMLTextAreaElement,
   translationInput: HTMLTextAreaElement,
-  startInput: HTMLInputElement,
-  endInput: HTMLInputElement,
   button: HTMLButtonElement,
   state: HTMLSpanElement,
 ): Promise<void> {
@@ -2767,8 +2844,7 @@ async function saveSegment(
   state.textContent = "正在保存…";
   try {
     const before = activeDetail.segments.find((item) => item.id === segment.id) ?? segment;
-    const { startMs, endMs } = readTimingDraft(startInput, endInput);
-    const updated = await persistSegment(segment.id, sourceInput.value, translationInput.value, startMs, endMs);
+    const updated = await persistSegment(segment.id, sourceInput.value, translationInput.value);
     rememberSubtitleSave(before, updated);
     replaceActiveSegment(updated);
     renderSubtitleListPreservingView(activeDetail.segments, segment.id);
@@ -2860,8 +2936,6 @@ async function translateSegment(
   segment: SubtitleSegment,
   sourceInput: HTMLTextAreaElement,
   translationInput: HTMLTextAreaElement,
-  startInput: HTMLInputElement,
-  endInput: HTMLInputElement,
   state: HTMLSpanElement,
 ): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
@@ -2870,8 +2944,7 @@ async function translateSegment(
   state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
   state.classList.remove("warning");
   try {
-    const { startMs, endMs } = readTimingDraft(startInput, endInput);
-    const saved = await persistSegment(segment.id, sourceInput.value, translationInput.value, startMs, endMs);
+    const saved = await persistSegment(segment.id, sourceInput.value, translationInput.value);
     replaceActiveSegment(saved);
     const translated = await invoke<SubtitleSegment>("translate_subtitle", {
       jobId: activeDetail.job.job_id,
@@ -2936,30 +3009,6 @@ function parseTimecode(value: string): number | null {
   const hours = numbers.length === 3 ? numbers[0] : 0;
   if (seconds >= 60 || (numbers.length === 3 && minutes >= 60)) return null;
   return Math.round((hours * 3_600 + minutes * 60 + seconds) * 1_000);
-}
-
-function readTimingDraft(
-  startInput: HTMLInputElement,
-  endInput: HTMLInputElement,
-): { startMs: number; endMs: number } {
-  const startMs = parseTimecode(startInput.value);
-  const endMs = parseTimecode(endInput.value);
-  if (startMs === null || endMs === null) {
-    throw new Error("时间格式无效，请使用 时:分:秒.毫秒");
-  }
-  if (endMs <= startMs) throw new Error("结束时间必须晚于开始时间");
-  return { startMs, endMs };
-}
-
-function timingOverlapWarning(segment: SubtitleSegment, startMs: number, endMs: number): string | null {
-  if (!activeDetail) return null;
-  const index = activeDetail.segments.findIndex((item) => item.id === segment.id);
-  const previous = index > 0 ? activeDetail.segments[index - 1] : null;
-  const next = index >= 0 && index + 1 < activeDetail.segments.length ? activeDetail.segments[index + 1] : null;
-  const messages = [];
-  if (previous && startMs < previous.end_ms) messages.push(`与上一段重叠 ${formatTime(previous.end_ms - startMs)}`);
-  if (next && endMs > next.start_ms) messages.push(`与下一段重叠 ${formatTime(endMs - next.start_ms)}`);
-  return messages.length > 0 ? `${messages.join("；")}（允许保存）` : null;
 }
 
 function seekTo(milliseconds: number, autoplay = true): void {
@@ -4039,7 +4088,45 @@ karaokeFollowPlayheadButton?.addEventListener("click", () => {
 karaokeZoomSelect?.addEventListener("change", () => {
   void loadKaraokeWaveform((activeMedia?.currentTime ?? 0) * 1_000);
 });
+karaokeWaveform?.addEventListener("pointerdown", (event) => {
+  const boundaryIndex = karaokeBoundaryAtPoint(event.clientX, event.clientY);
+  if (boundaryIndex === null || !activeDetail) return;
+  activeMedia?.pause();
+  karaokeFollowPlayhead = false;
+  syncKaraokeFollowButton();
+  karaokeTimingDrag = {
+    pointerId: event.pointerId,
+    boundaryIndex,
+    before: cloneSubtitleSegments(activeDetail.segments),
+    draft: cloneSubtitleSegments(activeDetail.segments),
+    moved: false,
+  };
+  karaokeSuppressClick = true;
+  karaokeWaveform.setPointerCapture(event.pointerId);
+  updateKaraokeTimingDrag(event.clientX);
+  event.preventDefault();
+});
+karaokeWaveform?.addEventListener("pointermove", (event) => {
+  if (!karaokeTimingDrag) {
+    karaokeWaveform.style.cursor = karaokeBoundaryAtPoint(event.clientX, event.clientY) === null ? "crosshair" : "ew-resize";
+    return;
+  }
+  if (karaokeTimingDrag.pointerId !== event.pointerId) return;
+  updateKaraokeTimingDrag(event.clientX);
+  event.preventDefault();
+});
+karaokeWaveform?.addEventListener("pointerup", (event) => {
+  if (!karaokeTimingDrag || karaokeTimingDrag.pointerId !== event.pointerId) return;
+  karaokeWaveform.releasePointerCapture(event.pointerId);
+  void commitKaraokeTimingDrag();
+  event.preventDefault();
+});
+karaokeWaveform?.addEventListener("pointercancel", () => cancelKaraokeTimingDrag());
 karaokeWaveform?.addEventListener("click", (event) => {
+  if (karaokeSuppressClick) {
+    karaokeSuppressClick = false;
+    return;
+  }
   if (!karaokeWaveformWindow) return;
   const bounds = karaokeWaveform.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
@@ -4048,6 +4135,17 @@ karaokeWaveform?.addEventListener("click", (event) => {
   syncKaraokeFollowButton();
   seekTo(milliseconds, false);
   updateActiveSubtitle(milliseconds);
+});
+karaokeSplitSegmentButton?.addEventListener("click", () => {
+  const segment = activeDetail?.segments.find((item) => item.id === activeSegmentId);
+  if (segment) openSplitSubtitleDialog(segment);
+});
+karaokeMergeSegmentButton?.addEventListener("click", () => {
+  if (!activeDetail || !activeSegmentId) return;
+  const index = activeDetail.segments.findIndex((item) => item.id === activeSegmentId);
+  const left = activeDetail.segments[index];
+  const right = activeDetail.segments[index + 1];
+  if (left && right) openMergeSubtitleDialog(left, right);
 });
 karaokeOpenWorkspaceButton?.addEventListener("click", () => {
   if (activeDetail) void openJob(activeDetail.job.job_id);
@@ -4158,6 +4256,11 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
 }
 
 document.addEventListener("keydown", (event) => {
+  if (karaokeTimingDrag && event.key === "Escape") {
+    cancelKaraokeTimingDrag();
+    event.preventDefault();
+    return;
+  }
   if (!activeDetail || !activeMedia || event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return;
   if (document.querySelector("dialog[open]")) return;
   if (currentArea === "karaoke" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
