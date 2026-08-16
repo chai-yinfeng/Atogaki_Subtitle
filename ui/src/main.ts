@@ -19,6 +19,8 @@ type LocalJob = {
   source_language: LanguageCode;
   target_language: LanguageCode;
   created_at_unix: number;
+  started_at_unix: number | null;
+  completed_at_unix: number | null;
   updated_at_unix: number;
   translation_status: "not_ready" | "untranslated" | "partial" | "translated" | "stale";
   segment_count: number;
@@ -474,7 +476,7 @@ app.innerHTML = `
         </div>
         <div class="review-grid">
           <section class="media-panel" aria-label="媒体播放器">
-            <div class="panel-heading compact"><div><p class="eyebrow">PLAYBACK</p><h3>媒体与当前字幕</h3></div></div>
+            <div class="panel-heading compact"><div><p class="eyebrow">PLAYBACK</p><h3>媒体与当前字幕</h3></div><button id="relink-job-media" type="button" class="secondary hidden">重新定位原媒体</button></div>
           <div id="media-host" class="media-host"></div>
           <div class="playback-tools" aria-label="播放快捷操作">
             <button id="previous-subtitle" type="button" class="secondary" title="上一句（[）">上一句</button>
@@ -793,6 +795,7 @@ const workspaceTitle = document.querySelector<HTMLHeadingElement>("#workspace-ti
 const workspaceMessage = document.querySelector<HTMLParagraphElement>("#workspace-message");
 const mediaHost = document.querySelector<HTMLDivElement>("#media-host");
 const mediaMessage = document.querySelector<HTMLParagraphElement>("#media-message");
+const relinkJobMediaButton = document.querySelector<HTMLButtonElement>("#relink-job-media");
 const previousSubtitleButton = document.querySelector<HTMLButtonElement>("#previous-subtitle");
 const rewindMediaButton = document.querySelector<HTMLButtonElement>("#rewind-media");
 const togglePlaybackButton = document.querySelector<HTMLButtonElement>("#toggle-playback");
@@ -1008,23 +1011,30 @@ function formatElapsed(seconds: number): string {
   return `${remainingSeconds}秒`;
 }
 
-function jobTimingLabel(job: Pick<LocalJob, "status" | "created_at_unix" | "updated_at_unix">): string {
-  if (matchesTerminalStatus(job.status)) {
-    return `总用时 ${formatElapsed(job.updated_at_unix - job.created_at_unix)}`;
-  }
+function jobTimingLabel(job: Pick<LocalJob, "status" | "created_at_unix" | "started_at_unix" | "completed_at_unix">): string {
   const now = Math.floor(Date.now() / 1_000);
-  return `已运行 ${formatElapsed(now - job.created_at_unix)}`;
+  if (job.status === "queued") return `排队 ${formatElapsed(now - job.created_at_unix)}`;
+  if (matchesTerminalStatus(job.status)) {
+    if (job.started_at_unix !== null && job.completed_at_unix !== null && job.completed_at_unix >= job.started_at_unix) {
+      return `处理用时 ${formatElapsed(job.completed_at_unix - job.started_at_unix)}`;
+    }
+    return "历史任务未记录处理用时";
+  }
+  if (job.started_at_unix !== null) return `已运行 ${formatElapsed(now - job.started_at_unix)}`;
+  return `准备中 ${formatElapsed(now - job.created_at_unix)}`;
 }
 
 function updateVisibleJobTimings(): void {
   document.querySelectorAll<HTMLElement>("[data-job-timing]").forEach((element) => {
     const createdAt = Number(element.dataset.createdAt);
-    const updatedAt = Number(element.dataset.updatedAt);
+    const startedAt = element.dataset.startedAt ? Number(element.dataset.startedAt) : null;
+    const completedAt = element.dataset.completedAt ? Number(element.dataset.completedAt) : null;
     const status = element.dataset.status ?? "";
-    if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return;
+    if (!Number.isFinite(createdAt)) return;
     element.textContent = jobTimingLabel({
       created_at_unix: createdAt,
-      updated_at_unix: updatedAt,
+      started_at_unix: startedAt,
+      completed_at_unix: completedAt,
       status,
     });
   });
@@ -1538,8 +1548,12 @@ function updateTranslationControls(): void {
   if (renderVideoButton) {
     const inputPath = activeDetail?.job.input_path;
     renderVideoButton.disabled =
-      workspaceActionBusy || !hasSegments || !inputPath || isAudioPath(inputPath);
-    renderVideoButton.title = inputPath && isAudioPath(inputPath) ? "音频任务不能烧录视频" : "";
+      workspaceActionBusy || !hasSegments || !inputPath || !activeDetail?.playback_path || isAudioPath(inputPath);
+    renderVideoButton.title = inputPath && isAudioPath(inputPath)
+      ? "音频任务不能烧录视频"
+      : inputPath && !activeDetail?.playback_path
+        ? "原视频已移动，请先在字幕校对中重新定位"
+        : "";
   }
   if (revealExportButton) {
     revealExportButton.disabled = workspaceActionBusy || !lastExportedSubtitlePath;
@@ -1585,6 +1599,7 @@ function startWorkspaceElapsed(message: string): () => void {
 
 function setWorkspaceBusy(busy: boolean): void {
   workspaceActionBusy = busy;
+  if (relinkJobMediaButton) relinkJobMediaButton.disabled = busy;
   updateTranslationControls();
 }
 
@@ -1605,7 +1620,7 @@ function renderJobs(jobs: LocalJob[]): void {
       (job) => `
         <article class="job-card">
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
-            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-updated-at="${job.updated_at_unix}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
+            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-started-at="${job.started_at_unix ?? ""}" data-completed-at="${job.completed_at_unix ?? ""}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
             <span class="job-statuses">
               <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
               <span class="status translation-status translation-status-${escapeHtml(job.translation_status)}">${escapeHtml(translationStatusLabel(job))}</span>
@@ -2545,12 +2560,49 @@ function renderWorkspace(detail: JobDetail): void {
   void renderWorkspaceGlossaryInspection();
   void renderJobGlossarySnapshot(detail.job.job_id);
   clearGlossaryPreview();
+  const sourceMediaMissing = Boolean(detail.job.input_path && !detail.playback_path);
+  relinkJobMediaButton?.classList.toggle("hidden", !sourceMediaMissing);
+  if (relinkJobMediaButton) {
+    relinkJobMediaButton.disabled = workspaceActionBusy;
+    relinkJobMediaButton.title = sourceMediaMissing
+      ? "选择移动后的原音频或视频；不会改动字幕和任务音频"
+      : "";
+  }
   mountMedia(detail.playback_path, detail.audio_fallback_path);
+  if (sourceMediaMissing && mediaMessage) {
+    mediaMessage.textContent = "原媒体已移动或删除；当前使用任务内保存的音频。可重新定位原媒体以恢复画面和视频烧录。";
+  }
   renderSubtitleList(detail.segments);
   updateActiveSubtitle(0);
   renderSubtitleOverlayButton();
   updateTranslationControls();
   void refreshVideoRenders();
+}
+
+async function relinkActiveJobMedia(): Promise<void> {
+  if (!activeDetail || workspaceActionBusy) return;
+  if (hasUnsavedSubtitleEdits()) {
+    setWorkspaceAction("请先保存或放弃尚未保存的字幕修改，再重新定位原媒体。", true);
+    return;
+  }
+  setWorkspaceBusy(true);
+  setWorkspaceAction("正在选择移动后的原媒体…");
+  try {
+    const updated = await invoke<LocalJob | null>("relink_job_media", {
+      jobId: activeDetail.job.job_id,
+    });
+    if (!updated) {
+      setWorkspaceAction("已取消重新定位。");
+      return;
+    }
+    await openJob(activeDetail.job.job_id, currentWorkspaceSection);
+    setWorkspaceAction(`已重新定位原媒体：${updated.input_path ?? ""}`);
+  } catch (error) {
+    setWorkspaceAction(`重新定位原媒体失败：${String(error)}`, true);
+  } finally {
+    setWorkspaceBusy(false);
+    updateTranslationControls();
+  }
 }
 
 function isAudioPath(path: string): boolean {
@@ -3538,8 +3590,8 @@ async function openVideoRenderDialog(): Promise<void> {
     setWorkspaceAction(`有 ${staleCount} 段译文已过期，请重译或修正后再烧录。`, true);
     return;
   }
-  if (!activeDetail.job.input_path || isAudioPath(activeDetail.job.input_path)) {
-    setWorkspaceAction("当前任务没有可烧录的视频源。", true);
+  if (!activeDetail.job.input_path || !activeDetail.playback_path || isAudioPath(activeDetail.job.input_path)) {
+    setWorkspaceAction("当前任务没有可烧录的视频源；如果原文件已移动，请先在字幕校对中重新定位。", true);
     return;
   }
   if (videoRenderMessage) videoRenderMessage.textContent = "";
@@ -4077,6 +4129,7 @@ document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("cl
 document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
   if (activeDetail) void openJob(activeDetail.job.job_id, currentWorkspaceSection);
 });
+relinkJobMediaButton?.addEventListener("click", () => void relinkActiveJobMedia());
 openSubtitleEditorButton?.addEventListener("click", () => {
   if (!activeDetail) return;
   if (hasUnsavedSubtitleEdits()) {

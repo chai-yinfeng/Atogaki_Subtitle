@@ -35,6 +35,8 @@ pub struct LocalJobRecord {
     pub source_language: String,
     pub target_language: String,
     pub created_at_unix: i64,
+    pub started_at_unix: Option<i64>,
+    pub completed_at_unix: Option<i64>,
     pub updated_at_unix: i64,
 }
 
@@ -246,10 +248,12 @@ impl LocalDatabase {
     pub async fn mark_job_failed(&self, job_id: &str, error: &str) -> Result<()> {
         sqlx::query(
             "UPDATE local_jobs
-             SET status = 'failed', message = '任务已中断', error_message = ?, updated_at_unix = ?
+             SET status = 'failed', message = '任务已中断', error_message = ?,
+                 completed_at_unix = COALESCE(completed_at_unix, ?), updated_at_unix = ?
              WHERE job_id = ? AND status NOT IN ('done', 'failed')",
         )
         .bind(error)
+        .bind(chrono::Utc::now().timestamp())
         .bind(chrono::Utc::now().timestamp())
         .bind(job_id)
         .execute(&self.pool)
@@ -270,8 +274,8 @@ impl LocalDatabase {
             "INSERT INTO local_jobs (
                 job_id, storage_dir, input_path, render_output_path, status, message,
                 error_message, source_language, target_language,
-                created_at_unix, updated_at_unix
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(job_id) DO UPDATE SET
                 storage_dir = excluded.storage_dir,
                 input_path = excluded.input_path,
@@ -281,6 +285,8 @@ impl LocalDatabase {
                 error_message = excluded.error_message,
                 source_language = excluded.source_language,
                 target_language = excluded.target_language,
+                started_at_unix = COALESCE(local_jobs.started_at_unix, excluded.started_at_unix),
+                completed_at_unix = COALESCE(local_jobs.completed_at_unix, excluded.completed_at_unix),
                 updated_at_unix = MAX(local_jobs.updated_at_unix, excluded.updated_at_unix)",
         )
         .bind(&manifest.job_id)
@@ -303,6 +309,18 @@ impl LocalDatabase {
         .bind(manifest.source_language.as_str())
         .bind(manifest.target_language.as_str())
         .bind(to_i64(manifest.created_at_unix, "created_at_unix")?)
+        .bind(
+            manifest
+                .started_at_unix
+                .map(|value| to_i64(value, "started_at_unix"))
+                .transpose()?,
+        )
+        .bind(
+            manifest
+                .completed_at_unix
+                .map(|value| to_i64(value, "completed_at_unix"))
+                .transpose()?,
+        )
         .bind(to_i64(manifest.updated_at_unix, "updated_at_unix")?)
         .execute(&mut *tx)
         .await
@@ -333,7 +351,7 @@ impl LocalDatabase {
             "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
                 source_language, target_language,
-                created_at_unix, updated_at_unix
+                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix
              FROM local_jobs
              ORDER BY updated_at_unix DESC, job_id DESC",
         )
@@ -366,7 +384,7 @@ impl LocalDatabase {
             "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
                 source_language, target_language,
-                created_at_unix, updated_at_unix
+                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix
              FROM local_jobs
              WHERE job_id = ?",
         )
@@ -374,6 +392,29 @@ impl LocalDatabase {
         .fetch_optional(&self.pool)
         .await
         .context("failed to read local task")
+    }
+
+    pub async fn update_job_input_path(
+        &self,
+        job_id: &str,
+        input_path: &Path,
+        updated_at_unix: i64,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE local_jobs
+             SET input_path = ?, updated_at_unix = MAX(updated_at_unix, ?)
+             WHERE job_id = ?",
+        )
+        .bind(input_path.display().to_string())
+        .bind(updated_at_unix)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to update source media for local task {job_id}"))?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("local task not found: {job_id}"));
+        }
+        Ok(())
     }
 
     pub async fn create_render_job(

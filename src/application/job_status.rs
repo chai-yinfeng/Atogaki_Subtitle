@@ -16,6 +16,17 @@ pub enum JobStatus {
 }
 
 impl JobStatus {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Done | Self::Failed)
+    }
+
+    pub fn is_processing(self) -> bool {
+        !matches!(
+            self,
+            Self::Queued | Self::Created | Self::Done | Self::Failed
+        )
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Queued => "queued",

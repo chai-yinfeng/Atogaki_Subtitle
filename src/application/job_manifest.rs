@@ -24,6 +24,10 @@ pub struct JobManifest {
     pub target_language: LanguageCode,
     pub outputs: JobOutputs,
     pub created_at_unix: u64,
+    #[serde(default)]
+    pub started_at_unix: Option<u64>,
+    #[serde(default)]
+    pub completed_at_unix: Option<u64>,
     pub updated_at_unix: u64,
     pub error: Option<String>,
 }
@@ -59,25 +63,41 @@ impl JobManifest {
             target_language: languages.target,
             outputs: JobOutputs::from(job),
             created_at_unix: now,
+            started_at_unix: None,
+            completed_at_unix: None,
             updated_at_unix: now,
             error: None,
         }
     }
 
     pub fn mark(&mut self, status: JobStatus) {
+        let now = unix_now();
+        if status.is_processing() && self.started_at_unix.is_none() {
+            self.started_at_unix = Some(now);
+        }
+        if status.is_terminal() {
+            self.completed_at_unix = Some(now);
+        }
         self.status = status;
         self.message = status.label().to_string();
-        self.updated_at_unix = unix_now();
+        self.updated_at_unix = now;
         if status != JobStatus::Failed {
             self.error = None;
         }
     }
 
     pub fn fail(&mut self, error: impl Into<String>) {
+        let now = unix_now();
         self.status = JobStatus::Failed;
         self.message = JobStatus::Failed.label().to_string();
-        self.updated_at_unix = unix_now();
+        self.completed_at_unix = Some(now);
+        self.updated_at_unix = now;
         self.error = Some(error.into());
+    }
+
+    pub fn replace_input(&mut self, input: PathBuf) {
+        self.input = Some(input);
+        self.updated_at_unix = unix_now();
     }
 }
 
@@ -150,5 +170,40 @@ mod tests {
         assert_eq!(manifest.target_language, LanguageCode::SimplifiedChinese);
         assert!(manifest.outputs.source_srt.ends_with("ja.srt"));
         assert!(manifest.outputs.translated_srt.ends_with("zh.srt"));
+        assert_eq!(manifest.started_at_unix, None);
+        assert_eq!(manifest.completed_at_unix, None);
+    }
+
+    #[test]
+    fn processing_timestamps_exclude_time_spent_queued() {
+        let mut manifest: JobManifest = serde_json::from_value(serde_json::json!({
+            "job_id": "timed-job",
+            "status": "queued",
+            "message": "queued",
+            "input": "/media/radio.mp4",
+            "render_output": null,
+            "outputs": {
+                "job_dir": "/tasks/timed-job",
+                "audio_wav": "/tasks/timed-job/audio.wav",
+                "segments_json": "/tasks/timed-job/segments.json",
+                "source_srt": "/tasks/timed-job/source.srt",
+                "translated_srt": "/tasks/timed-job/translated.srt",
+                "bilingual_srt": "/tasks/timed-job/bilingual.srt",
+                "bilingual_ass": "/tasks/timed-job/bilingual.ass"
+            },
+            "created_at_unix": 1,
+            "updated_at_unix": 1,
+            "error": null
+        }))
+        .unwrap();
+
+        manifest.mark(crate::application::job_status::JobStatus::Queued);
+        assert_eq!(manifest.started_at_unix, None);
+        manifest.mark(crate::application::job_status::JobStatus::ExtractingAudio);
+        let started = manifest.started_at_unix;
+        assert!(started.is_some());
+        manifest.mark(crate::application::job_status::JobStatus::Done);
+        assert_eq!(manifest.started_at_unix, started);
+        assert!(manifest.completed_at_unix >= started);
     }
 }

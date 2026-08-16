@@ -5,7 +5,7 @@ mod model_download;
 use std::{
     collections::HashMap,
     ffi::OsString,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -13,10 +13,10 @@ use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
         LocalGlossaryService, LocalGlossaryTermDraft, LocalRenderRequest, LocalRenderService,
-        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan, LocalTaskService,
-        LocalTranslationStatus, LocalWorkspaceService, MutableTranslationProvider,
-        TranscriptionOptions,
-        UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
+        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
+        LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
+        MutableTranslationProvider, TranscriptionOptions, UnconfiguredTranslationProvider,
+        job_spec::TranscribeSpec,
     },
     domain::{LanguageCode, subtitle::SubtitleTrack},
     infrastructure::{
@@ -574,6 +574,43 @@ async fn rename_job(
         .task_service
         .rename_persisted_job(&job_id, display_name)
         .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn relink_job_media(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Option<LocalJobRecord>, String> {
+    let current = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let initial_directory = current
+        .job
+        .input_path
+        .as_deref()
+        .and_then(|path| Path::new(path).parent())
+        .filter(|path| path.is_dir())
+        .map(Path::to_path_buf);
+    let selection = pick_local_file(
+        &app,
+        "重新定位原媒体",
+        "媒体",
+        &["mp3", "m4a", "wav", "mp4", "mkv", "webm", "mov"],
+        initial_directory,
+    )
+    .await?;
+    let Some(selection) = selection else {
+        return Ok(None);
+    };
+    state
+        .task_service
+        .relink_persisted_job_input(&job_id, selection)
+        .await
+        .map(Some)
         .map_err(|error| error.to_string())
 }
 
@@ -1480,6 +1517,7 @@ fn main() {
             recognition_defaults,
             reveal_exported_subtitle,
             reveal_rendered_video,
+            relink_job_media,
             rename_job,
             retry_job,
             save_download_network_settings,
@@ -1539,6 +1577,8 @@ mod tests {
             source_language: "ja".to_string(),
             target_language: "zh-Hans".to_string(),
             created_at_unix: 1,
+            started_at_unix: Some(1),
+            completed_at_unix: Some(1),
             updated_at_unix: 1,
         }
     }

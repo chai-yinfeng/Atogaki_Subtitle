@@ -271,6 +271,53 @@ impl LocalTaskService {
         database.rename_job(job_id, display_name).await
     }
 
+    /// Reconnects a durable task to source media that the user moved after
+    /// transcription. Derived audio and subtitle data stay in the task folder.
+    pub async fn relink_persisted_job_input(
+        &self,
+        job_id: &str,
+        input_path: impl AsRef<Path>,
+    ) -> Result<crate::infrastructure::local_db::LocalJobRecord> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("media relinking requires SQLite persistence"))?;
+        let input_path = input_path.as_ref().canonicalize().with_context(|| {
+            format!(
+                "failed to resolve replacement source media {}",
+                input_path.as_ref().display()
+            )
+        })?;
+        if !input_path.is_file() {
+            bail!(
+                "replacement source media is not a file: {}",
+                input_path.display()
+            );
+        }
+        let record = database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        let job = Job::open(PathBuf::from(&record.storage_dir))?;
+        let mut manifest = job
+            .read_manifest_if_exists()?
+            .ok_or_else(|| anyhow!("task status is missing: {}", job.status_json.display()))?;
+        manifest.replace_input(input_path.clone());
+        job.write_manifest(&manifest)?;
+        database
+            .update_job_input_path(
+                job_id,
+                &input_path,
+                i64::try_from(manifest.updated_at_unix)
+                    .context("replacement source media timestamp exceeds SQLite range")?,
+            )
+            .await?;
+        database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task disappeared after media relinking: {job_id}"))
+    }
+
     /// Converts non-terminal task state left by an earlier application session
     /// into an explicit, retryable failure. Automatically resuming an external
     /// ffmpeg/Whisper process is unsafe because its process state cannot be
@@ -737,6 +784,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn relinks_moved_source_media_without_replacing_task_artifacts() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-task-media-relink-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let (sender, _receiver) = mpsc::channel(1);
+        let service = LocalTaskService {
+            sender,
+            jobs_dir: root.join("jobs"),
+            database: Some(database.clone()),
+        };
+        let original = root.join("original.mp4");
+        let relocated = root.join("relocated.mp4");
+        fs::write(&original, b"original media placeholder").unwrap();
+        fs::write(&relocated, b"relocated media placeholder").unwrap();
+        let job = service
+            .create_queued_job(Some(original), None, crate::domain::LanguagePair::default())
+            .await
+            .unwrap();
+        fs::write(&job.audio_wav, b"derived audio").unwrap();
+
+        let updated = service
+            .relink_persisted_job_input(&job.id(), &relocated)
+            .await
+            .unwrap();
+        let manifest = job.read_manifest_if_exists().unwrap().unwrap();
+        let relocated = relocated.canonicalize().unwrap();
+
+        assert_eq!(updated.input_path.as_deref(), relocated.to_str());
+        assert_eq!(manifest.input.as_deref(), Some(relocated.as_path()));
+        assert_eq!(fs::read(&job.audio_wav).unwrap(), b"derived audio");
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn selected_glossary_is_snapshotted_and_associated_before_dispatch() {
         let root = std::env::temp_dir().join(format!(
             "atogaki-task-glossary-test-{}",
@@ -984,11 +1072,17 @@ mod tests {
         job.write_manifest(&manifest).unwrap();
         database
             .sync_snapshot(&crate::application::job_snapshot::JobSnapshot {
-                manifest,
+                manifest: manifest.clone(),
                 segments: Vec::new(),
             })
             .await
             .unwrap();
+        let completed_at = manifest.completed_at_unix.map(|value| value as i64);
+        let renamed_after_completion = service
+            .rename_persisted_job(&job_id, Some("已完成的任务".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(renamed_after_completion.completed_at_unix, completed_at);
         service.delete_persisted_job(&job_id).await.unwrap();
         assert!(!job.dir.exists());
         assert!(source_media.is_file());
