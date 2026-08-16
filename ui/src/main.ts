@@ -125,6 +125,19 @@ type JobDetail = {
   audio_fallback_path: string | null;
 };
 
+type WaveformPeak = {
+  min: number;
+  max: number;
+};
+
+type WaveformWindow = {
+  duration_ms: number;
+  start_ms: number;
+  end_ms: number;
+  point_duration_ms: number;
+  peaks: WaveformPeak[];
+};
+
 type TranslationRun = {
   id: string;
   provider_id: string;
@@ -270,6 +283,7 @@ type SubtitleOverlayPayload = {
 };
 
 type WorkspaceSection = "review" | "translation" | "export";
+type TopLevelArea = "workbench" | "listening" | "karaoke" | "workspace";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("missing app root");
@@ -285,6 +299,7 @@ app.innerHTML = `
         <nav class="primary-navigation" aria-label="主要区域">
           <button id="show-workbench" type="button" class="secondary active">工作台</button>
           <button id="show-listening" type="button" class="secondary">收听</button>
+          <button id="show-karaoke" type="button" class="secondary">烤肉</button>
         </nav>
         <button id="open-settings" type="button" class="secondary">设置</button>
         <button id="refresh" type="button">刷新任务</button>
@@ -360,6 +375,54 @@ app.innerHTML = `
             <p id="listening-current-translation">简体中文翻译</p>
           </div>
           <div id="listening-subtitle-list" class="listening-subtitle-list"></div>
+        </section>
+      </div>
+    </section>
+    <section id="karaoke-view" class="karaoke-view hidden" aria-labelledby="karaoke-title">
+      <div class="module-heading karaoke-heading">
+        <div><p class="eyebrow">PRECISION TIMING WORKSPACE</p><h2 id="karaoke-title">烤肉</h2><p>在波形上反复听音和定位字幕。当前里程碑先提供精确播放底座，后续会继续加入边界拖动、连续打轴和 A/B 循环。</p></div>
+      </div>
+      <div class="karaoke-layout">
+        <aside class="karaoke-library" aria-label="可精修任务">
+          <div class="section-heading"><h3>字幕任务</h3><span id="karaoke-job-count"></span></div>
+          <div id="karaoke-job-list" class="karaoke-job-list"></div>
+        </aside>
+        <section class="karaoke-editor" aria-label="波形时间轴编辑器">
+          <div class="panel-heading compact">
+            <div><p class="eyebrow">TIMING SESSION</p><h3 id="karaoke-job-title">选择一个任务开始精修</h3></div>
+            <button id="karaoke-open-workspace" type="button" class="secondary" disabled>打开完整任务详情</button>
+          </div>
+          <div class="karaoke-player-strip">
+            <div id="karaoke-media-host" class="media-host karaoke-media-host"></div>
+            <div class="karaoke-transport">
+              <div class="karaoke-clock"><span>当前时间</span><strong id="karaoke-current-time">00:00:00.000</strong></div>
+              <div class="karaoke-transport-buttons">
+                <button id="karaoke-step-back-small" type="button" class="secondary" title="后退 10 ms（Shift+←）">−10 ms</button>
+                <button id="karaoke-step-back" type="button" class="secondary" title="后退 100 ms（←）">−100 ms</button>
+                <button id="karaoke-toggle-playback" type="button">播放</button>
+                <button id="karaoke-step-forward" type="button" class="secondary" title="前进 100 ms（→）">+100 ms</button>
+                <button id="karaoke-step-forward-small" type="button" class="secondary" title="前进 10 ms（Shift+→）">+10 ms</button>
+              </div>
+              <div class="karaoke-transport-options">
+                <label>速度<select id="karaoke-playback-rate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+                <label>视野<select id="karaoke-zoom"><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="30000" selected>30 秒</option><option value="60000">60 秒</option><option value="120000">120 秒</option></select></label>
+              </div>
+              <p class="shortcut-help">空格/K 播放暂停 · ←/→ 移动 100 ms · Shift+←/→ 移动 10 ms · 点击波形定位</p>
+              <p id="karaoke-media-message" class="media-message">从左侧选择一个已经产生字幕的任务。</p>
+            </div>
+          </div>
+          <section class="waveform-panel" aria-labelledby="waveform-heading">
+            <div class="panel-heading compact">
+              <div><p class="eyebrow">WAVEFORM</p><h3 id="waveform-heading">声音与字幕时间轴</h3></div>
+              <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-follow-playhead" type="button" class="secondary active">跟随播放头</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button></div>
+            </div>
+            <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。</div>
+            <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="可点击定位的声音波形与字幕时间轴"></canvas>
+          </section>
+          <section class="karaoke-current-segment" aria-live="polite">
+            <div><span id="karaoke-segment-time">当前没有字幕</span><strong id="karaoke-current-source">原文字幕</strong><em id="karaoke-current-translation">译文字幕</em></div>
+            <p>第一里程碑先把听音定位做准；字幕边界拖动与保存会在下一里程碑接入同一 SQLite 时间轴。</p>
+          </section>
         </section>
       </div>
     </section>
@@ -669,6 +732,7 @@ app.innerHTML = `
 
 const homeView = document.querySelector<HTMLDivElement>("#home-view");
 const listeningView = document.querySelector<HTMLElement>("#listening-view");
+const karaokeView = document.querySelector<HTMLElement>("#karaoke-view");
 const shell = document.querySelector<HTMLElement>(".shell");
 const workspaceView = document.querySelector<HTMLElement>("#workspace-view");
 const workspaceSectionTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-workspace-section]"));
@@ -677,6 +741,22 @@ const jobList = document.querySelector<HTMLDivElement>("#job-list");
 const jobCount = document.querySelector<HTMLSpanElement>("#job-count");
 const jobManagementMessage = document.querySelector<HTMLParagraphElement>("#job-management-message");
 const dataPath = document.querySelector<HTMLParagraphElement>("#data-path");
+const karaokeJobList = document.querySelector<HTMLDivElement>("#karaoke-job-list");
+const karaokeJobCount = document.querySelector<HTMLSpanElement>("#karaoke-job-count");
+const karaokeJobTitle = document.querySelector<HTMLHeadingElement>("#karaoke-job-title");
+const karaokeOpenWorkspaceButton = document.querySelector<HTMLButtonElement>("#karaoke-open-workspace");
+const karaokeMediaHost = document.querySelector<HTMLDivElement>("#karaoke-media-host");
+const karaokeMediaMessage = document.querySelector<HTMLParagraphElement>("#karaoke-media-message");
+const karaokeCurrentTime = document.querySelector<HTMLElement>("#karaoke-current-time");
+const karaokeTogglePlaybackButton = document.querySelector<HTMLButtonElement>("#karaoke-toggle-playback");
+const karaokePlaybackRateSelect = document.querySelector<HTMLSelectElement>("#karaoke-playback-rate");
+const karaokeZoomSelect = document.querySelector<HTMLSelectElement>("#karaoke-zoom");
+const karaokeFollowPlayheadButton = document.querySelector<HTMLButtonElement>("#karaoke-follow-playhead");
+const karaokeWaveformStatus = document.querySelector<HTMLDivElement>("#karaoke-waveform-status");
+const karaokeWaveform = document.querySelector<HTMLCanvasElement>("#karaoke-waveform");
+const karaokeSegmentTime = document.querySelector<HTMLSpanElement>("#karaoke-segment-time");
+const karaokeCurrentSource = document.querySelector<HTMLElement>("#karaoke-current-source");
+const karaokeCurrentTranslation = document.querySelector<HTMLElement>("#karaoke-current-translation");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
 const sourceLanguage = document.querySelector<HTMLSelectElement>("#source-language");
@@ -797,7 +877,7 @@ const modelReadiness = document.querySelector<HTMLSpanElement>("#model-readiness
 
 let refreshing = false;
 let latestJobs: LocalJob[] = [];
-let currentArea: "workbench" | "listening" | "workspace" = "workbench";
+let currentArea: TopLevelArea = "workbench";
 let renderedJobsFingerprint: string | null = null;
 let activeDetail: JobDetail | null = null;
 let activeMedia: HTMLMediaElement | null = null;
@@ -835,6 +915,14 @@ const settingsDirtyFields = new Set<string>();
 let workspaceElapsedTimer: number | null = null;
 let playbackPositionSaveTimer: number | null = null;
 let lastPlaybackPositionSavedAt = 0;
+let karaokeWaveformWindow: WaveformWindow | null = null;
+let karaokeWaveformRequestId = 0;
+let karaokeViewStartMs = 0;
+let karaokeFollowPlayhead = true;
+let karaokeWaveformLoading = false;
+let karaokeAnimationFrame: number | null = null;
+let karaokeSelectedJobId: string | null = null;
+let karaokeResumeMs = 0;
 type SubtitleFollowState = { userScrollingUntil: number; autoScrollingUntil: number; resumeTimer: number | null };
 const subtitleFollowStates = new WeakMap<HTMLElement, SubtitleFollowState>();
 let translationStatus: TranslationStatus = {
@@ -1535,6 +1623,18 @@ function renderListeningJobs(jobs: LocalJob[]): void {
   });
 }
 
+function renderKaraokeJobs(jobs: LocalJob[]): void {
+  if (!karaokeJobList || !karaokeJobCount) return;
+  const editable = jobs.filter((job) => job.segment_count > 0 && matchesTerminalStatus(job.status));
+  karaokeJobCount.textContent = `${editable.length} 个`;
+  karaokeJobList.innerHTML = editable.length
+    ? editable.map((job) => `<button type="button" class="karaoke-job${activeDetail?.job.job_id === job.job_id && currentArea === "karaoke" ? " active" : ""}" data-karaoke-job="${escapeHtml(job.job_id)}"><strong>${escapeHtml(displayName(job))}</strong><span>${escapeHtml(languageLabel(job.source_language))} · ${job.segment_count} 段 · ${escapeHtml(translationStatusLabel(job))}</span></button>`).join("")
+    : `<div class="empty-state"><strong>还没有可精修任务。</strong><span>完成一次转写后，任务会出现在这里。</span></div>`;
+  karaokeJobList.querySelectorAll<HTMLButtonElement>("[data-karaoke-job]").forEach((button) => {
+    button.addEventListener("click", () => void openKaraokeJob(button.dataset.karaokeJob ?? ""));
+  });
+}
+
 function translationStatusLabel(job: LocalJob): string {
   if (job.translation_status === "translated") return "已翻译";
   if (job.translation_status === "partial") {
@@ -1622,6 +1722,7 @@ async function refresh(): Promise<void> {
       const scrollTop = window.scrollY;
       renderJobs(jobs);
       renderListeningJobs(jobs);
+      renderKaraokeJobs(jobs);
       renderedJobsFingerprint = fingerprint;
       if (!activeDetail) window.scrollTo({ top: scrollTop, behavior: "auto" });
     }
@@ -1658,6 +1759,7 @@ function showWorkspace(show: boolean): void {
   homeView?.classList.toggle("hidden", show);
   workspaceView?.classList.toggle("hidden", !show);
   listeningView?.classList.add("hidden");
+  karaokeView?.classList.add("hidden");
   if (show) currentArea = "workspace";
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", show);
 }
@@ -1667,6 +1769,11 @@ async function stopActivePlayback(): Promise<void> {
   const detail = activeDetail;
   const area = currentArea;
   mediaSessionId += 1;
+  karaokeWaveformRequestId += 1;
+  if (karaokeAnimationFrame !== null) {
+    window.cancelAnimationFrame(karaokeAnimationFrame);
+    karaokeAnimationFrame = null;
+  }
   activeMedia = null;
   if (playbackPositionSaveTimer !== null) {
     window.clearTimeout(playbackPositionSaveTimer);
@@ -1676,6 +1783,8 @@ async function stopActivePlayback(): Promise<void> {
     media.pause();
     if (area === "listening" && detail) {
       await savePlaybackPosition(detail.job.job_id, media);
+    } else if (area === "karaoke" && detail) {
+      karaokeResumeMs = Math.round(media.currentTime * 1_000);
     }
     media.removeAttribute("src");
     media.load();
@@ -1686,7 +1795,7 @@ async function stopActivePlayback(): Promise<void> {
   hideSubtitleOverlay();
 }
 
-async function showTopLevelArea(area: "workbench" | "listening"): Promise<void> {
+async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">): Promise<void> {
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;
@@ -1696,12 +1805,19 @@ async function showTopLevelArea(area: "workbench" | "listening"): Promise<void> 
   workspaceView?.classList.add("hidden");
   homeView?.classList.toggle("hidden", area !== "workbench");
   listeningView?.classList.toggle("hidden", area !== "listening");
+  karaokeView?.classList.toggle("hidden", area !== "karaoke");
   document.querySelector<HTMLButtonElement>("#show-workbench")?.classList.toggle("active", area === "workbench");
   document.querySelector<HTMLButtonElement>("#show-listening")?.classList.toggle("active", area === "listening");
+  document.querySelector<HTMLButtonElement>("#show-karaoke")?.classList.toggle("active", area === "karaoke");
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.remove("hidden");
   updatePlaybackControls();
   renderSubtitleOverlayButton();
   renderListeningJobs(latestJobs);
+  renderKaraokeJobs(latestJobs);
+  if (area === "karaoke" && karaokeSelectedJobId) {
+    await openKaraokeJob(karaokeSelectedJobId);
+    if (currentArea !== "karaoke") return;
+  }
   window.scrollTo({ top: 0, behavior: "auto" });
 }
 
@@ -1740,6 +1856,251 @@ function renderListeningSubtitles(segments: SubtitleSegment[]): void {
   listeningSubtitleList.querySelectorAll<HTMLButtonElement>("[data-listen-time]").forEach((button) => {
     button.addEventListener("click", () => seekTo(Number(button.dataset.listenTime ?? "0")));
   });
+}
+
+async function openKaraokeJob(jobId: string): Promise<void> {
+  if (!jobId || !karaokeMediaMessage) return;
+  const reopeningSelectedJob = karaokeSelectedJobId === jobId;
+  const requestId = ++navigationRequestId;
+  await stopActivePlayback();
+  if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
+  karaokeSelectedJobId = jobId;
+  if (!reopeningSelectedJob) karaokeResumeMs = 0;
+  activeDetail = null;
+  karaokeWaveformWindow = null;
+  karaokeViewStartMs = 0;
+  karaokeFollowPlayhead = true;
+  syncKaraokeFollowButton();
+  renderKaraokeJobs(latestJobs);
+  renderKaraokeTimeline();
+  karaokeMediaMessage.textContent = "正在读取精修任务…";
+  if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "正在准备本地波形…";
+  try {
+    const detail = await invoke<JobDetail>("get_job_detail", { jobId });
+    if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
+    activeDetail = detail;
+    activeSegmentId = null;
+    if (karaokeJobTitle) karaokeJobTitle.textContent = displayName(detail.job);
+    if (karaokeOpenWorkspaceButton) karaokeOpenWorkspaceButton.disabled = false;
+    renderKaraokeJobs(latestJobs);
+    mountMedia(detail.playback_path, detail.audio_fallback_path, karaokeMediaHost, karaokeMediaMessage, karaokeResumeMs);
+    updateActiveSubtitle(karaokeResumeMs);
+    await loadKaraokeWaveform(karaokeResumeMs, true);
+  } catch (error) {
+    if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
+    karaokeMediaMessage.textContent = `无法打开精修任务：${String(error)}`;
+    if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "波形不可用。";
+  }
+}
+
+function karaokeWindowDurationMs(): number {
+  return Number(karaokeZoomSelect?.value || "30000");
+}
+
+async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promise<void> {
+  if (!activeDetail || currentArea !== "karaoke" || karaokeWaveformLoading) return;
+  const requestId = ++karaokeWaveformRequestId;
+  const windowDuration = karaokeWindowDurationMs();
+  const knownDuration = karaokeWaveformWindow?.duration_ms ?? Math.round((activeMedia?.duration ?? 0) * 1_000);
+  const unclampedStart = alignStart ? anchorMs : anchorMs - windowDuration / 2;
+  const maximumStart = Math.max(0, knownDuration - windowDuration);
+  const startMs = knownDuration > 0
+    ? Math.max(0, Math.min(Math.round(unclampedStart), maximumStart))
+    : Math.max(0, Math.round(unclampedStart));
+  const endMs = startMs + windowDuration;
+  karaokeViewStartMs = startMs;
+  karaokeWaveformLoading = true;
+  if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "正在读取可见时间范围的波形…";
+  try {
+    const width = karaokeWaveform?.getBoundingClientRect().width ?? 1_200;
+    const pointCount = Math.max(240, Math.min(2_400, Math.round(width * window.devicePixelRatio)));
+    const waveform = await invoke<WaveformWindow>("get_waveform_window", {
+      request: {
+        jobId: activeDetail.job.job_id,
+        startMs,
+        endMs,
+        pointCount,
+      },
+    });
+    if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke") return;
+    karaokeWaveformWindow = waveform;
+    karaokeViewStartMs = waveform.start_ms;
+    if (karaokeWaveformStatus) {
+      karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms`;
+    }
+    renderKaraokeTimeline();
+  } catch (error) {
+    if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke") return;
+    karaokeWaveformWindow = null;
+    if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = `无法生成波形：${String(error)}`;
+    renderKaraokeTimeline();
+  } finally {
+    if (requestId === karaokeWaveformRequestId) karaokeWaveformLoading = false;
+  }
+}
+
+function renderKaraokeTimeline(): void {
+  const canvas = karaokeWaveform;
+  if (!canvas) return;
+  const bounds = canvas.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(bounds.width * scale));
+  const height = Math.max(1, Math.round(bounds.height * scale));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.setTransform(scale, 0, 0, scale, 0, 0);
+  const cssWidth = width / scale;
+  const cssHeight = height / scale;
+  context.clearRect(0, 0, cssWidth, cssHeight);
+  context.fillStyle = "#f8f5ec";
+  context.fillRect(0, 0, cssWidth, cssHeight);
+  const waveform = karaokeWaveformWindow;
+  if (!waveform || waveform.peaks.length === 0) {
+    context.fillStyle = "#777a72";
+    context.font = "13px system-ui";
+    context.textAlign = "center";
+    context.fillText(activeDetail ? "正在准备波形…" : "选择一个字幕任务", cssWidth / 2, cssHeight / 2);
+    return;
+  }
+
+  const range = waveform.end_ms - waveform.start_ms;
+  const rulerHeight = 28;
+  const waveformTop = rulerHeight;
+  const waveformHeight = Math.max(70, cssHeight * 0.5);
+  const centerY = waveformTop + waveformHeight / 2;
+  context.strokeStyle = "#d6d0c3";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(0, centerY);
+  context.lineTo(cssWidth, centerY);
+  context.stroke();
+  context.strokeStyle = "#4f766a";
+  context.lineWidth = Math.max(1, cssWidth / waveform.peaks.length);
+  context.beginPath();
+  waveform.peaks.forEach((peak, index) => {
+    const x = (index + 0.5) / waveform.peaks.length * cssWidth;
+    context.moveTo(x, centerY + peak.min * waveformHeight * 0.46);
+    context.lineTo(x, centerY + peak.max * waveformHeight * 0.46);
+  });
+  context.stroke();
+
+  context.fillStyle = "#74776f";
+  context.font = "10px ui-monospace, monospace";
+  context.textAlign = "center";
+  for (let marker = 0; marker <= 5; marker += 1) {
+    const x = marker / 5 * cssWidth;
+    const time = waveform.start_ms + range * marker / 5;
+    context.fillText(formatPreciseTime(time), Math.min(cssWidth - 45, Math.max(45, x)), 17);
+    context.strokeStyle = "rgba(112, 115, 106, .2)";
+    context.beginPath();
+    context.moveTo(x, rulerHeight - 5);
+    context.lineTo(x, cssHeight);
+    context.stroke();
+  }
+
+  const trackTop = waveformTop + waveformHeight + 14;
+  const trackHeight = Math.max(38, cssHeight - trackTop - 10);
+  for (const segment of activeDetail?.segments ?? []) {
+    if (segment.end_ms < waveform.start_ms || segment.start_ms > waveform.end_ms) continue;
+    const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
+    const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
+    const active = segment.id === activeSegmentId;
+    context.fillStyle = active ? "#2e5d52" : "#dfe9e2";
+    context.strokeStyle = active ? "#173f36" : "#8ca89c";
+    context.lineWidth = active ? 2 : 1;
+    context.beginPath();
+    context.roundRect(left + 1, trackTop, Math.max(3, right - left - 2), trackHeight, 5);
+    context.fill();
+    context.stroke();
+    if (right - left > 45) {
+      context.save();
+      context.beginPath();
+      context.rect(left + 5, trackTop + 2, Math.max(1, right - left - 10), trackHeight - 4);
+      context.clip();
+      context.fillStyle = active ? "#fffaf1" : "#36564d";
+      context.font = "11px system-ui";
+      context.textAlign = "left";
+      context.fillText(segment.source_text, left + 7, trackTop + trackHeight / 2 + 4);
+      context.restore();
+    }
+  }
+
+  const currentMs = Math.round((activeMedia?.currentTime ?? 0) * 1_000);
+  if (currentMs >= waveform.start_ms && currentMs <= waveform.end_ms) {
+    const playheadX = (currentMs - waveform.start_ms) / range * cssWidth;
+    context.strokeStyle = "#b34b36";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(playheadX, rulerHeight - 4);
+    context.lineTo(playheadX, cssHeight);
+    context.stroke();
+    context.fillStyle = "#b34b36";
+    context.beginPath();
+    context.moveTo(playheadX - 6, rulerHeight - 5);
+    context.lineTo(playheadX + 6, rulerHeight - 5);
+    context.lineTo(playheadX, rulerHeight + 4);
+    context.closePath();
+    context.fill();
+  }
+}
+
+function updateKaraokePosition(milliseconds: number): void {
+  if (currentArea !== "karaoke") return;
+  if (karaokeCurrentTime) karaokeCurrentTime.textContent = formatPreciseTime(milliseconds);
+  const segment = subtitleAt(milliseconds);
+  if (karaokeSegmentTime) {
+    karaokeSegmentTime.textContent = segment
+      ? `${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)} · #${segment.segment_index + 1}`
+      : "当前没有字幕";
+  }
+  if (karaokeCurrentSource) karaokeCurrentSource.textContent = segment?.source_text ?? "当前时间没有原文字幕。";
+  if (karaokeCurrentTranslation) karaokeCurrentTranslation.textContent = segment?.translated_text ?? "尚无译文。";
+  const waveform = karaokeWaveformWindow;
+  if (karaokeFollowPlayhead && waveform && !karaokeWaveformLoading) {
+    const margin = (waveform.end_ms - waveform.start_ms) * 0.12;
+    if (milliseconds < waveform.start_ms + margin || milliseconds > waveform.end_ms - margin) {
+      void loadKaraokeWaveform(milliseconds);
+      return;
+    }
+  }
+  renderKaraokeTimeline();
+}
+
+function syncKaraokeFollowButton(): void {
+  karaokeFollowPlayheadButton?.classList.toggle("active", karaokeFollowPlayhead);
+  if (karaokeFollowPlayheadButton) karaokeFollowPlayheadButton.textContent = karaokeFollowPlayhead ? "正在跟随播放头" : "跟随播放头";
+}
+
+function moveKaraokeWindow(direction: number): void {
+  if (!activeDetail) return;
+  karaokeFollowPlayhead = false;
+  syncKaraokeFollowButton();
+  const nextStart = Math.max(0, karaokeViewStartMs + karaokeWindowDurationMs() * 0.8 * direction);
+  void loadKaraokeWaveform(nextStart, true);
+}
+
+function seekKaraokeBy(milliseconds: number): void {
+  if (!activeMedia) return;
+  const durationMs = Number.isFinite(activeMedia.duration) ? activeMedia.duration * 1_000 : Number.MAX_SAFE_INTEGER;
+  seekTo(Math.max(0, Math.min(durationMs, activeMedia.currentTime * 1_000 + milliseconds)), false);
+  updateKaraokePosition(activeMedia.currentTime * 1_000);
+}
+
+function scheduleKaraokeAnimation(): void {
+  if (karaokeAnimationFrame !== null || currentArea !== "karaoke" || !activeMedia || activeMedia.paused) return;
+  const tick = () => {
+    if (currentArea !== "karaoke" || !activeMedia || activeMedia.paused) {
+      karaokeAnimationFrame = null;
+      return;
+    }
+    updateActiveSubtitle(activeMedia.currentTime * 1_000);
+    karaokeAnimationFrame = window.requestAnimationFrame(tick);
+  };
+  karaokeAnimationFrame = window.requestAnimationFrame(tick);
 }
 
 function showWorkspaceSection(section: WorkspaceSection): void {
@@ -2552,6 +2913,10 @@ function formatTime(milliseconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
 }
 
+function formatPreciseTime(milliseconds: number): string {
+  return formatEditableTime(milliseconds);
+}
+
 function formatEditableTime(milliseconds: number): string {
   const safe = Math.max(0, Math.round(milliseconds));
   const hours = Math.floor(safe / 3_600_000);
@@ -2605,7 +2970,9 @@ function seekTo(milliseconds: number, autoplay = true): void {
 }
 
 function activePlaybackRateSelect(): HTMLSelectElement | null {
-  return currentArea === "listening" ? listeningPlaybackRateSelect : playbackRateSelect;
+  if (currentArea === "listening") return listeningPlaybackRateSelect;
+  if (currentArea === "karaoke") return karaokePlaybackRateSelect;
+  return playbackRateSelect;
 }
 
 function schedulePlaybackPositionSave(): void {
@@ -2632,13 +2999,15 @@ async function savePlaybackPosition(jobId: string, media: HTMLMediaElement): Pro
 
 function updatePlaybackControls(): void {
   const disabled = !activeMedia;
-  for (const button of [previousSubtitleButton, rewindMediaButton, togglePlaybackButton, forwardMediaButton, nextSubtitleButton, listeningPreviousSubtitleButton, listeningRewindMediaButton, listeningTogglePlaybackButton, listeningForwardMediaButton, listeningNextSubtitleButton]) {
+  for (const button of [previousSubtitleButton, rewindMediaButton, togglePlaybackButton, forwardMediaButton, nextSubtitleButton, listeningPreviousSubtitleButton, listeningRewindMediaButton, listeningTogglePlaybackButton, listeningForwardMediaButton, listeningNextSubtitleButton, karaokeTogglePlaybackButton]) {
     if (button) button.disabled = disabled;
   }
-  for (const select of [playbackRateSelect, listeningPlaybackRateSelect]) if (select) select.disabled = disabled;
+  for (const select of [playbackRateSelect, listeningPlaybackRateSelect, karaokePlaybackRateSelect]) if (select) select.disabled = disabled;
   if (togglePlaybackButton) togglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
   if (listeningTogglePlaybackButton) listeningTogglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
-  if (activeMedia) for (const select of [playbackRateSelect, listeningPlaybackRateSelect]) if (select) select.value = String(activeMedia.playbackRate);
+  if (karaokeTogglePlaybackButton) karaokeTogglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
+  if (activeMedia) for (const select of [playbackRateSelect, listeningPlaybackRateSelect, karaokePlaybackRateSelect]) if (select) select.value = String(activeMedia.playbackRate);
+  scheduleKaraokeAnimation();
   if (subtitleOverlayVisible) syncSubtitleOverlay(subtitleAt((activeMedia?.currentTime ?? 0) * 1_000));
 }
 
@@ -2770,6 +3139,7 @@ function updateActiveSubtitle(milliseconds: number): void {
     activeSegmentId = nextId;
     highlightSegment(nextId);
   }
+  updateKaraokePosition(milliseconds);
   syncSubtitleOverlay(segment);
 }
 
@@ -3561,6 +3931,7 @@ async function applyPreviewedGlossary(): Promise<void> {
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
 document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("click", () => void showTopLevelArea("workbench"));
 document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => void showTopLevelArea("listening"));
+document.querySelector<HTMLButtonElement>("#show-karaoke")?.addEventListener("click", () => void showTopLevelArea("karaoke"));
 document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
   settingsDirtyFields.clear();
   if (!settingsDialog?.open) settingsDialog?.showModal();
@@ -3649,6 +4020,37 @@ listeningForwardMediaButton?.addEventListener("click", () => seekRelative(5));
 listeningNextSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(1));
 listeningPlaybackRateSelect?.addEventListener("change", () => {
   if (activeMedia && listeningPlaybackRateSelect) activeMedia.playbackRate = Number(listeningPlaybackRateSelect.value);
+});
+karaokeTogglePlaybackButton?.addEventListener("click", togglePlayback);
+karaokePlaybackRateSelect?.addEventListener("change", () => {
+  if (activeMedia && karaokePlaybackRateSelect) activeMedia.playbackRate = Number(karaokePlaybackRateSelect.value);
+});
+document.querySelector<HTMLButtonElement>("#karaoke-step-back-small")?.addEventListener("click", () => seekKaraokeBy(-10));
+document.querySelector<HTMLButtonElement>("#karaoke-step-back")?.addEventListener("click", () => seekKaraokeBy(-100));
+document.querySelector<HTMLButtonElement>("#karaoke-step-forward")?.addEventListener("click", () => seekKaraokeBy(100));
+document.querySelector<HTMLButtonElement>("#karaoke-step-forward-small")?.addEventListener("click", () => seekKaraokeBy(10));
+document.querySelector<HTMLButtonElement>("#karaoke-window-back")?.addEventListener("click", () => moveKaraokeWindow(-1));
+document.querySelector<HTMLButtonElement>("#karaoke-window-forward")?.addEventListener("click", () => moveKaraokeWindow(1));
+karaokeFollowPlayheadButton?.addEventListener("click", () => {
+  karaokeFollowPlayhead = !karaokeFollowPlayhead;
+  syncKaraokeFollowButton();
+  if (karaokeFollowPlayhead) void loadKaraokeWaveform((activeMedia?.currentTime ?? 0) * 1_000);
+});
+karaokeZoomSelect?.addEventListener("change", () => {
+  void loadKaraokeWaveform((activeMedia?.currentTime ?? 0) * 1_000);
+});
+karaokeWaveform?.addEventListener("click", (event) => {
+  if (!karaokeWaveformWindow) return;
+  const bounds = karaokeWaveform.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+  const milliseconds = karaokeWaveformWindow.start_ms + ratio * (karaokeWaveformWindow.end_ms - karaokeWaveformWindow.start_ms);
+  karaokeFollowPlayhead = false;
+  syncKaraokeFollowButton();
+  seekTo(milliseconds, false);
+  updateActiveSubtitle(milliseconds);
+});
+karaokeOpenWorkspaceButton?.addEventListener("click", () => {
+  if (activeDetail) void openJob(activeDetail.job.job_id);
 });
 exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
@@ -3758,6 +4160,11 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
 document.addEventListener("keydown", (event) => {
   if (!activeDetail || !activeMedia || event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return;
   if (document.querySelector("dialog[open]")) return;
+  if (currentArea === "karaoke" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    seekKaraokeBy((event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 100));
+    event.preventDefault();
+    return;
+  }
   const action = playbackActionForKey(event);
   if (!action || (event.repeat && (action === "toggle-playback" || action === "toggle-overlay"))) return;
   executePlaybackAction(action);
@@ -3843,6 +4250,12 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
 
 registerSubtitleFollowHost(subtitleList);
 registerSubtitleFollowHost(listeningSubtitleList);
+if (karaokeWaveform) {
+  new ResizeObserver(() => {
+    renderKaraokeTimeline();
+    if (activeDetail && currentArea === "karaoke") void loadKaraokeWaveform(karaokeViewStartMs, true);
+  }).observe(karaokeWaveform);
+}
 syncVadControls();
 renderSubtitleOverlayButton();
 void loadDesktopSettings(true);

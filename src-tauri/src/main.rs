@@ -27,6 +27,7 @@ use atogaki_subtitle::{
             LocalTranslationRunRecord,
         },
         media::MediaCapabilities,
+        waveform::WaveformWindow,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -413,6 +414,15 @@ struct RestoreSubtitleStructureRequest {
     job_id: String,
     before_segments: Vec<LocalSubtitleSegmentRecord>,
     after_segments: Vec<LocalSubtitleSegmentRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WaveformWindowRequest {
+    job_id: String,
+    start_ms: i64,
+    end_ms: i64,
+    point_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -899,6 +909,23 @@ async fn save_playback_position(
         .save_playback_position(&request.job_id, request.position_ms)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_waveform_window(
+    state: State<'_, DesktopState>,
+    request: WaveformWindowRequest,
+) -> Result<WaveformWindow, String> {
+    state
+        .workspace_service
+        .waveform_window(
+            &request.job_id,
+            request.start_ms,
+            request.end_ms,
+            request.point_count,
+        )
+        .await
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -1408,6 +1435,7 @@ fn main() {
             get_job_glossary_snapshot,
             get_job_detail,
             get_playback_position,
+            get_waveform_window,
             list_glossaries,
             list_jobs,
             list_video_renders,
