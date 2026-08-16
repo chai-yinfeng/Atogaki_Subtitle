@@ -97,17 +97,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 
 .karaoke-view { margin-top: 34px; }
 .karaoke-heading { margin-top: 0; }
-.karaoke-layout { display: grid; grid-template-columns: minmax(220px, 285px) minmax(0, 1fr); align-items: start; gap: 18px; }
-.karaoke-library, .karaoke-editor { min-width: 0; border: 1px solid #d8d0c1; border-radius: 16px; padding: 16px; background: rgba(255, 253, 247, .82); }
-.karaoke-library { position: sticky; top: 18px; }
-.karaoke-library .section-heading h3 { font-size: 16px; }
-.karaoke-job-list { display: grid; gap: 8px; margin-top: 12px; }
-.karaoke-job { min-width: 0; display: grid; gap: 5px; border: 1px solid #ded7c9; padding: 11px 12px; color: #343830; background: #fffdf7; text-align: left; }
-.karaoke-job strong, .karaoke-job span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.karaoke-job span { color: #77796f; font-size: 10px; }
-.karaoke-job.active { border-color: #8c4d3e; color: #fffaf1; background: #8c4d3e; }
-.karaoke-job.active span { color: #f2ded6; }
-.karaoke-editor { display: grid; gap: 15px; }
+.karaoke-layout { display: block; }
+.karaoke-editor { min-width: 0; display: grid; gap: 15px; border: 1px solid #d8d0c1; border-radius: 16px; padding: 16px; background: rgba(255, 253, 247, .82); }
 .karaoke-player-strip { display: grid; grid-template-columns: minmax(250px, .75fr) minmax(360px, 1.25fr); gap: 14px; }
 .karaoke-media-host { min-height: 150px; max-height: 230px; }
 .karaoke-media-host video { max-height: 230px; }
@@ -131,8 +122,9 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .karaoke-current-segment { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .4fr); align-items: start; gap: 16px; border: 1px solid #d8d0c1; border-radius: 12px; padding: 14px; background: #f8f5ec; }
 .karaoke-current-segment > div { min-width: 0; display: grid; gap: 6px; }
 .karaoke-current-segment span { color: #8c4d3e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
-.karaoke-current-segment strong { font-size: 14px; line-height: 1.45; }
-.karaoke-current-segment em { color: #666a62; font-size: 13px; font-style: normal; line-height: 1.45; }
+.karaoke-text-editor label { display: grid; gap: 5px; color: #62655e; font-size: 10px; font-weight: 700; }
+.karaoke-text-editor textarea { width: 100%; resize: vertical; border: 1px solid #d3ccbd; border-radius: 8px; padding: 9px 10px; color: #30332d; background: #fffdf7; font: inherit; line-height: 1.5; }
+.karaoke-text-editor textarea:disabled { color: #888b83; background: #efede6; }
 .karaoke-current-segment p { margin: 0; color: #787a72; font-size: 10px; line-height: 1.55; }
 .karaoke-segment-actions { display: flex; flex-wrap: wrap; align-content: start; gap: 8px; }
 .karaoke-segment-actions button { padding: 7px 9px; font-size: 10px; }
@@ -351,8 +343,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 @media (max-width: 900px) {
   .listening-layout { grid-template-columns: 1fr; }
   .listening-library { position: static; }
-  .karaoke-layout, .karaoke-player-strip { grid-template-columns: 1fr; }
-  .karaoke-library { position: static; }
+  .karaoke-player-strip { grid-template-columns: 1fr; }
   .karaoke-current-segment { grid-template-columns: 1fr; }
   .review-grid { grid-template-columns: 1fr; }
   .media-panel { position: static; }
