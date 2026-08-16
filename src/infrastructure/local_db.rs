@@ -1464,6 +1464,21 @@ impl LocalDatabase {
                 || before.start_ms != after.start_ms
                 || before.end_ms != after.end_ms;
         }
+        for index in 0..updated.len().saturating_sub(1) {
+            let before_overlap =
+                before_segments[index].end_ms > before_segments[index + 1].start_ms;
+            let after_overlap = updated[index].end_ms > updated[index + 1].start_ms;
+            if after_overlap {
+                let overlap_was_unchanged = before_overlap
+                    && updated[index].end_ms == before_segments[index].end_ms
+                    && updated[index + 1].start_ms == before_segments[index + 1].start_ms;
+                if !overlap_was_unchanged {
+                    return Err(anyhow!(
+                        "subtitle timing edits cannot create or change overlaps on one track"
+                    ));
+                }
+            }
+        }
         persist_structure_segments(&mut tx, job_id, &mut updated).await?;
         tx.commit()
             .await
@@ -2113,14 +2128,25 @@ mod tests {
 
         let mut timing_draft = original.clone();
         timing_draft[0].end_ms = 1_050;
-        timing_draft[1].start_ms = 1_050;
         let retimed = database
             .save_segment_timing(&manifest.job_id, &original, &timing_draft)
             .await
             .unwrap();
         assert_eq!(retimed[0].end_ms, 1_050);
-        assert_eq!(retimed[1].start_ms, 1_050);
-        assert!(retimed[0].timing_edited && retimed[1].timing_edited);
+        assert_eq!(retimed[1].start_ms, 1_100);
+        assert!(retimed[0].timing_edited);
+        assert!(!retimed[1].timing_edited);
+        let mut overlapping = retimed.clone();
+        overlapping[0].end_ms = 1_150;
+        let rejected_overlap = database
+            .save_segment_timing(&manifest.job_id, &retimed, &overlapping)
+            .await
+            .unwrap_err();
+        assert!(
+            rejected_overlap
+                .to_string()
+                .contains("cannot create or change overlaps")
+        );
         let stale_timing = database
             .save_segment_timing(&manifest.job_id, &original, &timing_draft)
             .await
