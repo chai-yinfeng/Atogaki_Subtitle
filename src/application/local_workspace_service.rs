@@ -23,6 +23,7 @@ use crate::{
             LocalDatabase, LocalJobRecord, LocalMachineTranslation, LocalSubtitleSegmentRecord,
             LocalTranslationRunRecord, NewLocalTranslationRun,
         },
+        waveform::{self, WaveformWindow},
     },
 };
 
@@ -137,6 +138,28 @@ impl LocalWorkspaceService {
             .await
     }
 
+    pub async fn waveform_window(
+        &self,
+        job_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+        point_count: usize,
+    ) -> Result<WaveformWindow> {
+        let job = self
+            .database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        let task_directory = PathBuf::from(job.storage_dir);
+        let audio_path = task_directory.join("audio.wav");
+        let cache_path = task_directory.join("waveform-v1.bin");
+        tokio::task::spawn_blocking(move || {
+            waveform::load_waveform_window(&audio_path, &cache_path, start_ms, end_ms, point_count)
+        })
+        .await
+        .context("waveform worker stopped unexpectedly")?
+    }
+
     pub fn translation_status(&self) -> LocalTranslationStatus {
         let provider = self.translation_provider.status();
         LocalTranslationStatus {
@@ -243,6 +266,17 @@ impl LocalWorkspaceService {
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         self.database
             .restore_segment_structure(job_id, before_segments, after_segments)
+            .await
+    }
+
+    pub async fn save_subtitle_timing(
+        &self,
+        job_id: &str,
+        before_segments: &[LocalSubtitleSegmentRecord],
+        after_segments: &[LocalSubtitleSegmentRecord],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        self.database
+            .save_segment_timing(job_id, before_segments, after_segments)
             .await
     }
 

@@ -35,6 +35,8 @@ pub struct LocalJobRecord {
     pub source_language: String,
     pub target_language: String,
     pub created_at_unix: i64,
+    pub started_at_unix: Option<i64>,
+    pub completed_at_unix: Option<i64>,
     pub updated_at_unix: i64,
 }
 
@@ -246,10 +248,12 @@ impl LocalDatabase {
     pub async fn mark_job_failed(&self, job_id: &str, error: &str) -> Result<()> {
         sqlx::query(
             "UPDATE local_jobs
-             SET status = 'failed', message = '任务已中断', error_message = ?, updated_at_unix = ?
+             SET status = 'failed', message = '任务已中断', error_message = ?,
+                 completed_at_unix = COALESCE(completed_at_unix, ?), updated_at_unix = ?
              WHERE job_id = ? AND status NOT IN ('done', 'failed')",
         )
         .bind(error)
+        .bind(chrono::Utc::now().timestamp())
         .bind(chrono::Utc::now().timestamp())
         .bind(job_id)
         .execute(&self.pool)
@@ -270,8 +274,8 @@ impl LocalDatabase {
             "INSERT INTO local_jobs (
                 job_id, storage_dir, input_path, render_output_path, status, message,
                 error_message, source_language, target_language,
-                created_at_unix, updated_at_unix
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(job_id) DO UPDATE SET
                 storage_dir = excluded.storage_dir,
                 input_path = excluded.input_path,
@@ -281,6 +285,8 @@ impl LocalDatabase {
                 error_message = excluded.error_message,
                 source_language = excluded.source_language,
                 target_language = excluded.target_language,
+                started_at_unix = COALESCE(local_jobs.started_at_unix, excluded.started_at_unix),
+                completed_at_unix = COALESCE(local_jobs.completed_at_unix, excluded.completed_at_unix),
                 updated_at_unix = MAX(local_jobs.updated_at_unix, excluded.updated_at_unix)",
         )
         .bind(&manifest.job_id)
@@ -303,6 +309,18 @@ impl LocalDatabase {
         .bind(manifest.source_language.as_str())
         .bind(manifest.target_language.as_str())
         .bind(to_i64(manifest.created_at_unix, "created_at_unix")?)
+        .bind(
+            manifest
+                .started_at_unix
+                .map(|value| to_i64(value, "started_at_unix"))
+                .transpose()?,
+        )
+        .bind(
+            manifest
+                .completed_at_unix
+                .map(|value| to_i64(value, "completed_at_unix"))
+                .transpose()?,
+        )
         .bind(to_i64(manifest.updated_at_unix, "updated_at_unix")?)
         .execute(&mut *tx)
         .await
@@ -333,7 +351,7 @@ impl LocalDatabase {
             "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
                 source_language, target_language,
-                created_at_unix, updated_at_unix
+                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix
              FROM local_jobs
              ORDER BY updated_at_unix DESC, job_id DESC",
         )
@@ -366,7 +384,7 @@ impl LocalDatabase {
             "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
                 source_language, target_language,
-                created_at_unix, updated_at_unix
+                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix
              FROM local_jobs
              WHERE job_id = ?",
         )
@@ -374,6 +392,29 @@ impl LocalDatabase {
         .fetch_optional(&self.pool)
         .await
         .context("failed to read local task")
+    }
+
+    pub async fn update_job_input_path(
+        &self,
+        job_id: &str,
+        input_path: &Path,
+        updated_at_unix: i64,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE local_jobs
+             SET input_path = ?, updated_at_unix = MAX(updated_at_unix, ?)
+             WHERE job_id = ?",
+        )
+        .bind(input_path.display().to_string())
+        .bind(updated_at_unix)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to update source media for local task {job_id}"))?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("local task not found: {job_id}"));
+        }
+        Ok(())
     }
 
     pub async fn create_render_job(
@@ -1421,6 +1462,71 @@ impl LocalDatabase {
         Ok(restored)
     }
 
+    pub async fn save_segment_timing(
+        &self,
+        job_id: &str,
+        before_segments: &[LocalSubtitleSegmentRecord],
+        after_segments: &[LocalSubtitleSegmentRecord],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        if before_segments.len() != after_segments.len() {
+            return Err(anyhow!(
+                "timing edits cannot add or remove subtitle segments"
+            ));
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin subtitle timing transaction")?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let current = list_segments_in_transaction(&mut tx, job_id).await?;
+        if current != before_segments {
+            return Err(anyhow!(
+                "subtitle timing changed after editing started; reload before saving"
+            ));
+        }
+
+        let mut updated = after_segments.to_vec();
+        for (before, after) in before_segments.iter().zip(updated.iter_mut()) {
+            if before.id != after.id
+                || before.job_id != after.job_id
+                || before.segment_index != after.segment_index
+                || before.source_text != after.source_text
+                || before.translated_text != after.translated_text
+                || before.source_edited != after.source_edited
+                || before.translation_edited != after.translation_edited
+                || before.translation_stale != after.translation_stale
+            {
+                return Err(anyhow!(
+                    "timing edits cannot change subtitle text or structure"
+                ));
+            }
+            after.timing_edited = before.timing_edited
+                || before.start_ms != after.start_ms
+                || before.end_ms != after.end_ms;
+        }
+        for index in 0..updated.len().saturating_sub(1) {
+            let before_overlap =
+                before_segments[index].end_ms > before_segments[index + 1].start_ms;
+            let after_overlap = updated[index].end_ms > updated[index + 1].start_ms;
+            if after_overlap {
+                let overlap_was_unchanged = before_overlap
+                    && updated[index].end_ms == before_segments[index].end_ms
+                    && updated[index + 1].start_ms == before_segments[index + 1].start_ms;
+                if !overlap_was_unchanged {
+                    return Err(anyhow!(
+                        "subtitle timing edits cannot create or change overlaps on one track"
+                    ));
+                }
+            }
+        }
+        persist_structure_segments(&mut tx, job_id, &mut updated).await?;
+        tx.commit()
+            .await
+            .context("failed to commit subtitle timing transaction")?;
+        Ok(updated)
+    }
+
     pub async fn replace_segments(
         &self,
         job_id: &str,
@@ -2060,6 +2166,48 @@ mod tests {
             .await
             .unwrap();
         let original = database.list_segments(&manifest.job_id).await.unwrap();
+
+        let mut timing_draft = original.clone();
+        timing_draft[0].end_ms = 1_050;
+        let retimed = database
+            .save_segment_timing(&manifest.job_id, &original, &timing_draft)
+            .await
+            .unwrap();
+        assert_eq!(retimed[0].end_ms, 1_050);
+        assert_eq!(retimed[1].start_ms, 1_100);
+        assert!(retimed[0].timing_edited);
+        assert!(!retimed[1].timing_edited);
+        let mut overlapping = retimed.clone();
+        overlapping[0].end_ms = 1_150;
+        let rejected_overlap = database
+            .save_segment_timing(&manifest.job_id, &retimed, &overlapping)
+            .await
+            .unwrap_err();
+        assert!(
+            rejected_overlap
+                .to_string()
+                .contains("cannot create or change overlaps")
+        );
+        let stale_timing = database
+            .save_segment_timing(&manifest.job_id, &original, &timing_draft)
+            .await
+            .unwrap_err();
+        assert!(stale_timing.to_string().contains("reload before saving"));
+        database
+            .restore_segment_structure(&manifest.job_id, &original, &retimed)
+            .await
+            .unwrap();
+        let mut text_tamper = original.clone();
+        text_tamper[0].source_text = "timing endpoint must reject text".to_string();
+        let rejected_text = database
+            .save_segment_timing(&manifest.job_id, &original, &text_tamper)
+            .await
+            .unwrap_err();
+        assert!(
+            rejected_text
+                .to_string()
+                .contains("cannot change subtitle text")
+        );
 
         let split = database
             .split_segment(

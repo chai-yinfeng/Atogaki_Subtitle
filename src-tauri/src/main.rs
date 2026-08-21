@@ -5,7 +5,7 @@ mod model_download;
 use std::{
     collections::HashMap,
     ffi::OsString,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -13,10 +13,10 @@ use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
         LocalGlossaryService, LocalGlossaryTermDraft, LocalRenderRequest, LocalRenderService,
-        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan, LocalTaskService,
-        LocalTranslationStatus, LocalWorkspaceService, MutableTranslationProvider,
-        TranscriptionOptions,
-        UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
+        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
+        LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
+        MutableTranslationProvider, TranscriptionOptions, UnconfiguredTranslationProvider,
+        job_spec::TranscribeSpec,
     },
     domain::{LanguageCode, subtitle::SubtitleTrack},
     infrastructure::{
@@ -27,6 +27,7 @@ use atogaki_subtitle::{
             LocalTranslationRunRecord,
         },
         media::MediaCapabilities,
+        waveform::WaveformWindow,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -417,6 +418,23 @@ struct RestoreSubtitleStructureRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SaveSubtitleTimingRequest {
+    job_id: String,
+    before_segments: Vec<LocalSubtitleSegmentRecord>,
+    after_segments: Vec<LocalSubtitleSegmentRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WaveformWindowRequest {
+    job_id: String,
+    start_ms: i64,
+    end_ms: i64,
+    point_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SubtitleExportRequest {
     job_id: String,
     output_directory: String,
@@ -556,6 +574,43 @@ async fn rename_job(
         .task_service
         .rename_persisted_job(&job_id, display_name)
         .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn relink_job_media(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Option<LocalJobRecord>, String> {
+    let current = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let initial_directory = current
+        .job
+        .input_path
+        .as_deref()
+        .and_then(|path| Path::new(path).parent())
+        .filter(|path| path.is_dir())
+        .map(Path::to_path_buf);
+    let selection = pick_local_file(
+        &app,
+        "重新定位原媒体",
+        "媒体",
+        &["mp3", "m4a", "wav", "mp4", "mkv", "webm", "mov"],
+        initial_directory,
+    )
+    .await?;
+    let Some(selection) = selection else {
+        return Ok(None);
+    };
+    state
+        .task_service
+        .relink_persisted_job_input(&job_id, selection)
+        .await
+        .map(Some)
         .map_err(|error| error.to_string())
 }
 
@@ -815,6 +870,22 @@ async fn restore_subtitle_structure(
 }
 
 #[tauri::command]
+async fn save_subtitle_timing(
+    state: State<'_, DesktopState>,
+    request: SaveSubtitleTimingRequest,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .workspace_service
+        .save_subtitle_timing(
+            &request.job_id,
+            &request.before_segments,
+            &request.after_segments,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn translation_status(state: State<'_, DesktopState>) -> LocalTranslationStatus {
     state.workspace_service.translation_status()
 }
@@ -899,6 +970,23 @@ async fn save_playback_position(
         .save_playback_position(&request.job_id, request.position_ms)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_waveform_window(
+    state: State<'_, DesktopState>,
+    request: WaveformWindowRequest,
+) -> Result<WaveformWindow, String> {
+    state
+        .workspace_service
+        .waveform_window(
+            &request.job_id,
+            request.start_ms,
+            request.end_ms,
+            request.point_count,
+        )
+        .await
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -1408,6 +1496,7 @@ fn main() {
             get_job_glossary_snapshot,
             get_job_detail,
             get_playback_position,
+            get_waveform_window,
             list_glossaries,
             list_jobs,
             list_video_renders,
@@ -1428,6 +1517,7 @@ fn main() {
             recognition_defaults,
             reveal_exported_subtitle,
             reveal_rendered_video,
+            relink_job_media,
             rename_job,
             retry_job,
             save_download_network_settings,
@@ -1448,7 +1538,8 @@ fn main() {
             restore_subtitle,
             split_subtitle,
             merge_subtitles,
-            restore_subtitle_structure
+            restore_subtitle_structure,
+            save_subtitle_timing
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Atogaki desktop application");
@@ -1486,6 +1577,8 @@ mod tests {
             source_language: "ja".to_string(),
             target_language: "zh-Hans".to_string(),
             created_at_unix: 1,
+            started_at_unix: Some(1),
+            completed_at_unix: Some(1),
             updated_at_unix: 1,
         }
     }
