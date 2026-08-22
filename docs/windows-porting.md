@@ -52,7 +52,7 @@ Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisp
 
 **出口：** 干净 Windows 设备能直接运行三个内置 sidecar；能力检查显示 Whisper 可用、ASS filter 可用、MPEG-4 可用，并且许可证与对应源码材料可追溯。
 
-2026-08-22 当前自动化出口由 [Windows sidecars 32575359901](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359901) 通过。流水线固定 Node.js 22、Rust 1.95.0、Tauri CLI 2.11.0、MSVC 和 MSYS2 UCRT64，离线锁定构建 NSIS，并在安装目录运行三个 sidecar、检查 Rust／前端／sidecar 合规资源和卸载结果。上传的 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 约 27.6 MB，`Atogaki-windows-x86_64-sidecars` 约 75.9 MB，后者包含二进制、许可证和对应源码；两者当前保留到 2026-09-05。CI runner 上的安装冒烟证明包内闭合性，但 W2 的“干净用户设备”最终确认与 W3/W4 仍合并在 Windows 11 实机执行。
+2026-08-22 当前自动化出口由 [Windows sidecars 32581475065](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32581475065) 通过。流水线固定 Node.js 22、Rust 1.95.0、Tauri CLI 2.11.0、MSVC 和 MSYS2 UCRT64，离线锁定构建 NSIS，并在安装目录检查主程序 PE GUI 子系统、运行三个 sidecar、检查 Rust／前端／sidecar 合规资源和卸载结果。上传的 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 约 27.6 MB，`Atogaki-windows-x86_64-sidecars` 约 75.9 MB，后者包含二进制、许可证和对应源码；两者当前保留到 2026-09-05。CI runner 上的安装冒烟证明包内闭合性，但 W2 的“干净用户设备”最终确认与 W3/W4 仍合并在 Windows 11 实机执行。
 
 ### W3. 平台系统集成
 
@@ -69,6 +69,8 @@ Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisp
 首个测试版只生成 NSIS，并允许以明确标注的未签名 alpha 交付知情测试者；Actions Artifact 不自动等同于公开 Release。Windows 11 x86_64 是首版正式验收范围，Windows 10 在取得实测结论前只做尽力兼容。正式公开推广前重新评估受信任代码签名证书。
 
 2026-08-22 完成第一批 W3 代码准备：导出字幕和烧录视频可通过 `explorer.exe /select,` 选中文件，界面不再在 Windows 显示 Finder 操作或无意义的 VideoToolbox 不可用状态；Windows 首版 MPEG-4 被记录为正常软件编码，只有 macOS 的硬件尝试失败才保存 VideoToolbox fallback reason。当前提交已通过[原生 Windows 编译与共享测试](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359911)，实际 Explorer、WebView2 和窗口行为按 [`windows-testing.md`](windows-testing.md) 执行。
+
+2026-08-22 第一轮 Windows 11 实机已确认安装包可启动、模型下载进入实际传输、翻译 provider API 可用；同时发现主程序启动会附带 Console 窗口。修复后 Release 主程序使用 Windows GUI 子系统，所有运行时 Whisper／FFmpeg／ffprobe 调用统一带 `CREATE_NO_WINDOW`，避免后续识别、媒体探测和烧录再次闪出终端。CI 已对安装后主程序增加 PE 子系统门禁；真实窗口无终端仍等待修复候选覆盖安装后复核。
 
 ### W4. 离线闭环与安装包候选
 

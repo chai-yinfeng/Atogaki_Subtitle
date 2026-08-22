@@ -1,6 +1,6 @@
 # Windows 11 实机测试清单
 
-_适用候选：2026-08-22 Windows Actions `32575359901`；未签名 alpha，仅供知情测试_
+_适用候选：2026-08-22 Windows Actions `32581475065`；未签名 alpha，仅供知情测试_
 
 ## 测试边界
 
@@ -10,7 +10,7 @@ _适用候选：2026-08-22 Windows Actions `32575359901`；未签名 alpha，仅
 
 ## 0. 获取并校验候选
 
-1. 打开成功运行 [Windows sidecars 32575359901](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359901)，下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 并解压。
+1. 打开成功运行 [Windows sidecars 32581475065](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32581475065)，下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 并解压。
 2. 在解压目录打开 PowerShell，校验安装器旁的 SHA-256：
 
 ```powershell
@@ -50,3 +50,7 @@ $actual -eq $expected
 - 卸载 Atogaki 后确认应用程序和开始菜单入口被移除；用户原媒体、主动导出的字幕／视频不得删除。
 - 第一轮不要求卸载时删除 Atogaki 应用数据。记录应用数据是否保留，后续再决定是否提供显式“同时清除本地数据”选项。
 - 将结果按“通过／失败／未测”记录，并附设备信息。阻塞问题优先级依次为：无法安装或启动、凭据泄露／数据损坏、sidecar 无法运行、识别／导出闭环失败、窗口与文案问题。
+
+## 当前实机记录
+
+2026-08-22 第一轮候选可正常启动，模型下载已进入实际传输，翻译 provider API 调用通过。该候选启动时会同时出现无用途的终端窗口，已在 `32581475065` 修复并增加 CI PE GUI 子系统门禁；覆盖安装后优先复核 App 启动、识别和烧录三个阶段均不出现终端，再继续其余清单。
