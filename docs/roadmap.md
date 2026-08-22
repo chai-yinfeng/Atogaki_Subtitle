@@ -96,6 +96,8 @@ _最后更新：2026-08-22_
 
 2026-08-22 完成 W1 原生编译基线。首轮 Windows 测试暴露 SQLite 文件仍被连接池占用时不能删除临时目录，现已增加显式异步关闭并让磁盘数据库测试在清理前等待连接释放；第二轮确认 Tauri 在 `cargo check` 也会校验 externalBin 和 Windows ICO，CI 使用仅对编译步骤生效的配置覆盖延后 sidecar，仓库则由现有 App 图标生成正式多尺寸 ICO。最终原生运行通过 71 个共享核心测试和 Tauri Windows 桌面编译；尚未生成安装包或验证真实窗口。
 
+2026-08-22 固定 W2/W3 的首版工程与交付边界：Tauri／Rust 和 whisper.cpp 使用 MSVC，FFmpeg／libass 静态字幕栈使用 MSYS2 UCRT64／MinGW-w64；FFmpeg 保持 LGPL-only。首个测试包采用 NSIS，Windows 11 x86_64 为验收范围，并允许向知情测试者提供明确标注的未签名 alpha；Actions 产物通过实机冒烟后才进入 GitHub Release。详见决策记录 0030。
+
 **验收：** Windows x86_64 用户能从安装包完成安装，在不依赖开发环境的情况下下载模型、保存 provider 凭据，并用 CPU 跑通“导入 → 识别 → 翻译 → 编辑 → 导出／烧录”；悬浮字幕在普通桌面可置顶，卸载不会删除用户自行管理的原媒体。
 
 ## 1.5. 重新识别（Windows 基础发行之后）

@@ -50,7 +50,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 - 生成 `x86_64-pc-windows-msvc` 对应的 build manifest、第三方声明、许可证目录和对应源码归档。macOS 的生成文件不能原样复用。
 - 用目标后缀命名三个 sidecar，并验证 Tauri 安装包能在无环境变量和无系统 FFmpeg/Whisper 时启动它们。
 
-Windows FFmpeg／libass 的具体工具链和 DLL 分发方式具有持久影响；在选定实现前应新增决策记录，比较原生 MSVC、MSYS2/MinGW 或其他可复现方案，而不是把一次本机构建隐式变成发布标准。
+Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisper.cpp 使用 MSVC，FFmpeg／libass 字幕栈使用 MSYS2 UCRT64／MinGW-w64，并优先静态纳入 sidecar。构建必须检查没有意外的工具链 DLL 依赖；进程间只通过参数、文件、标准流和退出状态通信，不跨 ABI 共享对象或内存。
 
 **出口：** 干净 Windows 设备能直接运行三个内置 sidecar；能力检查显示 Whisper 可用、ASS filter 可用、MPEG-4 可用，并且许可证与对应源码材料可追溯。
 
@@ -65,6 +65,8 @@ Windows FFmpeg／libass 的具体工具链和 DLL 分发方式具有持久影响
 - 验证悬浮字幕置顶、拖动、缩放、关闭、任务栏行为和主窗口退出；不复制 macOS NSPanel 或 activation policy。
 
 **出口：** 设置、凭据、下载、文件选择、播放和悬浮字幕在普通 Windows 桌面形成稳定平台行为。
+
+首个测试版只生成 NSIS，并允许以明确标注的未签名 alpha 交付知情测试者；Actions Artifact 不自动等同于公开 Release。Windows 11 x86_64 是首版正式验收范围，Windows 10 在取得实测结论前只做尽力兼容。正式公开推广前重新评估受信任代码签名证书。
 
 ### W4. 离线闭环与安装包候选
 
