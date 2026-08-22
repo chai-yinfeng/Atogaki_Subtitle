@@ -1,0 +1,91 @@
+name: Windows sidecars
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+    paths:
+      - ".github/workflows/windows-sidecars.yml"
+      - "scripts/build-whisper-windows.ps1"
+      - "scripts/build-ffmpeg-windows.sh"
+      - "scripts/package-sidecar-sources-windows.ps1"
+      - "scripts/sidecar-versions.zsh"
+  pull_request:
+    paths:
+      - ".github/workflows/windows-sidecars.yml"
+      - "scripts/build-whisper-windows.ps1"
+      - "scripts/build-ffmpeg-windows.sh"
+      - "scripts/package-sidecar-sources-windows.ps1"
+      - "scripts/sidecar-versions.zsh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-sidecars-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Windows x86_64 sidecars
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Cache verified source archives
+        uses: actions/cache@v5
+        with:
+          path: target/sidecar-source-cache
+          key: windows-sidecar-sources-${{ hashFiles('scripts/sidecar-versions.zsh') }}
+
+      - name: Set up MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            autoconf
+            automake
+            curl
+            diffutils
+            libtool
+            make
+            pkgconf
+            tar
+            xz
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            meson:p
+            ninja:p
+            nasm:p
+
+      - name: Build MSVC whisper sidecar
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1
+
+      - name: Build and verify LGPL FFmpeg sidecars
+        shell: msys2 {0}
+        run: ./scripts/build-ffmpeg-windows.sh
+
+      - name: Package corresponding sources
+        shell: pwsh
+        run: ./scripts/package-sidecar-sources-windows.ps1
+
+      - name: Upload audited sidecar artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: Atogaki-windows-x86_64-sidecars
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/binaries/*-x86_64-pc-windows-msvc.exe
+            src-tauri/third-party/build-manifest.txt
+            src-tauri/third-party/licenses/
+            target/release/bundle/sources/*.tar.gz
+            target/release/bundle/sources/*.sha256
