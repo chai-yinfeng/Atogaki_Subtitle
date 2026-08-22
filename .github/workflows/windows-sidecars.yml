@@ -4,12 +4,9 @@ on:
   push:
     branches:
       - main
-      - "codex/**"
     paths:
       - ".gitattributes"
       - ".github/workflows/windows-sidecars.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
       - "LICENSE"
       - "about.hbs"
       - "about.toml"
@@ -20,27 +17,12 @@ on:
       - "scripts/generate-rust-licenses-windows.ps1"
       - "scripts/smoke-test-nsis-windows.ps1"
       - "scripts/sidecar-versions.zsh"
-      - "src/**"
-      - "src-tauri/Cargo.lock"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/build.rs"
       - "src-tauri/icons/**"
-      - "src-tauri/src/**"
-      - "src-tauri/tauri.conf.json"
       - "src-tauri/tauri.windows.conf.json"
-      - "ui/index.html"
-      - "ui/overlay.html"
-      - "ui/package-lock.json"
-      - "ui/package.json"
-      - "ui/src/**"
-      - "ui/tsconfig.json"
-      - "ui/vite.config.ts"
   pull_request:
     paths:
       - ".gitattributes"
       - ".github/workflows/windows-sidecars.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
       - "LICENSE"
       - "about.hbs"
       - "about.toml"
@@ -51,21 +33,8 @@ on:
       - "scripts/generate-rust-licenses-windows.ps1"
       - "scripts/smoke-test-nsis-windows.ps1"
       - "scripts/sidecar-versions.zsh"
-      - "src/**"
-      - "src-tauri/Cargo.lock"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/build.rs"
       - "src-tauri/icons/**"
-      - "src-tauri/src/**"
-      - "src-tauri/tauri.conf.json"
       - "src-tauri/tauri.windows.conf.json"
-      - "ui/index.html"
-      - "ui/overlay.html"
-      - "ui/package-lock.json"
-      - "ui/package.json"
-      - "ui/src/**"
-      - "ui/tsconfig.json"
-      - "ui/vite.config.ts"
   workflow_dispatch:
 
 permissions:

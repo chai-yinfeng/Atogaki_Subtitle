@@ -102,6 +102,8 @@ _最后更新：2026-08-22_
 
 2026-08-22 开始 Windows 11 实机回归：安装包可正常启动，模型下载已进入实际传输，翻译 provider API 调用通过。首轮同时发现桌面主程序仍使用 PE Console 子系统，启动会附带无用途的终端窗口；现已将 Release 主程序改为 GUI 子系统，并让 Whisper／FFmpeg／ffprobe 子进程在 Windows 使用 `CREATE_NO_WINDOW`。修复候选由 [Windows sidecars 32581475065](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32581475065) 重新打包，CI 已读取安装后 EXE 的 PE Header、确认 GUI 子系统，并通过安装、sidecar 能力和卸载冒烟；仍需在同一实机确认启动、识别和烧录全程不再出现终端。
 
+Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续以 macOS Apple Silicon 为质量基线，不为每个功能分支 push 生成 Windows 安装包。共享代码在 PR 或进入 `main` 时运行路径过滤后的 Windows 编译门禁；完整 sidecar、许可证和 NSIS 流水线只在 Windows 打包基础设施变化时自动验证，普通产品代码由选定的 Windows 稳定候选 commit 手动触发。平台继续共享同一业务代码，不维护长期 Windows 产品分支。详见决策记录 0031。
+
 2026-08-22 开始 W3 代码准备：字幕和烧录成品可调用 Windows Explorer 选中文件，界面按平台显示 Finder／Explorer，并把 Windows 首版 MPEG-4 记为正常软件编码基线，而不是伪装成 VideoToolbox 失败回退。相关 Windows 原生编译已通过，Explorer 窗口行为、中文／长路径和多显示器仍留给实机验证。
 
 **验收：** Windows x86_64 用户能从安装包完成安装，在不依赖开发环境的情况下下载模型、保存 provider 凭据，并用 CPU 跑通“导入 → 识别 → 翻译 → 编辑 → 导出／烧录”；悬浮字幕在普通桌面可置顶，卸载不会删除用户自行管理的原媒体。

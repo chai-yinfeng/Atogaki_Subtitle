@@ -36,6 +36,8 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 首个基线由 `.github/workflows/windows-compile.yml` 承载：使用 Windows Server 2022 x86_64 runner、Rust 1.95.0 和 Node.js 22，运行前端锁定依赖构建、共享 Rust 测试与 Tauri 桌面编译。Tauri 编译步骤通过仅对该步骤生效的 `TAURI_CONFIG` merge patch 把 `externalBin` 覆盖为空，避免 build script 在 `cargo check` 阶段要求尚未产生的 Windows sidecar；正式配置和后续打包仍要求三个真实二进制。它刻意不调用 `tauri build`，也不生成或上传安装包；三个 Windows sidecar 和安装包属于 W2/W4，在没有合规二进制前不使用占位文件伪造打包成功。
 
+基线采用路径过滤的合并门禁：普通功能分支 push 不自动运行；修改共享 Rust、Tauri、前端或构建依赖的 PR 与进入 `main` 的提交会运行，纯文档和无关文件跳过，也可通过 `workflow_dispatch` 手动检查任意候选。这样保留跨平台编译反馈，但不要求以 Windows 为日常开发环境。
+
 **出口：** 共享核心测试和 Tauri 桌面代码能在 Windows x86_64 编译；失败项已区分为代码问题、sidecar 缺失或环境门禁。
 
 2026-08-22 W1 出口已通过：Windows Server 2022 x86_64 runner 完成前端生产构建、71 个共享核心测试和 Tauri 桌面壳编译。首次运行发现 Windows 不允许删除仍被 SQLite pool 打开的文件，现有磁盘数据库测试会显式等待连接池关闭；Tauri 编译还要求 Windows ICO，并会在 build script 阶段校验 externalBin。仓库已增加由现有 App 图标生成的多尺寸 ICO，W1 则用步骤级配置 merge patch 延后尚未构建的 sidecar。该结果只证明源码可原生编译，不代表安装包、sidecar 或窗口体验已验收。
@@ -53,6 +55,8 @@ Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisp
 **出口：** 干净 Windows 设备能直接运行三个内置 sidecar；能力检查显示 Whisper 可用、ASS filter 可用、MPEG-4 可用，并且许可证与对应源码材料可追溯。
 
 2026-08-22 当前自动化出口由 [Windows sidecars 32581475065](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32581475065) 通过。流水线固定 Node.js 22、Rust 1.95.0、Tauri CLI 2.11.0、MSVC 和 MSYS2 UCRT64，离线锁定构建 NSIS，并在安装目录检查主程序 PE GUI 子系统、运行三个 sidecar、检查 Rust／前端／sidecar 合规资源和卸载结果。上传的 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 约 27.6 MB，`Atogaki-windows-x86_64-sidecars` 约 75.9 MB，后者包含二进制、许可证和对应源码；两者当前保留到 2026-09-05。CI runner 上的安装冒烟证明包内闭合性，但 W2 的“干净用户设备”最终确认与 W3/W4 仍合并在 Windows 11 实机执行。
+
+完整流水线不跟随普通产品代码 push：Windows 构建脚本、sidecar 版本、合规生成器、安装冒烟或 Windows 专属打包配置变化时，PR／`main` 自动验证；选定的 Windows 稳定候选则从目标 commit 手动触发 `workflow_dispatch`。日常 macOS 开发因此只在合并边界承担编译门禁，不持续生成约 27.6 MB 的临时安装包。
 
 ### W3. 平台系统集成
 

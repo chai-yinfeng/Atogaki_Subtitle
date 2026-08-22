@@ -4,8 +4,43 @@ on:
   push:
     branches:
       - main
-      - "codex/**"
+    paths:
+      - ".github/workflows/windows-compile.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "src/**"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/build.rs"
+      - "src-tauri/icons/**"
+      - "src-tauri/src/**"
+      - "src-tauri/tauri*.json"
+      - "ui/index.html"
+      - "ui/overlay.html"
+      - "ui/package-lock.json"
+      - "ui/package.json"
+      - "ui/src/**"
+      - "ui/tsconfig.json"
+      - "ui/vite.config.ts"
   pull_request:
+    paths:
+      - ".github/workflows/windows-compile.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "src/**"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/build.rs"
+      - "src-tauri/icons/**"
+      - "src-tauri/src/**"
+      - "src-tauri/tauri*.json"
+      - "ui/index.html"
+      - "ui/overlay.html"
+      - "ui/package-lock.json"
+      - "ui/package.json"
+      - "ui/src/**"
+      - "ui/tsconfig.json"
+      - "ui/vite.config.ts"
   workflow_dispatch:
 
 permissions:
