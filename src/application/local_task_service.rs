@@ -779,6 +779,7 @@ mod tests {
         assert_eq!(jobs[0].job_id, job.id());
         assert_eq!(jobs[0].status, "queued");
 
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -820,6 +821,7 @@ mod tests {
         assert_eq!(fs::read(&job.audio_wav).unwrap(), b"derived audio");
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -905,6 +907,7 @@ mod tests {
         assert!(prompt.contains("ナブナ（表記: n-buna）"));
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -950,6 +953,7 @@ mod tests {
         assert!(database.list_jobs().await.unwrap().is_empty());
         assert!(!jobs_dir.exists());
 
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1028,6 +1032,7 @@ mod tests {
         );
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1109,6 +1114,7 @@ mod tests {
         assert!(unmanaged.dir.is_dir());
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

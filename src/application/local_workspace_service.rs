@@ -1083,6 +1083,7 @@ mod tests {
         assert_eq!(runs[0].output_tokens, Some(12));
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1149,6 +1150,7 @@ mod tests {
         assert!(translated_srt.contains("译：everyone"));
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1209,6 +1211,7 @@ mod tests {
         );
         drop(requests);
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1250,6 +1253,7 @@ mod tests {
         );
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1354,6 +1358,7 @@ mod tests {
         );
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1405,6 +1410,7 @@ mod tests {
         assert!(ass.contains("SQLite 中修正的译文"));
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1467,6 +1473,7 @@ mod tests {
         assert!(error.to_string().contains("stale"));
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

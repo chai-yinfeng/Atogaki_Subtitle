@@ -208,6 +208,15 @@ impl LocalDatabase {
         Ok(Self { pool })
     }
 
+    /// Close every connection shared by this database handle and its clones.
+    ///
+    /// Dropping the final SQLite pool handle eventually closes its connections,
+    /// but callers that need to move or remove the database file must wait for
+    /// an explicit close on platforms such as Windows that lock open files.
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
+
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
         sqlx::query_scalar("SELECT value FROM local_settings WHERE key = ?")
             .bind(key)
@@ -2137,6 +2146,7 @@ mod tests {
         assert!(!restored.translation_stale);
         assert!(!restored.timing_edited);
 
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -2319,6 +2329,7 @@ mod tests {
             .unwrap();
         assert!(untranslated_merge[1].translated_text.is_none());
 
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -2383,6 +2394,7 @@ mod tests {
         assert_eq!(finished[0].progress, 1.0);
         assert_eq!(finished[0].encoder.as_deref(), Some("videotoolbox"));
 
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -2469,6 +2481,7 @@ mod tests {
         let unchanged = database.list_segments(&manifest.job_id).await.unwrap();
         assert_eq!(unchanged[0].translated_text.as_deref(), Some("第一句话"));
 
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -2543,6 +2556,7 @@ mod tests {
         assert_eq!(glossaries[0].core_term_count, 1);
         assert_eq!(glossaries[0].builtin_version.as_deref(), Some("v2"));
 
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -2621,6 +2635,7 @@ mod tests {
         let unchanged_builtin = database.get_glossary(&builtin.id).await.unwrap().unwrap();
         assert_eq!(unchanged_builtin.terms[0].source_text, "新版内置项");
 
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

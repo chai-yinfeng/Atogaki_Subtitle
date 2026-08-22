@@ -516,6 +516,7 @@ mod tests {
         assert!(output.is_file());
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

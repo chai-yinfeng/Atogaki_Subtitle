@@ -417,6 +417,7 @@ mod tests {
         assert!(applied.segments[0].translation_stale);
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -483,6 +484,7 @@ mod tests {
         assert_eq!(resolved.corrected_text("水井です"), "suisです");
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
@@ -520,6 +522,7 @@ mod tests {
         }));
 
         drop(service);
+        database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
