@@ -1,0 +1,3 @@
+LICENSE text eol=lf
+about.hbs text eol=lf
+src-tauri/third-party/*.html text eol=lf

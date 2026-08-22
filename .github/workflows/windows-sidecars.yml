@@ -6,6 +6,7 @@ on:
       - main
       - "codex/**"
     paths:
+      - ".gitattributes"
       - ".github/workflows/windows-sidecars.yml"
       - "scripts/build-whisper-windows.ps1"
       - "scripts/build-ffmpeg-windows.sh"
@@ -16,6 +17,7 @@ on:
       - "src-tauri/tauri.windows.conf.json"
   pull_request:
     paths:
+      - ".gitattributes"
       - ".github/workflows/windows-sidecars.yml"
       - "scripts/build-whisper-windows.ps1"
       - "scripts/build-ffmpeg-windows.sh"
