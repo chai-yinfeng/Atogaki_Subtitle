@@ -20,7 +20,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 已经确认的实机缺口：
 
-- “在文件管理器中定位”命令在非 macOS 平台直接报错，需要实现 Explorer 的文件选中或安全降级。
+- Explorer 文件选中路径已经实现并通过 Windows 编译；中文、空格、长路径、非系统盘和现有 Explorer 进程下的窗口行为仍需实机验证。
 - 悬浮字幕的非 macOS 路径尚未在 Windows 普通桌面、多显示器、任务栏和最小化／关闭流程中验证。
 - 部分错误和能力文案直接提到 VideoToolbox 或 Finder，需要按实际平台显示；实时录音代码仍固定使用 AVFoundation，但实时能力不属于本阶段。
 - README、发布说明和测试记录目前只有 macOS 构建命令与候选产物，Windows 安装包类型、命名和校验流程尚未固定。
@@ -52,7 +52,7 @@ Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisp
 
 **出口：** 干净 Windows 设备能直接运行三个内置 sidecar；能力检查显示 Whisper 可用、ASS filter 可用、MPEG-4 可用，并且许可证与对应源码材料可追溯。
 
-2026-08-22 自动化出口由 [Windows sidecars 32573810966](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32573810966) 通过。流水线固定 Node.js 22、Rust 1.95.0、Tauri CLI 2.11.0、MSVC 和 MSYS2 UCRT64，离线锁定构建 NSIS，并在安装目录运行三个 sidecar、检查合规资源和卸载结果。上传的 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 约 27.7 MB，`Atogaki-windows-x86_64-sidecars` 约 75.9 MB，后者包含二进制、许可证和对应源码；两者当前保留到 2026-09-05。CI runner 上的安装冒烟证明包内闭合性，但 W2 的“干净用户设备”最终确认与 W3/W4 仍合并在 Windows 11 实机执行。
+2026-08-22 当前自动化出口由 [Windows sidecars 32575359901](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359901) 通过。流水线固定 Node.js 22、Rust 1.95.0、Tauri CLI 2.11.0、MSVC 和 MSYS2 UCRT64，离线锁定构建 NSIS，并在安装目录运行三个 sidecar、检查 Rust／前端／sidecar 合规资源和卸载结果。上传的 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 约 27.6 MB，`Atogaki-windows-x86_64-sidecars` 约 75.9 MB，后者包含二进制、许可证和对应源码；两者当前保留到 2026-09-05。CI runner 上的安装冒烟证明包内闭合性，但 W2 的“干净用户设备”最终确认与 W3/W4 仍合并在 Windows 11 实机执行。
 
 ### W3. 平台系统集成
 
@@ -67,6 +67,8 @@ Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisp
 **出口：** 设置、凭据、下载、文件选择、播放和悬浮字幕在普通 Windows 桌面形成稳定平台行为。
 
 首个测试版只生成 NSIS，并允许以明确标注的未签名 alpha 交付知情测试者；Actions Artifact 不自动等同于公开 Release。Windows 11 x86_64 是首版正式验收范围，Windows 10 在取得实测结论前只做尽力兼容。正式公开推广前重新评估受信任代码签名证书。
+
+2026-08-22 完成第一批 W3 代码准备：导出字幕和烧录视频可通过 `explorer.exe /select,` 选中文件，界面不再在 Windows 显示 Finder 操作或无意义的 VideoToolbox 不可用状态；Windows 首版 MPEG-4 被记录为正常软件编码，只有 macOS 的硬件尝试失败才保存 VideoToolbox fallback reason。当前提交已通过[原生 Windows 编译与共享测试](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359911)，实际 Explorer、WebView2 和窗口行为按 [`windows-testing.md`](windows-testing.md) 执行。
 
 ### W4. 离线闭环与安装包候选
 

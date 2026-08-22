@@ -98,7 +98,9 @@ _最后更新：2026-08-22_
 
 2026-08-22 固定 W2/W3 的首版工程与交付边界：Tauri／Rust 和 whisper.cpp 使用 MSVC，FFmpeg／libass 静态字幕栈使用 MSYS2 UCRT64／MinGW-w64；FFmpeg 保持 LGPL-only。首个测试包采用 NSIS，Windows 11 x86_64 为验收范围，并允许向知情测试者提供明确标注的未签名 alpha；Actions 产物通过实机冒烟后才进入 GitHub Release。详见决策记录 0030。
 
-2026-08-22 完成 W2 与安装包自动化基线。Windows Actions 从固定源码构建 CPU `whisper-cli.exe` 和 LGPL-only FFmpeg／ffprobe，检查 ASS、MPEG-4、禁用 GPL/nonfree/libx264、拒绝意外的 MSYS2／MinGW／动态字幕栈 DLL，并生成目标专属 Rust 声明、许可证目录、构建清单和对应源码归档。成功运行 [32573810966](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32573810966) 还生成 current-user NSIS，在 runner 上完成静默安装、三个内置 sidecar 启动与能力检查、合规资源检查和静默卸载，并上传带 SHA-256 的未签名测试安装包。该结果不替代 Windows 11 实机上的 SmartScreen、窗口、Credential Manager、用户数据和真实媒体闭环验收。
+2026-08-22 完成 W2 与安装包自动化基线。Windows Actions 从固定源码构建 CPU `whisper-cli.exe` 和 LGPL-only FFmpeg／ffprobe，检查 ASS、MPEG-4、禁用 GPL/nonfree/libx264、拒绝意外的 MSYS2／MinGW／动态字幕栈 DLL，并生成目标专属 Rust／前端声明、许可证目录、构建清单和对应源码归档。当前成功运行 [32575359901](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359901) 生成 current-user NSIS，在 runner 上完成静默安装、三个内置 sidecar 启动与能力检查、合规资源检查和静默卸载，并上传带 SHA-256 的未签名测试安装包；同提交的[原生编译基线](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359911)也通过。该结果不替代 Windows 11 实机上的 SmartScreen、窗口、Credential Manager、用户数据和真实媒体闭环验收。
+
+2026-08-22 开始 W3 代码准备：字幕和烧录成品可调用 Windows Explorer 选中文件，界面按平台显示 Finder／Explorer，并把 Windows 首版 MPEG-4 记为正常软件编码基线，而不是伪装成 VideoToolbox 失败回退。相关 Windows 原生编译已通过，Explorer 窗口行为、中文／长路径和多显示器仍留给实机验证。
 
 **验收：** Windows x86_64 用户能从安装包完成安装，在不依赖开发环境的情况下下载模型、保存 provider 凭据，并用 CPU 跑通“导入 → 识别 → 翻译 → 编辑 → 导出／烧录”；悬浮字幕在普通桌面可置顶，卸载不会删除用户自行管理的原媒体。
 
