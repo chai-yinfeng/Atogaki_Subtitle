@@ -55,6 +55,8 @@ Windows sidecar 与 macOS 使用同一组固定上游版本和源码 SHA-256，�
 - PE 依赖检查拒绝 `msys-2.0.dll`、MinGW GCC／C++／pthread DLL 和动态字幕栈 DLL，避免用户机器隐式依赖开发环境。
 - 对应源码归档包含七份精确上游源码、Windows 构建脚本、许可证、清单和逐文件 SHA-256；它与 NSIS 安装包分别作为 Actions Artifact／未来 Release asset 保存。
 
+2026-08-22 的 [Windows sidecars 32573810966](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32573810966) 在 Windows Server 2022 runner 上重新生成目标报告并确认仓库无差异，完成 LGPL 配置与 PE 依赖检查、对应源码归档、NSIS 安装后能力检查和卸载；这使上述 Windows 构建结论成为已执行的 CI 基线，而不是只在 macOS 上准备的交叉平台材料。
+
 这证明依赖闭包和构建材料达到 Windows 打包基线；未签名 NSIS 的 SmartScreen 行为、真实用户数据目录、Credential Manager、媒体闭环与卸载边界仍必须在 Windows 11 实机验收，不能由许可证审计替代。
 
 复现命令：
@@ -114,7 +116,7 @@ DeepL、DeepSeek 与自定义 OpenAI-compatible 服务都通过现有 HTTPS 客�
 
 ## 尚未覆盖
 
-- macOS x86_64 和 Windows 的完整依赖闭包、系统库、sidecar 构建与安装器；
+- macOS x86_64、Windows ARM64，以及 Windows 11 实机上的 SmartScreen、系统集成和用户数据边界；
 - Apple 签名、公证和未来应用商店条款；
 - 模型本身的逐版本法律审查；
 - 用户导入媒体、字幕及云端翻译内容的权利。

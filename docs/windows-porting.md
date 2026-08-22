@@ -1,6 +1,6 @@
 # Windows x86_64 兼容计划
 
-_状态：下一主线；最后更新：2026-08-22_
+_状态：W1/W2 与 NSIS 自动化基线完成，W3 实机系统集成进行中；最后更新：2026-08-22_
 
 ## 目标与边界
 
@@ -18,10 +18,8 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 - 硬字幕运行时先探测编码器；没有 VideoToolbox 时可使用 LGPL MPEG-4，因此 Windows 首版不需要先选择新的硬件 H.264 后端。
 - SQLite、任务目录、语言代码、字幕编辑、provider 和导出逻辑位于共享 Rust／前端层，不应为 Windows 复制第二套业务实现。
 
-已经确认的缺口：
+已经确认的实机缺口：
 
-- 仓库没有 Windows 构建环境或 CI；现有 sidecar 构建、版本清单和对应源码归档脚本均为 macOS/zsh 专用。
-- `src-tauri/binaries/` 目前只有 `aarch64-apple-darwin` 产物；第三方声明和构建清单也只覆盖当前 target。
 - “在文件管理器中定位”命令在非 macOS 平台直接报错，需要实现 Explorer 的文件选中或安全降级。
 - 悬浮字幕的非 macOS 路径尚未在 Windows 普通桌面、多显示器、任务栏和最小化／关闭流程中验证。
 - 部分错误和能力文案直接提到 VideoToolbox 或 Finder，需要按实际平台显示；实时录音代码仍固定使用 AVFoundation，但实时能力不属于本阶段。
@@ -44,15 +42,17 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 ### W2. 固定 Windows sidecar 与合规产物
 
-- 为固定版本 whisper.cpp 构建 CPU `whisper-cli.exe`。
-- 为固定版本 FFmpeg 构建 `ffmpeg.exe`／`ffprobe.exe`，必须包含 libass 和 MPEG-4 encoder，不启用 GPL、nonfree 或 libx264。
-- 检查 DLL 依赖，确保安装机不需要 MSYS2、开发环境或构建机绝对路径；决定静态或随包 DLL 的方式前记录可复现性、许可证和安装体积取舍。
-- 生成 `x86_64-pc-windows-msvc` 对应的 build manifest、第三方声明、许可证目录和对应源码归档。macOS 的生成文件不能原样复用。
-- 用目标后缀命名三个 sidecar，并验证 Tauri 安装包能在无环境变量和无系统 FFmpeg/Whisper 时启动它们。
+- [x] 为固定版本 whisper.cpp 构建 CPU `whisper-cli.exe`。
+- [x] 为固定版本 FFmpeg 构建 `ffmpeg.exe`／`ffprobe.exe`，包含 libass 和 MPEG-4 encoder，不启用 GPL、nonfree 或 libx264。
+- [x] 检查 DLL 依赖，拒绝 MSYS2、MinGW runtime 和动态字幕栈 DLL；三个 sidecar 独立打包，不要求安装机配置开发工具 `PATH`。
+- [x] 生成 `x86_64-pc-windows-msvc` 对应的 build manifest、第三方声明、许可证目录和对应源码归档，不复用 macOS target 报告。
+- [x] 用目标后缀命名三个 sidecar，并在 current-user NSIS 静默安装后启动它们，检查 Whisper、ASS filter 与 MPEG-4 encoder，再完成静默卸载。
 
 Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisper.cpp 使用 MSVC，FFmpeg／libass 字幕栈使用 MSYS2 UCRT64／MinGW-w64，并优先静态纳入 sidecar。构建必须检查没有意外的工具链 DLL 依赖；进程间只通过参数、文件、标准流和退出状态通信，不跨 ABI 共享对象或内存。
 
 **出口：** 干净 Windows 设备能直接运行三个内置 sidecar；能力检查显示 Whisper 可用、ASS filter 可用、MPEG-4 可用，并且许可证与对应源码材料可追溯。
+
+2026-08-22 自动化出口由 [Windows sidecars 32573810966](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32573810966) 通过。流水线固定 Node.js 22、Rust 1.95.0、Tauri CLI 2.11.0、MSVC 和 MSYS2 UCRT64，离线锁定构建 NSIS，并在安装目录运行三个 sidecar、检查合规资源和卸载结果。上传的 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 约 27.7 MB，`Atogaki-windows-x86_64-sidecars` 约 75.9 MB，后者包含二进制、许可证和对应源码；两者当前保留到 2026-09-05。CI runner 上的安装冒烟证明包内闭合性，但 W2 的“干净用户设备”最终确认与 W3/W4 仍合并在 Windows 11 实机执行。
 
 ### W3. 平台系统集成
 
