@@ -85,6 +85,7 @@ _最后更新：2026-08-22_
 
 ## 1.4. Windows 基础发行（下一主线）
 
+- [x] 建立 Windows Server 2022 x86_64 原生 CI 基线，固定 Rust 1.95.0／Node.js 22，完成前端生产构建、共享 Rust 测试和 Tauri 桌面壳编译。
 - [ ] 构建 Windows x86_64 的 whisper-cli、FFmpeg/ffprobe LGPL sidecar 和 Tauri 安装包，首版以 CPU 识别为稳定基线。
 - [ ] 为 Windows target 重新生成并审计 Rust、前端和 sidecar 的许可证材料与对应源码归档，不直接复用 macOS arm64 审计结论。
 - [ ] 回归 Windows Credential Manager、应用数据目录、模型下载／代理、WebView2 播放、字幕导出和 MPEG-4 烧录。
@@ -92,6 +93,8 @@ _最后更新：2026-08-22_
 - [ ] 由实际 Windows 用户完成英语或韩语节目闭环，再决定 DirectML/CUDA 与韩语专项优化优先级。
 
 首版不以 GPU 识别、Windows 专属视觉优化或韩语专项调参为前置条件。先固定可重复构建和安装路径，再逐项回归本地数据、系统集成与离线处理闭环，最后以真实用户设备作为阶段验收。
+
+2026-08-22 完成 W1 原生编译基线。首轮 Windows 测试暴露 SQLite 文件仍被连接池占用时不能删除临时目录，现已增加显式异步关闭并让磁盘数据库测试在清理前等待连接释放；第二轮确认 Tauri 在 `cargo check` 也会校验 externalBin 和 Windows ICO，CI 使用仅对编译步骤生效的配置覆盖延后 sidecar，仓库则由现有 App 图标生成正式多尺寸 ICO。最终原生运行通过 71 个共享核心测试和 Tauri Windows 桌面编译；尚未生成安装包或验证真实窗口。
 
 **验收：** Windows x86_64 用户能从安装包完成安装，在不依赖开发环境的情况下下载模型、保存 provider 凭据，并用 CPU 跑通“导入 → 识别 → 翻译 → 编辑 → 导出／烧录”；悬浮字幕在普通桌面可置顶，卸载不会删除用户自行管理的原媒体。
 

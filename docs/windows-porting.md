@@ -31,14 +31,16 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 ### W1. 建立原生编译基线
 
-- 准备可重复使用的 Windows x86_64 构建机或 CI runner；Tauri 最终安装包和真实窗口回归必须在 Windows 原生环境完成。
-- 在不引入 sidecar 的前提下先通过根 Rust 测试、`src-tauri` 编译和前端生产构建，清理错误的 `cfg`、路径分隔符、文件名和平台 API 假设。
-- 固定 Rust、Node/npm、Tauri、MSVC Build Tools 和 WebView2 的构建前置条件；依赖下载失败与代理行为按现有开发工作流记录。
-- 建立最小自动化基线。仓库当前没有 `.github/workflows`，应先验证普通提交的 Windows compile/test，再决定是否自动生成安装包。
+- [x] 准备可重复使用的 Windows x86_64 CI runner；Tauri 最终安装包和真实窗口回归仍必须在 Windows 原生环境完成。
+- [x] 在不引入 sidecar 的前提下通过根 Rust 测试、`src-tauri` 编译和前端生产构建，清理首批平台文件锁和构建资源问题。
+- [x] 固定首轮 Rust、Node/npm、Tauri、MSVC Build Tools 和 WebView2 的构建前置条件；依赖下载失败与代理行为继续按现有开发工作流记录。
+- [x] 建立最小自动化基线；当前只做 compile/test，不自动生成安装包。
 
 首个基线由 `.github/workflows/windows-compile.yml` 承载：使用 Windows Server 2022 x86_64 runner、Rust 1.95.0 和 Node.js 22，运行前端锁定依赖构建、共享 Rust 测试与 Tauri 桌面编译。Tauri 编译步骤通过仅对该步骤生效的 `TAURI_CONFIG` merge patch 把 `externalBin` 覆盖为空，避免 build script 在 `cargo check` 阶段要求尚未产生的 Windows sidecar；正式配置和后续打包仍要求三个真实二进制。它刻意不调用 `tauri build`，也不生成或上传安装包；三个 Windows sidecar 和安装包属于 W2/W4，在没有合规二进制前不使用占位文件伪造打包成功。
 
 **出口：** 共享核心测试和 Tauri 桌面代码能在 Windows x86_64 编译；失败项已区分为代码问题、sidecar 缺失或环境门禁。
+
+2026-08-22 W1 出口已通过：Windows Server 2022 x86_64 runner 完成前端生产构建、71 个共享核心测试和 Tauri 桌面壳编译。首次运行发现 Windows 不允许删除仍被 SQLite pool 打开的文件，现有磁盘数据库测试会显式等待连接池关闭；Tauri 编译还要求 Windows ICO，并会在 build script 阶段校验 externalBin。仓库已增加由现有 App 图标生成的多尺寸 ICO，W1 则用步骤级配置 merge patch 延后尚未构建的 sidecar。该结果只证明源码可原生编译，不代表安装包、sidecar 或窗口体验已验收。
 
 ### W2. 固定 Windows sidecar 与合规产物
 
