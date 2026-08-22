@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod credential_store;
 mod desktop_settings;
 mod model_download;

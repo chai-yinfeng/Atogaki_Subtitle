@@ -17,7 +17,10 @@ use tokio::{
     time::{Duration, sleep},
 };
 
-use crate::{domain::render::RenderOptions, interface::cli::RecordArgs};
+use crate::{
+    domain::render::RenderOptions, infrastructure::child_process::sidecar_command,
+    interface::cli::RecordArgs,
+};
 
 const VIDEOTOOLBOX_QUALITY: u8 = 65;
 const MPEG4_QUALITY: u8 = 3;
@@ -101,7 +104,7 @@ struct EncodingSelection {
 }
 
 pub async fn inspect_capabilities(ffmpeg: &Path) -> Result<MediaCapabilities> {
-    let output = Command::new(ffmpeg)
+    let output = sidecar_command(ffmpeg)
         .arg("-version")
         .output()
         .await
@@ -138,7 +141,7 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
         anyhow::bail!("input file does not exist: {}", input.display());
     }
     let ffprobe = ffprobe_path(ffmpeg);
-    let duration_output = Command::new(&ffprobe)
+    let duration_output = sidecar_command(&ffprobe)
         .args([
             "-v",
             "error",
@@ -164,7 +167,7 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
         .context("ffprobe returned an invalid media duration")?;
     let duration_ms = (duration_seconds.max(0.0) * 1_000.0).round() as u64;
 
-    let video_output = Command::new(&ffprobe)
+    let video_output = sidecar_command(&ffprobe)
         .args([
             "-v",
             "error",
@@ -232,7 +235,7 @@ fn paired_ffprobe_path(ffmpeg: &Path) -> PathBuf {
 }
 
 pub async fn list_capture_devices(ffmpeg: &Path) -> Result<()> {
-    let output = Command::new(ffmpeg)
+    let output = sidecar_command(ffmpeg)
         .args(["-f", "avfoundation", "-list_devices", "true", "-i", ""])
         .output()
         .await
@@ -244,7 +247,7 @@ pub async fn list_capture_devices(ffmpeg: &Path) -> Result<()> {
 }
 
 pub async fn record_audio(ffmpeg: &Path, args: &RecordArgs) -> Result<()> {
-    let mut cmd = Command::new(ffmpeg);
+    let mut cmd = sidecar_command(ffmpeg);
     cmd.args(["-y", "-f", "avfoundation"]);
     if let Some(seconds) = args.duration {
         cmd.args(["-t", &seconds.to_string()]);
@@ -270,7 +273,7 @@ pub async fn extract_wav(ffmpeg: &Path, input: &Path, output: &Path) -> Result<P
         anyhow::bail!("input file does not exist: {}", input.display());
     }
 
-    let mut cmd = Command::new(ffmpeg);
+    let mut cmd = sidecar_command(ffmpeg);
     cmd.args(["-y", "-i"]);
     cmd.arg(input);
     cmd.args(["-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le"]);
@@ -583,7 +586,7 @@ async fn run_burn_command(
     target_video_bitrate_bps: Option<u64>,
     execution: &RenderExecution,
 ) -> Result<()> {
-    let mut cmd = Command::new(ffmpeg);
+    let mut cmd = sidecar_command(ffmpeg);
     cmd.args(burn_args(
         input,
         output,
@@ -717,7 +720,7 @@ async fn mux_srt_soft_subtitle(
     srt: &Path,
     output: &Path,
 ) -> Result<()> {
-    let mut cmd = Command::new(ffmpeg);
+    let mut cmd = sidecar_command(ffmpeg);
     cmd.args(["-y", "-i"]);
     cmd.arg(input);
     cmd.args(["-i"]);
@@ -750,7 +753,7 @@ fn validate_render_options(options: &RenderOptions) -> Result<()> {
 }
 
 async fn supports_filter(ffmpeg: &Path, filter: &str) -> Result<bool> {
-    let output = Command::new(ffmpeg)
+    let output = sidecar_command(ffmpeg)
         .args(["-hide_banner", "-filters"])
         .output()
         .await
@@ -763,7 +766,7 @@ async fn supports_filter(ffmpeg: &Path, filter: &str) -> Result<bool> {
 }
 
 async fn supports_encoder(ffmpeg: &Path, encoder: &str) -> Result<bool> {
-    let output = Command::new(ffmpeg)
+    let output = sidecar_command(ffmpeg)
         .args(["-hide_banner", "-encoders"])
         .output()
         .await

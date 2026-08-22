@@ -41,6 +41,22 @@ if (-not (Test-Path $app)) {
     throw "Installed application executable is missing: $app"
 }
 
+$appStream = [System.IO.File]::OpenRead($app)
+$appReader = $null
+try {
+    $appReader = [System.IO.BinaryReader]::new($appStream)
+    $appStream.Position = 0x3c
+    $peHeaderOffset = $appReader.ReadInt32()
+    $appStream.Position = $peHeaderOffset + 92
+    $subsystem = $appReader.ReadUInt16()
+} finally {
+    if ($appReader) { $appReader.Dispose() }
+    $appStream.Dispose()
+}
+if ($subsystem -ne 2) {
+    throw "Installed application is not a Windows GUI executable (PE subsystem: $subsystem)"
+}
+
 $ffmpeg = Get-ChildItem $installDirectory -Filter "ffmpeg*.exe" -Recurse | Select-Object -First 1
 $ffprobe = Get-ChildItem $installDirectory -Filter "ffprobe*.exe" -Recurse | Select-Object -First 1
 $whisper = Get-ChildItem $installDirectory -Filter "whisper-cli*.exe" -Recurse | Select-Object -First 1

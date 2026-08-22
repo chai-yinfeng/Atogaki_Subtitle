@@ -1,3 +1,4 @@
+mod child_process;
 pub mod config;
 pub mod db;
 pub mod deepl;

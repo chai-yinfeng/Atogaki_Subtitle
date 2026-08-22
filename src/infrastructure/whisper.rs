@@ -7,11 +7,11 @@ use std::{
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use tokio::process::Command;
 
 use crate::{
     application::TranscriptionOptions,
     domain::{TranscriptSegment, glossary},
+    infrastructure::child_process::sidecar_command,
 };
 
 #[derive(Debug, Deserialize)]
@@ -115,7 +115,7 @@ async fn run_whisper(
     force_cpu: bool,
 ) -> std::result::Result<(), WhisperFailure> {
     let args = build_args(options, wav, output_prefix, prompt, force_cpu);
-    let mut command = Command::new(whisper_cli);
+    let mut command = sidecar_command(whisper_cli);
     command.kill_on_drop(true);
     let output = command
         .args(args)
