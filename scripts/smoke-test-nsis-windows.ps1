@@ -51,11 +51,11 @@ foreach ($sidecar in @($ffmpeg, $ffprobe, $whisper)) {
 }
 
 $filters = & $ffmpeg.FullName -hide_banner -filters 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $filters -notmatch '(?m)^\s*[TSC.]{3}\s+ass\s') {
+if ($LASTEXITCODE -ne 0 -or $filters -notmatch '(?m)^\s*\S+\s+ass\s+') {
     throw "Installed FFmpeg cannot report the libass filter"
 }
 $encoders = & $ffmpeg.FullName -hide_banner -encoders 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $encoders -notmatch '(?m)^\s*V[FSXBD.]{5}\s+mpeg4\s') {
+if ($LASTEXITCODE -ne 0 -or $encoders -notmatch '(?m)^\s*\S+\s+mpeg4\s+') {
     throw "Installed FFmpeg cannot report the MPEG-4 encoder"
 }
 & $ffprobe.FullName -version | Select-Object -First 1
