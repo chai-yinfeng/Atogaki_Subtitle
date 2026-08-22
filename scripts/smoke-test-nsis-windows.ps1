@@ -36,7 +36,7 @@ if (-not (Test-Path $uninstaller)) {
 }
 $installDirectory = Split-Path -Parent $uninstaller
 
-$app = Join-Path $installDirectory "Atogaki.exe"
+$app = Join-Path $installDirectory "atogaki-desktop.exe"
 if (-not (Test-Path $app)) {
     throw "Installed application executable is missing: $app"
 }

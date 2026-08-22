@@ -130,7 +130,8 @@ jobs:
           rustup default 1.95.0
 
       - name: Cache Tauri build dependencies
-        uses: actions/cache@v5
+        id: tauri-build-cache
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry
@@ -156,6 +157,16 @@ jobs:
         run: |
           tauri build --bundles nsis --ci
           git diff --exit-code -- Cargo.lock
+
+      - name: Save Tauri build dependencies
+        if: steps.tauri-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: windows-tauri-nsis-${{ hashFiles('Cargo.lock', 'src-tauri/Cargo.lock', 'src/**/*.rs', 'src-tauri/src/**/*.rs', 'src-tauri/tauri*.json') }}
 
       - name: Smoke-test NSIS install and uninstall
         shell: pwsh
