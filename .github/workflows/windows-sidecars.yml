@@ -10,14 +10,18 @@ on:
       - "scripts/build-whisper-windows.ps1"
       - "scripts/build-ffmpeg-windows.sh"
       - "scripts/package-sidecar-sources-windows.ps1"
+      - "scripts/smoke-test-nsis-windows.ps1"
       - "scripts/sidecar-versions.zsh"
+      - "src-tauri/tauri.windows.conf.json"
   pull_request:
     paths:
       - ".github/workflows/windows-sidecars.yml"
       - "scripts/build-whisper-windows.ps1"
       - "scripts/build-ffmpeg-windows.sh"
       - "scripts/package-sidecar-sources-windows.ps1"
+      - "scripts/smoke-test-nsis-windows.ps1"
       - "scripts/sidecar-versions.zsh"
+      - "src-tauri/tauri.windows.conf.json"
   workflow_dispatch:
 
 permissions:
@@ -77,6 +81,50 @@ jobs:
         shell: pwsh
         run: ./scripts/package-sidecar-sources-windows.ps1
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix ui
+
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+
+      - name: Cache Tauri build dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: windows-tauri-nsis-${{ hashFiles('Cargo.lock', 'src-tauri/Cargo.lock', 'src/**/*.rs', 'src-tauri/src/**/*.rs', 'src-tauri/tauri*.json') }}
+
+      - name: Install pinned Tauri CLI
+        run: npm install --global @tauri-apps/cli@2.11.0
+
+      - name: Build unsigned NSIS installer
+        working-directory: src-tauri
+        run: tauri build --bundles nsis --locked
+
+      - name: Smoke-test NSIS install and uninstall
+        shell: pwsh
+        run: ./scripts/smoke-test-nsis-windows.ps1 -Installer "src-tauri/target/release/bundle/nsis/*-setup.exe"
+
+      - name: Write NSIS checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer was not generated" }
+          $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
+          Set-Content -Path "$($installer.FullName).sha256" -Value "$hash  $($installer.Name)" -Encoding ascii
+
       - name: Upload audited sidecar artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -89,3 +137,13 @@ jobs:
             src-tauri/third-party/licenses/
             target/release/bundle/sources/*.tar.gz
             target/release/bundle/sources/*.sha256
+
+      - name: Upload unsigned NSIS test installer
+        uses: actions/upload-artifact@v6
+        with:
+          name: Atogaki-windows-x86_64-unsigned-nsis
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sha256
