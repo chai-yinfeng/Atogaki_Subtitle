@@ -1137,24 +1137,25 @@ async fn pick_video_output_file(
 
 #[tauri::command]
 fn reveal_exported_subtitle(path: String) -> Result<(), String> {
-    reveal_in_finder(path, "导出文件")
+    reveal_in_file_manager(path, "导出文件")
 }
 
 #[tauri::command]
 fn reveal_rendered_video(path: String) -> Result<(), String> {
-    reveal_in_finder(path, "烧录视频")
+    reveal_in_file_manager(path, "烧录视频")
 }
 
-fn reveal_in_finder(path: String, label: &str) -> Result<(), String> {
-    let path = PathBuf::from(path)
-        .canonicalize()
-        .map_err(|error| format!("无法定位{label}：{error}"))?;
+fn reveal_in_file_manager(path: String, label: &str) -> Result<(), String> {
+    let path = PathBuf::from(path);
     if !path.is_file() {
         return Err(format!("{label}不存在：{}", path.display()));
     }
 
     #[cfg(target_os = "macos")]
     {
+        let path = path
+            .canonicalize()
+            .map_err(|error| format!("无法定位{label}：{error}"))?;
         let status = std::process::Command::new("open")
             .arg("-R")
             .arg(&path)
@@ -1166,8 +1167,18 @@ fn reveal_in_finder(path: String, label: &str) -> Result<(), String> {
         Ok(())
     }
 
-    #[cfg(not(target_os = "macos"))]
-    Err("当前只支持在 macOS Finder 中定位导出文件。".to_string())
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg("/select,")
+            .arg(&path)
+            .spawn()
+            .map_err(|error| format!("无法打开 Explorer：{error}"))?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Err("当前平台尚不支持在文件管理器中定位导出文件。".to_string())
 }
 
 #[tauri::command]

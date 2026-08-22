@@ -310,6 +310,17 @@ type SubtitleOverlayPayload = {
 type WorkspaceSection = "review" | "translation" | "export";
 type TopLevelArea = "workbench" | "listening" | "karaoke" | "workspace";
 
+const desktopPlatform = navigator.userAgent.includes("Windows")
+  ? "windows"
+  : navigator.userAgent.includes("Macintosh")
+    ? "macos"
+    : "other";
+const fileManagerLabel = desktopPlatform === "macos"
+  ? "Finder"
+  : desktopPlatform === "windows"
+    ? "Explorer"
+    : "文件管理器";
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("missing app root");
 
@@ -555,7 +566,7 @@ app.innerHTML = `
         <div class="export-grid">
           <article class="export-card">
             <div><span class="module-number">01</span><h3>字幕文件</h3><p>按需要选择原文、译文或双语 SRT/ASS；只导出原文时不要求先完成翻译。</p></div>
-            <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 Finder 中显示</button></div>
+            <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 ${fileManagerLabel} 中显示</button></div>
           </article>
           <article class="export-card">
             <div><span class="module-number">02</span><h3>带字幕视频</h3><p>把当前字幕冻结为一次独立烧录任务；提交后仍可返回字幕校对继续工作。</p></div>
@@ -656,7 +667,7 @@ app.innerHTML = `
           <input id="video-output-path" placeholder="选择 MP4 保存位置，或粘贴完整路径" />
         </label>
         <button id="choose-video-output" type="button" class="secondary">选择位置</button>
-        <p>提交时会把 SQLite 当前字幕冻结为本次 ASS 快照；默认优先 VideoToolbox，失败时回退到内置 LGPL MPEG-4 软件编码。可读取源视频码率时，成品会以源码率加约 20% 余量编码。</p>
+        <p>${desktopPlatform === "macos" ? "优先使用 VideoToolbox，失败时回退" : "使用"}内置 LGPL MPEG-4 软件编码。提交时会把 SQLite 当前字幕冻结为本次 ASS 快照；可读取源视频码率时，成品会以源码率加约 20% 余量编码。</p>
       </div>
       <div class="video-render-footer">
         <span id="video-render-message" role="status"></span>
@@ -3480,7 +3491,7 @@ async function revealExportedSubtitle(): Promise<void> {
   try {
     await invoke("reveal_exported_subtitle", { path: lastExportedSubtitlePath });
   } catch (error) {
-    setWorkspaceAction(`Finder 定位失败：${String(error)}`, true);
+    setWorkspaceAction(`${fileManagerLabel} 定位失败：${String(error)}`, true);
   } finally {
     setWorkspaceBusy(false);
   }
@@ -3525,7 +3536,7 @@ function renderVideoRenderHistory(): void {
       const actions = render.status === "queued" || render.status === "running"
         ? `<button type="button" class="danger" data-cancel-render="${escapeHtml(render.id)}">取消</button>`
         : render.status === "done"
-          ? `<button type="button" class="secondary" data-reveal-render="${escapeHtml(render.output_path)}">在 Finder 中显示</button>`
+          ? `<button type="button" class="secondary" data-reveal-render="${escapeHtml(render.output_path)}">在 ${fileManagerLabel} 中显示</button>`
           : "";
       return `<article class="video-render-row">
         <div class="video-render-row-main">
@@ -3572,8 +3583,12 @@ function renderMediaCapabilities(): void {
     submitVideoRenderButton.disabled = videoRenderSubmitting || !mediaCapabilities.ready_for_hard_subtitles;
   }
   const encoder = [
-    mediaCapabilities.videotoolbox_encoder ? "VideoToolbox 可用" : "VideoToolbox 不可用",
-    mediaCapabilities.mpeg4_encoder ? "MPEG-4 回退可用" : "MPEG-4 回退缺失",
+    ...(desktopPlatform === "macos"
+      ? [mediaCapabilities.videotoolbox_encoder ? "VideoToolbox 可用" : "VideoToolbox 不可用"]
+      : []),
+    mediaCapabilities.mpeg4_encoder
+      ? desktopPlatform === "macos" ? "MPEG-4 回退可用" : "MPEG-4 软件编码可用"
+      : desktopPlatform === "macos" ? "MPEG-4 回退缺失" : "MPEG-4 软件编码缺失",
   ].join(" · ");
   mediaCapabilitiesHost.innerHTML = `<strong>${mediaCapabilities.ready_for_hard_subtitles ? "烧录环境就绪" : "烧录环境不可用"}</strong><span>${escapeHtml(encoder)} · libass ${mediaCapabilities.ass_filter ? "可用" : "缺失"}</span><code>${escapeHtml(mediaCapabilities.binary_path)}</code><small>${escapeHtml(mediaCapabilities.version)}</small>`;
   mediaCapabilitiesHost.classList.toggle("warning", !mediaCapabilities.ready_for_hard_subtitles);
@@ -3714,7 +3729,7 @@ async function revealRenderedVideo(path: string): Promise<void> {
   try {
     await invoke("reveal_rendered_video", { path });
   } catch (error) {
-    if (videoRenderMessage) videoRenderMessage.textContent = `Finder 定位失败：${String(error)}`;
+    if (videoRenderMessage) videoRenderMessage.textContent = `${fileManagerLabel} 定位失败：${String(error)}`;
   }
 }
 
