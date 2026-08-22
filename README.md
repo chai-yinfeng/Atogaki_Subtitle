@@ -3,7 +3,7 @@
 Atogaki 是一个本地优先的外语音视频理解、字幕校对与导出工具。它最初是为了把
 ヨルシカ「後書き」电台整理成便于中文使用者理解和学习的日中双语资料；长期方向是扩展为泛用的本地字幕识别、翻译、编辑和烧录工作台。
 
-项目目前处于 macOS Apple Silicon 预发布阶段。核心闭环已经可用，但尚未提供 Developer ID 签名、公证的正式安装包。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+项目目前处于 macOS Apple Silicon 预发布阶段。核心闭环已经可用，但尚未提供 Developer ID 签名、公证的正式安装包；Windows x86_64 是下一平台目标，当前还没有可供普通用户使用的 Windows 安装包。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
 ## 能做什么
 
@@ -109,7 +109,7 @@ CI=true tauri build --bundles dmg
 tauri build --bundles dmg
 ```
 
-产物位于 `src-tauri/target/release/bundle/`。详细窗口回归见 [`docs/desktop-testing.md`](docs/desktop-testing.md)，发布资产和 LGPL 源码归档见 [`docs/releasing.md`](docs/releasing.md)。
+产物位于 `src-tauri/target/release/bundle/`。详细窗口回归见 [`docs/desktop-testing.md`](docs/desktop-testing.md)，发布资产和 LGPL 源码归档见 [`docs/releasing.md`](docs/releasing.md)，下一阶段的 Windows 工作分解见 [`docs/windows-porting.md`](docs/windows-porting.md)。
 
 根目录和 Tauri 目录各有一个 Cargo package，因此会出现两个构建目录：
 
@@ -155,8 +155,8 @@ Atogaki_Sub/
 
 - 正确性、可编辑性和可回看性优先于实时性；实时辅助属于后续阶段。
 - 时间轴和人工修正是一等数据，重新识别与重试应派生新任务而非覆盖旧结果。
-- 首批语言组合是日语或英语识别、简体中文翻译；任务会持久化语言对，provider 与领域接口不写死某一种组合。
-- 首个平台是 macOS Apple Silicon；x86_64 macOS 和 Windows 需要独立构建、许可证审计与真实设备回归。
+- 首批语言组合是日语、英语或韩语识别、简体中文翻译；任务会持久化语言对，provider 与领域接口不写死某一种组合。
+- 首个平台是 macOS Apple Silicon；Windows x86_64 是下一目标，需要独立构建、许可证审计与真实设备回归。x86_64 macOS 尚未列入当前主线。
 - 当前没有账号、云端文件托管、跨设备同步或自动媒体下载。
 
 项目方向见 [`docs/product-direction.md`](docs/product-direction.md)，完成度和技术债见 [`docs/roadmap.md`](docs/roadmap.md)。适合后续补充的公开材料包括 App 截图/短演示、已知问题、测试设备矩阵、贡献指南和稳定 Release 下载入口；这些应在首轮功能回归与外部测试反馈稳定后加入。

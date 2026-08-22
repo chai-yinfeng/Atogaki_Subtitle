@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-08-09_
+_最后更新：2026-08-22_
 
 ## 仓库组织
 
@@ -10,11 +10,11 @@ _最后更新：2026-08-09_
 Atogaki_Sub/
 ├── Cargo.toml                 # Rust package 与依赖
 ├── src/                       # 可复用的处理核心与当前 CLI
-│   ├── lib.rs                 # 供 CLI 与未来桌面 UI 复用的库入口
+│   ├── lib.rs                 # 供 CLI 与桌面 App 复用的库入口
 │   ├── application/           # 用例、任务规格、状态与编排
 │   ├── domain/                # 字幕段、词表、分段与导出规则
-│   ├── infrastructure/        # ffmpeg、Whisper、DeepL、文件与数据库适配器
-│   └── interface/             # CLI；未来会新增桌面 UI 适配层
+│   ├── infrastructure/        # ffmpeg、Whisper、翻译 provider、文件与数据库适配器
+│   └── interface/             # CLI / HTTP 等输入适配层
 ├── assets/                    # 版本化的示例和内置词表
 ├── migrations/                # 现有 Postgres 实验性迁移；不作为桌面 MVP 依赖
 ├── migrations/sqlite/         # 桌面本地 SQLite 迁移
@@ -27,7 +27,7 @@ Atogaki_Sub/
 └── tests/                     # 跨模块集成测试（按需要新增）
 ```
 
-未来引入 Tauri 时，优先在本仓库根目录新增 `src-tauri/` 和前端目录（例如 `ui/`），并让当前 Rust 处理核心转为独立库 crate 或 workspace member。不要把现有 `src/` 移入一个人为的子目录。
+当前 Tauri 桌面壳位于 `src-tauri/`，前端位于 `ui/`，并直接复用根 Rust library。后续平台适配继续保持这一边界，不把现有 `src/` 移入人为的子目录，也不让平台 UI 直接调用 sidecar 或具体 provider。
 
 ## 目标桌面架构
 
@@ -48,6 +48,8 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 正式桌面 App 把固定版本的 `whisper-cli`、`ffmpeg` 和 `ffprobe` 作为按平台/CPU 架构生成的 Tauri sidecar 放在主程序同目录；Finder 启动不依赖 shell、Homebrew 或用户 `PATH`。模型仍按设备下载到应用数据目录或由用户选择，不进入 Bundle。开发环境可用 `ATOGAKI_WHISPER_CLI`、`ATOGAKI_FFMPEG` 和 `ATOGAKI_FFPROBE` 覆盖 sidecar。macOS FFmpeg 从固定源码构建 libass 字体栈与 LGPL 配置，发布物附带许可证和构建清单，不包含 libx264。
 
+macOS Apple Silicon 是当前已验证发行基线，Windows x86_64 是下一平台目标。Windows 首版保持同一 application/domain 边界，以 CPU Whisper、Credential Manager、WebView2、平台应用数据目录和 LGPL MPEG-4 烧录为基线；Windows sidecar、依赖声明和对应源码归档必须按新 target 独立构建与审计，不能把 macOS arm64 产物或审计结果直接视为跨平台结论。
+
 启动恢复采用显式失败而非静默续跑：数据库中仍为非终态的识别任务会与任务目录快照核对，未完成者标记为上次退出导致的失败。重试从旧任务的输入、识别参数和词表快照创建新 UUID 任务，旧目录保持只读证据；旧模型路径不可用时才使用当前设备设置中的替代模型。ffmpeg/Whisper 子进程设置为随异步任务销毁而终止。
 
 `LocalGlossaryService` 管理 SQLite 词表、任务范围 prompt 预览、差异预览和对工作区的应用。词条分为始终提示的“核心”、按任务选择的“内容包”和不占 prompt 的“仅修正”。仓库 TXT 的 SHA-256 是内置词表版本：内容变化时启动流程完整刷新只读内置基线，用户保存内置词表则写时复制为独立自定义词表。新任务选择词表和内容包后，`LocalTaskService` 会在排队前把解析后的词条冻结为任务目录中的 `recognition-glossary.txt`，把最终 prompt 写入 `whisper-prompt.txt`，再将快照路径交给 Whisper。带规范写法的核心或内容词条会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化；仅修正规则只执行后一阶段。SQLite 保存词表关联、名称和快照路径，因此以后编辑、升级或删除原词表不会改变旧任务实际使用的内容。
@@ -67,6 +69,7 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 - 任务目录以 UUID 命名，避免并发任务冲突。
 - 新任务把 Whisper/VAD 模型路径、VAD 阈值、分段和运行选项写入 `recognition-options.json`。该文件是识别结果的可复现记录；既有任务不反向补造当时未记录的参数。
 - 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态、时间轴编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。SQLite 是人工时间轴的主数据源，手动时间在任务快照再次同步时必须保留；时间改变不使译文过期，但后续字幕导出和烧录使用新时间。
+- 当前字幕段属于隐式单轨，同轨不允许新增重叠。多人同时发言出现真实需求后，先通过单独决策引入轨道实体和 `track_id`，再设计说话人样式；当前 schema 不提前加入未被使用的逐段排版字段。
 - 每个任务用规范代码持久化源语言和目标语言；首批桌面组合为 `ja`、`en` 或 `ko` 到 `zh-Hans`，旧任务迁移为 `ja` 到 `zh-Hans`。Whisper 与翻译 provider 只在各自基础设施适配器中转换服务专用代码。
 - SQLite 另外记录译文是否人工编辑；只修改原文时保留旧译文并标记为过期，同时修改译文时视为已人工校正。
 - SQLite 词表是带源语言的可编辑主数据；每个转写任务只能选择同语言词表，并使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新原文并把已有译文标记为过期。
@@ -79,4 +82,4 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 - 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。
 - 外部工具和 API 是可替换基础设施：ASR、翻译和媒体处理分别通过应用层选项接入。CLI 默认日语识别、简中翻译，但不将该默认值写死到应用层或 DeepL 适配器。
 - macOS 本地长任务采用硬件优先、显式回退：Whisper 请求 GPU device 0，GPU/Metal 失败才重试 CPU；硬字幕要求 libass，并优先用 VideoToolbox H.264 编码，失败后记录原因并回退 FFmpeg 原生 LGPL MPEG-4 软件编码；两层均失败才让任务失败并保留 ASS 快照。libass 字幕合成仍在 CPU 执行。
-- 学习工作区可按需打开独立的悬浮字幕 WebView 窗口。它由 Rust 主进程创建为无边框、置顶、可缩放的正常窗口，主工作区按字幕段切换发送原文与译文；窗口本身不读取 SQLite、媒体或密钥。为维持公开 Tauri 配置，它不使用 macOS 私有 API，因此当前不支持透明背景和鼠标穿透。
+- 收听区和任务工作区可按需打开独立的悬浮字幕 WebView 窗口。它由 Rust 主进程创建为无边框、置顶、可缩放的正常窗口，当前播放工作区按字幕段切换发送原文与译文；窗口本身不读取 SQLite、媒体或密钥。为维持公开 Tauri 配置，它不使用 macOS 私有 API，因此当前不支持透明背景和鼠标穿透。未来学习区复用任务与播放定位数据，但不以悬浮字幕窗口作为其数据存储边界。

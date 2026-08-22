@@ -1,8 +1,12 @@
-# macOS 发布说明
+# 发布说明
 
-_最后更新：2026-08-09_
+_最后更新：2026-08-22_
 
-## 产物边界
+macOS Apple Silicon 是当前已验证的预发布平台，Windows x86_64 是下一目标。Windows 构建、sidecar、系统集成和真实设备验收的工作分解见 `docs/windows-porting.md`；在其中的发布门禁完成前，本文件后续步骤只适用于 macOS，不得据此宣称已经支持 Windows。
+
+## macOS Apple Silicon
+
+### 产物边界
 
 DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后，把 DMG 作为 GitHub Release asset 上传。这样仓库保持轻量，Release 页面仍能为测试者提供固定版本下载。
 
@@ -17,7 +21,7 @@ DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后�
 
 GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpeg、whisper.cpp 与静态依赖的对应源码材料。
 
-## 首次手工预发布
+### 首次手工预发布
 
 1. 在干净提交上完成 Rust、前端、打包 App、模型下载和真实窗口回归。凡本版本新增或修改的交互，必须在**最终 ad-hoc 签名 App**中逐项完成对应 `docs/desktop-testing.md` 场景并记录结果；仅通过单元测试、前端构建、Tauri 编译，或仅验证窗口能创建，均不得创建公开 Release。
 2. 运行 `./scripts/generate-rust-licenses.sh` 与 `node ./scripts/generate-frontend-licenses.mjs`，审阅并提交生成声明。详细范围见 `docs/third-party-license-audit.md`。
@@ -41,7 +45,7 @@ gh release create v0.1.0-alpha.1 \
   --prerelease --title "Atogaki v0.1.0-alpha.1" --notes-file path/to/release-notes.md
 ```
 
-## 自动化时机
+### 自动化时机
 
 首轮建议手工发布以稳定构建清单和窗口回归。取得 Apple Developer Program 资格后，再让 GitHub Actions 在版本 tag 上构建、签名、公证、装订 notarization ticket、生成 DMG 和校验文件，并上传到同一个 Release。签名证书、App Store Connect API key 等只放 GitHub Actions encrypted secrets，不进入仓库。
 
