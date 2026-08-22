@@ -1,0 +1,59 @@
+name: Windows compile baseline
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-compile-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-compile:
+    name: Windows x86_64 compile
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      RUST_TOOLCHAIN: 1.95.0
+      NODE_VERSION: 22
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix ui
+
+      - name: Build frontend
+        run: npm run build --prefix ui
+
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal --component rustfmt
+          rustup default $env:RUST_TOOLCHAIN
+          rustc --version --verbose
+          cargo --version --verbose
+
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
+      - name: Test shared Rust core
+        run: cargo test --locked
+
+      - name: Compile Tauri desktop shell
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked

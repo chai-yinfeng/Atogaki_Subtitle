@@ -36,6 +36,8 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 - 固定 Rust、Node/npm、Tauri、MSVC Build Tools 和 WebView2 的构建前置条件；依赖下载失败与代理行为按现有开发工作流记录。
 - 建立最小自动化基线。仓库当前没有 `.github/workflows`，应先验证普通提交的 Windows compile/test，再决定是否自动生成安装包。
 
+首个基线由 `.github/workflows/windows-compile.yml` 承载：使用 Windows Server 2022 x86_64 runner、Rust 1.95.0 和 Node.js 22，运行前端锁定依赖构建、共享 Rust 测试与 Tauri 桌面编译。它刻意不调用 `tauri build`，也不生成或上传安装包；三个 Windows sidecar 和安装包属于 W2/W4，在没有合规二进制前不使用占位文件伪造打包成功。
+
 **出口：** 共享核心测试和 Tauri 桌面代码能在 Windows x86_64 编译；失败项已区分为代码问题、sidecar 缺失或环境门禁。
 
 ### W2. 固定 Windows sidecar 与合规产物
