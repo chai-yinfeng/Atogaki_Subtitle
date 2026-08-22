@@ -102,7 +102,7 @@ impl LocalRenderService {
         let capabilities = self.capabilities().await?;
         if !capabilities.ready_for_hard_subtitles {
             bail!(
-                "configured ffmpeg cannot burn subtitles: libass={}, VideoToolbox={}, MPEG-4={}",
+                "configured ffmpeg cannot burn subtitles: libass={}, hardware H.264={}, MPEG-4={}",
                 capabilities.ass_filter,
                 capabilities.videotoolbox_encoder,
                 capabilities.mpeg4_encoder

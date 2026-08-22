@@ -400,9 +400,9 @@ async fn burn_ass_with_encoder(
     target_video_bitrate_bps: Option<u64>,
     execution: &RenderExecution,
 ) -> Result<RenderOutcome> {
-    let mut hardware_fallback_reason = Some(
-        "VideoToolbox is unavailable; using the bundled LGPL MPEG-4 software encoder".to_string(),
-    );
+    let mut hardware_fallback_reason = cfg!(target_os = "macos").then(|| {
+        "VideoToolbox is unavailable; using the bundled LGPL MPEG-4 software encoder".to_string()
+    });
     if supports_encoder(ffmpeg, "h264_videotoolbox").await? {
         eprintln!("ffmpeg render: using VideoToolbox hardware H.264 encoder");
         let result = run_burn_command(
@@ -470,12 +470,12 @@ async fn burn_ass_with_encoder(
     }
 
     if !supports_encoder(ffmpeg, "mpeg4").await? {
-        let prior = hardware_fallback_reason
-            .as_deref()
-            .unwrap_or("VideoToolbox did not produce an output");
-        anyhow::bail!(
-            "no usable video encoder remains after {prior}; the configured ffmpeg is missing the LGPL MPEG-4 software encoder"
-        );
+        if let Some(prior) = hardware_fallback_reason.as_deref() {
+            anyhow::bail!(
+                "no usable video encoder remains after {prior}; the configured ffmpeg is missing the LGPL MPEG-4 software encoder"
+            );
+        }
+        anyhow::bail!("the configured ffmpeg is missing the LGPL MPEG-4 software encoder");
     }
     eprintln!("ffmpeg render: using the LGPL MPEG-4 software encoder");
     let result = run_burn_command(
@@ -523,23 +523,30 @@ async fn burn_ass_with_encoder(
                 )),
                 Err(error) if error.downcast_ref::<RenderCancelled>().is_some() => Err(error),
                 Err(aac_error) => {
-                    let prior = hardware_fallback_reason
-                        .as_deref()
-                        .unwrap_or("VideoToolbox did not produce an output");
-                    Err(anyhow::anyhow!(
-                        "MPEG-4 software fallback failed after {prior}; copied-audio attempt: {}; AAC retry: {aac_error:#}",
-                        summarize_render_error(&copy_error)
-                    ))
+                    if let Some(prior) = hardware_fallback_reason.as_deref() {
+                        Err(anyhow::anyhow!(
+                            "MPEG-4 software fallback failed after {prior}; copied-audio attempt: {}; AAC retry: {aac_error:#}",
+                            summarize_render_error(&copy_error)
+                        ))
+                    } else {
+                        Err(anyhow::anyhow!(
+                            "MPEG-4 software encoding failed; copied-audio attempt: {}; AAC retry: {aac_error:#}",
+                            summarize_render_error(&copy_error)
+                        ))
+                    }
                 }
             }
         }
         Err(error) => {
-            let prior = hardware_fallback_reason
-                .as_deref()
-                .unwrap_or("VideoToolbox did not produce an output");
-            Err(anyhow::anyhow!(
-                "MPEG-4 software fallback failed after {prior}: {error:#}"
-            ))
+            if let Some(prior) = hardware_fallback_reason.as_deref() {
+                Err(anyhow::anyhow!(
+                    "MPEG-4 software fallback failed after {prior}: {error:#}"
+                ))
+            } else {
+                Err(anyhow::anyhow!(
+                    "MPEG-4 software encoding failed: {error:#}"
+                ))
+            }
         }
     }
 }
