@@ -41,7 +41,7 @@ cargo install --locked --features cli --version 0.9.1 cargo-about
 [`scripts/generate-frontend-licenses.mjs`](../scripts/generate-frontend-licenses.mjs) 直接读取 `ui/package-lock.json`，区分 WebView 运行依赖与仅构建依赖，并生成 [`src-tauri/third-party/frontend-licenses.html`](../src-tauri/third-party/frontend-licenses.html)。当前结果为：
 
 - 1 个运行依赖：`@tauri-apps/api`，Apache-2.0 OR MIT；
-- 60 个构建依赖，使用 MIT、Apache-2.0、BSD-3-Clause、ISC 或 MPL-2.0；其中 lightningcss 的平台/构建包为 MPL-2.0，但不会作为 Node package 复制进 App；
+- 60 个构建依赖，使用 MIT、Apache-2.0、BSD-3-Clause、ISC 或 MPL-2.0；其中 lightningcss 的平台/构建包为 MPL-2.0，但不会作为 Node package 复制进 App。报告为它们记录包名、版本、许可证表达式和来源，不附随 `npm ci` 当前平台变化的可选原生构建包全文；
 - 运行依赖缺少已安装许可证全文，或 lockfile 出现未审查表达式时，生成立即失败。
 
 ## Windows x86_64 差异审计

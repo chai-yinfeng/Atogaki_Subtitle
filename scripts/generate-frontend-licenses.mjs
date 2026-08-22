@@ -11,7 +11,8 @@ const outputPath = process.argv[2]
   ? path.resolve(process.argv[2])
   : path.join(projectDirectory, "src-tauri", "third-party", "frontend-licenses.html");
 const lockText = fs.readFileSync(lockPath, "utf8");
-const lock = JSON.parse(lockText);
+const normalizedLockText = lockText.replace(/\r\n?/g, "\n");
+const lock = JSON.parse(normalizedLockText);
 
 const acceptedExpressions = new Set([
   "Apache-2.0",
@@ -39,7 +40,11 @@ const dependencies = Object.entries(lock.packages)
     buildOnly: Boolean(metadata.dev),
     packagePath,
   }))
-  .sort((left, right) => left.name.localeCompare(right.name) || left.version.localeCompare(right.version));
+  .sort((left, right) => {
+    if (left.name !== right.name) return left.name < right.name ? -1 : 1;
+    if (left.version !== right.version) return left.version < right.version ? -1 : 1;
+    return 0;
+  });
 
 const invalid = dependencies.filter(
   (dependency) => !dependency.license || !acceptedExpressions.has(dependency.license),
@@ -60,7 +65,8 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => (
 })[character]);
 
 const licenseDocuments = new Map();
-for (const dependency of dependencies) {
+const runtimeDependencies = dependencies.filter((dependency) => !dependency.buildOnly);
+for (const dependency of runtimeDependencies) {
   const installedDirectory = path.join(uiDirectory, dependency.packagePath);
   if (!fs.existsSync(installedDirectory)) continue;
   const licenseFiles = fs.readdirSync(installedDirectory)
@@ -75,7 +81,6 @@ for (const dependency of dependencies) {
   }
 }
 
-const runtimeDependencies = dependencies.filter((dependency) => !dependency.buildOnly);
 for (const dependency of runtimeDependencies) {
   const hasText = [...licenseDocuments.values()].some((document) =>
     document.usedBy.some((usedBy) => usedBy.startsWith(`${dependency.name}@${dependency.version} `)),
@@ -86,7 +91,7 @@ for (const dependency of runtimeDependencies) {
   }
 }
 
-const lockDigest = crypto.createHash("sha256").update(lockText).digest("hex");
+const lockDigest = crypto.createHash("sha256").update(normalizedLockText).digest("hex");
 const rows = dependencies.map((dependency) => {
   const source = dependency.resolved ?? `https://www.npmjs.com/package/${dependency.name}/v/${dependency.version}`;
   return `<tr><td><a href="${escapeHtml(source)}">${escapeHtml(dependency.name)}</a></td><td>${escapeHtml(dependency.version)}</td><td>${escapeHtml(dependency.license)}</td><td>${dependency.buildOnly ? "build" : "runtime"}</td></tr>`;
@@ -107,7 +112,7 @@ const html = `<!doctype html>
 </head>
 <body>
   <h1>Atogaki frontend third-party licenses</h1>
-  <p>Generated from ui/package-lock.json. Runtime dependencies are shipped in the WebView bundle; build dependencies are recorded for audit completeness but are not copied into the App.</p>
+  <p>Generated from ui/package-lock.json. Runtime dependencies are shipped in the WebView bundle and include their installed license text below. Build dependencies are recorded by package, version, license expression and source for audit completeness, but are not copied into the App.</p>
   <p>Lockfile SHA-256: <code>${lockDigest}</code>. Runtime packages: ${runtimeDependencies.length}. Build packages: ${dependencies.length - runtimeDependencies.length}.</p>
   <table><thead><tr><th>Package</th><th>Version</th><th>License</th><th>Scope</th></tr></thead><tbody>${rows}</tbody></table>
 ${documents}
