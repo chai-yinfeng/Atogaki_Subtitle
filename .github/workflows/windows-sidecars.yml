@@ -151,7 +151,11 @@ jobs:
 
       - name: Build unsigned NSIS installer
         working-directory: src-tauri
-        run: tauri build --bundles nsis -- --locked
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          tauri build --bundles nsis --ci
+          git diff --exit-code -- Cargo.lock
 
       - name: Smoke-test NSIS install and uninstall
         shell: pwsh
