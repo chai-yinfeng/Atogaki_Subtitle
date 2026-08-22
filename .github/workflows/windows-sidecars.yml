@@ -8,24 +8,64 @@ on:
     paths:
       - ".gitattributes"
       - ".github/workflows/windows-sidecars.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "LICENSE"
+      - "about.hbs"
+      - "about.toml"
       - "scripts/build-whisper-windows.ps1"
       - "scripts/build-ffmpeg-windows.sh"
+      - "scripts/generate-frontend-licenses.mjs"
       - "scripts/package-sidecar-sources-windows.ps1"
       - "scripts/generate-rust-licenses-windows.ps1"
       - "scripts/smoke-test-nsis-windows.ps1"
       - "scripts/sidecar-versions.zsh"
+      - "src/**"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/build.rs"
+      - "src-tauri/icons/**"
+      - "src-tauri/src/**"
+      - "src-tauri/tauri.conf.json"
       - "src-tauri/tauri.windows.conf.json"
+      - "ui/index.html"
+      - "ui/overlay.html"
+      - "ui/package-lock.json"
+      - "ui/package.json"
+      - "ui/src/**"
+      - "ui/tsconfig.json"
+      - "ui/vite.config.ts"
   pull_request:
     paths:
       - ".gitattributes"
       - ".github/workflows/windows-sidecars.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "LICENSE"
+      - "about.hbs"
+      - "about.toml"
       - "scripts/build-whisper-windows.ps1"
       - "scripts/build-ffmpeg-windows.sh"
+      - "scripts/generate-frontend-licenses.mjs"
       - "scripts/package-sidecar-sources-windows.ps1"
       - "scripts/generate-rust-licenses-windows.ps1"
       - "scripts/smoke-test-nsis-windows.ps1"
       - "scripts/sidecar-versions.zsh"
+      - "src/**"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/build.rs"
+      - "src-tauri/icons/**"
+      - "src-tauri/src/**"
+      - "src-tauri/tauri.conf.json"
       - "src-tauri/tauri.windows.conf.json"
+      - "ui/index.html"
+      - "ui/overlay.html"
+      - "ui/package-lock.json"
+      - "ui/package.json"
+      - "ui/src/**"
+      - "ui/tsconfig.json"
+      - "ui/vite.config.ts"
   workflow_dispatch:
 
 permissions:
@@ -123,6 +163,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix ui
 
+      - name: Generate and verify frontend licenses
+        run: |
+          node ./scripts/generate-frontend-licenses.mjs
+          git diff --exit-code -- src-tauri/third-party/frontend-licenses.html
+
       - name: Set up Rust
         shell: pwsh
         run: |
@@ -137,7 +182,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: windows-tauri-nsis-${{ hashFiles('Cargo.lock', 'src-tauri/Cargo.lock', 'src/**/*.rs', 'src-tauri/src/**/*.rs', 'src-tauri/tauri*.json') }}
+          key: windows-tauri-nsis-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/Cargo.toml', 'src-tauri/build.rs', 'src/**/*.rs', 'src-tauri/src/**/*.rs', 'src-tauri/tauri*.json') }}
+          restore-keys: windows-tauri-nsis-
 
       - name: Generate and verify Windows Rust licenses
         shell: pwsh
@@ -166,7 +212,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: windows-tauri-nsis-${{ hashFiles('Cargo.lock', 'src-tauri/Cargo.lock', 'src/**/*.rs', 'src-tauri/src/**/*.rs', 'src-tauri/tauri*.json') }}
+          key: windows-tauri-nsis-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/Cargo.toml', 'src-tauri/build.rs', 'src/**/*.rs', 'src-tauri/src/**/*.rs', 'src-tauri/tauri*.json') }}
 
       - name: Smoke-test NSIS install and uninstall
         shell: pwsh
