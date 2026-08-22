@@ -49,7 +49,20 @@ jobs:
           path: target/sidecar-source-cache
           key: windows-sidecar-sources-${{ hashFiles('scripts/sidecar-versions.zsh') }}
 
+      - name: Restore audited sidecar build
+        id: sidecar-build-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            src-tauri/binaries
+            src-tauri/third-party/build-manifest.txt
+            src-tauri/third-party/licenses
+            target/release/bundle/sources
+            target/windows-sidecars
+          key: windows-sidecar-build-v1-${{ hashFiles('scripts/sidecar-versions.zsh', 'scripts/build-whisper-windows.ps1', 'scripts/build-ffmpeg-windows.sh', 'scripts/package-sidecar-sources-windows.ps1') }}
+
       - name: Set up MSYS2 UCRT64
+        if: steps.sidecar-build-cache.outputs.cache-hit != 'true'
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -72,16 +85,31 @@ jobs:
             nasm:p
 
       - name: Build MSVC whisper sidecar
+        if: steps.sidecar-build-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./scripts/build-whisper-windows.ps1
 
       - name: Build and verify LGPL FFmpeg sidecars
+        if: steps.sidecar-build-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: ./scripts/build-ffmpeg-windows.sh
 
       - name: Package corresponding sources
+        if: steps.sidecar-build-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./scripts/package-sidecar-sources-windows.ps1
+
+      - name: Save audited sidecar build
+        if: steps.sidecar-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            src-tauri/binaries
+            src-tauri/third-party/build-manifest.txt
+            src-tauri/third-party/licenses
+            target/release/bundle/sources
+            target/windows-sidecars
+          key: windows-sidecar-build-v1-${{ hashFiles('scripts/sidecar-versions.zsh', 'scripts/build-whisper-windows.ps1', 'scripts/build-ffmpeg-windows.sh', 'scripts/package-sidecar-sources-windows.ps1') }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -111,7 +139,7 @@ jobs:
       - name: Generate and verify Windows Rust licenses
         shell: pwsh
         run: |
-          cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc
+          cargo fetch --manifest-path src-tauri/Cargo.toml --locked
           cargo install --locked --features cli --version 0.9.1 cargo-about
           ./scripts/generate-rust-licenses-windows.ps1
           git diff --exit-code -- src-tauri/third-party/rust-licenses-windows.html
