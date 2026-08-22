@@ -5,6 +5,7 @@ This directory is copied into the App Bundle. It contains generated Rust and fro
 ## Generated application notices
 
 - `rust-licenses.html` is generated from `src-tauri/Cargo.lock` for `aarch64-apple-darwin` with `cargo-about 0.9.1`.
+- `rust-licenses-windows.html` is generated from the same lockfile for `x86_64-pc-windows-msvc`; Windows CI regenerates it and rejects an uncommitted diff before packaging.
 - `frontend-licenses.html` is generated from `ui/package-lock.json`; it distinguishes runtime packages copied into the WebView bundle from build-only packages.
 
 Regenerate and review both files whenever either lockfile changes:
@@ -12,6 +13,8 @@ Regenerate and review both files whenever either lockfile changes:
 ```bash
 cargo install --locked --features cli --version 0.9.1 cargo-about
 ./scripts/generate-rust-licenses.sh
+ATOGAKI_LICENSE_TARGET=x86_64-pc-windows-msvc ./scripts/generate-rust-licenses.sh \
+  ./src-tauri/third-party/rust-licenses-windows.html
 npm --prefix ui ci
 node ./scripts/generate-frontend-licenses.mjs
 ```
@@ -34,15 +37,17 @@ Atogaki bundles separately executable command-line sidecars. They communicate wi
 | FreeType | 2.14.3 | FreeType License | https://download.savannah.gnu.org/releases/freetype/ |
 | HarfBuzz | 14.3.0 | permissive; see bundled license | https://github.com/harfbuzz/harfbuzz/releases/tag/14.3.0 |
 
-The FFmpeg build script rejects GPL and nonfree configuration and verifies that `libx264` is absent. It builds libass and its LGPL/permissive dependencies from pinned, SHA-256-verified source archives and links them statically; it does not link Homebrew dylibs. `build-manifest.txt`, generated beside this file for release builds, records the exact dependency versions, source hashes, target, configure line and pre-bundle binary hashes. Tauri's final ad-hoc signature changes the Mach-O file hashes inside the App; release integrity is checked with `codesign` and the DMG SHA-256 instead of comparing signed sidecars to the pre-bundle hashes.
+The FFmpeg build scripts reject GPL and nonfree configuration and verify that `libx264` is absent. They build libass and its LGPL/permissive dependencies from pinned, SHA-256-verified source archives and link them statically. macOS does not link Homebrew dylibs; Windows rejects MSYS2 and subtitle-stack runtime DLL dependencies. `build-manifest.txt`, generated beside this file for release builds, records the exact dependency versions, source hashes, target, configure line and pre-bundle binary hashes. Tauri's final ad-hoc macOS signature changes the Mach-O file hashes inside the App; release integrity is checked with `codesign` and the DMG SHA-256 instead of comparing signed sidecars to the pre-bundle hashes.
 
 Before publishing an installer, generate the complete corresponding source archive:
 
 ```bash
 ./scripts/package-sidecar-sources-macos.sh
+# Windows, after the MSVC and MSYS2 UCRT64 build steps:
+./scripts/package-sidecar-sources-windows.ps1
 ```
 
-It writes `Atogaki-<version>-third-party-sources.tar.xz` and a SHA-256 file under `src-tauri/target/release/bundle/sources/`. Upload both beside the DMG in the same GitHub Release. The archive includes the exact FFmpeg, libass, libunibreak, FriBidi, FreeType, HarfBuzz and whisper.cpp upstream sources, their checksums, license texts, the pinned build script and the matching binary manifest. The archive is a Release asset: it is intentionally ignored by Git and not embedded in the DMG.
+The macOS script writes `Atogaki-<version>-third-party-sources.tar.xz` under `src-tauri/target/release/bundle/sources/`; the Windows script writes `Atogaki-<version>-windows-x86_64-third-party-sources.tar.gz` under `target/release/bundle/sources/`. Each has a neighboring SHA-256 file. Upload the target's archive beside its installer in the same GitHub Release. Each archive includes the exact FFmpeg, libass, libunibreak, FriBidi, FreeType, HarfBuzz and whisper.cpp upstream sources, checksums, license texts, pinned build scripts and matching binary manifest. These are Release assets: they are intentionally ignored by Git and not embedded in the ordinary installer.
 
 This repository documentation is a build aid, not legal advice.
 

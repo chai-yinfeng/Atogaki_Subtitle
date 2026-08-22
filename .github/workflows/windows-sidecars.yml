@@ -10,6 +10,7 @@ on:
       - "scripts/build-whisper-windows.ps1"
       - "scripts/build-ffmpeg-windows.sh"
       - "scripts/package-sidecar-sources-windows.ps1"
+      - "scripts/generate-rust-licenses-windows.ps1"
       - "scripts/smoke-test-nsis-windows.ps1"
       - "scripts/sidecar-versions.zsh"
       - "src-tauri/tauri.windows.conf.json"
@@ -19,6 +20,7 @@ on:
       - "scripts/build-whisper-windows.ps1"
       - "scripts/build-ffmpeg-windows.sh"
       - "scripts/package-sidecar-sources-windows.ps1"
+      - "scripts/generate-rust-licenses-windows.ps1"
       - "scripts/smoke-test-nsis-windows.ps1"
       - "scripts/sidecar-versions.zsh"
       - "src-tauri/tauri.windows.conf.json"
@@ -106,12 +108,20 @@ jobs:
             src-tauri/target
           key: windows-tauri-nsis-${{ hashFiles('Cargo.lock', 'src-tauri/Cargo.lock', 'src/**/*.rs', 'src-tauri/src/**/*.rs', 'src-tauri/tauri*.json') }}
 
+      - name: Generate and verify Windows Rust licenses
+        shell: pwsh
+        run: |
+          cargo fetch --manifest-path src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc
+          cargo install --locked --features cli --version 0.9.1 cargo-about
+          ./scripts/generate-rust-licenses-windows.ps1
+          git diff --exit-code -- src-tauri/third-party/rust-licenses-windows.html
+
       - name: Install pinned Tauri CLI
         run: npm install --global @tauri-apps/cli@2.11.0
 
       - name: Build unsigned NSIS installer
         working-directory: src-tauri
-        run: tauri build --bundles nsis --locked
+        run: tauri build --bundles nsis -- --locked
 
       - name: Smoke-test NSIS install and uninstall
         shell: pwsh
@@ -134,6 +144,7 @@ jobs:
           path: |
             src-tauri/binaries/*-x86_64-pc-windows-msvc.exe
             src-tauri/third-party/build-manifest.txt
+            src-tauri/third-party/rust-licenses-windows.html
             src-tauri/third-party/licenses/
             target/release/bundle/sources/*.tar.gz
             target/release/bundle/sources/*.sha256

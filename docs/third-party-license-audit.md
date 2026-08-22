@@ -2,7 +2,7 @@
 
 _审计日期：2026-08-06_
 
-本记录用于 Atogaki `0.1.0` macOS Apple Silicon 预发布基线的工程审计，不构成法律意见。每次升级锁文件、sidecar 或目标平台后都必须重新生成并复核。
+本记录用于 Atogaki `0.1.0` macOS Apple Silicon 预发布基线和 Windows x86_64 构建基线的工程审计，不构成法律意见。每次升级锁文件、sidecar 或目标平台后都必须重新生成并复核。
 
 ## 范围与结论
 
@@ -15,7 +15,7 @@ _审计日期：2026-08-06_
 
 当前锁定版本中没有发现迫使 Atogaki 自有源码采用 GPL、AGPL 或 SSPL 的必选依赖。Atogaki 继续使用 Apache-2.0；第三方组件保留各自许可。最重要的分发义务来自 LGPL FFmpeg/FriBidi 字幕栈：Release 必须同时提供许可证、精确对应源码、校验值和重建信息。
 
-该结论只适用于当前 macOS arm64 锁文件与当前 sidecar 配置。x86_64 macOS、Windows、新 provider、新模型格式或任何依赖升级都需要单独审计。
+该结论适用于当前 macOS arm64 已发布配置，以及下文单独记录的 Windows x86_64 构建配置。x86_64 macOS、Windows ARM64、新 provider、新模型格式或任何依赖升级都需要单独审计。
 
 ## Rust 与 Tauri
 
@@ -43,6 +43,19 @@ cargo install --locked --features cli --version 0.9.1 cargo-about
 - 1 个运行依赖：`@tauri-apps/api`，Apache-2.0 OR MIT；
 - 60 个构建依赖，使用 MIT、Apache-2.0、BSD-3-Clause、ISC 或 MPL-2.0；其中 lightningcss 的平台/构建包为 MPL-2.0，但不会作为 Node package 复制进 App；
 - 运行依赖缺少已安装许可证全文，或 lockfile 出现未审查表达式时，生成立即失败。
+
+## Windows x86_64 差异审计
+
+Windows 使用同一 `src-tauri/Cargo.lock`，但按 `x86_64-pc-windows-msvc` 重新解析 target-specific 依赖并生成 [`src-tauri/third-party/rust-licenses-windows.html`](../src-tauri/third-party/rust-licenses-windows.html)。报告包含 Windows、WebView2、注册表与 MSVC target crate；接受的许可证类别仍为 Apache-2.0、MIT、Unicode-3.0、BSD-3-Clause、MPL-2.0、ISC、CDLA-Permissive-2.0、Zlib 与 0BSD，没有新增 GPL、AGPL、SSPL 或未知表达式。Windows CI 使用固定 `cargo-about 0.9.1` 离线重生成，并在报告与仓库版本不一致时停止打包。
+
+Windows sidecar 与 macOS 使用同一组固定上游版本和源码 SHA-256，但构建清单、二进制哈希和对应源码包按 target 独立生成：
+
+- `whisper-cli.exe` 使用 MSVC 静态 CPU 基线；FFmpeg／libass 字幕栈使用 MSYS2 UCRT64／MinGW-w64，并通过独立进程边界与 Atogaki 通信。
+- FFmpeg 构建检查 `--disable-gpl`、`--disable-nonfree`、无 libx264、LGPL 自述、`ass` filter 与 MPEG-4 encoder。
+- PE 依赖检查拒绝 `msys-2.0.dll`、MinGW GCC／C++／pthread DLL 和动态字幕栈 DLL，避免用户机器隐式依赖开发环境。
+- 对应源码归档包含七份精确上游源码、Windows 构建脚本、许可证、清单和逐文件 SHA-256；它与 NSIS 安装包分别作为 Actions Artifact／未来 Release asset 保存。
+
+这证明依赖闭包和构建材料达到 Windows 打包基线；未签名 NSIS 的 SmartScreen 行为、真实用户数据目录、Credential Manager、媒体闭环与卸载边界仍必须在 Windows 11 实机验收，不能由许可证审计替代。
 
 复现命令：
 
