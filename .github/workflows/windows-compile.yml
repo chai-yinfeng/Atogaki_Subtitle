@@ -56,4 +56,9 @@ jobs:
         run: cargo test --locked
 
       - name: Compile Tauri desktop shell
+        env:
+          # W1 verifies the Windows Rust/Tauri integration before W2 produces
+          # real, audited sidecars. Tauri otherwise rejects missing externalBin
+          # files from its build script even during `cargo check`.
+          TAURI_CONFIG: '{"bundle":{"externalBin":[]}}'
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
