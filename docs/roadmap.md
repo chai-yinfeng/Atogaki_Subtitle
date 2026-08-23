@@ -1,6 +1,6 @@
 # 开发路线图
 
-_最后更新：2026-08-22_
+_最后更新：2026-08-23_
 
 路线图按用户价值排序；完成一个阶段前，不提前将后续阶段变成产品默认路径。
 
@@ -101,6 +101,8 @@ _最后更新：2026-08-22_
 2026-08-22 完成 W2 与安装包自动化基线。Windows Actions 从固定源码构建 CPU `whisper-cli.exe` 和 LGPL-only FFmpeg／ffprobe，检查 ASS、MPEG-4、禁用 GPL/nonfree/libx264、拒绝意外的 MSYS2／MinGW／动态字幕栈 DLL，并生成目标专属 Rust／前端声明、许可证目录、构建清单和对应源码归档。当前成功运行 [32575359901](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359901) 生成 current-user NSIS，在 runner 上完成静默安装、三个内置 sidecar 启动与能力检查、合规资源检查和静默卸载，并上传带 SHA-256 的未签名测试安装包；同提交的[原生编译基线](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359911)也通过。该结果不替代 Windows 11 实机上的 SmartScreen、窗口、Credential Manager、用户数据和真实媒体闭环验收。
 
 2026-08-22 开始 Windows 11 实机回归：安装包可正常启动，模型下载已进入实际传输，翻译 provider API 调用通过。首轮同时发现桌面主程序仍使用 PE Console 子系统，启动会附带无用途的终端窗口；现已将 Release 主程序改为 GUI 子系统，并让 Whisper／FFmpeg／ffprobe 子进程在 Windows 使用 `CREATE_NO_WINDOW`。修复候选由 [Windows sidecars 32581475065](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32581475065) 重新打包，CI 已读取安装后 EXE 的 PE Header、确认 GUI 子系统，并通过安装、sidecar 能力和卸载冒烟；仍需在同一实机确认启动、识别和烧录全程不再出现终端。
+
+2026-08-23 修复候选完成后，Windows 实机在已测试范围内未再发现其他问题，允许发布首个明确标注“Windows 11 x86_64、未签名、CPU 基线”的预发布版，邀请更多 Windows 用户扩大设备、媒体和完整工作流覆盖。该结论是 alpha 扩测门禁通过，不等同于 W3/W4 所有矩阵已经由单台设备逐项验收。
 
 Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续以 macOS Apple Silicon 为质量基线，不为每个功能分支 push 生成 Windows 安装包。共享代码在 PR 或进入 `main` 时运行路径过滤后的 Windows 编译门禁；完整 sidecar、许可证和 NSIS 流水线只在 Windows 打包基础设施变化时自动验证，普通产品代码由选定的 Windows 稳定候选 commit 手动触发。平台继续共享同一业务代码，不维护长期 Windows 产品分支。详见决策记录 0031。
 

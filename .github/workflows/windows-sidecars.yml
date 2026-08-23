@@ -36,6 +36,11 @@ on:
       - "src-tauri/icons/**"
       - "src-tauri/tauri.windows.conf.json"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing prerelease tag to publish; leave blank to build Artifacts only"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -218,3 +223,82 @@ jobs:
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
             src-tauri/target/release/bundle/nsis/*-setup.exe.sha256
+
+  publish:
+    name: Publish Windows prerelease
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+    needs: build
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download NSIS Artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: Atogaki-windows-x86_64-unsigned-nsis
+          path: release-assets/installer
+
+      - name: Download corresponding-source Artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: Atogaki-windows-x86_64-sidecars
+          path: release-assets/sidecars
+
+      - name: Verify and stage release assets
+        id: release-assets
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+-alpha\.\d+$') {
+            throw "release_tag must look like v0.1.0-alpha.6"
+          }
+          $tagCommit = (git rev-list -n 1 $env:RELEASE_TAG).Trim()
+          if (-not $tagCommit -or $tagCommit -ne $env:GITHUB_SHA) {
+            throw "release tag $env:RELEASE_TAG must already exist and point to $env:GITHUB_SHA"
+          }
+          $notes = "docs/release-notes/$env:RELEASE_TAG.md"
+          if (-not (Test-Path $notes)) {
+            throw "release notes are missing: $notes"
+          }
+
+          $installer = Get-ChildItem "release-assets/installer/*-setup.exe" | Select-Object -First 1
+          $installerChecksum = Get-ChildItem "release-assets/installer/*-setup.exe.sha256" | Select-Object -First 1
+          $sources = Get-ChildItem "release-assets/sidecars" -Filter "*-third-party-sources.tar.gz" -Recurse | Select-Object -First 1
+          $sourcesChecksum = Get-ChildItem "release-assets/sidecars" -Filter "*-third-party-sources.tar.gz.sha256" -Recurse | Select-Object -First 1
+          foreach ($asset in @($installer, $installerChecksum, $sources, $sourcesChecksum)) {
+            if (-not $asset) { throw "one or more required Windows release assets are missing" }
+          }
+
+          $expectedInstallerHash = (Get-Content $installerChecksum.FullName).Split()[0].ToLowerInvariant()
+          $actualInstallerHash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
+          if ($actualInstallerHash -ne $expectedInstallerHash) { throw "NSIS checksum mismatch" }
+          $expectedSourcesHash = (Get-Content $sourcesChecksum.FullName).Split()[0].ToLowerInvariant()
+          $actualSourcesHash = (Get-FileHash -Algorithm SHA256 $sources.FullName).Hash.ToLowerInvariant()
+          if ($actualSourcesHash -ne $expectedSourcesHash) { throw "corresponding-source checksum mismatch" }
+
+          New-Item -ItemType Directory -Force "release-assets/staged" | Out-Null
+          $releaseInstaller = "release-assets/staged/Atogaki-$env:RELEASE_TAG-windows-x86_64-setup.exe"
+          Copy-Item $installer.FullName $releaseInstaller
+          Set-Content "$releaseInstaller.sha256" "$actualInstallerHash  $(Split-Path -Leaf $releaseInstaller)" -Encoding ascii
+          Copy-Item $sources.FullName "release-assets/staged/$($sources.Name)"
+          Copy-Item $sourcesChecksum.FullName "release-assets/staged/$($sourcesChecksum.Name)"
+          "notes=$notes" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          NOTES_FILE: ${{ steps.release-assets.outputs.notes }}
+        run: |
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) { throw "release already exists: $env:RELEASE_TAG" }
+          $assets = Get-ChildItem "release-assets/staged/*" | ForEach-Object { $_.FullName }
+          gh release create $env:RELEASE_TAG @assets --verify-tag --prerelease --latest=false --title "Atogaki $env:RELEASE_TAG" --notes-file $env:NOTES_FILE

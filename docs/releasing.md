@@ -1,8 +1,8 @@
 # 发布说明
 
-_最后更新：2026-08-22_
+_最后更新：2026-08-23_
 
-macOS Apple Silicon 是当前已验证的预发布平台，Windows x86_64 是下一目标。Windows 构建、sidecar、系统集成和真实设备验收的工作分解见 `docs/windows-porting.md`；在其中的发布门禁完成前，本文件后续步骤只适用于 macOS，不得据此宣称已经支持 Windows。
+macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 已建立未签名预发布基线，按选定稳定候选集中构建和实机回归；两个平台共享产品代码，但不要求每次 macOS 开发提交都同步生成 Windows 安装包。
 
 ## macOS Apple Silicon
 
@@ -50,3 +50,17 @@ gh release create v0.1.0-alpha.1 \
 首轮建议手工发布以稳定构建清单和窗口回归。取得 Apple Developer Program 资格后，再让 GitHub Actions 在版本 tag 上构建、签名、公证、装订 notarization ticket、生成 DMG 和校验文件，并上传到同一个 Release。签名证书、App Store Connect API key 等只放 GitHub Actions encrypted secrets，不进入仓库。
 
 当前 Apple Silicon App 使用 ad-hoc 签名并声明最低 macOS 12.0；这可以保证 Bundle 完整性，但不能代替 Developer ID 签名与公证，也不会消除外部下载时的 Gatekeeper 提示。DMG 已在本机用 `hdiutil verify` 通过结构校验，并确认包含 `.app`、Applications 链接、三个 sidecar、Apache-2.0 项目许可证和第三方构建清单。Tauri 配置现已固定 660×400 Finder 窗口及“App 左、Applications 右”的图标位置；`CI=true` 的无美化产物仍只用于结构校验。当前 macOS 26 环境的非 CI Finder 美化脚本仍需在最终发布前实机构建并复核，自动化不能用无布局产物替代这项发布门禁。
+
+## Windows 11 x86_64
+
+Windows 预发布资产包括带版本名的 NSIS 安装器、相邻 SHA-256，以及包含 FFmpeg、whisper.cpp 和静态字幕栈精确源码／许可证／构建材料的 `.tar.gz` 与相邻 SHA-256。模型不进入安装包。当前安装器没有商业代码签名，只能提供给知情测试者；不得建议用户全局关闭 SmartScreen 或杀毒软件。
+
+发布流程：
+
+1. 从干净的候选 commit 创建并推送唯一的新预发布 tag；不得复用或移动已经公开的 tag。
+2. 在 GitHub Actions 手动运行 `Windows sidecars`，选择该 tag 所在 ref，并在 `release_tag` 输入同一 tag。留空只生成 14 天 Artifact，不创建 Release。
+3. 构建 job 重新生成 Windows Rust／前端许可证、复用或重建已审计 sidecar、生成 NSIS，并完成 PE GUI 子系统、安装、能力与卸载冒烟。
+4. 只有构建完全通过后，独立发布 job 才取得 `contents: write` 权限。它确认 tag 精确指向本次 commit，验证安装器和对应源码的 SHA-256，从仓库读取同 tag 发布说明，然后创建 GitHub prerelease。
+5. 在 Windows 11 x86_64 实机从最终 Release 重新下载并抽查哈希、SmartScreen、启动、模型、provider、识别、导出／烧录和卸载；多人扩展测试继续按 `docs/windows-testing.md` 反馈。
+
+Windows 日常共享代码只在 PR／`main` 运行编译门禁；完整安装包不跟随普通产品提交。发布 job 拒绝不存在、指向其他 commit、格式不是 `vX.Y.Z-alpha.N` 或缺少 `docs/release-notes/<tag>.md` 的 tag，也拒绝覆盖已有 Release。
