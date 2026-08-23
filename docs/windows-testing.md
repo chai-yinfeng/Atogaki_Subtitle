@@ -10,7 +10,7 @@ _适用候选：`v0.1.0-alpha.6` Windows x86_64 预发布；未签名 alpha，�
 
 ## 0. 获取并校验候选
 
-1. 从 GitHub Release 下载 `Atogaki-v0.1.0-alpha.6-windows-x86_64-setup.exe` 及相邻 `.sha256`。开发中的未发布候选才从对应 Actions 运行下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact。
+1. 从 [`v0.1.0-alpha.6` GitHub Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6) 下载 `Atogaki-v0.1.0-alpha.6-windows-x86_64-setup.exe` 及相邻 `.sha256`。开发中的未发布候选才从对应 Actions 运行下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact。
 2. 在解压目录打开 PowerShell，校验安装器旁的 SHA-256：
 
 ```powershell
@@ -56,3 +56,5 @@ $actual -eq $expected
 2026-08-22 第一轮候选可正常启动，模型下载已进入实际传输，翻译 provider API 调用通过。该候选启动时会同时出现无用途的终端窗口，已在 `32581475065` 修复并增加 CI PE GUI 子系统门禁；覆盖安装后优先复核 App 启动、识别和烧录三个阶段均不出现终端，再继续其余清单。
 
 2026-08-23 修复候选在当前实机测试范围内未再发现其他问题，允许将同一代码基线发布为 `v0.1.0-alpha.6`，由更多 Windows 用户扩大覆盖。尚未逐项记录的设备、路径、悬浮字幕、多显示器、真实英语／韩语媒体和卸载边界继续按本清单反馈，不因进入 prerelease 自动视为通过。
+
+2026-08-23 `v0.1.0-alpha.6` 已由[固定 tag 发布流水线](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32622817441)完成冷构建、哈希核对、静默安装／卸载冒烟并发布。后续测试统一从 Release 获取带版本名的最终安装包，不再转发短期 Actions Artifact。

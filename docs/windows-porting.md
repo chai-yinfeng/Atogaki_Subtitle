@@ -1,6 +1,6 @@
 # Windows x86_64 兼容计划
 
-_状态：W1/W2 与 NSIS 自动化基线完成，W3 实机系统集成进行中；最后更新：2026-08-22_
+_状态：W1/W2 与 NSIS 自动发布基线完成，首个 Windows prerelease 已发布，W3/W4 多设备实测进行中；最后更新：2026-08-23_
 
 ## 目标与边界
 
@@ -23,7 +23,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 - Explorer 文件选中路径已经实现并通过 Windows 编译；中文、空格、长路径、非系统盘和现有 Explorer 进程下的窗口行为仍需实机验证。
 - 悬浮字幕的非 macOS 路径尚未在 Windows 普通桌面、多显示器、任务栏和最小化／关闭流程中验证。
 - 部分错误和能力文案直接提到 VideoToolbox 或 Finder，需要按实际平台显示；实时录音代码仍固定使用 AVFoundation，但实时能力不属于本阶段。
-- README、发布说明和测试记录目前只有 macOS 构建命令与候选产物，Windows 安装包类型、命名和校验流程尚未固定。
+- Windows NSIS 类型、Release 命名和校验流程已经固定；README 的平台入口与面向非开发者的安装说明仍需随扩测反馈继续完善。
 
 ## 实施顺序
 
@@ -56,6 +56,8 @@ Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisp
 
 2026-08-22 当前自动化出口由 [Windows sidecars 32581475065](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32581475065) 通过。流水线固定 Node.js 22、Rust 1.95.0、Tauri CLI 2.11.0、MSVC 和 MSYS2 UCRT64，离线锁定构建 NSIS，并在安装目录检查主程序 PE GUI 子系统、运行三个 sidecar、检查 Rust／前端／sidecar 合规资源和卸载结果。上传的 `Atogaki-windows-x86_64-unsigned-nsis` Artifact 约 27.6 MB，`Atogaki-windows-x86_64-sidecars` 约 75.9 MB，后者包含二进制、许可证和对应源码；两者当前保留到 2026-09-05。CI runner 上的安装冒烟证明包内闭合性，但 W2 的“干净用户设备”最终确认与 W3/W4 仍合并在 Windows 11 实机执行。
 
+2026-08-23 的[发布流水线 32622817441](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32622817441)从 `v0.1.0-alpha.6` 固定 tag 冷构建并通过相同门禁，随后由最小写权限的独立 job 核验 tag、产物哈希与发布说明，创建[首个 Windows x86_64 prerelease](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6)。Release 同时提供带版本名的 NSIS、SHA-256、对应源码包及其 SHA-256；Actions Artifact 继续只用于开发候选。
+
 完整流水线不跟随普通产品代码 push：Windows 构建脚本、sidecar 版本、合规生成器、安装冒烟或 Windows 专属打包配置变化时，PR／`main` 自动验证；选定的 Windows 稳定候选则从目标 commit 手动触发 `workflow_dispatch`。日常 macOS 开发因此只在合并边界承担编译门禁，不持续生成约 27.6 MB 的临时安装包。
 
 ### W3. 平台系统集成
@@ -74,7 +76,7 @@ Windows sidecar 工具链已由决策记录 0030 固定：Tauri／Rust 与 whisp
 
 2026-08-22 完成第一批 W3 代码准备：导出字幕和烧录视频可通过 `explorer.exe /select,` 选中文件，界面不再在 Windows 显示 Finder 操作或无意义的 VideoToolbox 不可用状态；Windows 首版 MPEG-4 被记录为正常软件编码，只有 macOS 的硬件尝试失败才保存 VideoToolbox fallback reason。当前提交已通过[原生 Windows 编译与共享测试](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359911)，实际 Explorer、WebView2 和窗口行为按 [`windows-testing.md`](windows-testing.md) 执行。
 
-2026-08-22 第一轮 Windows 11 实机已确认安装包可启动、模型下载进入实际传输、翻译 provider API 可用；同时发现主程序启动会附带 Console 窗口。修复后 Release 主程序使用 Windows GUI 子系统，所有运行时 Whisper／FFmpeg／ffprobe 调用统一带 `CREATE_NO_WINDOW`，避免后续识别、媒体探测和烧录再次闪出终端。CI 已对安装后主程序增加 PE 子系统门禁；真实窗口无终端仍等待修复候选覆盖安装后复核。
+2026-08-22 第一轮 Windows 11 实机已确认安装包可启动、模型下载进入实际传输、翻译 provider API 可用；同时发现主程序启动会附带 Console 窗口。修复后 Release 主程序使用 Windows GUI 子系统，所有运行时 Whisper／FFmpeg／ffprobe 调用统一带 `CREATE_NO_WINDOW`，避免后续识别、媒体探测和烧录再次闪出终端。CI 已对安装后主程序增加 PE 子系统门禁；2026-08-23 修复候选实机测试未再发现其他问题，并以 `v0.1.0-alpha.6` 进入多人扩测。
 
 ### W4. 离线闭环与安装包候选
 

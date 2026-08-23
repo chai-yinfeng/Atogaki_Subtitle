@@ -104,6 +104,8 @@ _最后更新：2026-08-23_
 
 2026-08-23 修复候选完成后，Windows 实机在已测试范围内未再发现其他问题，允许发布首个明确标注“Windows 11 x86_64、未签名、CPU 基线”的预发布版，邀请更多 Windows 用户扩大设备、媒体和完整工作流覆盖。该结论是 alpha 扩测门禁通过，不等同于 W3/W4 所有矩阵已经由单台设备逐项验收。
 
+2026-08-23 已发布 [Windows x86_64 预发布版 `v0.1.0-alpha.6`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6)。固定 tag 的[发布流水线 32622817441](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32622817441) 从源码冷构建 Whisper、LGPL-only FFmpeg／libass 和 Tauri NSIS，重新生成目标许可证材料，通过 PE GUI、sidecar 能力、静默安装与卸载门禁后，自动发布约 27.6 MB 的安装包、SHA-256、对应源码包及其 SHA-256。该版本进入多人 Windows 设备扩测，代码签名、W3/W4 未记录矩阵和真实媒体覆盖仍是后续风险。
+
 Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续以 macOS Apple Silicon 为质量基线，不为每个功能分支 push 生成 Windows 安装包。共享代码在 PR 或进入 `main` 时运行路径过滤后的 Windows 编译门禁；完整 sidecar、许可证和 NSIS 流水线只在 Windows 打包基础设施变化时自动验证，普通产品代码由选定的 Windows 稳定候选 commit 手动触发。平台继续共享同一业务代码，不维护长期 Windows 产品分支。详见决策记录 0031。
 
 2026-08-22 开始 W3 代码准备：字幕和烧录成品可调用 Windows Explorer 选中文件，界面按平台显示 Finder／Explorer，并把 Windows 首版 MPEG-4 记为正常软件编码基线，而不是伪装成 VideoToolbox 失败回退。相关 Windows 原生编译已通过，Explorer 窗口行为、中文／长路径和多显示器仍留给实机验证。

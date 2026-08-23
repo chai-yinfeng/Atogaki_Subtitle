@@ -1,6 +1,6 @@
 # 第三方依赖许可证审计
 
-_审计日期：2026-08-06_
+_审计日期：2026-08-23_
 
 本记录用于 Atogaki `0.1.0` macOS Apple Silicon 预发布基线和 Windows x86_64 构建基线的工程审计，不构成法律意见。每次升级锁文件、sidecar 或目标平台后都必须重新生成并复核。
 
@@ -53,9 +53,11 @@ Windows sidecar 与 macOS 使用同一组固定上游版本和源码 SHA-256，�
 - `whisper-cli.exe` 使用 MSVC 静态 CPU 基线；FFmpeg／libass 字幕栈使用 MSYS2 UCRT64／MinGW-w64，并通过独立进程边界与 Atogaki 通信。
 - FFmpeg 构建检查 `--disable-gpl`、`--disable-nonfree`、无 libx264、LGPL 自述、`ass` filter 与 MPEG-4 encoder。
 - PE 依赖检查拒绝 `msys-2.0.dll`、MinGW GCC／C++／pthread DLL 和动态字幕栈 DLL，避免用户机器隐式依赖开发环境。
-- 对应源码归档包含七份精确上游源码、Windows 构建脚本、许可证、清单和逐文件 SHA-256；它与 NSIS 安装包分别作为 Actions Artifact／未来 Release asset 保存。
+- 对应源码归档包含七份精确上游源码、Windows 构建脚本、许可证、清单和逐文件 SHA-256；开发候选将它与 NSIS 作为 Actions Artifact 保存，公开预发布则将二者及各自 SHA-256 放入同一 Release。
 
 2026-08-22 的 [Windows sidecars 32575359901](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359901) 在 Windows Server 2022 runner 上重新生成 Rust target 与前端报告并确认仓库无差异，完成 LGPL 配置与 PE 依赖检查、对应源码归档、NSIS 安装后能力检查和卸载；这使上述 Windows 构建结论成为已执行的 CI 基线，而不是只在 macOS 上准备的交叉平台材料。
+
+2026-08-23 的 [`v0.1.0-alpha.6` 发布流水线](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32622817441)在固定 tag 上再次从源码冷构建并完成同一审计与安装门禁；其[公开 prerelease](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6)同时提供安装器、安装器 SHA-256、45.5 MB 对应源码包及其 SHA-256，验证 Windows LGPL 交付材料已实际随二进制发布。
 
 这证明依赖闭包和构建材料达到 Windows 打包基线；未签名 NSIS 的 SmartScreen 行为、真实用户数据目录、Credential Manager、媒体闭环与卸载边界仍必须在 Windows 11 实机验收，不能由许可证审计替代。
 
