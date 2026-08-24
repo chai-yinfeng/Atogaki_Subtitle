@@ -1,5 +1,6 @@
 /target
 /atogaki_jobs
+/local-artifacts/
 .DS_Store
 
 .idea
