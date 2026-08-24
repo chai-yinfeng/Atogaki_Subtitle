@@ -123,6 +123,46 @@ type JobDetail = {
   audio_fallback_path: string | null;
 };
 
+type LearningOccurrence = {
+  id: string;
+  learning_item_id: string;
+  job_id: string | null;
+  segment_id: string | null;
+  job_display_name_snapshot: string;
+  segment_source_snapshot: string;
+  segment_translation_snapshot: string | null;
+  selection_start_utf16: number;
+  selection_end_utf16: number;
+  start_ms: number;
+  end_ms: number;
+  created_at_unix: number;
+};
+
+type LearningItemDetail = {
+  item: {
+    id: string;
+    source_language: LanguageCode;
+    target_language: LanguageCode;
+    item_type: "selection" | "sentence";
+    source_text: string;
+    meaning_text: string | null;
+    meaning_provider_id: string | null;
+    meaning_source_label: string | null;
+    occurrence_count: number;
+    created_at_unix: number;
+    updated_at_unix: number;
+  };
+  occurrences: LearningOccurrence[];
+};
+
+type PendingLearningSelection = {
+  jobId: string;
+  segmentId: string;
+  selectedText: string;
+  selectionStartUtf16: number;
+  selectionEndUtf16: number;
+};
+
 type WaveformPeak = {
   min: number;
   max: number;
@@ -308,7 +348,7 @@ type SubtitleOverlayPayload = {
 };
 
 type WorkspaceSection = "review" | "translation" | "export";
-type TopLevelArea = "workbench" | "listening" | "karaoke" | "workspace";
+type TopLevelArea = "workbench" | "listening" | "learning" | "karaoke" | "workspace";
 
 const desktopPlatform = navigator.userAgent.includes("Windows")
   ? "windows"
@@ -335,6 +375,7 @@ app.innerHTML = `
         <nav class="primary-navigation" aria-label="主要区域">
           <button id="show-workbench" type="button" class="secondary active">工作台</button>
           <button id="show-listening" type="button" class="secondary">收听</button>
+          <button id="show-learning" type="button" class="secondary">学习</button>
         </nav>
         <button id="open-settings" type="button" class="secondary">设置</button>
         <button id="refresh" type="button">刷新任务</button>
@@ -382,7 +423,7 @@ app.innerHTML = `
     </div>
     <section id="listening-view" class="listening-view hidden" aria-labelledby="listening-title">
       <div class="module-heading listening-heading">
-        <div><p class="eyebrow">LISTENING LIBRARY</p><h2 id="listening-title">收听</h2><p>只展示已经完整翻译的任务。这里不修改字幕，适合播放、切换节目和使用悬浮字幕。</p></div>
+        <div><p class="eyebrow">LISTENING LIBRARY</p><h2 id="listening-title">收听</h2><p>阅读全文并跟随播放；选择一段原文即可收藏词语、短语或语法表达。</p></div>
       </div>
       <div class="listening-layout">
         <aside class="listening-library" aria-label="可收听任务">
@@ -409,9 +450,26 @@ app.innerHTML = `
             <p id="listening-current-source">原文字幕</p>
             <p id="listening-current-translation">简体中文翻译</p>
           </div>
-          <div id="listening-subtitle-list" class="listening-subtitle-list"></div>
+          <div id="listening-subtitle-list" class="listening-subtitle-list" aria-label="节目全文"></div>
+          <div id="listening-selection-menu" class="selection-menu hidden" role="dialog" aria-label="收藏所选原文">
+            <div><span>已选择</span><strong id="listening-selection-text"></strong></div>
+            <p id="listening-selection-message">可先收藏，之后在学习区补充标准译义。</p>
+            <div class="selection-menu-actions">
+              <button id="save-learning-selection" type="button">收藏词语／语法</button>
+              <button id="save-learning-sentence" type="button" class="secondary">收藏整句</button>
+              <button id="close-learning-selection" type="button" class="secondary">取消</button>
+            </div>
+          </div>
         </section>
       </div>
+    </section>
+    <section id="learning-view" class="learning-view hidden" aria-labelledby="learning-title">
+      <div class="module-heading learning-heading">
+        <div><p class="eyebrow">LEARNING LIBRARY</p><h2 id="learning-title">学习</h2><p>保存词语、短语、语法表达与整句，在原节目语境中反复回听。</p></div>
+        <button id="refresh-learning" type="button" class="secondary">刷新单词本</button>
+      </div>
+      <p id="learning-message" class="learning-message" role="status"></p>
+      <div id="learning-item-list" class="learning-item-list"></div>
     </section>
     <section id="karaoke-view" class="karaoke-view hidden" aria-labelledby="karaoke-title">
       <div class="module-heading karaoke-heading">
@@ -757,6 +815,7 @@ app.innerHTML = `
 
 const homeView = document.querySelector<HTMLDivElement>("#home-view");
 const listeningView = document.querySelector<HTMLElement>("#listening-view");
+const learningView = document.querySelector<HTMLElement>("#learning-view");
 const karaokeView = document.querySelector<HTMLElement>("#karaoke-view");
 const shell = document.querySelector<HTMLElement>(".shell");
 const workspaceView = document.querySelector<HTMLElement>("#workspace-view");
@@ -831,6 +890,13 @@ const listeningTogglePlaybackButton = document.querySelector<HTMLButtonElement>(
 const listeningForwardMediaButton = document.querySelector<HTMLButtonElement>("#listening-forward-media");
 const listeningNextSubtitleButton = document.querySelector<HTMLButtonElement>("#listening-next-subtitle");
 const listeningPlaybackRateSelect = document.querySelector<HTMLSelectElement>("#listening-playback-rate");
+const listeningSelectionMenu = document.querySelector<HTMLDivElement>("#listening-selection-menu");
+const listeningSelectionText = document.querySelector<HTMLElement>("#listening-selection-text");
+const listeningSelectionMessage = document.querySelector<HTMLParagraphElement>("#listening-selection-message");
+const saveLearningSelectionButton = document.querySelector<HTMLButtonElement>("#save-learning-selection");
+const saveLearningSentenceButton = document.querySelector<HTMLButtonElement>("#save-learning-sentence");
+const learningItemList = document.querySelector<HTMLDivElement>("#learning-item-list");
+const learningMessage = document.querySelector<HTMLParagraphElement>("#learning-message");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translationRunStatusText = document.querySelector<HTMLSpanElement>("#translation-run-status");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
@@ -938,6 +1004,9 @@ let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelDownloadPoll: number | null = null;
 const settingsDirtyFields = new Set<string>();
+let learningItems: LearningItemDetail[] = [];
+let pendingLearningSelection: PendingLearningSelection | null = null;
+let learningActionBusy = false;
 let workspaceElapsedTimer: number | null = null;
 let playbackPositionSaveTimer: number | null = null;
 let lastPlaybackPositionSavedAt = 0;
@@ -1803,6 +1872,7 @@ function showWorkspace(show: boolean): void {
   homeView?.classList.toggle("hidden", show);
   workspaceView?.classList.toggle("hidden", !show);
   listeningView?.classList.add("hidden");
+  learningView?.classList.add("hidden");
   karaokeView?.classList.add("hidden");
   if (show) currentArea = "workspace";
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", show);
@@ -1850,6 +1920,7 @@ async function stopActivePlayback(): Promise<void> {
 }
 
 async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">): Promise<void> {
+  closeLearningSelection();
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;
@@ -1859,13 +1930,16 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">): Promi
   workspaceView?.classList.add("hidden");
   homeView?.classList.toggle("hidden", area !== "workbench");
   listeningView?.classList.toggle("hidden", area !== "listening");
+  learningView?.classList.toggle("hidden", area !== "learning");
   karaokeView?.classList.toggle("hidden", area !== "karaoke");
   document.querySelector<HTMLButtonElement>("#show-workbench")?.classList.toggle("active", area === "workbench");
   document.querySelector<HTMLButtonElement>("#show-listening")?.classList.toggle("active", area === "listening");
+  document.querySelector<HTMLButtonElement>("#show-learning")?.classList.toggle("active", area === "learning");
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", area === "karaoke");
   updatePlaybackControls();
   renderSubtitleOverlayButton();
   renderListeningJobs(latestJobs);
+  if (area === "learning") await refreshLearningItems();
   if (area === "karaoke" && karaokeSelectedJobId) {
     await openKaraokeJob(karaokeSelectedJobId);
     if (currentArea !== "karaoke") return;
@@ -1873,7 +1947,11 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">): Promi
   window.scrollTo({ top: 0, behavior: "auto" });
 }
 
-async function openListeningJob(jobId: string): Promise<void> {
+async function openListeningJob(
+  jobId: string,
+  resumeOverrideMs: number | null = null,
+  autoplay = false,
+): Promise<void> {
   if (!jobId || !listeningMediaMessage) return;
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
@@ -1883,7 +1961,7 @@ async function openListeningJob(jobId: string): Promise<void> {
   renderSubtitleOverlayButton();
   listeningMediaMessage.textContent = "正在读取节目…";
   try {
-    const [detail, resumeMs] = await Promise.all([
+    const [detail, savedResumeMs] = await Promise.all([
       invoke<JobDetail>("get_job_detail", { jobId }),
       invoke<number>("get_playback_position", { jobId }),
     ]);
@@ -1893,9 +1971,11 @@ async function openListeningJob(jobId: string): Promise<void> {
     if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
     renderListeningJobs(latestJobs);
     renderListeningSubtitles(detail.segments);
+    const resumeMs = resumeOverrideMs ?? savedResumeMs;
     mountMedia(detail.playback_path, detail.audio_fallback_path, listeningMediaHost, listeningMediaMessage, resumeMs);
     updateActiveSubtitle(resumeMs);
     renderSubtitleOverlayButton();
+    if (autoplay && activeMedia) await activeMedia.play();
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "listening") return;
     listeningMediaMessage.textContent = `无法打开节目：${String(error)}`;
@@ -1904,10 +1984,259 @@ async function openListeningJob(jobId: string): Promise<void> {
 
 function renderListeningSubtitles(segments: SubtitleSegment[]): void {
   if (!listeningSubtitleList) return;
-  listeningSubtitleList.innerHTML = segments.map((segment) => `<button type="button" class="listening-subtitle" data-segment-id="${escapeHtml(segment.id)}" data-listen-time="${segment.start_ms}"><span>${escapeHtml(formatTime(segment.start_ms))}</span><strong>${escapeHtml(segment.source_text)}</strong><em>${escapeHtml(segment.translated_text ?? "")}</em></button>`).join("");
+  closeLearningSelection();
+  listeningSubtitleList.innerHTML = segments.map((segment) => `
+    <article class="listening-subtitle" data-segment-id="${escapeHtml(segment.id)}">
+      <button type="button" class="listening-time" data-listen-time="${segment.start_ms}" aria-label="跳转到 ${escapeHtml(formatTime(segment.start_ms))}">${escapeHtml(formatTime(segment.start_ms))}</button>
+      <div class="listening-text">
+        <p class="listening-source" data-learning-source title="选择词语、短语或语法表达后收藏">${escapeHtml(segment.source_text)}</p>
+        <p class="listening-translation">${escapeHtml(segment.translated_text ?? "")}</p>
+      </div>
+      <button type="button" class="collect-learning-sentence secondary" data-collect-sentence="${escapeHtml(segment.id)}">收藏整句</button>
+    </article>`).join("");
   listeningSubtitleList.querySelectorAll<HTMLButtonElement>("[data-listen-time]").forEach((button) => {
     button.addEventListener("click", () => seekTo(Number(button.dataset.listenTime ?? "0")));
   });
+  listeningSubtitleList.querySelectorAll<HTMLButtonElement>("[data-collect-sentence]").forEach((button) => {
+    button.addEventListener("click", () => void saveLearningSentence(button.dataset.collectSentence ?? ""));
+  });
+}
+
+function selectionOffsetWithin(root: HTMLElement, node: Node, offset: number): number {
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  range.setEnd(node, offset);
+  return range.toString().length;
+}
+
+function captureListeningSelection(): void {
+  if (currentArea !== "listening" || !activeDetail || !listeningSubtitleList) return;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return;
+  const range = selection.getRangeAt(0);
+  const source = (range.startContainer instanceof Element
+    ? range.startContainer
+    : range.startContainer.parentElement)?.closest<HTMLElement>("[data-learning-source]");
+  if (!source || !source.contains(range.startContainer) || !source.contains(range.endContainer)) {
+    closeLearningSelection(false);
+    return;
+  }
+  const segmentElement = source.closest<HTMLElement>("[data-segment-id]");
+  const segmentId = segmentElement?.dataset.segmentId;
+  if (!segmentId) return;
+  let start = selectionOffsetWithin(source, range.startContainer, range.startOffset);
+  let end = selectionOffsetWithin(source, range.endContainer, range.endOffset);
+  if (end < start) [start, end] = [end, start];
+  const rawText = source.textContent ?? "";
+  const rawSelection = rawText.slice(start, end);
+  const leadingWhitespace = rawSelection.length - rawSelection.trimStart().length;
+  const trailingWhitespace = rawSelection.length - rawSelection.trimEnd().length;
+  start += leadingWhitespace;
+  end -= trailingWhitespace;
+  const selectedText = rawText.slice(start, end);
+  if (!selectedText) {
+    closeLearningSelection(false);
+    return;
+  }
+  pendingLearningSelection = {
+    jobId: activeDetail.job.job_id,
+    segmentId,
+    selectedText,
+    selectionStartUtf16: start,
+    selectionEndUtf16: end,
+  };
+  if (listeningSelectionText) listeningSelectionText.textContent = selectedText;
+  if (listeningSelectionMessage) {
+    listeningSelectionMessage.textContent = "可先收藏，之后在学习区补充标准译义。";
+    listeningSelectionMessage.classList.remove("warning");
+  }
+  listeningSelectionMenu?.classList.remove("hidden");
+  const followState = subtitleFollowState(listeningSubtitleList);
+  followState.userScrollingUntil = Number.MAX_SAFE_INTEGER;
+}
+
+function closeLearningSelection(clearBrowserSelection = true): void {
+  pendingLearningSelection = null;
+  listeningSelectionMenu?.classList.add("hidden");
+  if (clearBrowserSelection) window.getSelection()?.removeAllRanges();
+  if (listeningSubtitleList) {
+    subtitleFollowState(listeningSubtitleList).userScrollingUntil = Date.now() + 3_000;
+  }
+}
+
+function setLearningBusy(busy: boolean): void {
+  learningActionBusy = busy;
+  if (saveLearningSelectionButton) saveLearningSelectionButton.disabled = busy;
+  if (saveLearningSentenceButton) saveLearningSentenceButton.disabled = busy;
+  listeningSubtitleList?.querySelectorAll<HTMLButtonElement>(".collect-learning-sentence").forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
+async function persistLearningSelection(
+  selection: PendingLearningSelection,
+  itemType: "selection" | "sentence",
+): Promise<void> {
+  if (learningActionBusy) return;
+  setLearningBusy(true);
+  if (listeningSelectionMessage) {
+    listeningSelectionMessage.textContent = "正在保存到本地单词本…";
+    listeningSelectionMessage.classList.remove("warning");
+  }
+  try {
+    const saved = await invoke<LearningItemDetail>("save_learning_selection", {
+      request: {
+        jobId: selection.jobId,
+        segmentId: selection.segmentId,
+        itemType,
+        selectionStartUtf16: selection.selectionStartUtf16,
+        selectionEndUtf16: selection.selectionEndUtf16,
+      },
+    });
+    await refreshLearningItems();
+    closeLearningSelection();
+    if (listeningMediaMessage) {
+      listeningMediaMessage.textContent = `已收藏“${saved.item.source_text}”；可到学习区补充译义和回听例句。`;
+    }
+  } catch (error) {
+    if (listeningSelectionMessage) {
+      listeningSelectionMessage.textContent = `收藏失败：${String(error)}`;
+      listeningSelectionMessage.classList.add("warning");
+    }
+  } finally {
+    setLearningBusy(false);
+  }
+}
+
+async function saveLearningSentence(segmentId: string): Promise<void> {
+  if (!activeDetail || !segmentId) return;
+  const segment = activeDetail.segments.find((candidate) => candidate.id === segmentId);
+  if (!segment) return;
+  await persistLearningSelection({
+    jobId: activeDetail.job.job_id,
+    segmentId,
+    selectedText: segment.source_text,
+    selectionStartUtf16: 0,
+    selectionEndUtf16: segment.source_text.length,
+  }, "sentence");
+}
+
+async function refreshLearningItems(): Promise<void> {
+  if (!learningItemList) return;
+  if (currentArea === "learning" && learningItems.length === 0) {
+    learningItemList.innerHTML = '<div class="empty-state">正在读取单词本…</div>';
+  }
+  try {
+    learningItems = await invoke<LearningItemDetail[]>("list_learning_items");
+    renderLearningItems();
+    if (learningMessage) {
+      learningMessage.textContent = learningItems.length
+        ? `${learningItems.length} 个学习条目保存在本机。`
+        : "从收听区选择原文，建立第一个学习条目。";
+      learningMessage.classList.remove("warning");
+    }
+  } catch (error) {
+    learningItemList.innerHTML = `<div class="empty-state error">无法读取单词本：${escapeHtml(String(error))}</div>`;
+    if (learningMessage) {
+      learningMessage.textContent = "单词本读取失败。";
+      learningMessage.classList.add("warning");
+    }
+  }
+}
+
+function renderLearningItems(): void {
+  if (!learningItemList) return;
+  if (learningItems.length === 0) {
+    learningItemList.innerHTML = '<div class="empty-state"><strong>单词本还是空的。</strong><span>到收听区选择词语、短语或语法表达；也可以直接收藏整句。</span></div>';
+    return;
+  }
+  learningItemList.innerHTML = learningItems.map((detail) => {
+    const occurrence = detail.occurrences[0];
+    const sourceLabel = detail.item.item_type === "sentence" ? "整句" : "词语／语法";
+    const sourceMeta = occurrence
+      ? `${escapeHtml(occurrence.job_display_name_snapshot)} · ${escapeHtml(formatTime(occurrence.start_ms))}`
+      : "来源已不可用";
+    const context = occurrence
+      ? `<blockquote><strong>${escapeHtml(occurrence.segment_source_snapshot)}</strong>${occurrence.segment_translation_snapshot ? `<span>${escapeHtml(occurrence.segment_translation_snapshot)}</span>` : ""}</blockquote>`
+      : "";
+    return `<article class="learning-card" data-learning-item="${escapeHtml(detail.item.id)}">
+      <div class="learning-card-heading">
+        <div><span>${sourceLabel} · ${escapeHtml(languageLabel(detail.item.source_language))}</span><h3>${escapeHtml(detail.item.source_text)}</h3></div>
+        <span>${detail.item.occurrence_count} 个例句</span>
+      </div>
+      <label>学习译义<input class="learning-meaning" value="${escapeHtml(detail.item.meaning_text ?? "")}" placeholder="尚未接入标准词典；可先手工填写" /></label>
+      <div class="learning-source-meta">${sourceMeta}</div>
+      ${context}
+      <div class="learning-card-actions">
+        <button type="button" data-save-learning-meaning="${escapeHtml(detail.item.id)}">保存译义</button>
+        ${occurrence?.job_id ? `<button type="button" class="secondary" data-play-learning-source="${escapeHtml(detail.item.id)}">播放例句</button>` : ""}
+        <button type="button" class="danger" data-delete-learning-item="${escapeHtml(detail.item.id)}">删除</button>
+      </div>
+    </article>`;
+  }).join("");
+  learningItemList.querySelectorAll<HTMLButtonElement>("[data-save-learning-meaning]").forEach((button) => {
+    button.addEventListener("click", () => void saveLearningMeaning(button.dataset.saveLearningMeaning ?? ""));
+  });
+  learningItemList.querySelectorAll<HTMLButtonElement>("[data-play-learning-source]").forEach((button) => {
+    button.addEventListener("click", () => void playLearningSource(button.dataset.playLearningSource ?? ""));
+  });
+  learningItemList.querySelectorAll<HTMLButtonElement>("[data-delete-learning-item]").forEach((button) => {
+    button.addEventListener("click", () => void removeLearningItem(button.dataset.deleteLearningItem ?? ""));
+  });
+}
+
+async function saveLearningMeaning(itemId: string): Promise<void> {
+  const card = learningItemList?.querySelector<HTMLElement>(`[data-learning-item="${CSS.escape(itemId)}"]`);
+  const input = card?.querySelector<HTMLInputElement>(".learning-meaning");
+  if (!input || learningActionBusy) return;
+  learningActionBusy = true;
+  if (learningMessage) learningMessage.textContent = "正在保存学习译义…";
+  try {
+    await invoke("update_learning_item_meaning", {
+      request: { itemId, meaningText: input.value.trim() || null },
+    });
+    await refreshLearningItems();
+    if (learningMessage) learningMessage.textContent = "学习译义已保存到本机。";
+  } catch (error) {
+    if (learningMessage) {
+      learningMessage.textContent = `保存失败：${String(error)}`;
+      learningMessage.classList.add("warning");
+    }
+  } finally {
+    learningActionBusy = false;
+  }
+}
+
+async function removeLearningItem(itemId: string): Promise<void> {
+  const detail = learningItems.find((candidate) => candidate.item.id === itemId);
+  if (!detail || learningActionBusy) return;
+  const confirmed = await confirmAction({
+    title: "删除学习条目？",
+    message: `将从本机单词本删除“${detail.item.source_text}”及其 ${detail.item.occurrence_count} 个来源例句。原任务和字幕不会改变。`,
+    confirmLabel: "删除条目",
+    danger: true,
+  });
+  if (!confirmed) return;
+  learningActionBusy = true;
+  try {
+    await invoke("delete_learning_item", { itemId });
+    await refreshLearningItems();
+  } catch (error) {
+    if (learningMessage) {
+      learningMessage.textContent = `删除失败：${String(error)}`;
+      learningMessage.classList.add("warning");
+    }
+  } finally {
+    learningActionBusy = false;
+  }
+}
+
+async function playLearningSource(itemId: string): Promise<void> {
+  const occurrence = learningItems.find((candidate) => candidate.item.id === itemId)?.occurrences[0];
+  if (!occurrence?.job_id) return;
+  await showTopLevelArea("listening");
+  if (currentArea !== "listening") return;
+  await openListeningJob(occurrence.job_id, occurrence.start_ms, true);
 }
 
 async function openKaraokeJob(jobId: string): Promise<void> {
@@ -4092,6 +4421,17 @@ async function applyPreviewedGlossary(): Promise<void> {
 document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
 document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("click", () => void showTopLevelArea("workbench"));
 document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => void showTopLevelArea("listening"));
+document.querySelector<HTMLButtonElement>("#show-learning")?.addEventListener("click", () => void showTopLevelArea("learning"));
+document.querySelector<HTMLButtonElement>("#refresh-learning")?.addEventListener("click", () => void refreshLearningItems());
+listeningSubtitleList?.addEventListener("mouseup", captureListeningSelection);
+listeningSubtitleList?.addEventListener("keyup", captureListeningSelection);
+saveLearningSelectionButton?.addEventListener("click", () => {
+  if (pendingLearningSelection) void persistLearningSelection(pendingLearningSelection, "selection");
+});
+saveLearningSentenceButton?.addEventListener("click", () => {
+  if (pendingLearningSelection) void saveLearningSentence(pendingLearningSelection.segmentId);
+});
+document.querySelector<HTMLButtonElement>("#close-learning-selection")?.addEventListener("click", () => closeLearningSelection());
 document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
   settingsDirtyFields.clear();
   if (!settingsDialog?.open) settingsDialog?.showModal();
@@ -4464,6 +4804,7 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement
     || target instanceof HTMLTextAreaElement
     || target instanceof HTMLSelectElement
+    || target instanceof HTMLButtonElement
     || (target instanceof HTMLElement && target.isContentEditable);
 }
 

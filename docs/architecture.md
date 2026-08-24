@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-08-22_
+_最后更新：2026-08-24_
 
 ## 仓库组织
 
@@ -42,7 +42,7 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
-当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService` 与 `LocalRenderService`：前者负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
+当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService`、`LocalLearningService` 与 `LocalRenderService`：任务服务负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；学习服务负责收藏字幕选区、管理来源例句和手工译义；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
 `DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 按 provider ID 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。模型下载与云端翻译共用可热切换的网络配置：跟随启动环境、强制直连或自定义 HTTP 代理；模型还可使用用户提供的 HTTPS 镜像根地址。DeepL、DeepSeek 与自定义 OpenAI-compatible provider 都延迟到首次实际翻译才读取对应密钥。`ModelDownloadService` 每次只运行一个下载，按镜像到官方源回退，写入应用管理目录中的 `.part` 文件，校验固定 SHA-256 后原子安装并更新模型设置；UI 只轮询进度，不直接访问网络或模型文件。
 
@@ -72,6 +72,7 @@ macOS Apple Silicon 是当前已验证发行基线，Windows x86_64 是下一平
 - 当前字幕段属于隐式单轨，同轨不允许新增重叠。多人同时发言出现真实需求后，先通过单独决策引入轨道实体和 `track_id`，再设计说话人样式；当前 schema 不提前加入未被使用的逐段排版字段。
 - 每个任务用规范代码持久化源语言和目标语言；首批桌面组合为 `ja`、`en` 或 `ko` 到 `zh-Hans`，旧任务迁移为 `ja` 到 `zh-Hans`。Whisper 与翻译 provider 只在各自基础设施适配器中转换服务专用代码。
 - SQLite 另外记录译文是否人工编辑；只修改原文时保留旧译文并标记为过期，同时修改译文时视为已人工校正。
+- 学习资料使用 `local_learning_items` 和 `local_learning_occurrences` 分层：前者按语言对、类型和规范化原文合并词／短语／语法或整句条目，后者保存每次出现的任务／字幕引用、UTF-16 选区、收藏时双语快照和整段时间范围。任务删除后外键置空而快照继续存在；媒体与音频不写入 SQLite。标准词典查询将使用独立 provider，不能把字幕翻译 provider 的语境译文标记为词典释义。
 - SQLite 词表是带源语言的可编辑主数据；每个转写任务只能选择同语言词表，并使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新原文并把已有译文标记为过期。
 - 词表分类只存在于 SQLite 主数据和桌面应用层；处理核心读取已解析的文本快照，避免把 UI 的内容包概念耦合进 Whisper 适配器。
 - 翻译 provider 接收任务语言对、带稳定 ID 的目标字幕段、语义分离的前后文、风格提示和受保护术语，并返回带相同 ID 的结构化译文。应用层校验结果数量、重复／遗漏 ID 和空译文，在所有批次完成后使用带原文校验的 SQLite 事务一次性写入；翻译期间若原文已被修改，本次结果整体拒绝，避免译文错配。
@@ -82,4 +83,4 @@ macOS Apple Silicon 是当前已验证发行基线，Windows x86_64 是下一平
 - 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。
 - 外部工具和 API 是可替换基础设施：ASR、翻译和媒体处理分别通过应用层选项接入。CLI 默认日语识别、简中翻译，但不将该默认值写死到应用层或 DeepL 适配器。
 - macOS 本地长任务采用硬件优先、显式回退：Whisper 请求 GPU device 0，GPU/Metal 失败才重试 CPU；硬字幕要求 libass，并优先用 VideoToolbox H.264 编码，失败后记录原因并回退 FFmpeg 原生 LGPL MPEG-4 软件编码；两层均失败才让任务失败并保留 ASS 快照。libass 字幕合成仍在 CPU 执行。
-- 收听区和任务工作区可按需打开独立的悬浮字幕 WebView 窗口。它由 Rust 主进程创建为无边框、置顶、可缩放的正常窗口，当前播放工作区按字幕段切换发送原文与译文；窗口本身不读取 SQLite、媒体或密钥。为维持公开 Tauri 配置，它不使用 macOS 私有 API，因此当前不支持透明背景和鼠标穿透。未来学习区复用任务与播放定位数据，但不以悬浮字幕窗口作为其数据存储边界。
+- 收听区和任务工作区可按需打开独立的悬浮字幕 WebView 窗口。它由 Rust 主进程创建为无边框、置顶、可缩放的正常窗口，当前播放工作区按字幕段切换发送原文与译文；窗口本身不读取 SQLite、媒体或密钥。为维持公开 Tauri 配置，它不使用 macOS 私有 API，因此当前不支持透明背景和鼠标穿透。收听区同时承担学习采集的全文阅读器：文本选择与独立时间码跳转分离，学习区通过来源记录回到同一播放器，不复制第三套预览或播放器。

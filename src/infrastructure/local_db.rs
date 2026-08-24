@@ -105,6 +105,66 @@ pub struct LocalSubtitleSegmentRecord {
     pub timing_edited: bool,
 }
 
+#[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
+pub struct LocalLearningItemRecord {
+    pub id: String,
+    pub source_language: String,
+    pub target_language: String,
+    pub item_type: String,
+    pub source_text: String,
+    pub meaning_text: Option<String>,
+    pub meaning_provider_id: Option<String>,
+    pub meaning_source_label: Option<String>,
+    pub occurrence_count: i64,
+    pub created_at_unix: i64,
+    pub updated_at_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
+pub struct LocalLearningOccurrenceRecord {
+    pub id: String,
+    pub learning_item_id: String,
+    pub job_id: Option<String>,
+    pub segment_id: Option<String>,
+    pub job_display_name_snapshot: String,
+    pub segment_source_snapshot: String,
+    pub segment_translation_snapshot: Option<String>,
+    pub selection_start_utf16: i64,
+    pub selection_end_utf16: i64,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub created_at_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LocalLearningItemDetail {
+    pub item: LocalLearningItemRecord,
+    pub occurrences: Vec<LocalLearningOccurrenceRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewLocalLearningSelection {
+    pub job_id: String,
+    pub segment_id: String,
+    pub item_type: String,
+    pub selection_start_utf16: i64,
+    pub selection_end_utf16: i64,
+}
+
+#[derive(Debug, FromRow)]
+struct LocalLearningSourceRow {
+    job_id: String,
+    display_name: Option<String>,
+    input_path: Option<String>,
+    source_language: String,
+    target_language: String,
+    segment_id: String,
+    start_ms: i64,
+    end_ms: i64,
+    source_text: String,
+    translated_text: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct LocalMachineTranslation {
     pub segment_id: String,
@@ -622,6 +682,240 @@ impl LocalDatabase {
         self.get_job(job_id)
             .await?
             .ok_or_else(|| anyhow!("renamed local task disappeared: {job_id}"))
+    }
+
+    pub async fn save_learning_selection(
+        &self,
+        input: NewLocalLearningSelection,
+    ) -> Result<LocalLearningItemDetail> {
+        if !matches!(input.item_type.as_str(), "selection" | "sentence") {
+            return Err(anyhow!(
+                "unsupported learning item type: {}",
+                input.item_type
+            ));
+        }
+        let start = usize::try_from(input.selection_start_utf16)
+            .context("learning selection start must be non-negative")?;
+        let end = usize::try_from(input.selection_end_utf16)
+            .context("learning selection end must be non-negative")?;
+        if end <= start {
+            return Err(anyhow!("learning selection cannot be empty"));
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin learning item transaction")?;
+        let source = sqlx::query_as::<_, LocalLearningSourceRow>(
+            "SELECT j.job_id, j.display_name, j.input_path,
+                    j.source_language, j.target_language,
+                    s.id AS segment_id, s.start_ms, s.end_ms,
+                    s.source_text, s.translated_text
+             FROM local_subtitle_segments s
+             JOIN local_jobs j ON j.job_id = s.job_id
+             WHERE j.job_id = ? AND s.id = ?",
+        )
+        .bind(&input.job_id)
+        .bind(&input.segment_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .context("failed to read learning item source")?
+        .ok_or_else(|| {
+            anyhow!(
+                "subtitle segment {} does not belong to task {}",
+                input.segment_id,
+                input.job_id
+            )
+        })?;
+
+        let selected_text = utf16_slice(&source.source_text, start, end)?;
+        let selected_text = selected_text.trim().to_string();
+        if selected_text.is_empty() {
+            return Err(anyhow!("learning selection cannot contain only whitespace"));
+        }
+        if input.item_type == "sentence"
+            && (start != 0 || end != source.source_text.encode_utf16().count())
+        {
+            return Err(anyhow!(
+                "sentence collections must include the complete subtitle segment"
+            ));
+        }
+        let source_key = selected_text.to_lowercase();
+        let meaning_text = (input.item_type == "sentence")
+            .then(|| source.translated_text.clone())
+            .flatten()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let now = chrono::Utc::now().timestamp();
+        let item_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO local_learning_items (
+                id, source_language, target_language, item_type, source_text, source_key,
+                meaning_text, meaning_provider_id, meaning_source_label,
+                created_at_unix, updated_at_unix
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+             ON CONFLICT(source_language, target_language, item_type, source_key) DO UPDATE SET
+                meaning_text = COALESCE(local_learning_items.meaning_text, excluded.meaning_text),
+                updated_at_unix = excluded.updated_at_unix",
+        )
+        .bind(&item_id)
+        .bind(&source.source_language)
+        .bind(&source.target_language)
+        .bind(&input.item_type)
+        .bind(&selected_text)
+        .bind(&source_key)
+        .bind(meaning_text)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .context("failed to save learning item")?;
+        let item_id: String = sqlx::query_scalar(
+            "SELECT id FROM local_learning_items
+             WHERE source_language = ? AND target_language = ?
+               AND item_type = ? AND source_key = ?",
+        )
+        .bind(&source.source_language)
+        .bind(&source.target_language)
+        .bind(&input.item_type)
+        .bind(&source_key)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to read saved learning item id")?;
+
+        let display_name = source
+            .display_name
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                source.input_path.as_deref().and_then(|value| {
+                    Path::new(value)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
+            })
+            .unwrap_or_else(|| source.job_id.clone());
+        sqlx::query(
+            "INSERT OR IGNORE INTO local_learning_occurrences (
+                id, learning_item_id, job_id, segment_id, job_display_name_snapshot,
+                segment_source_snapshot, segment_translation_snapshot,
+                selection_start_utf16, selection_end_utf16, start_ms, end_ms, created_at_unix
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&item_id)
+        .bind(&source.job_id)
+        .bind(&source.segment_id)
+        .bind(display_name)
+        .bind(&source.source_text)
+        .bind(&source.translated_text)
+        .bind(input.selection_start_utf16)
+        .bind(input.selection_end_utf16)
+        .bind(source.start_ms)
+        .bind(source.end_ms)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .context("failed to save learning item source")?;
+        tx.commit()
+            .await
+            .context("failed to commit learning item transaction")?;
+
+        self.get_learning_item(&item_id)
+            .await?
+            .ok_or_else(|| anyhow!("saved learning item disappeared: {item_id}"))
+    }
+
+    pub async fn list_learning_items(&self) -> Result<Vec<LocalLearningItemDetail>> {
+        let items = sqlx::query_as::<_, LocalLearningItemRecord>(
+            "SELECT i.id, i.source_language, i.target_language, i.item_type,
+                    i.source_text, i.meaning_text, i.meaning_provider_id,
+                    i.meaning_source_label, COUNT(o.id) AS occurrence_count,
+                    i.created_at_unix, i.updated_at_unix
+             FROM local_learning_items i
+             LEFT JOIN local_learning_occurrences o ON o.learning_item_id = i.id
+             GROUP BY i.id
+             ORDER BY i.updated_at_unix DESC, i.id DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list learning items")?;
+        let occurrences = sqlx::query_as::<_, LocalLearningOccurrenceRecord>(
+            "SELECT id, learning_item_id, job_id, segment_id, job_display_name_snapshot,
+                    segment_source_snapshot, segment_translation_snapshot,
+                    selection_start_utf16, selection_end_utf16,
+                    start_ms, end_ms, created_at_unix
+             FROM local_learning_occurrences
+             ORDER BY created_at_unix DESC, id DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list learning item sources")?;
+        let mut occurrences_by_item = HashMap::<String, Vec<_>>::new();
+        for occurrence in occurrences {
+            occurrences_by_item
+                .entry(occurrence.learning_item_id.clone())
+                .or_default()
+                .push(occurrence);
+        }
+        Ok(items
+            .into_iter()
+            .map(|item| LocalLearningItemDetail {
+                occurrences: occurrences_by_item.remove(&item.id).unwrap_or_default(),
+                item,
+            })
+            .collect())
+    }
+
+    pub async fn get_learning_item(
+        &self,
+        item_id: &str,
+    ) -> Result<Option<LocalLearningItemDetail>> {
+        Ok(self
+            .list_learning_items()
+            .await?
+            .into_iter()
+            .find(|detail| detail.item.id == item_id))
+    }
+
+    pub async fn update_learning_item_meaning(
+        &self,
+        item_id: &str,
+        meaning_text: Option<String>,
+    ) -> Result<LocalLearningItemDetail> {
+        let meaning_text = meaning_text
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let result = sqlx::query(
+            "UPDATE local_learning_items
+             SET meaning_text = ?, meaning_provider_id = NULL, meaning_source_label = NULL,
+                 updated_at_unix = ?
+             WHERE id = ?",
+        )
+        .bind(meaning_text)
+        .bind(chrono::Utc::now().timestamp())
+        .bind(item_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to update learning item meaning")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("learning item not found: {item_id}"));
+        }
+        self.get_learning_item(item_id)
+            .await?
+            .ok_or_else(|| anyhow!("updated learning item disappeared: {item_id}"))
+    }
+
+    pub async fn delete_learning_item(&self, item_id: &str) -> Result<()> {
+        let result = sqlx::query("DELETE FROM local_learning_items WHERE id = ?")
+            .bind(item_id)
+            .execute(&self.pool)
+            .await
+            .context("failed to delete learning item")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("learning item not found: {item_id}"));
+        }
+        Ok(())
     }
 
     pub async fn delete_job(&self, job_id: &str) -> Result<()> {
@@ -1678,6 +1972,15 @@ fn normalized_subtitle_text(value: String, field: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
+fn utf16_slice(value: &str, start: usize, end: usize) -> Result<String> {
+    let units = value.encode_utf16().collect::<Vec<_>>();
+    let selected = units
+        .get(start..end)
+        .ok_or_else(|| anyhow!("learning selection is outside the subtitle text"))?;
+    String::from_utf16(selected)
+        .map_err(|_| anyhow!("learning selection splits a Unicode character"))
+}
+
 fn normalized_optional_subtitle_text(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
@@ -1911,7 +2214,8 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::{
-        LocalDatabase, LocalGlossaryTermInput, LocalMachineTranslation, NewLocalRenderJob,
+        LocalDatabase, LocalGlossaryTermInput, LocalMachineTranslation, NewLocalLearningSelection,
+        NewLocalRenderJob,
     };
     use crate::{
         application::{
@@ -2145,6 +2449,75 @@ mod tests {
         assert!(!restored.translation_edited);
         assert!(!restored.translation_stale);
         assert!(!restored.timing_edited);
+
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn learning_items_keep_utf16_selections_and_source_snapshots() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-learning-item-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        let mut segment = TranscriptSegment::new(1_000, 2_500, "今日は🍎を食べる".to_string());
+        segment.set_translation(Some("今天吃苹果".to_string()));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![segment.clone()],
+            })
+            .await
+            .unwrap();
+
+        let input = NewLocalLearningSelection {
+            job_id: manifest.job_id.clone(),
+            segment_id: segment.id.clone(),
+            item_type: "selection".to_string(),
+            selection_start_utf16: 3,
+            selection_end_utf16: 5,
+        };
+        let saved = database
+            .save_learning_selection(input.clone())
+            .await
+            .unwrap();
+        assert_eq!(saved.item.source_text, "🍎");
+        assert_eq!(saved.item.occurrence_count, 1);
+        assert_eq!(saved.occurrences[0].start_ms, 1_000);
+        assert_eq!(
+            saved.occurrences[0].segment_translation_snapshot.as_deref(),
+            Some("今天吃苹果")
+        );
+
+        let deduplicated = database.save_learning_selection(input).await.unwrap();
+        assert_eq!(deduplicated.item.id, saved.item.id);
+        assert_eq!(deduplicated.item.occurrence_count, 1);
+        let updated = database
+            .update_learning_item_meaning(&saved.item.id, Some("苹果".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(updated.item.meaning_text.as_deref(), Some("苹果"));
+
+        database.delete_job(&manifest.job_id).await.unwrap();
+        let preserved = database
+            .get_learning_item(&saved.item.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(preserved.occurrences[0].job_id.is_none());
+        assert!(preserved.occurrences[0].segment_id.is_none());
+        assert_eq!(
+            preserved.occurrences[0].segment_source_snapshot,
+            "今日は🍎を食べる"
+        );
 
         database.close().await;
         drop(database);

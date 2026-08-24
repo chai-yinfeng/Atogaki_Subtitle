@@ -14,9 +14,9 @@ use std::{
 use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
-        LocalGlossaryService, LocalGlossaryTermDraft, LocalRenderRequest, LocalRenderService,
-        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
-        LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
+        LocalGlossaryService, LocalGlossaryTermDraft, LocalLearningService, LocalRenderRequest,
+        LocalRenderService, LocalSubtitleExport, LocalSubtitleExportArtifact,
+        LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
         MutableTranslationProvider, TranscriptionOptions, UnconfiguredTranslationProvider,
         job_spec::TranscribeSpec,
     },
@@ -25,8 +25,8 @@ use atogaki_subtitle::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
             LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
-            LocalJobTranslationStats, LocalRenderJobRecord, LocalSubtitleSegmentRecord,
-            LocalTranslationRunRecord,
+            LocalJobTranslationStats, LocalLearningItemDetail, LocalRenderJobRecord,
+            LocalSubtitleSegmentRecord, LocalTranslationRunRecord, NewLocalLearningSelection,
         },
         media::MediaCapabilities,
         waveform::WaveformWindow,
@@ -52,6 +52,7 @@ struct DesktopState {
     task_service: LocalTaskService,
     workspace_service: LocalWorkspaceService,
     glossary_service: LocalGlossaryService,
+    learning_service: LocalLearningService,
     render_service: LocalRenderService,
     settings_service: DesktopSettingsService,
     model_download_service: ModelDownloadService,
@@ -468,6 +469,23 @@ struct SavePlaybackPositionRequest {
     position_ms: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveLearningSelectionRequest {
+    job_id: String,
+    segment_id: String,
+    item_type: String,
+    selection_start_utf16: i64,
+    selection_end_utf16: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateLearningMeaningRequest {
+    item_id: String,
+    meaning_text: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VideoOutputSelection {
@@ -545,6 +563,59 @@ async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopJobSumma
             DesktopJobSummary::new(job, job_stats)
         })
         .collect())
+}
+
+#[tauri::command]
+async fn list_learning_items(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<LocalLearningItemDetail>, String> {
+    state
+        .learning_service
+        .list_items()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_learning_selection(
+    state: State<'_, DesktopState>,
+    request: SaveLearningSelectionRequest,
+) -> Result<LocalLearningItemDetail, String> {
+    state
+        .learning_service
+        .save_selection(NewLocalLearningSelection {
+            job_id: request.job_id,
+            segment_id: request.segment_id,
+            item_type: request.item_type,
+            selection_start_utf16: request.selection_start_utf16,
+            selection_end_utf16: request.selection_end_utf16,
+        })
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_learning_item_meaning(
+    state: State<'_, DesktopState>,
+    request: UpdateLearningMeaningRequest,
+) -> Result<LocalLearningItemDetail, String> {
+    state
+        .learning_service
+        .update_meaning(&request.item_id, request.meaning_text)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_learning_item(
+    state: State<'_, DesktopState>,
+    item_id: String,
+) -> Result<(), String> {
+    state
+        .learning_service
+        .delete_item(&item_id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1436,6 +1507,7 @@ fn main() {
             tauri::async_runtime::block_on(settings_service.initialize())?;
             let glossary_service = LocalGlossaryService::new(database.clone());
             tauri::async_runtime::block_on(glossary_service.ensure_builtins())?;
+            let learning_service = LocalLearningService::new(database.clone());
             let task_service = tauri::async_runtime::block_on(async {
                 LocalTaskService::start_with_database(
                     config.clone(),
@@ -1460,6 +1532,7 @@ fn main() {
                 task_service,
                 workspace_service,
                 glossary_service,
+                learning_service,
                 render_service,
                 settings_service,
                 model_download_service,
@@ -1503,6 +1576,7 @@ fn main() {
             data_directory,
             desktop_settings,
             delete_job,
+            delete_learning_item,
             delete_glossary,
             export_workspace_subtitles,
             get_glossary,
@@ -1512,6 +1586,7 @@ fn main() {
             get_waveform_window,
             list_glossaries,
             list_jobs,
+            list_learning_items,
             list_video_renders,
             model_catalog,
             model_download_states,
@@ -1536,6 +1611,7 @@ fn main() {
             save_download_network_settings,
             save_desktop_settings,
             save_glossary,
+            save_learning_selection,
             save_playback_position,
             submit_transcription,
             start_model_download,
@@ -1547,6 +1623,7 @@ fn main() {
             translate_subtitle,
             translation_status,
             update_subtitle_overlay,
+            update_learning_item_meaning,
             update_subtitle,
             restore_subtitle,
             split_subtitle,
