@@ -701,6 +701,7 @@ struct EcdictRow {
     exchange: String,
 }
 
+#[cfg(test)]
 fn parse_ecdict(path: &Path) -> Result<Vec<IndexedEntry>> {
     let mut reader = csv::ReaderBuilder::new().flexible(true).from_path(path)?;
     let mut entries = Vec::new();
