@@ -14,7 +14,7 @@ Merriam-Webster 的 Key 绑定具体 reference work。真实回归确认当前 K
 
 ## 决策
 
-- 原始归档继续作为已校验的来源事实保留。JMdict 与 FreeDict 在第一次查询或包版本变化后，生成 `dictionaries/atogaki-dictionary-index.sqlite`；索引只保存精确词形、词头、读音和规范化义项，不复制无关字段。
+- 原始归档继续作为已校验的来源事实保留。JMdict、FreeDict 与后续决策 0036 引入的 ECDICT 基础 CSV 在第一次查询或包版本变化后，生成 `dictionaries/atogaki-dictionary-index.sqlite`；索引只保存查询所需词形、词头、读音和规范化义项，不复制无关字段。
 - Tomoshi 首次使用时在同目录原子展开为派生 `.db`，以包的版本 sidecar 判断是否需要重建；查询直接使用其 `forms`、`entries` 和 `zh_defs` 表，不把其他许可不同的表笼统归为同一来源。
 - 日语 provider 只做上游已收录词形的精确查询。FreeDict 英中先查原词，再按固定、保守的英语复数、过去式、进行式和比较级规则生成词元候选并依次精确查询；命中时展示上游实际词头，不做前缀或编辑距离猜词。未命中、包缺失、解压失败或某一 API 失败只影响当前标签页，不阻止收藏、简明译义或切换其他来源。
 - Merriam-Webster 默认先尝试更符合学习场景且已实机验证的 `learners` reference；若官方明确返回当前 Key 未订阅，则尝试 `collegiate`，成功后把 reference ID 作为非敏感设置记住。不会枚举其他产品。

@@ -8,6 +8,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha512};
 use tokio::{
     fs,
@@ -41,6 +42,7 @@ enum DictionarySource {
         url: &'static str,
         checksum: &'static str,
         algorithm: ChecksumAlgorithm,
+        total_bytes: Option<u64>,
     },
     GithubLatest {
         repository: &'static str,
@@ -51,6 +53,7 @@ enum DictionarySource {
 
 #[derive(Debug, Clone, Copy)]
 enum ChecksumAlgorithm {
+    GitSha1,
     Sha256,
     Sha512,
 }
@@ -216,7 +219,7 @@ impl DictionaryDownloadService {
             .with_context(|| format!("failed to create {}", part_path.display()))?;
         let mut stream = response.bytes_stream();
         let mut downloaded = 0_u64;
-        let mut digest = StreamingDigest::new(resolved.algorithm);
+        let mut digest = StreamingDigest::new(resolved.algorithm, resolved.total_bytes)?;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.context("dictionary download was interrupted")?;
             output.write_all(&chunk).await.context("failed to write dictionary package")?;
@@ -286,12 +289,13 @@ async fn resolve_download(
             url,
             checksum,
             algorithm,
+            total_bytes,
         } => Ok(ResolvedDownload {
             url: url.to_string(),
             checksum: checksum.to_string(),
             algorithm,
             version: item.version_label.to_string(),
-            total_bytes: None,
+            total_bytes,
         }),
         DictionarySource::GithubLatest {
             repository,
@@ -335,20 +339,28 @@ async fn resolve_download(
 }
 
 enum StreamingDigest {
+    GitSha1(Sha1),
     Sha256(Sha256),
     Sha512(Sha512),
 }
 
 impl StreamingDigest {
-    fn new(algorithm: ChecksumAlgorithm) -> Self {
+    fn new(algorithm: ChecksumAlgorithm, total_bytes: Option<u64>) -> Result<Self> {
         match algorithm {
-            ChecksumAlgorithm::Sha256 => Self::Sha256(Sha256::new()),
-            ChecksumAlgorithm::Sha512 => Self::Sha512(Sha512::new()),
+            ChecksumAlgorithm::GitSha1 => {
+                let size = total_bytes.ok_or_else(|| anyhow!("Git blob 校验缺少文件大小"))?;
+                let mut digest = Sha1::new();
+                digest.update(format!("blob {size}\0").as_bytes());
+                Ok(Self::GitSha1(digest))
+            }
+            ChecksumAlgorithm::Sha256 => Ok(Self::Sha256(Sha256::new())),
+            ChecksumAlgorithm::Sha512 => Ok(Self::Sha512(Sha512::new())),
         }
     }
 
     fn update(&mut self, bytes: &[u8]) {
         match self {
+            Self::GitSha1(value) => value.update(bytes),
             Self::Sha256(value) => value.update(bytes),
             Self::Sha512(value) => value.update(bytes),
         }
@@ -356,6 +368,7 @@ impl StreamingDigest {
 
     fn finalize(self) -> String {
         match self {
+            Self::GitSha1(value) => format!("{:x}", value.finalize()),
             Self::Sha256(value) => format!("{:x}", value.finalize()),
             Self::Sha512(value) => format!("{:x}", value.finalize()),
         }
@@ -471,6 +484,24 @@ fn dictionary_catalog() -> &'static [DictionaryCatalogItem] {
             },
         },
         DictionaryCatalogItem {
+            id: "ecdict-eng-zho",
+            name: "ECDICT 基础英中",
+            language_pair: "英语 → 中文",
+            version_label: "2025-03-28 · bc015ed2",
+            size_label: "62.9 MiB · 约 76 万词条",
+            description: "ECDICT 仓库的基础 CSV 数据；覆盖词形、音标、英中释义与词频标签。增强版 340 万词发布包因上游未提供摘要，暂不自动安装。",
+            license: "MIT（上游声明；混合历史数据来源仍需持续审计）",
+            attribution: "ECDICT contributors / Linwei (skywind3000)",
+            source_url: "https://github.com/skywind3000/ECDICT",
+            file_name: "ecdict.csv",
+            source: DictionarySource::Fixed {
+                url: "https://raw.githubusercontent.com/skywind3000/ECDICT/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/ecdict.csv",
+                checksum: "c4ade63ea08cf39d9c3475e96929036d64d94c94",
+                algorithm: ChecksumAlgorithm::GitSha1,
+                total_bytes: Some(65_933_428),
+            },
+        },
+        DictionaryCatalogItem {
             id: "freedict-eng-zho",
             name: "FreeDict 英中",
             language_pair: "英语 → 中文",
@@ -485,6 +516,7 @@ fn dictionary_catalog() -> &'static [DictionaryCatalogItem] {
                 url: "https://download.freedict.org/dictionaries/eng-zho/2025.11.23/freedict-eng-zho-2025.11.23.stardict.tar.xz",
                 checksum: "059f9aca26fdc3a5a2c0c0e8fc92e111a34bf8fd438f70d267cccf35f5e47a2d45c46650999a1b3a48c3bffc3e16e0db897232128fe822d1bc59cf34f40b395c",
                 algorithm: ChecksumAlgorithm::Sha512,
+                total_bytes: None,
             },
         },
     ];
@@ -508,12 +540,16 @@ mod tests {
 
     #[test]
     fn streaming_digest_supports_both_manifest_algorithms() {
-        let mut sha256 = StreamingDigest::new(ChecksumAlgorithm::Sha256);
+        let mut sha256 = StreamingDigest::new(ChecksumAlgorithm::Sha256, None).unwrap();
         sha256.update(b"atogaki");
         assert_eq!(sha256.finalize(), format!("{:x}", Sha256::digest(b"atogaki")));
-        let mut sha512 = StreamingDigest::new(ChecksumAlgorithm::Sha512);
+        let mut sha512 = StreamingDigest::new(ChecksumAlgorithm::Sha512, None).unwrap();
         sha512.update(b"atogaki");
         assert_eq!(sha512.finalize(), format!("{:x}", Sha512::digest(b"atogaki")));
+
+        let mut git = StreamingDigest::new(ChecksumAlgorithm::GitSha1, Some(7)).unwrap();
+        git.update(b"atogaki");
+        assert_eq!(git.finalize(), "0f74bb4e2751dca7e6d37b0314d0bd607f49d8cf");
     }
 
     #[test]

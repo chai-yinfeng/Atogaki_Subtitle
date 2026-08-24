@@ -10,7 +10,7 @@
 
 学习区需要让用户自行下载 JMdict、Tomoshi 等离线数据，并分别配置 Cambridge、Collins、Merriam-Webster API。离线数据更新频率不同，固定“最新版”裸链接无法同时保证版本可追溯与内容完整性；商业 API Key 若与字幕翻译共用一个设置项，则容易覆盖、误读或扩散到 SQLite。
 
-英文到中文也存在开放离线数据。FreeDict 当前提供由 WikDict/Wiktionary 导入的 `eng-zho` 包、版本化下载地址与 SHA-512，但词头、校订深度和学习型结构不能等同于 Cambridge 或 Collins。ECDICT 词量更大，但其汇总数据的逐项来源与再分发许可暂不足以作为默认正式包。
+英文到中文也存在开放离线数据。FreeDict 当前提供由 WikDict/Wiktionary 导入的 `eng-zho` 包、版本化下载地址与 SHA-512，但词头、校订深度和学习型结构不能等同于 Cambridge 或 Collins。ECDICT 词量更大，但其汇总数据的逐项来源与再分发许可暂不足以作为随 App 分发的默认正式包。后续决策 0036 允许用户明确下载固定基础 CSV，并继续显示来源审计提示；这不改变“不内置数据”的边界。
 
 ## 决策
 

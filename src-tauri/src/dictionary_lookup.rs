@@ -79,6 +79,10 @@ impl DictionaryLookupService {
                 ensure_language(&detail, "en", "FreeDict")?;
                 self.lookup_freedict(item_id, query).await?
             }
+            "ecdict" => {
+                ensure_language(&detail, "en", "ECDICT")?;
+                self.lookup_ecdict(item_id, query).await?
+            }
             "merriam-webster" => {
                 ensure_language(&detail, "en", "Merriam-Webster")?;
                 self.lookup_merriam_webster(item_id, query).await?
@@ -138,6 +142,31 @@ impl DictionaryLookupService {
         ))
     }
 
+    async fn lookup_ecdict(
+        &self,
+        item_id: &str,
+        query: &str,
+    ) -> Result<NewLocalLearningLookupResult> {
+        let source = self.directory.join("ecdict.csv");
+        require_file(&source, "ECDICT 基础英中")?;
+        let version = package_version(&source);
+        self.ensure_index("ecdict", &version, &source).await?;
+        let candidates = english_lemma_candidates(query);
+        let entry = self
+            .query_index_candidates("ecdict", &candidates)
+            .await?
+            .ok_or_else(|| anyhow!("ECDICT 中没有找到“{query}”或其英语词形对应的词头"))?;
+        Ok(entry.into_lookup(
+            item_id,
+            "ecdict",
+            "ECDICT 基础英中",
+            "ECDICT contributors / Linwei (skywind3000)",
+            Some("https://github.com/skywind3000/ECDICT"),
+            Some("MIT（上游声明；混合历史数据来源见项目 README）"),
+            Some(version),
+        ))
+    }
+
     async fn ensure_index(&self, provider: &str, version: &str, source: &Path) -> Result<()> {
         let _guard = self.index_lock.lock().await;
         let pool = open_index(&self.directory.join(INDEX_FILE)).await?;
@@ -149,6 +178,11 @@ impl DictionaryLookupService {
         .fetch_optional(&pool)
         .await?;
         if indexed_version.as_deref() == Some(version) {
+            pool.close().await;
+            return Ok(());
+        }
+        if provider == "ecdict" {
+            replace_ecdict_index(&pool, provider, version, source).await?;
             pool.close().await;
             return Ok(());
         }
@@ -512,6 +546,70 @@ async fn replace_index(pool: &sqlx::SqlitePool, provider: &str, version: &str, e
     Ok(())
 }
 
+async fn replace_ecdict_index(
+    pool: &sqlx::SqlitePool,
+    provider: &str,
+    version: &str,
+    source: &Path,
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM dictionary_forms WHERE provider_id = ?")
+        .bind(provider)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM dictionary_entries WHERE provider_id = ?")
+        .bind(provider)
+        .execute(&mut *tx)
+        .await?;
+    let mut reader = csv::ReaderBuilder::new().flexible(true).from_path(source)?;
+    let mut entries = Vec::with_capacity(200);
+    let mut indexed_entries = 0_usize;
+    for (index, row) in reader.deserialize::<EcdictRow>().enumerate() {
+        let row = row.with_context(|| format!("ECDICT CSV 第 {} 行无法解析", index + 2))?;
+        if let Some(entry) = ecdict_entry(index, row) {
+            entries.push(entry);
+        }
+        if entries.len() == 200 {
+            insert_index_entries(&mut tx, provider, &entries).await?;
+            indexed_entries += entries.len();
+            entries.clear();
+        }
+    }
+    if !entries.is_empty() {
+        insert_index_entries(&mut tx, provider, &entries).await?;
+        indexed_entries += entries.len();
+    }
+    if indexed_entries == 0 {
+        bail!("ECDICT CSV 没有可用词条");
+    }
+    sqlx::query("INSERT INTO dictionary_index_meta (provider_id, source_version, completed_at_unix) VALUES (?, ?, ?) ON CONFLICT(provider_id) DO UPDATE SET source_version=excluded.source_version, completed_at_unix=excluded.completed_at_unix")
+        .bind(provider).bind(version).bind(now_unix()).execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn insert_index_entries(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    provider: &str,
+    entries: &[IndexedEntry],
+) -> Result<()> {
+    let mut builder = QueryBuilder::<Sqlite>::new("INSERT INTO dictionary_entries (provider_id, entry_id, headword, reading, senses_json) ");
+    builder.push_values(entries, |mut row, entry| {
+        row.push_bind(provider).push_bind(&entry.id).push_bind(&entry.headword)
+            .push_bind(&entry.reading).push_bind(serde_json::to_string(&entry.senses).expect("serializable senses"));
+    });
+    builder.build().execute(&mut **tx).await?;
+    let forms = entries.iter().flat_map(|entry| entry.forms.iter().enumerate().map(move |(rank, form)| (entry, rank, form))).collect::<Vec<_>>();
+    for chunk in forms.chunks(300) {
+        let mut builder = QueryBuilder::<Sqlite>::new("INSERT OR IGNORE INTO dictionary_forms (provider_id, form, entry_id, rank) ");
+        builder.push_values(chunk, |mut row, (entry, rank, form)| {
+            row.push_bind(provider).push_bind(*form).push_bind(&entry.id).push_bind(*rank as i64);
+        });
+        builder.build().execute(&mut **tx).await?;
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 struct JmRoot { tags: HashMap<String, String>, words: Vec<JmWord> }
 #[derive(Deserialize)]
@@ -586,6 +684,81 @@ fn parse_freedict(path: &Path) -> Result<Vec<IndexedEntry>> {
             senses: vec![LocalLearningLookupSense { part_of_speech: None, definitions, examples: Vec::new() }], forms: vec![word] });
     }
     Ok(entries)
+}
+
+#[derive(Deserialize)]
+struct EcdictRow {
+    word: String,
+    #[serde(default)]
+    phonetic: String,
+    #[serde(default)]
+    definition: String,
+    #[serde(default)]
+    translation: String,
+    #[serde(default)]
+    pos: String,
+    #[serde(default)]
+    exchange: String,
+}
+
+fn parse_ecdict(path: &Path) -> Result<Vec<IndexedEntry>> {
+    let mut reader = csv::ReaderBuilder::new().flexible(true).from_path(path)?;
+    let mut entries = Vec::new();
+    for (index, row) in reader.deserialize::<EcdictRow>().enumerate() {
+        let row = row.with_context(|| format!("ECDICT CSV 第 {} 行无法解析", index + 2))?;
+        if let Some(entry) = ecdict_entry(index, row) {
+            entries.push(entry);
+        }
+    }
+    if entries.is_empty() {
+        bail!("ECDICT CSV 没有可用词条");
+    }
+    Ok(entries)
+}
+
+fn ecdict_entry(index: usize, row: EcdictRow) -> Option<IndexedEntry> {
+    let headword = row.word.trim();
+    if headword.is_empty() {
+        return None;
+    }
+    let mut definitions = split_dictionary_lines(&row.translation);
+    if definitions.is_empty() {
+        definitions = split_dictionary_lines(&row.definition);
+    }
+    if definitions.is_empty() {
+        return None;
+    }
+    let mut forms = vec![headword.to_string()];
+    for exchange in row.exchange.split('/') {
+        if let Some((_, value)) = exchange.split_once(':') {
+            for form in value.split(',').map(str::trim).filter(|value| !value.is_empty()) {
+                if !forms.iter().any(|candidate| candidate.eq_ignore_ascii_case(form)) {
+                    forms.push(form.to_string());
+                }
+            }
+        }
+    }
+    Some(IndexedEntry {
+        id: index.to_string(),
+        headword: headword.to_string(),
+        reading: (!row.phonetic.trim().is_empty()).then(|| row.phonetic.trim().to_string()),
+        senses: vec![LocalLearningLookupSense {
+            part_of_speech: (!row.pos.trim().is_empty()).then(|| row.pos.trim().to_string()),
+            definitions,
+            examples: Vec::new(),
+        }],
+        forms,
+    })
+}
+
+fn split_dictionary_lines(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .flat_map(|line| line.split('；'))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn html_lines(html: &str) -> Vec<String> {
@@ -703,8 +876,8 @@ mod tests {
 
     use super::{
         INDEX_FILE, TomoshiEntry, create_index_schema, english_lemma_candidates, html_lines,
-        mw_audio_url, open_index, package_version, parse_freedict, parse_jmdict, replace_index,
-        tomoshi_senses,
+        mw_audio_url, open_index, package_version, parse_ecdict, parse_freedict, parse_jmdict,
+        replace_index, tomoshi_senses,
     };
 
     #[test]
@@ -723,6 +896,27 @@ mod tests {
         assert!(english_lemma_candidates("stopped").contains(&"stop".to_string()));
         assert!(english_lemma_candidates("boxes").contains(&"box".to_string()));
         assert_eq!(english_lemma_candidates("look after"), vec!["look after"]);
+    }
+
+    #[test]
+    fn parses_ecdict_translations_and_exchange_forms() {
+        let root = std::env::temp_dir().join(format!("atogaki-ecdict-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("ecdict.csv");
+        std::fs::write(
+            &source,
+            "word,phonetic,definition,translation,pos,exchange\n\
+             gadget,ˈɡædʒɪt,a small device,小器具；小装置,n:100,s:gadgets\n\
+             perceived,pəˈsiːvd,,感知到的,v:100,0:perceive\n",
+        )
+        .unwrap();
+        let entries = parse_ecdict(&source).unwrap();
+        let gadget = entries.iter().find(|entry| entry.headword == "gadget").unwrap();
+        assert!(gadget.forms.contains(&"gadgets".to_string()));
+        assert_eq!(gadget.senses[0].definitions, vec!["小器具", "小装置"]);
+        let perceived = entries.iter().find(|entry| entry.headword == "perceived").unwrap();
+        assert!(perceived.forms.contains(&"perceive".to_string()));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// Manual regression hook for real downloaded packages; CI does not own these large files.

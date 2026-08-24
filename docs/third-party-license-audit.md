@@ -106,7 +106,7 @@ Whisper/VAD 模型不打包进 App 或 DMG，由用户在设备上选择或下�
 
 DeepL、DeepSeek 与自定义 OpenAI-compatible 服务都通过现有 HTTPS 客户端直接调用，App 不分发这些服务的 SDK。用户仍需遵守所选服务的条款、配额和内容处理要求；自定义端点由用户自行确认运营方。后续增加带新 SDK 的翻译服务时，仍需审计新增依赖、服务条款、数据发送说明和输出归属。
 
-学习词典新增的 `tar`、`xz2` 与 `zstd` Rust 依赖已进入同一 `cargo-about` 报告，其许可仍落在现有接受集合内。JMdict、Tomoshi 与 FreeDict 的数据不随 App 分发，由用户明确下载；UI 对实际读取范围显示对应版本、署名和 CC BY-SA 标签。
+学习词典新增的 `tar`、`xz2`、`zstd`、`csv` 与 `sha1` Rust 依赖已进入同一 `cargo-about` 报告，其许可仍落在现有接受集合内。JMdict、Tomoshi、FreeDict 与 ECDICT 的数据不随 App 分发，由用户明确下载；UI 对实际读取范围显示对应版本、署名和许可标签。ECDICT 仓库当前声明 MIT，但 README 记载的混合历史数据来源仍需持续审计；本轮只提供固定基础 CSV 的下载入口，不把数据打进 App，也不使用缺少发布方 checksum 的增强版 ZIP。
 
 Merriam-Webster 是用户自带 Key 的非商业网络服务，不随 App 分发 SDK 或词典数据。API 结果仅由用户点击查询，缓存 24 小时；界面使用官方品牌规范提供且未修改的浅色背景 PNG Logo，以批准的 50px 尺寸显示。仓库文件 `ui/public/merriam-webster-logo.png` 来自 `https://dictionaryapi.com/images/info/branding-guidelines/MWLogo_LightBG_120x120_2x.png`，原始尺寸 240×240，SHA-256 为 `6ddee7e22cbe0686e9ae6de180eea8342ae89d4f0e923b39d409e6a0c76f49bd`。公开发行前必须再次确认非商业、每日每 reference 1,000 次、最多两个 reference、品牌展示和禁止比较／基准测试等当时条款；当前按来源切换的独立展示不得演变为自动排名。
 
