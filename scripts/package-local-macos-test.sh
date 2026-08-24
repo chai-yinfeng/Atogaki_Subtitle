@@ -25,8 +25,8 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
-cd "$PROJECT_DIR"
-cargo tauri build --manifest-path src-tauri/Cargo.toml --bundles dmg
+cd "$TAURI_DIR"
+cargo tauri build --bundles dmg
 
 SOURCE_DMG="$TAURI_DIR/target/release/bundle/dmg/Atogaki_${VERSION}_aarch64.dmg"
 if [[ ! -f "$SOURCE_DMG" ]]; then
