@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -75,10 +75,6 @@ impl DictionaryLookupService {
                 ensure_language(&detail, "ja", "Tomoshi")?;
                 self.lookup_tomoshi(item_id, query).await?
             }
-            "freedict" => {
-                ensure_language(&detail, "en", "FreeDict")?;
-                self.lookup_freedict(item_id, query).await?
-            }
             "ecdict" => {
                 ensure_language(&detail, "en", "ECDICT")?;
                 self.lookup_ecdict(item_id, query).await?
@@ -111,33 +107,6 @@ impl DictionaryLookupService {
             "JMdict / Electronic Dictionary Research and Development Group",
             Some("https://www.edrdg.org/jmdict/j_jmdict.html"),
             Some("CC BY-SA 4.0"),
-            Some(version),
-        ))
-    }
-
-    async fn lookup_freedict(
-        &self,
-        item_id: &str,
-        query: &str,
-    ) -> Result<NewLocalLearningLookupResult> {
-        let source = self.directory.join("freedict-eng-zho.stardict.tar.xz");
-        require_file(&source, "FreeDict 英中")?;
-        let version = package_version(&source);
-        self.ensure_index("freedict", &version, &source).await?;
-        let candidates = english_lemma_candidates(query);
-        let entry = self
-            .query_index_candidates("freedict", &candidates)
-            .await?
-            .ok_or_else(|| {
-                anyhow!("FreeDict 英中没有找到“{query}”或其常见英语变形对应的词头")
-            })?;
-        Ok(entry.into_lookup(
-            item_id,
-            "freedict",
-            "FreeDict 英中",
-            "FreeDict Project；WikDict / Wiktionary contributors",
-            Some("https://freedict.org/downloads/"),
-            Some("CC BY-SA 3.0 Unported"),
             Some(version),
         ))
     }
@@ -190,7 +159,6 @@ impl DictionaryLookupService {
         let provider_owned = provider.to_string();
         let entries = tokio::task::spawn_blocking(move || match provider_owned.as_str() {
             "jmdict" => parse_jmdict(&source),
-            "freedict" => parse_freedict(&source),
             _ => bail!("unsupported index provider"),
         })
         .await
@@ -651,41 +619,6 @@ fn parse_jmdict(path: &Path) -> Result<Vec<IndexedEntry>> {
     }).collect())
 }
 
-fn parse_freedict(path: &Path) -> Result<Vec<IndexedEntry>> {
-    let decoder = xz2::read::XzDecoder::new(File::open(path)?);
-    let mut archive = tar::Archive::new(decoder);
-    let mut index = Vec::new();
-    let mut dictionary = Vec::new();
-    for file in archive.entries()? {
-        let mut file = file?;
-        let name = file.path()?.to_string_lossy().to_string();
-        if name.ends_with(".idx.gz") {
-            GzDecoder::new(&mut file).read_to_end(&mut index)?;
-        } else if name.ends_with(".dict") {
-            file.read_to_end(&mut dictionary)?;
-        }
-    }
-    if index.is_empty() || dictionary.is_empty() { bail!("FreeDict 压缩包缺少 StarDict 索引或正文"); }
-    let mut cursor = 0;
-    let mut entries = Vec::new();
-    while cursor < index.len() {
-        let end = index[cursor..].iter().position(|byte| *byte == 0).map(|value| cursor + value)
-            .ok_or_else(|| anyhow!("FreeDict 索引损坏"))?;
-        let word = String::from_utf8_lossy(&index[cursor..end]).to_string();
-        cursor = end + 1;
-        if cursor + 8 > index.len() { bail!("FreeDict 索引记录不完整"); }
-        let offset = u32::from_be_bytes(index[cursor..cursor + 4].try_into().unwrap()) as usize;
-        let size = u32::from_be_bytes(index[cursor + 4..cursor + 8].try_into().unwrap()) as usize;
-        cursor += 8;
-        let raw = dictionary.get(offset..offset + size).ok_or_else(|| anyhow!("FreeDict 正文偏移越界"))?;
-        let definitions = html_lines(&String::from_utf8_lossy(raw));
-        if definitions.is_empty() { continue; }
-        entries.push(IndexedEntry { id: format!("{offset}:{size}"), headword: word.clone(), reading: None,
-            senses: vec![LocalLearningLookupSense { part_of_speech: None, definitions, examples: Vec::new() }], forms: vec![word] });
-    }
-    Ok(entries)
-}
-
 #[derive(Deserialize)]
 struct EcdictRow {
     word: String,
@@ -760,16 +693,6 @@ fn split_dictionary_lines(value: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(str::to_string)
         .collect()
-}
-
-fn html_lines(html: &str) -> Vec<String> {
-    let mut output = String::new();
-    let mut inside = false;
-    for character in html.replace("<br>", "\n").replace("<br/>", "\n").replace("</p>", "\n").chars() {
-        match character { '<' => inside = true, '>' => inside = false, _ if !inside => output.push(character), _ => {} }
-    }
-    let output = output.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ");
-    output.lines().map(str::trim).filter(|value| !value.is_empty()).map(str::to_string).collect()
 }
 
 #[derive(Deserialize)]
@@ -876,14 +799,12 @@ mod tests {
     use crate::credential_store::{CredentialStore, SystemCredentialStore};
 
     use super::{
-        INDEX_FILE, TomoshiEntry, create_index_schema, english_lemma_candidates, html_lines,
-        mw_audio_url, open_index, package_version, parse_ecdict, parse_freedict, parse_jmdict,
-        replace_index, tomoshi_senses,
+        INDEX_FILE, TomoshiEntry, create_index_schema, english_lemma_candidates, mw_audio_url,
+        open_index, package_version, parse_ecdict, parse_jmdict, replace_index, tomoshi_senses,
     };
 
     #[test]
-    fn strips_stardict_html_and_builds_mw_audio_paths() {
-        assert_eq!(html_lines("<p>苹果 &amp; 果实</p><br>食物"), vec!["苹果 & 果实", "食物"]);
+    fn builds_mw_audio_paths() {
         assert!(mw_audio_url("bixbite").contains("/bix/"));
         assert!(mw_audio_url("ggreen").contains("/gg/"));
         assert!(mw_audio_url("apple01").contains("/a/"));
@@ -934,13 +855,6 @@ mod tests {
                 .iter()
                 .any(|entry| entry.forms.iter().any(|form| form == "勉強"))
         );
-        let freedict =
-            parse_freedict(&root.join("freedict-eng-zho.stardict.tar.xz")).unwrap();
-        assert!(
-            freedict
-                .iter()
-                .any(|entry| entry.forms.iter().any(|form| form == "apple"))
-        );
     }
 
     /// Builds the persistent App index and checks representative exact-form lookups.
@@ -954,37 +868,22 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = open_index(&root.join(INDEX_FILE)).await.unwrap();
             create_index_schema(&pool).await.unwrap();
-            for (provider, file, entries) in [
-                (
-                    "jmdict",
-                    "jmdict-eng.json.tgz",
-                    parse_jmdict(&root.join("jmdict-eng.json.tgz")).unwrap(),
-                ),
-                (
-                    "freedict",
-                    "freedict-eng-zho.stardict.tar.xz",
-                    parse_freedict(&root.join("freedict-eng-zho.stardict.tar.xz")).unwrap(),
-                ),
-            ] {
-                let source = root.join(file);
-                replace_index(&pool, provider, &package_version(&source), entries)
-                    .await
-                    .unwrap();
-            }
+            let source = root.join("jmdict-eng.json.tgz");
+            replace_index(
+                &pool,
+                "jmdict",
+                &package_version(&source),
+                parse_jmdict(&source).unwrap(),
+            )
+            .await
+            .unwrap();
             let japanese = sqlx::query_scalar::<_, String>(
                 "SELECT e.headword FROM dictionary_forms f JOIN dictionary_entries e ON e.provider_id=f.provider_id AND e.entry_id=f.entry_id WHERE f.provider_id='jmdict' AND f.form='勉強' LIMIT 1",
             )
             .fetch_one(&pool)
             .await
             .unwrap();
-            let english = sqlx::query_scalar::<_, String>(
-                "SELECT e.headword FROM dictionary_forms f JOIN dictionary_entries e ON e.provider_id=f.provider_id AND e.entry_id=f.entry_id WHERE f.provider_id='freedict' AND f.form='apple' COLLATE NOCASE LIMIT 1",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
             assert!(!japanese.is_empty());
-            assert_eq!(english.to_ascii_lowercase(), "apple");
             pool.close().await;
         });
     }

@@ -887,7 +887,7 @@ app.innerHTML = `
           <div class="settings-section-heading"><div><strong>4. 学习词典</strong><span>离线包由你明确点击后下载到正式应用数据目录；商业词典的 Key 分来源保存。</span></div><span id="dictionary-directory"></span></div>
           <div>
             <strong class="settings-subheading">离线词典包</strong>
-            <p class="settings-message">JMdict 与 Tomoshi 用于日语；ECDICT 基础数据与 FreeDict 用于英语。ECDICT 覆盖更广但属于社区汇总数据，FreeDict 暂留作对照。下载会复用上方代理设置并校验固定版本摘要。</p>
+            <p class="settings-message">JMdict 与 Tomoshi 用于日语；ECDICT 基础数据用于英语。ECDICT 属于社区汇总数据，下载会复用上方代理设置并校验固定版本摘要。</p>
           </div>
           <div id="dictionary-catalog" class="model-catalog"></div>
           <p id="dictionary-download-message" class="settings-message" role="status"></p>
@@ -2508,7 +2508,6 @@ function learningProviderOptions(detail: LearningItemDetail): LearningProviderOp
   if (detail.item.source_language === "en") {
     providers.push(
       { id: "ecdict", name: "ECDICT 英中", kind: "offline" },
-      { id: "freedict", name: "FreeDict 英中", kind: "offline" },
       { id: "cambridge", name: "Cambridge", kind: "api" },
       { id: "collins", name: "Collins", kind: "api" },
       { id: "merriam-webster", name: "Merriam-Webster", kind: "api" },
@@ -2634,9 +2633,7 @@ function learningProviderStatus(provider: LearningProviderOption): string {
       ? "jmdict-en"
       : provider.id === "tomoshi"
         ? "tomoshi-open"
-        : provider.id === "ecdict"
-          ? "ecdict-eng-zho"
-          : "freedict-eng-zho";
+        : "ecdict-eng-zho";
     return dictionaryDownloads.some((item) => item.dictionaryId === packageId && item.status === "done") ? "可查询" : "未下载";
   }
   if (["cambridge", "collins"].includes(provider.id)) return "待接入";

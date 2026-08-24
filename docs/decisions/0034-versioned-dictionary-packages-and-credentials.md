@@ -16,7 +16,7 @@
 
 - 正式应用数据目录下建立 `dictionaries/`；离线包只在用户点击下载后进入该目录，不打入 App Bundle，也不写入临时测试目录。
 - JMdict 使用 `scriptin/jmdict-simplified` 的日英 JSON 发布包，Tomoshi 使用其开放 SQLite 发布包。点击下载时从 GitHub Releases API 解析最新 tag、预期资产、大小与发布方 SHA-256；缺少摘要时拒绝安装。
-- FreeDict 英中先作为可选离线补充，固定到 `2025.11.23` StarDict 包并校验 FreeDict 数据库公布的 SHA-512。UI 明确它不是商业学习词典的等价替代；包内 `.ifo`／COPYING 已确认该版本使用 CC BY-SA 3.0 Unported。
+- FreeDict 英中曾作为可选离线补充，固定到 `2025.11.23` StarDict 包并校验 FreeDict 数据库公布的 SHA-512。2026-08-25 在 ECDICT 实机验证通过后，FreeDict 因覆盖不足从产品目录退役；本条只保留历史决策依据。
 - 所有下载先写同目录 `.part`，流式计算摘要；通过后才替换稳定文件名，更新失败会恢复旧包；版本另存为不含用户数据的 sidecar。App 启动清理残留 `.part`，但不自动更新或删除已安装词典。
 - Cambridge、Collins、Merriam-Webster 使用 `dictionary:<provider>` 凭据 ID 分别写入平台系统凭据库。SQLite 只保存“曾由本 App 成功保存”的布尔标记；打开设置和列出状态不读取 Keychain，只有用户主动保存、删除或检查时访问。
 - Merriam-Webster 继续作为独立来源标签页，与其他来源并列切换；不做自动排名、合并或评价。请求只由用户点击触发，结果显示官方未修改 Logo、完整产品名与署名，并使用有期限的本地缓存；公开分发前仍须重新确认非商业用途和当时有效条款。

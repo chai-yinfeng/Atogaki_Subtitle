@@ -9,7 +9,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha256};
 use tokio::{
     fs,
     io::AsyncWriteExt,
@@ -55,7 +55,6 @@ enum DictionarySource {
 enum ChecksumAlgorithm {
     GitSha1,
     Sha256,
-    Sha512,
 }
 
 #[derive(Debug, Clone)]
@@ -341,7 +340,6 @@ async fn resolve_download(
 enum StreamingDigest {
     GitSha1(Sha1),
     Sha256(Sha256),
-    Sha512(Sha512),
 }
 
 impl StreamingDigest {
@@ -354,7 +352,6 @@ impl StreamingDigest {
                 Ok(Self::GitSha1(digest))
             }
             ChecksumAlgorithm::Sha256 => Ok(Self::Sha256(Sha256::new())),
-            ChecksumAlgorithm::Sha512 => Ok(Self::Sha512(Sha512::new())),
         }
     }
 
@@ -362,7 +359,6 @@ impl StreamingDigest {
         match self {
             Self::GitSha1(value) => value.update(bytes),
             Self::Sha256(value) => value.update(bytes),
-            Self::Sha512(value) => value.update(bytes),
         }
     }
 
@@ -370,7 +366,6 @@ impl StreamingDigest {
         match self {
             Self::GitSha1(value) => format!("{:x}", value.finalize()),
             Self::Sha256(value) => format!("{:x}", value.finalize()),
-            Self::Sha512(value) => format!("{:x}", value.finalize()),
         }
     }
 }
@@ -501,24 +496,6 @@ fn dictionary_catalog() -> &'static [DictionaryCatalogItem] {
                 total_bytes: Some(65_933_428),
             },
         },
-        DictionaryCatalogItem {
-            id: "freedict-eng-zho",
-            name: "FreeDict 英中",
-            language_pair: "英语 → 中文",
-            version_label: "2025.11.23",
-            size_label: "1.6 MiB · 26,660 词头",
-            description: "来自 WikDict/Wiktionary 的免费离线补充；不等同于商业学习词典。",
-            license: "CC BY-SA 3.0 Unported",
-            attribution: "FreeDict Project 与 WikDict/Wiktionary contributors",
-            source_url: "https://freedict.org/downloads/",
-            file_name: "freedict-eng-zho.stardict.tar.xz",
-            source: DictionarySource::Fixed {
-                url: "https://download.freedict.org/dictionaries/eng-zho/2025.11.23/freedict-eng-zho-2025.11.23.stardict.tar.xz",
-                checksum: "059f9aca26fdc3a5a2c0c0e8fc92e111a34bf8fd438f70d267cccf35f5e47a2d45c46650999a1b3a48c3bffc3e16e0db897232128fe822d1bc59cf34f40b395c",
-                algorithm: ChecksumAlgorithm::Sha512,
-                total_bytes: None,
-            },
-        },
     ];
     CATALOG
 }
@@ -526,7 +503,7 @@ fn dictionary_catalog() -> &'static [DictionaryCatalogItem] {
 #[cfg(test)]
 mod tests {
     use super::{ChecksumAlgorithm, StreamingDigest, cleanup_partial_downloads, dictionary_catalog};
-    use sha2::{Digest, Sha256, Sha512};
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn catalog_has_unique_ids_and_https_sources() {
@@ -543,10 +520,6 @@ mod tests {
         let mut sha256 = StreamingDigest::new(ChecksumAlgorithm::Sha256, None).unwrap();
         sha256.update(b"atogaki");
         assert_eq!(sha256.finalize(), format!("{:x}", Sha256::digest(b"atogaki")));
-        let mut sha512 = StreamingDigest::new(ChecksumAlgorithm::Sha512, None).unwrap();
-        sha512.update(b"atogaki");
-        assert_eq!(sha512.finalize(), format!("{:x}", Sha512::digest(b"atogaki")));
-
         let mut git = StreamingDigest::new(ChecksumAlgorithm::GitSha1, Some(7)).unwrap();
         git.update(b"atogaki");
         assert_eq!(git.finalize(), "0f74bb4e2751dca7e6d37b0314d0bd607f49d8cf");
