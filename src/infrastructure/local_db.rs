@@ -136,10 +136,71 @@ pub struct LocalLearningOccurrenceRecord {
     pub created_at_unix: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LocalLearningLookupSense {
+    pub part_of_speech: Option<String>,
+    pub definitions: Vec<String>,
+    pub examples: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LocalLearningLookupResult {
+    pub id: String,
+    pub learning_item_id: String,
+    pub provider_id: String,
+    pub provider_name: String,
+    pub headword: String,
+    pub reading: Option<String>,
+    pub pronunciation: Option<String>,
+    pub senses: Vec<LocalLearningLookupSense>,
+    pub attribution_text: String,
+    pub source_url: Option<String>,
+    pub license_label: Option<String>,
+    pub data_version: Option<String>,
+    pub fetched_at_unix: i64,
+    pub cache_expires_at_unix: Option<i64>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct LocalLearningLookupRow {
+    id: String,
+    learning_item_id: String,
+    provider_id: String,
+    provider_name: String,
+    headword: String,
+    reading: Option<String>,
+    pronunciation: Option<String>,
+    senses_json: String,
+    attribution_text: String,
+    source_url: Option<String>,
+    license_label: Option<String>,
+    data_version: Option<String>,
+    fetched_at_unix: i64,
+    cache_expires_at_unix: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewLocalLearningLookupResult {
+    pub learning_item_id: String,
+    pub provider_id: String,
+    pub provider_name: String,
+    pub headword: String,
+    pub reading: Option<String>,
+    pub pronunciation: Option<String>,
+    pub senses: Vec<LocalLearningLookupSense>,
+    pub attribution_text: String,
+    pub source_url: Option<String>,
+    pub license_label: Option<String>,
+    pub data_version: Option<String>,
+    pub fetched_at_unix: i64,
+    pub cache_expires_at_unix: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct LocalLearningItemDetail {
     pub item: LocalLearningItemRecord,
     pub occurrences: Vec<LocalLearningOccurrenceRecord>,
+    pub lookup_results: Vec<LocalLearningLookupResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -858,13 +919,118 @@ impl LocalDatabase {
                 .or_default()
                 .push(occurrence);
         }
+        let lookup_rows = sqlx::query_as::<_, LocalLearningLookupRow>(
+            "SELECT id, learning_item_id, provider_id, provider_name, headword,
+                    reading, pronunciation, senses_json, attribution_text, source_url,
+                    license_label, data_version, fetched_at_unix, cache_expires_at_unix
+             FROM local_learning_lookup_results
+             ORDER BY provider_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list learning dictionary results")?;
+        let mut lookups_by_item = HashMap::<String, Vec<_>>::new();
+        for row in lookup_rows {
+            let learning_item_id = row.learning_item_id.clone();
+            lookups_by_item
+                .entry(learning_item_id)
+                .or_default()
+                .push(learning_lookup_result_from_row(row)?);
+        }
         Ok(items
             .into_iter()
             .map(|item| LocalLearningItemDetail {
                 occurrences: occurrences_by_item.remove(&item.id).unwrap_or_default(),
+                lookup_results: lookups_by_item.remove(&item.id).unwrap_or_default(),
                 item,
             })
             .collect())
+    }
+
+    pub async fn upsert_learning_lookup_result(
+        &self,
+        input: NewLocalLearningLookupResult,
+    ) -> Result<LocalLearningItemDetail> {
+        let provider_id = input.provider_id.trim();
+        let provider_name = input.provider_name.trim();
+        let headword = input.headword.trim();
+        let attribution_text = input.attribution_text.trim();
+        if provider_id.is_empty()
+            || provider_name.is_empty()
+            || headword.is_empty()
+            || attribution_text.is_empty()
+        {
+            return Err(anyhow!(
+                "learning dictionary results require provider, headword, and attribution"
+            ));
+        }
+        if input.senses.is_empty()
+            || input.senses.iter().any(|sense| {
+                sense
+                    .definitions
+                    .iter()
+                    .all(|value| value.trim().is_empty())
+            })
+        {
+            return Err(anyhow!(
+                "learning dictionary results require at least one definition per sense"
+            ));
+        }
+        let senses_json = serde_json::to_string(&input.senses)
+            .context("failed to encode learning dictionary senses")?;
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO local_learning_lookup_results (
+                id, learning_item_id, provider_id, provider_name, headword,
+                reading, pronunciation, senses_json, attribution_text, source_url,
+                license_label, data_version, fetched_at_unix, cache_expires_at_unix
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(learning_item_id, provider_id) DO UPDATE SET
+                provider_name = excluded.provider_name,
+                headword = excluded.headword,
+                reading = excluded.reading,
+                pronunciation = excluded.pronunciation,
+                senses_json = excluded.senses_json,
+                attribution_text = excluded.attribution_text,
+                source_url = excluded.source_url,
+                license_label = excluded.license_label,
+                data_version = excluded.data_version,
+                fetched_at_unix = excluded.fetched_at_unix,
+                cache_expires_at_unix = excluded.cache_expires_at_unix",
+        )
+        .bind(id)
+        .bind(&input.learning_item_id)
+        .bind(provider_id)
+        .bind(provider_name)
+        .bind(headword)
+        .bind(
+            input
+                .reading
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+        )
+        .bind(
+            input
+                .pronunciation
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+        )
+        .bind(senses_json)
+        .bind(attribution_text)
+        .bind(input.source_url)
+        .bind(input.license_label)
+        .bind(input.data_version)
+        .bind(input.fetched_at_unix)
+        .bind(input.cache_expires_at_unix)
+        .execute(&self.pool)
+        .await
+        .context("failed to save learning dictionary result")?;
+
+        self.get_learning_item(&input.learning_item_id)
+            .await?
+            .ok_or_else(|| anyhow!("learning item not found: {}", input.learning_item_id))
     }
 
     pub async fn get_learning_item(
@@ -1981,6 +2147,29 @@ fn utf16_slice(value: &str, start: usize, end: usize) -> Result<String> {
         .map_err(|_| anyhow!("learning selection splits a Unicode character"))
 }
 
+fn learning_lookup_result_from_row(
+    row: LocalLearningLookupRow,
+) -> Result<LocalLearningLookupResult> {
+    let senses = serde_json::from_str(&row.senses_json)
+        .with_context(|| format!("failed to decode {} dictionary senses", row.provider_id))?;
+    Ok(LocalLearningLookupResult {
+        id: row.id,
+        learning_item_id: row.learning_item_id,
+        provider_id: row.provider_id,
+        provider_name: row.provider_name,
+        headword: row.headword,
+        reading: row.reading,
+        pronunciation: row.pronunciation,
+        senses,
+        attribution_text: row.attribution_text,
+        source_url: row.source_url,
+        license_label: row.license_label,
+        data_version: row.data_version,
+        fetched_at_unix: row.fetched_at_unix,
+        cache_expires_at_unix: row.cache_expires_at_unix,
+    })
+}
+
 fn normalized_optional_subtitle_text(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
@@ -2214,8 +2403,8 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::{
-        LocalDatabase, LocalGlossaryTermInput, LocalMachineTranslation, NewLocalLearningSelection,
-        NewLocalRenderJob,
+        LocalDatabase, LocalGlossaryTermInput, LocalLearningLookupSense, LocalMachineTranslation,
+        NewLocalLearningLookupResult, NewLocalLearningSelection, NewLocalRenderJob,
     };
     use crate::{
         application::{
@@ -2505,6 +2694,63 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(updated.item.meaning_text.as_deref(), Some("苹果"));
+
+        let with_dictionary = database
+            .upsert_learning_lookup_result(NewLocalLearningLookupResult {
+                learning_item_id: saved.item.id.clone(),
+                provider_id: "jmdict".to_string(),
+                provider_name: "JMdict".to_string(),
+                headword: "林檎".to_string(),
+                reading: Some("りんご".to_string()),
+                pronunciation: None,
+                senses: vec![LocalLearningLookupSense {
+                    part_of_speech: Some("名词".to_string()),
+                    definitions: vec!["apple".to_string()],
+                    examples: Vec::new(),
+                }],
+                attribution_text: "JMdict / EDRDG".to_string(),
+                source_url: Some("https://www.edrdg.org/jmdict/".to_string()),
+                license_label: Some("CC BY-SA 4.0".to_string()),
+                data_version: Some("test".to_string()),
+                fetched_at_unix: 42,
+                cache_expires_at_unix: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(with_dictionary.lookup_results.len(), 1);
+        assert_eq!(with_dictionary.lookup_results[0].provider_id, "jmdict");
+        assert_eq!(
+            with_dictionary.lookup_results[0].senses[0].definitions,
+            vec!["apple"]
+        );
+
+        let replaced_dictionary = database
+            .upsert_learning_lookup_result(NewLocalLearningLookupResult {
+                learning_item_id: saved.item.id.clone(),
+                provider_id: "jmdict".to_string(),
+                provider_name: "JMdict".to_string(),
+                headword: "林檎".to_string(),
+                reading: Some("りんご".to_string()),
+                pronunciation: None,
+                senses: vec![LocalLearningLookupSense {
+                    part_of_speech: Some("名词".to_string()),
+                    definitions: vec!["apple; fruit".to_string()],
+                    examples: Vec::new(),
+                }],
+                attribution_text: "JMdict / EDRDG".to_string(),
+                source_url: None,
+                license_label: Some("CC BY-SA 4.0".to_string()),
+                data_version: Some("test-2".to_string()),
+                fetched_at_unix: 43,
+                cache_expires_at_unix: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(replaced_dictionary.lookup_results.len(), 1);
+        assert_eq!(
+            replaced_dictionary.lookup_results[0].senses[0].definitions,
+            vec!["apple; fruit"]
+        );
 
         database.delete_job(&manifest.job_id).await.unwrap();
         let preserved = database

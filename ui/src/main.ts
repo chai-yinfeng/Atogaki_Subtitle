@@ -138,6 +138,29 @@ type LearningOccurrence = {
   created_at_unix: number;
 };
 
+type LearningLookupSense = {
+  part_of_speech: string | null;
+  definitions: string[];
+  examples: string[];
+};
+
+type LearningLookupResult = {
+  id: string;
+  learning_item_id: string;
+  provider_id: string;
+  provider_name: string;
+  headword: string;
+  reading: string | null;
+  pronunciation: string | null;
+  senses: LearningLookupSense[];
+  attribution_text: string;
+  source_url: string | null;
+  license_label: string | null;
+  data_version: string | null;
+  fetched_at_unix: number;
+  cache_expires_at_unix: number | null;
+};
+
 type LearningItemDetail = {
   item: {
     id: string;
@@ -153,6 +176,13 @@ type LearningItemDetail = {
     updated_at_unix: number;
   };
   occurrences: LearningOccurrence[];
+  lookup_results: LearningLookupResult[];
+};
+
+type LearningProviderOption = {
+  id: string;
+  name: string;
+  kind: "summary" | "offline" | "api";
 };
 
 type PendingLearningSelection = {
@@ -656,6 +686,15 @@ app.innerHTML = `
         </section>
       </div>
     </dialog>
+    <dialog id="learning-dictionary-dialog" class="learning-dictionary-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">DICTIONARY REFERENCES</p><h2 id="learning-dictionary-title">词典详情</h2></div>
+        <button id="close-learning-dictionary" type="button" class="secondary">关闭</button>
+      </div>
+      <p id="learning-dictionary-subtitle" class="dialog-help"></p>
+      <nav id="learning-provider-tabs" class="learning-provider-tabs" aria-label="词典来源"></nav>
+      <section id="learning-provider-panel" class="learning-provider-panel" aria-live="polite"></section>
+    </dialog>
     <dialog id="rename-job-dialog" class="rename-job-dialog">
       <form id="rename-job-form">
         <div class="dialog-heading">
@@ -897,6 +936,11 @@ const saveLearningSelectionButton = document.querySelector<HTMLButtonElement>("#
 const saveLearningSentenceButton = document.querySelector<HTMLButtonElement>("#save-learning-sentence");
 const learningItemList = document.querySelector<HTMLDivElement>("#learning-item-list");
 const learningMessage = document.querySelector<HTMLParagraphElement>("#learning-message");
+const learningDictionaryDialog = document.querySelector<HTMLDialogElement>("#learning-dictionary-dialog");
+const learningDictionaryTitle = document.querySelector<HTMLHeadingElement>("#learning-dictionary-title");
+const learningDictionarySubtitle = document.querySelector<HTMLParagraphElement>("#learning-dictionary-subtitle");
+const learningProviderTabs = document.querySelector<HTMLElement>("#learning-provider-tabs");
+const learningProviderPanel = document.querySelector<HTMLElement>("#learning-provider-panel");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translationRunStatusText = document.querySelector<HTMLSpanElement>("#translation-run-status");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
@@ -1006,6 +1050,8 @@ let modelDownloadPoll: number | null = null;
 const settingsDirtyFields = new Set<string>();
 let learningItems: LearningItemDetail[] = [];
 let pendingLearningSelection: PendingLearningSelection | null = null;
+let activeLearningItemId: string | null = null;
+let activeLearningProviderId = "summary";
 let learningActionBusy = false;
 let workspaceElapsedTimer: number | null = null;
 let playbackPositionSaveTimer: number | null = null;
@@ -2129,6 +2175,7 @@ async function refreshLearningItems(): Promise<void> {
   try {
     learningItems = await invoke<LearningItemDetail[]>("list_learning_items");
     renderLearningItems();
+    if (learningDictionaryDialog?.open && activeLearningItemId) renderLearningDictionary();
     if (learningMessage) {
       learningMessage.textContent = learningItems.length
         ? `${learningItems.length} 个学习条目保存在本机。`
@@ -2169,6 +2216,7 @@ function renderLearningItems(): void {
       ${context}
       <div class="learning-card-actions">
         <button type="button" data-save-learning-meaning="${escapeHtml(detail.item.id)}">保存译义</button>
+        <button type="button" class="secondary" data-open-learning-dictionary="${escapeHtml(detail.item.id)}">查看词典</button>
         ${occurrence?.job_id ? `<button type="button" class="secondary" data-play-learning-source="${escapeHtml(detail.item.id)}">播放例句</button>` : ""}
         <button type="button" class="danger" data-delete-learning-item="${escapeHtml(detail.item.id)}">删除</button>
       </div>
@@ -2180,9 +2228,121 @@ function renderLearningItems(): void {
   learningItemList.querySelectorAll<HTMLButtonElement>("[data-play-learning-source]").forEach((button) => {
     button.addEventListener("click", () => void playLearningSource(button.dataset.playLearningSource ?? ""));
   });
+  learningItemList.querySelectorAll<HTMLButtonElement>("[data-open-learning-dictionary]").forEach((button) => {
+    button.addEventListener("click", () => openLearningDictionary(button.dataset.openLearningDictionary ?? ""));
+  });
   learningItemList.querySelectorAll<HTMLButtonElement>("[data-delete-learning-item]").forEach((button) => {
     button.addEventListener("click", () => void removeLearningItem(button.dataset.deleteLearningItem ?? ""));
   });
+}
+
+function learningProviderOptions(detail: LearningItemDetail): LearningProviderOption[] {
+  const providers: LearningProviderOption[] = [{ id: "summary", name: "简明", kind: "summary" }];
+  if (detail.item.item_type === "sentence") return providers;
+  if (detail.item.source_language === "en") {
+    providers.push(
+      { id: "cambridge", name: "Cambridge", kind: "api" },
+      { id: "collins", name: "Collins", kind: "api" },
+      { id: "merriam-webster", name: "Merriam-Webster", kind: "api" },
+    );
+  } else if (detail.item.source_language === "ja") {
+    providers.push(
+      { id: "jmdict", name: "JMdict", kind: "offline" },
+      { id: "tomoshi", name: "Tomoshi", kind: "offline" },
+    );
+  }
+  return providers;
+}
+
+function openLearningDictionary(itemId: string): void {
+  const detail = learningItems.find((candidate) => candidate.item.id === itemId);
+  if (!detail || !learningDictionaryDialog) return;
+  activeLearningItemId = itemId;
+  activeLearningProviderId = "summary";
+  renderLearningDictionary();
+  learningDictionaryDialog.showModal();
+}
+
+function closeLearningDictionary(): void {
+  learningDictionaryDialog?.close();
+  activeLearningItemId = null;
+  activeLearningProviderId = "summary";
+}
+
+function renderLearningDictionary(): void {
+  const detail = learningItems.find((candidate) => candidate.item.id === activeLearningItemId);
+  if (!detail || !learningProviderTabs || !learningProviderPanel) {
+    closeLearningDictionary();
+    return;
+  }
+  const providers = learningProviderOptions(detail);
+  if (!providers.some((provider) => provider.id === activeLearningProviderId)) {
+    activeLearningProviderId = "summary";
+  }
+  const occurrence = detail.occurrences[0];
+  if (learningDictionaryTitle) learningDictionaryTitle.textContent = detail.item.source_text;
+  if (learningDictionarySubtitle) {
+    learningDictionarySubtitle.textContent = `${languageLabel(detail.item.source_language)} · ${detail.item.item_type === "sentence" ? "整句收藏只显示简明译义" : "各词典来源独立显示，不自动合并"}`;
+  }
+  learningProviderTabs.innerHTML = providers.map((provider) => {
+    const hasResult = provider.id === "summary"
+      ? Boolean(detail.item.meaning_text)
+      : detail.lookup_results.some((result) => result.provider_id === provider.id);
+    return `<button type="button" class="secondary${provider.id === activeLearningProviderId ? " active" : ""}" data-learning-provider="${escapeHtml(provider.id)}" aria-pressed="${provider.id === activeLearningProviderId}">
+      ${escapeHtml(provider.name)}<span>${hasResult ? "已有内容" : provider.kind === "offline" ? "未下载" : provider.kind === "api" ? "未配置" : "可编辑"}</span>
+    </button>`;
+  }).join("");
+  learningProviderTabs.querySelectorAll<HTMLButtonElement>("[data-learning-provider]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeLearningProviderId = button.dataset.learningProvider ?? "summary";
+      renderLearningDictionary();
+    });
+  });
+
+  if (activeLearningProviderId === "summary") {
+    const meaning = detail.item.meaning_text
+      ? `<p class="learning-summary-meaning">${escapeHtml(detail.item.meaning_text)}</p>`
+      : '<p class="learning-provider-empty-copy">还没有简明译义。关闭详情后可直接在学习列表中填写。</p>';
+    const context = occurrence
+      ? `<blockquote><strong>${escapeHtml(occurrence.segment_source_snapshot)}</strong>${occurrence.segment_translation_snapshot ? `<span>${escapeHtml(occurrence.segment_translation_snapshot)}</span>` : ""}</blockquote>
+        <p class="learning-source-meta">${escapeHtml(occurrence.job_display_name_snapshot)} · ${escapeHtml(formatTime(occurrence.start_ms))}</p>`
+      : '<p class="learning-provider-empty-copy">原任务已删除；收藏时的来源快照仍保存在本机。</p>';
+    learningProviderPanel.innerHTML = `<article class="learning-provider-result">
+      <div class="learning-provider-result-heading"><div><span>我的学习译义</span><h3>${escapeHtml(detail.item.source_text)}</h3></div><span>本地</span></div>
+      ${meaning}${context}
+    </article>`;
+    return;
+  }
+
+  const provider = providers.find((candidate) => candidate.id === activeLearningProviderId);
+  const result = detail.lookup_results.find((candidate) => candidate.provider_id === activeLearningProviderId);
+  if (!provider || !result) {
+    const message = provider?.kind === "offline"
+      ? `${provider.name} 离线词典包尚未下载。下一阶段会在设置中提供带进度、SHA-256 校验和原子安装的下载入口，数据保存到正式应用目录的 dictionaries/。`
+      : provider?.id === "merriam-webster"
+        ? "Merriam-Webster API 尚未配置。接入时需要单独的 API Key，并按官方要求显示来源标识；免费非商业额度为每个 Key 每天 1,000 次。"
+        : `${provider?.name ?? "该词典"} API 尚未配置。接入后会独立请求并显示本来源的释义、例句和发音，不覆盖其他词典。`;
+    learningProviderPanel.innerHTML = `<div class="learning-provider-empty">
+      <span>${provider?.kind === "offline" ? "LOCAL DICTIONARY PACK" : "DICTIONARY API"}</span>
+      <h3>${escapeHtml(provider?.name ?? activeLearningProviderId)} 尚未接入</h3>
+      <p>${escapeHtml(message)}</p>
+    </div>`;
+    return;
+  }
+
+  const senses = result.senses.map((sense) => `<section class="learning-dictionary-sense">
+    ${sense.part_of_speech ? `<strong>${escapeHtml(sense.part_of_speech)}</strong>` : ""}
+    <ol>${sense.definitions.map((definition) => `<li>${escapeHtml(definition)}</li>`).join("")}</ol>
+    ${sense.examples.length ? `<div class="learning-dictionary-examples">${sense.examples.map((example) => `<p>${escapeHtml(example)}</p>`).join("")}</div>` : ""}
+  </section>`).join("");
+  learningProviderPanel.innerHTML = `<article class="learning-provider-result">
+    <div class="learning-provider-result-heading">
+      <div><span>${escapeHtml(result.provider_name)}</span><h3>${escapeHtml(result.headword)}</h3></div>
+      <div class="learning-dictionary-reading">${result.reading ? escapeHtml(result.reading) : ""}${result.pronunciation ? `<span>${escapeHtml(result.pronunciation)}</span>` : ""}</div>
+    </div>
+    ${senses}
+    <footer><span>${escapeHtml(result.attribution_text)}</span>${result.license_label ? `<span>${escapeHtml(result.license_label)}</span>` : ""}${result.data_version ? `<span>数据 ${escapeHtml(result.data_version)}</span>` : ""}</footer>
+  </article>`;
 }
 
 async function saveLearningMeaning(itemId: string): Promise<void> {
@@ -4423,6 +4583,11 @@ document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("
 document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => void showTopLevelArea("listening"));
 document.querySelector<HTMLButtonElement>("#show-learning")?.addEventListener("click", () => void showTopLevelArea("learning"));
 document.querySelector<HTMLButtonElement>("#refresh-learning")?.addEventListener("click", () => void refreshLearningItems());
+document.querySelector<HTMLButtonElement>("#close-learning-dictionary")?.addEventListener("click", closeLearningDictionary);
+learningDictionaryDialog?.addEventListener("close", () => {
+  activeLearningItemId = null;
+  activeLearningProviderId = "summary";
+});
 listeningSubtitleList?.addEventListener("mouseup", captureListeningSelection);
 listeningSubtitleList?.addEventListener("keyup", captureListeningSelection);
 saveLearningSelectionButton?.addEventListener("click", () => {

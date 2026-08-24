@@ -125,6 +125,33 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .learning-card blockquote span { color: #70736b; font-size: 11px; line-height: 1.55; }
 .learning-card-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .learning-card-actions button { align-self: auto; padding: 7px 10px; font-size: 10px; }
+.learning-dictionary-dialog { width: min(780px, calc(100vw - 40px)); max-height: calc(100vh - 40px); overflow: auto; border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: #22251f; background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
+.learning-dictionary-dialog::backdrop { background: rgba(32, 35, 31, .42); backdrop-filter: blur(4px); }
+.learning-provider-tabs { display: flex; gap: 8px; margin: 18px 0 14px; overflow-x: auto; padding-bottom: 3px; }
+.learning-provider-tabs button { min-width: max-content; display: grid; justify-items: start; gap: 2px; border-color: #d2cabb; color: #555a52; background: #fffdf7; }
+.learning-provider-tabs button span { color: #85877e; font-size: 8px; font-weight: 500; }
+.learning-provider-tabs button.active { border-color: #31584e; color: #fff; background: #31584e; }
+.learning-provider-tabs button.active span { color: #dce9e1; }
+.learning-provider-panel { min-height: 300px; }
+.learning-provider-result { display: grid; gap: 16px; border: 1px solid #d8d0c1; border-radius: 14px; padding: 20px; background: #fffdf7; }
+.learning-provider-result-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; border-bottom: 1px solid #e1dbcf; padding-bottom: 14px; }
+.learning-provider-result-heading span { color: #787b72; font-size: 10px; }
+.learning-provider-result-heading h3 { margin: 4px 0 0; font-family: Georgia, "Songti SC", serif; font-size: 27px; font-weight: 500; overflow-wrap: anywhere; }
+.learning-dictionary-reading { display: grid; justify-items: end; gap: 4px; color: #31584e; font-size: 15px; }
+.learning-dictionary-reading span { font-family: ui-monospace, monospace; }
+.learning-summary-meaning { margin: 0; font-size: 17px; line-height: 1.75; white-space: pre-wrap; }
+.learning-provider-result blockquote { display: grid; gap: 7px; margin: 0; border-left: 3px solid #91a99d; padding: 9px 0 9px 13px; line-height: 1.65; }
+.learning-provider-result blockquote span { color: #71746c; font-size: 12px; }
+.learning-dictionary-sense { display: grid; gap: 8px; }
+.learning-dictionary-sense > strong { width: fit-content; border-radius: 999px; padding: 3px 8px; color: #31584e; background: #e6eee8; font-size: 10px; }
+.learning-dictionary-sense ol { display: grid; gap: 8px; margin: 0; padding-left: 24px; line-height: 1.65; }
+.learning-dictionary-examples { display: grid; gap: 5px; border-left: 2px solid #ddd4c4; padding-left: 12px; color: #6e7068; font-size: 12px; }
+.learning-dictionary-examples p { margin: 0; }
+.learning-provider-result footer { display: flex; flex-wrap: wrap; gap: 6px 14px; border-top: 1px solid #e1dbcf; padding-top: 12px; color: #7a7d74; font-size: 9px; }
+.learning-provider-empty { min-height: 300px; display: grid; align-content: center; justify-items: center; gap: 8px; border: 1px dashed #cfc6b7; border-radius: 14px; padding: 36px; background: rgba(255, 253, 247, .56); text-align: center; }
+.learning-provider-empty > span { color: #8c4d3e; font-size: 9px; font-weight: 700; letter-spacing: .08em; }
+.learning-provider-empty h3 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; font-weight: 500; }
+.learning-provider-empty p, .learning-provider-empty-copy { max-width: 560px; margin: 0; color: #71746c; font-size: 12px; line-height: 1.7; }
 
 .karaoke-view { margin-top: 34px; }
 .karaoke-heading { margin-top: 0; }
