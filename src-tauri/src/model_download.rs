@@ -78,7 +78,6 @@ impl ModelDownloadService {
                 models_directory.display()
             )
         })?;
-        cleanup_partial_downloads(&models_directory)?;
         Ok(Self {
             models_directory,
             settings,
@@ -107,10 +106,14 @@ impl ModelDownloadService {
         {
             bail!("another model download is already running");
         }
+        let downloaded_bytes = fs::metadata(self.partial_path(&model))
+            .await
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
         let state = ModelDownloadState {
             model_id: model.id.to_string(),
             status: "queued".to_string(),
-            downloaded_bytes: 0,
+            downloaded_bytes,
             total_bytes: None,
             path: None,
             error: None,
@@ -122,8 +125,6 @@ impl ModelDownloadService {
         let service = self.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(error) = service.download(model.clone()).await {
-                let part_path = service.partial_path(&model);
-                let _ = fs::remove_file(part_path).await;
                 service
                     .update_state(model.id, |state| {
                         state.status = "failed".to_string();
@@ -166,7 +167,6 @@ impl ModelDownloadService {
         for source in sources {
             self.update_state(model.id, |state| {
                 state.source = Some(source.label.to_string());
-                state.downloaded_bytes = 0;
                 state.total_bytes = None;
             })
             .await;
@@ -176,7 +176,6 @@ impl ModelDownloadService {
             {
                 Ok(()) => return Ok(()),
                 Err(error) => {
-                    let _ = fs::remove_file(self.partial_path(&model)).await;
                     failures.push(format!("{}：{error:#}", source.label));
                 }
             }
@@ -191,14 +190,37 @@ impl ModelDownloadService {
         source: &DownloadSource,
         output_path: &Path,
     ) -> Result<()> {
-        let response = client
+        let part_path = self.partial_path(model);
+        let existing_bytes = fs::metadata(&part_path)
+            .await
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let mut request = client
             .get(&source.url)
+            .header(reqwest::header::ACCEPT_ENCODING, "identity");
+        if existing_bytes > 0 {
+            request = request.header(reqwest::header::RANGE, format!("bytes={existing_bytes}-"));
+        }
+        let response = request
             .send()
             .await
             .with_context(|| format!("无法连接 {}", source.label))?;
         let status = response.status();
+        if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && existing_bytes > 0 {
+            if sha256_file(&part_path).await? == model.sha256 {
+                return self.install_verified_download(model, &part_path, output_path).await;
+            }
+            fs::remove_file(&part_path).await.with_context(|| {
+                format!("failed to discard invalid partial model {}", part_path.display())
+            })?;
+            bail!("服务器拒绝续传，且现有临时文件未通过完整校验；下次将重新下载");
+        }
         if !status.is_success() {
             bail!("服务器返回 {status}");
+        }
+        let resumed = existing_bytes > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
+        if resumed {
+            validate_content_range(response.headers(), existing_bytes)?;
         }
         let resolved_host = response
             .url()
@@ -209,18 +231,38 @@ impl ModelDownloadService {
             state.source = Some(format!("{} · {resolved_host}", source.label));
         })
         .await;
-        let total_bytes = response.content_length();
+        let total_bytes = if resumed {
+            content_range_total(response.headers()).or_else(|| {
+                response
+                    .content_length()
+                    .map(|remaining| existing_bytes.saturating_add(remaining))
+            })
+        } else {
+            response.content_length()
+        };
         self.update_state(model.id, |state| state.total_bytes = total_bytes)
             .await;
 
-        let part_path = self.partial_path(model);
-        let _ = fs::remove_file(&part_path).await;
-        let mut output = fs::File::create(&part_path)
+        let mut options = fs::OpenOptions::new();
+        options.create(true).write(true);
+        if resumed {
+            options.append(true);
+        } else {
+            options.truncate(true);
+        }
+        let mut output = options.open(&part_path)
             .await
             .with_context(|| format!("failed to create {}", part_path.display()))?;
         let mut stream = response.bytes_stream();
-        let mut downloaded_bytes = 0_u64;
+        let mut downloaded_bytes = if resumed { existing_bytes } else { 0 };
+        self.update_state(model.id, |state| {
+            state.downloaded_bytes = downloaded_bytes;
+        })
+        .await;
         let mut hasher = Sha256::new();
+        if resumed {
+            update_sha256_from_file(&part_path, &mut hasher).await?;
+        }
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.context("model download was interrupted")?;
             output
@@ -245,9 +287,22 @@ impl ModelDownloadService {
         }
         let actual = format!("{:x}", hasher.finalize());
         if actual != model.sha256 {
+            fs::remove_file(&part_path).await.with_context(|| {
+                format!("failed to discard corrupt model download {}", part_path.display())
+            })?;
             bail!("SHA-256 校验失败，期望 {}，实际 {actual}", model.sha256);
         }
-        fs::rename(&part_path, &output_path)
+        self.install_verified_download(model, &part_path, output_path).await
+    }
+
+    async fn install_verified_download(
+        &self,
+        model: &ModelCatalogItem,
+        part_path: &Path,
+        output_path: &Path,
+    ) -> Result<()> {
+        let downloaded_bytes = fs::metadata(part_path).await?.len();
+        fs::rename(part_path, output_path)
             .await
             .with_context(|| format!("failed to install {}", output_path.display()))?;
         self.settings
@@ -369,19 +424,50 @@ async fn sha256_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn cleanup_partial_downloads(models_directory: &Path) -> Result<()> {
-    for entry in std::fs::read_dir(models_directory)? {
-        let path = entry?.path();
-        if path.extension().and_then(|extension| extension.to_str()) == Some("part") {
-            std::fs::remove_file(&path).with_context(|| {
-                format!(
-                    "failed to clean interrupted model download {}",
-                    path.display()
-                )
-            })?;
+async fn update_sha256_from_file(path: &Path, hasher: &mut Sha256) -> Result<()> {
+    let mut file = fs::File::open(path)
+        .await
+        .with_context(|| format!("failed to open partial download {}", path.display()))?;
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer).await?;
+        if read == 0 {
+            break;
         }
+        hasher.update(&buffer[..read]);
     }
     Ok(())
+}
+
+fn validate_content_range(headers: &reqwest::header::HeaderMap, expected_start: u64) -> Result<()> {
+    let value = headers
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| anyhow!("续传响应缺少 Content-Range"))?;
+    let range = value
+        .strip_prefix("bytes ")
+        .and_then(|value| value.split('/').next())
+        .ok_or_else(|| anyhow!("无法解析续传范围：{value}"))?;
+    let start = range
+        .split('-')
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| anyhow!("无法解析续传起点：{value}"))?;
+    if start != expected_start {
+        bail!("服务器从 {start} 字节续传，但本地需要从 {expected_start} 字节继续");
+    }
+    Ok(())
+}
+
+fn content_range_total(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::CONTENT_RANGE)?
+        .to_str()
+        .ok()?
+        .split('/')
+        .nth(1)?
+        .parse()
+        .ok()
 }
 
 fn model_catalog() -> &'static [ModelCatalogItem] {
@@ -457,12 +543,9 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use reqwest::header::{CONTENT_RANGE, HeaderMap, HeaderValue};
 
-    use super::{cleanup_partial_downloads, download_sources, model_catalog};
+    use super::{content_range_total, download_sources, model_catalog, validate_content_range};
 
     #[test]
     fn catalog_uses_unique_ids_and_https_downloads() {
@@ -517,24 +600,11 @@ mod tests {
     }
 
     #[test]
-    fn startup_cleanup_only_removes_partial_downloads() {
-        let root = std::env::temp_dir().join(format!(
-            "atogaki-model-cleanup-test-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        let partial = root.join("ggml-medium.bin.part");
-        let installed = root.join("ggml-small.bin");
-        fs::write(&partial, b"incomplete").unwrap();
-        fs::write(&installed, b"installed").unwrap();
-
-        cleanup_partial_downloads(&root).unwrap();
-
-        assert!(!partial.exists());
-        assert!(installed.exists());
-        fs::remove_dir_all(root).unwrap();
+    fn content_range_must_continue_at_the_local_file_boundary() {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_RANGE, HeaderValue::from_static("bytes 1024-2047/4096"));
+        validate_content_range(&headers, 1024).unwrap();
+        assert_eq!(content_range_total(&headers), Some(4096));
+        assert!(validate_content_range(&headers, 512).is_err());
     }
 }
