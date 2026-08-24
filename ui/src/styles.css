@@ -111,6 +111,13 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 
 .learning-view { margin-top: 34px; }
 .learning-heading { align-items: end; }
+.learning-language-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 18px 0 8px; }
+.learning-language-bar > span { color: #73766e; font-size: 11px; white-space: nowrap; }
+.learning-language-tabs { display: flex; flex-wrap: wrap; gap: 7px; }
+.learning-language-tabs button { display: flex; align-items: center; gap: 7px; border-color: #d2cabb; color: #555a52; background: #fffdf7; }
+.learning-language-tabs button span { min-width: 18px; border-radius: 999px; padding: 1px 5px; color: #70736b; background: #eee9df; font-size: 9px; text-align: center; }
+.learning-language-tabs button.active { border-color: #31584e; color: #fff; background: #31584e; }
+.learning-language-tabs button.active span { color: #31584e; background: #e4eee8; }
 .learning-message { min-height: 18px; color: #6e7068; font-size: 12px; }
 .learning-message.warning { color: #9a3e31; }
 .learning-item-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); align-items: start; gap: 14px; }

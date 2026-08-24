@@ -4,6 +4,7 @@ import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts"
 import "./styles.css";
 
 type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
+type LearningLanguage = "ja" | "en" | "ko";
 
 type LocalJob = {
   job_id: string;
@@ -529,6 +530,14 @@ app.innerHTML = `
         <div><p class="eyebrow">LEARNING LIBRARY</p><h2 id="learning-title">学习</h2><p>保存词语、短语、语法表达与整句，在原节目语境中反复回听。</p></div>
         <button id="refresh-learning" type="button" class="secondary">刷新单词本</button>
       </div>
+      <div class="learning-language-bar">
+        <nav id="learning-language-tabs" class="learning-language-tabs" aria-label="选择单词本语言">
+          <button type="button" class="secondary" data-learning-language="ja">日语单词本 <span data-learning-language-count="ja">0</span></button>
+          <button type="button" class="secondary" data-learning-language="en">英语单词本 <span data-learning-language-count="en">0</span></button>
+          <button type="button" class="secondary" data-learning-language="ko">韩语单词本 <span data-learning-language-count="ko">0</span></button>
+        </nav>
+        <span id="learning-language-summary"></span>
+      </div>
       <p id="learning-message" class="learning-message" role="status"></p>
       <div id="learning-item-list" class="learning-item-list"></div>
     </section>
@@ -992,6 +1001,8 @@ const saveLearningSelectionButton = document.querySelector<HTMLButtonElement>("#
 const saveLearningSentenceButton = document.querySelector<HTMLButtonElement>("#save-learning-sentence");
 const learningItemList = document.querySelector<HTMLDivElement>("#learning-item-list");
 const learningMessage = document.querySelector<HTMLParagraphElement>("#learning-message");
+const learningLanguageTabs = document.querySelector<HTMLElement>("#learning-language-tabs");
+const learningLanguageSummary = document.querySelector<HTMLElement>("#learning-language-summary");
 const learningDictionaryDialog = document.querySelector<HTMLDialogElement>("#learning-dictionary-dialog");
 const learningDictionaryTitle = document.querySelector<HTMLHeadingElement>("#learning-dictionary-title");
 const learningDictionarySubtitle = document.querySelector<HTMLParagraphElement>("#learning-dictionary-subtitle");
@@ -1113,6 +1124,7 @@ let dictionaryCredentials: DictionaryCredentialStatus[] = [];
 let dictionaryDownloadPoll: number | null = null;
 const settingsDirtyFields = new Set<string>();
 let learningItems: LearningItemDetail[] = [];
+let activeLearningLanguage: LearningLanguage = readLearningLanguagePreference();
 let pendingLearningSelection: PendingLearningSelection | null = null;
 let activeLearningItemId: string | null = null;
 let activeLearningProviderId = "summary";
@@ -2392,7 +2404,7 @@ async function refreshLearningItems(): Promise<void> {
     if (learningDictionaryDialog?.open && activeLearningItemId) renderLearningDictionary();
     if (learningMessage) {
       learningMessage.textContent = learningItems.length
-        ? `${learningItems.length} 个学习条目保存在本机。`
+        ? "日语、英语和韩语收藏分别保存在对应单词本中。"
         : "从收听区选择原文，建立第一个学习条目。";
       learningMessage.classList.remove("warning");
     }
@@ -2407,11 +2419,31 @@ async function refreshLearningItems(): Promise<void> {
 
 function renderLearningItems(): void {
   if (!learningItemList) return;
+  const languageItems = learningItems.filter(
+    (detail) => detail.item.source_language === activeLearningLanguage,
+  );
+  const languageName = languageLabel(activeLearningLanguage);
+  learningLanguageTabs?.querySelectorAll<HTMLButtonElement>("[data-learning-language]").forEach((button) => {
+    const language = button.dataset.learningLanguage as LearningLanguage;
+    const active = language === activeLearningLanguage;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    const count = learningItems.filter((detail) => detail.item.source_language === language).length;
+    const countHost = button.querySelector<HTMLElement>("[data-learning-language-count]");
+    if (countHost) countHost.textContent = String(count);
+  });
+  if (learningLanguageSummary) {
+    learningLanguageSummary.textContent = `${languageName} · ${languageItems.length} 个条目`;
+  }
   if (learningItems.length === 0) {
     learningItemList.innerHTML = '<div class="empty-state"><strong>单词本还是空的。</strong><span>到收听区选择词语、短语或语法表达；也可以直接收藏整句。</span></div>';
     return;
   }
-  learningItemList.innerHTML = learningItems.map((detail) => {
+  if (languageItems.length === 0) {
+    learningItemList.innerHTML = `<div class="empty-state"><strong>${escapeHtml(languageName)}单词本还是空的。</strong><span>打开一项${escapeHtml(languageName)}任务，在收听区选择词语、短语或语法表达。</span></div>`;
+    return;
+  }
+  learningItemList.innerHTML = languageItems.map((detail) => {
     const occurrence = detail.occurrences[0];
     const sourceLabel = detail.item.item_type === "sentence" ? "整句" : "词语／语法";
     const sourceMeta = occurrence
@@ -2448,6 +2480,26 @@ function renderLearningItems(): void {
   learningItemList.querySelectorAll<HTMLButtonElement>("[data-delete-learning-item]").forEach((button) => {
     button.addEventListener("click", () => void removeLearningItem(button.dataset.deleteLearningItem ?? ""));
   });
+}
+
+function readLearningLanguagePreference(): LearningLanguage {
+  try {
+    const stored = window.localStorage.getItem("atogaki.learningLanguage");
+    if (stored === "ja" || stored === "en" || stored === "ko") return stored;
+  } catch {
+    // A blocked WebView storage preference should not block the local learning library.
+  }
+  return "ja";
+}
+
+function selectLearningLanguage(language: LearningLanguage): void {
+  activeLearningLanguage = language;
+  try {
+    window.localStorage.setItem("atogaki.learningLanguage", language);
+  } catch {
+    // Keep the selection for this run even when preference storage is unavailable.
+  }
+  renderLearningItems();
 }
 
 function learningProviderOptions(detail: LearningItemDetail): LearningProviderOption[] {
@@ -4880,6 +4932,11 @@ document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("
 document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => void showTopLevelArea("listening"));
 document.querySelector<HTMLButtonElement>("#show-learning")?.addEventListener("click", () => void showTopLevelArea("learning"));
 document.querySelector<HTMLButtonElement>("#refresh-learning")?.addEventListener("click", () => void refreshLearningItems());
+learningLanguageTabs?.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-learning-language]");
+  const language = button?.dataset.learningLanguage;
+  if (language === "ja" || language === "en" || language === "ko") selectLearningLanguage(language);
+});
 document.querySelector<HTMLButtonElement>("#close-learning-dictionary")?.addEventListener("click", closeLearningDictionary);
 learningDictionaryDialog?.addEventListener("close", () => {
   activeLearningItemId = null;

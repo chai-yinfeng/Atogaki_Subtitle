@@ -35,6 +35,24 @@ if [[ ! -f "$SOURCE_DMG" ]]; then
 fi
 
 hdiutil verify "$SOURCE_DMG"
+
+INSPECTION_MOUNT=$(mktemp -d /private/tmp/atogaki-dmg-inspection.XXXXXX)
+cleanup_inspection_mount() {
+  hdiutil detach "$INSPECTION_MOUNT" >/dev/null 2>&1 || true
+  rmdir "$INSPECTION_MOUNT" >/dev/null 2>&1 || true
+}
+trap cleanup_inspection_mount EXIT
+hdiutil attach "$SOURCE_DMG" -nobrowse -readonly -mountpoint "$INSPECTION_MOUNT" >/dev/null
+APP_BUNDLE="$INSPECTION_MOUNT/Atogaki.app"
+ICON_FILE=$(plutil -extract CFBundleIconFile raw "$APP_BUNDLE/Contents/Info.plist")
+if [[ -z "$ICON_FILE" || "$ICON_FILE" != *.icns || ! -f "$APP_BUNDLE/Contents/Resources/$ICON_FILE" ]]; then
+  print -u2 "Packaged App is missing its declared macOS icon metadata."
+  exit 1
+fi
+hdiutil detach "$INSPECTION_MOUNT" >/dev/null
+rmdir "$INSPECTION_MOUNT"
+trap - EXIT
+
 mkdir -p "$ARTIFACT_DIR"
 
 DESTINATION="$ARTIFACT_DIR/Atogaki-${VERSION}-${COMMIT}-macos-arm64.dmg"

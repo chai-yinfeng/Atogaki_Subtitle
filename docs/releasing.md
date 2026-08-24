@@ -10,7 +10,7 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后，把 DMG 作为 GitHub Release asset 上传。这样仓库保持轻量，Release 页面仍能为测试者提供固定版本下载。
 
-日常 macOS 可测试里程碑即使不创建公开 Release，也必须在完成提交与回归后运行 `./scripts/package-local-macos-test.sh`。脚本只接受干净工作区，执行非 CI 的 ad-hoc DMG 构建与 `hdiutil verify`，再把带 commit 短哈希的 DMG 和 SHA-256 固定复制到仓库根目录 `local-artifacts/`。该目录被 Git 忽略；每次交付时直接提供其中产物的可点击绝对路径，不再让测试者到 `/private/tmp` 或 Tauri 深层 target 目录寻找。
+日常 macOS 可测试里程碑即使不创建公开 Release，也必须在完成提交与回归后运行 `./scripts/package-local-macos-test.sh`。脚本只接受干净工作区，执行非 CI 的 ad-hoc DMG 构建与 `hdiutil verify`，再把带 commit 短哈希的 DMG 和 SHA-256 固定复制到仓库根目录 `local-artifacts/`。该目录被 Git 忽略；每次交付时直接提供其中产物的可点击绝对路径，不再让测试者到 `/private/tmp` 或 Tauri 深层 target 目录寻找。打包后的 App 还必须在 `Contents/Resources/` 包含 ICNS，且 `Info.plist` 的 `CFBundleIconFile` 指向该文件；缺少图标元数据会降低 Finder、LaunchServices 和 macOS Tahoe“Apps”启动器的发现可靠性。
 
 首个 Apple Silicon 预发布建议包含：
 

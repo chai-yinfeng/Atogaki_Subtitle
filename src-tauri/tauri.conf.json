@@ -29,6 +29,9 @@
     }
   },
   "bundle": {
+    "icon": [
+      "icons/icon.png"
+    ],
     "macOS": {
       "dmg": {
         "windowSize": {
