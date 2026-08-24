@@ -477,7 +477,7 @@ fn dictionary_catalog() -> &'static [DictionaryCatalogItem] {
             version_label: "2025.11.23",
             size_label: "1.6 MiB · 26,660 词头",
             description: "来自 WikDict/Wiktionary 的免费离线补充；不等同于商业学习词典。",
-            license: "FreeDict/WikDict 数据许可（包内声明）",
+            license: "CC BY-SA 3.0 Unported",
             attribution: "FreeDict Project 与 WikDict/Wiktionary contributors",
             source_url: "https://freedict.org/downloads/",
             file_name: "freedict-eng-zho.stardict.tar.xz",

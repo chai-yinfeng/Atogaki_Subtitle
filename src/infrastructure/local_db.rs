@@ -152,6 +152,7 @@ pub struct LocalLearningLookupResult {
     pub headword: String,
     pub reading: Option<String>,
     pub pronunciation: Option<String>,
+    pub audio_url: Option<String>,
     pub senses: Vec<LocalLearningLookupSense>,
     pub attribution_text: String,
     pub source_url: Option<String>,
@@ -170,6 +171,7 @@ struct LocalLearningLookupRow {
     headword: String,
     reading: Option<String>,
     pronunciation: Option<String>,
+    audio_url: Option<String>,
     senses_json: String,
     attribution_text: String,
     source_url: Option<String>,
@@ -187,6 +189,7 @@ pub struct NewLocalLearningLookupResult {
     pub headword: String,
     pub reading: Option<String>,
     pub pronunciation: Option<String>,
+    pub audio_url: Option<String>,
     pub senses: Vec<LocalLearningLookupSense>,
     pub attribution_text: String,
     pub source_url: Option<String>,
@@ -888,6 +891,14 @@ impl LocalDatabase {
     }
 
     pub async fn list_learning_items(&self) -> Result<Vec<LocalLearningItemDetail>> {
+        sqlx::query(
+            "DELETE FROM local_learning_lookup_results
+             WHERE cache_expires_at_unix IS NOT NULL AND cache_expires_at_unix <= ?",
+        )
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await
+        .context("failed to expire learning dictionary results")?;
         let items = sqlx::query_as::<_, LocalLearningItemRecord>(
             "SELECT i.id, i.source_language, i.target_language, i.item_type,
                     i.source_text, i.meaning_text, i.meaning_provider_id,
@@ -921,7 +932,7 @@ impl LocalDatabase {
         }
         let lookup_rows = sqlx::query_as::<_, LocalLearningLookupRow>(
             "SELECT id, learning_item_id, provider_id, provider_name, headword,
-                    reading, pronunciation, senses_json, attribution_text, source_url,
+                    reading, pronunciation, audio_url, senses_json, attribution_text, source_url,
                     license_label, data_version, fetched_at_unix, cache_expires_at_unix
              FROM local_learning_lookup_results
              ORDER BY provider_id ASC",
@@ -982,14 +993,15 @@ impl LocalDatabase {
         sqlx::query(
             "INSERT INTO local_learning_lookup_results (
                 id, learning_item_id, provider_id, provider_name, headword,
-                reading, pronunciation, senses_json, attribution_text, source_url,
+                reading, pronunciation, audio_url, senses_json, attribution_text, source_url,
                 license_label, data_version, fetched_at_unix, cache_expires_at_unix
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(learning_item_id, provider_id) DO UPDATE SET
                 provider_name = excluded.provider_name,
                 headword = excluded.headword,
                 reading = excluded.reading,
                 pronunciation = excluded.pronunciation,
+                audio_url = excluded.audio_url,
                 senses_json = excluded.senses_json,
                 attribution_text = excluded.attribution_text,
                 source_url = excluded.source_url,
@@ -1013,6 +1025,13 @@ impl LocalDatabase {
         .bind(
             input
                 .pronunciation
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+        )
+        .bind(
+            input
+                .audio_url
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty()),
@@ -2160,6 +2179,7 @@ fn learning_lookup_result_from_row(
         headword: row.headword,
         reading: row.reading,
         pronunciation: row.pronunciation,
+        audio_url: row.audio_url,
         senses,
         attribution_text: row.attribution_text,
         source_url: row.source_url,
@@ -2703,6 +2723,7 @@ mod tests {
                 headword: "林檎".to_string(),
                 reading: Some("りんご".to_string()),
                 pronunciation: None,
+                audio_url: None,
                 senses: vec![LocalLearningLookupSense {
                     part_of_speech: Some("名词".to_string()),
                     definitions: vec!["apple".to_string()],
@@ -2732,6 +2753,7 @@ mod tests {
                 headword: "林檎".to_string(),
                 reading: Some("りんご".to_string()),
                 pronunciation: None,
+                audio_url: None,
                 senses: vec![LocalLearningLookupSense {
                     part_of_speech: Some("名词".to_string()),
                     definitions: vec!["apple; fruit".to_string()],

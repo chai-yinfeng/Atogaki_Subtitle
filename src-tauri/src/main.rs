@@ -3,6 +3,7 @@
 mod credential_store;
 mod desktop_settings;
 mod dictionary_download;
+mod dictionary_lookup;
 mod model_download;
 
 use std::{
@@ -61,6 +62,7 @@ struct DesktopState {
     settings_service: DesktopSettingsService,
     model_download_service: ModelDownloadService,
     dictionary_download_service: DictionaryDownloadService,
+    dictionary_lookup_service: dictionary_lookup::DictionaryLookupService,
 }
 
 const SUBTITLE_OVERLAY_LABEL: &str = "subtitle-overlay";
@@ -1331,6 +1333,19 @@ async fn check_dictionary_credential(
 }
 
 #[tauri::command]
+async fn lookup_learning_dictionary(
+    state: State<'_, DesktopState>,
+    item_id: String,
+    provider_id: String,
+) -> Result<LocalLearningItemDetail, String> {
+    state
+        .dictionary_lookup_service
+        .lookup(&item_id, &provider_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn save_desktop_settings(
     state: State<'_, DesktopState>,
     request: SaveDesktopSettingsRequest,
@@ -1600,6 +1615,11 @@ fn main() {
                 data_dir.join("dictionaries"),
                 settings_service.clone(),
             )?;
+            let dictionary_lookup_service = dictionary_lookup::DictionaryLookupService::new(
+                data_dir.join("dictionaries"),
+                learning_service.clone(),
+                settings_service.clone(),
+            );
             app.manage(DesktopState {
                 data_dir,
                 task_service,
@@ -1610,6 +1630,7 @@ fn main() {
                 settings_service,
                 model_download_service,
                 dictionary_download_service,
+                dictionary_lookup_service,
             });
             app.manage(SubtitleOverlayState::default());
             if let Some(main_window) = app.get_webview_window("main") {
@@ -1666,6 +1687,7 @@ fn main() {
             list_glossaries,
             list_jobs,
             list_learning_items,
+            lookup_learning_dictionary,
             list_video_renders,
             model_catalog,
             model_download_states,

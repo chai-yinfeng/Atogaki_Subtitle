@@ -151,7 +151,8 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 支持从收听全文阅读器的字幕原文选择词、短语或语法片段，连同完整例句上下文保存；整句收藏作为无需文本选择的快捷入口。
 - [x] 建立多词典 provider 结果边界和按来源切换的详情卡片；学习列表保持简明译义与一条例句，未配置来源显示独立空状态。
 - [x] 增加词典包下载器与独立 API 配置窗口：JMdict／Tomoshi 从发布元数据解析最新版并校验 SHA-256，FreeDict 英中固定版本并校验 SHA-512；三家商业词典 Key 独立进入系统凭据库。
-- [ ] 接入实际词典数据：日语下载 JMdict／Tomoshi 离线包，英语配置 Cambridge／Collins／Merriam-Webster API，并按各自条款处理署名、缓存和音频。查询失败不阻塞收藏或其他来源。
+- [x] 接入首批实际词典链路：JMdict／Tomoshi／FreeDict 从已安装包解压、索引或直接查询，Merriam-Webster 支持 Learner's／Collegiate 产品识别、官方 Logo、英英释义、音标和发音；各来源结果与错误相互隔离。
+- [ ] 取得可正式使用的 Cambridge／Collins API 协议与账户后补齐其 adapter；公开发行前重新核对商业词典授权、缓存和展示条款，不把仅有配置入口写成已支持。
 - [x] 第一版音频关联复用原任务媒体与字幕段时间范围，不把媒体二进制写进 SQLite；精确到词的裁剪在取得可靠词级时间或手动边界后再扩展。
 - [x] 将收听字幕流升级为可选择文本的全文阅读模式，保留当前播放句高亮、独立时间码跳转和整句收藏，不建立第三套重复预览页；条目可在学习区删除。
 - [x] 建立与工作台、收听同级的“学习”区域，显示条目、来源例句并允许手工维护译义。
@@ -164,6 +165,8 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 2026-08-24 完成多来源词典详情骨架：学习列表继续只显示用户简明译义和来源例句，点击“查看词典”后按语言显示来源标签；英语预留 Cambridge、Collins、Merriam-Webster，日语预留 JMdict、Tomoshi，整句只显示简明页。SQLite 已能按 provider 独立持久化结构化义项、署名、数据版本和缓存期限，但本轮不下载词典包、不访问凭据或外部 API。后续离线数据进入正式应用目录 `dictionaries/`，由用户在设置中明确下载。
 
 2026-08-24 完成词典资源准备层：设置页可按包查看来源、许可、署名、版本和进度，用户明确触发后把 JMdict、Tomoshi 或 FreeDict 英中下载到正式 `dictionaries/`；滚动发布先读取 GitHub Release 摘要，FreeDict 固定 `2025.11.23` 与官方 SHA-512，所有包校验后才安装，更新失败会恢复旧包。Cambridge、Collins、Merriam-Webster 分别保存、检查和删除系统凭据，打开设置只读 SQLite 标记而不触发 Keychain。本里程碑尚未解压、索引或发起词典查询；FreeDict 只定位为开放离线补充，ECDICT 因来源与许可不足未进入默认目录。
+
+2026-08-24 完成首批真实词典查询闭环：JMdict JSON 和 FreeDict StarDict 在第一次查询时于正式 `dictionaries/` 生成版本化轻量 SQLite 索引，Tomoshi `.zst` 原子展开后直接查询其 `forms/entries/zh_defs`，包版本变化才重建；真实包已分别用“勉強”和 `apple` 回归。FreeDict 包内许可固定为 CC BY-SA 3.0 Unported，Tomoshi 只对本次读取的 CC BY-SA 4.0 表作精确署名。Merriam-Webster 仅在用户点击时访问系统凭据与 API；实测当前 Key 属于 Advanced Learner's 而非 Collegiate，adapter 因此会在 Learner's／Collegiate 间识别并记住有效 reference，显示官方未修改 Logo、完整产品名、音标和远程发音，并把本地结果限制为 24 小时缓存。Cambridge／Collins 仍只有凭据边界，未宣称支持查询。
 
 第一版不同时引入自动生成长篇 AI 语法讲解、间隔重复、复杂标签体系或自定义 Anki 模板。学习数据既保留对当前字幕主数据的引用，也保留收藏时快照，避免后续字幕修改让旧学习记录失去上下文。下一里程碑先验证真实收藏行为，再选择词典来源和补充检索／筛选；不提前把复杂复习系统写入架构。
 

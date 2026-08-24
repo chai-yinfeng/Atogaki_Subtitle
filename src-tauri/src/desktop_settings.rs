@@ -34,6 +34,7 @@ const OPENAI_COMPATIBLE_KEY_SAVED: &str = "translation.openai_compatible_key_sav
 const CAMBRIDGE_DICTIONARY_KEY_SAVED: &str = "dictionary.cambridge_key_saved";
 const COLLINS_DICTIONARY_KEY_SAVED: &str = "dictionary.collins_key_saved";
 const MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED: &str = "dictionary.merriam_webster_key_saved";
+const MERRIAM_WEBSTER_REFERENCE: &str = "dictionary.merriam_webster_reference";
 const DEEPSEEK_MODEL: &str = "translation.deepseek_model";
 const OPENAI_BASE_URL: &str = "translation.openai_base_url";
 const OPENAI_MODEL: &str = "translation.openai_model";
@@ -698,6 +699,31 @@ impl DesktopSettingsService {
             configured,
             credential_store: self.credentials.backend_name().to_string(),
         })
+    }
+
+    /// Explicit dictionary lookup action: reads only the selected provider secret.
+    pub fn dictionary_api_key(&self, provider_id: &str) -> Result<String> {
+        let credential_id = dictionary_credential_id(provider_id)?;
+        normalized_secret(self.credentials.get(&credential_id)?)
+            .ok_or_else(|| anyhow!("{} API Key 尚未配置", dictionary_provider_display_name(provider_id).unwrap_or("词典")))
+    }
+
+    pub async fn merriam_webster_reference(&self) -> Result<String> {
+        Ok(self
+            .database
+            .get_setting(MERRIAM_WEBSTER_REFERENCE)
+            .await?
+            .filter(|value| matches!(value.as_str(), "learners" | "collegiate"))
+            .unwrap_or_else(|| "learners".to_string()))
+    }
+
+    pub async fn save_merriam_webster_reference(&self, reference: &str) -> Result<()> {
+        if !matches!(reference, "learners" | "collegiate") {
+            bail!("unsupported Merriam-Webster reference: {reference}");
+        }
+        self.database
+            .set_setting(MERRIAM_WEBSTER_REFERENCE, reference)
+            .await
     }
 
     /// Persists only the non-secret network draft used by the model downloader.

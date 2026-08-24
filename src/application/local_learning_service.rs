@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::infrastructure::local_db::{
-    LocalDatabase, LocalLearningItemDetail, NewLocalLearningSelection,
+    LocalDatabase, LocalLearningItemDetail, NewLocalLearningLookupResult, NewLocalLearningSelection,
 };
 
 #[derive(Debug, Clone)]
@@ -23,6 +23,17 @@ impl LocalLearningService {
 
     pub async fn list_items(&self) -> Result<Vec<LocalLearningItemDetail>> {
         self.database.list_learning_items().await
+    }
+
+    pub async fn get_item(&self, item_id: &str) -> Result<Option<LocalLearningItemDetail>> {
+        self.database.get_learning_item(item_id).await
+    }
+
+    pub async fn upsert_lookup_result(
+        &self,
+        input: NewLocalLearningLookupResult,
+    ) -> Result<LocalLearningItemDetail> {
+        self.database.upsert_learning_lookup_result(input).await
     }
 
     pub async fn update_meaning(

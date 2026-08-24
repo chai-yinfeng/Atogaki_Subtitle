@@ -152,6 +152,7 @@ type LearningLookupResult = {
   headword: string;
   reading: string | null;
   pronunciation: string | null;
+  audio_url: string | null;
   senses: LearningLookupSense[];
   attribution_text: string;
   source_url: string | null;
@@ -1116,6 +1117,7 @@ let pendingLearningSelection: PendingLearningSelection | null = null;
 let activeLearningItemId: string | null = null;
 let activeLearningProviderId = "summary";
 let learningActionBusy = false;
+let learningLookupBusy = false;
 let workspaceElapsedTimer: number | null = null;
 let playbackPositionSaveTimer: number | null = null;
 let lastPlaybackPositionSavedAt = 0;
@@ -2194,7 +2196,10 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">): Promi
   updatePlaybackControls();
   renderSubtitleOverlayButton();
   renderListeningJobs(latestJobs);
-  if (area === "learning") await refreshLearningItems();
+  if (area === "learning") {
+    await Promise.all([refreshLearningItems(), loadDictionarySettings()]);
+    if (learningDictionaryDialog?.open) renderLearningDictionary();
+  }
   if (area === "karaoke" && karaokeSelectedJobId) {
     await openKaraokeJob(karaokeSelectedJobId);
     if (currentArea !== "karaoke") return;
@@ -2450,6 +2455,7 @@ function learningProviderOptions(detail: LearningItemDetail): LearningProviderOp
   if (detail.item.item_type === "sentence") return providers;
   if (detail.item.source_language === "en") {
     providers.push(
+      { id: "freedict", name: "FreeDict 英中", kind: "offline" },
       { id: "cambridge", name: "Cambridge", kind: "api" },
       { id: "collins", name: "Collins", kind: "api" },
       { id: "merriam-webster", name: "Merriam-Webster", kind: "api" },
@@ -2497,8 +2503,9 @@ function renderLearningDictionary(): void {
     const hasResult = provider.id === "summary"
       ? Boolean(detail.item.meaning_text)
       : detail.lookup_results.some((result) => result.provider_id === provider.id);
-    return `<button type="button" class="secondary${provider.id === activeLearningProviderId ? " active" : ""}" data-learning-provider="${escapeHtml(provider.id)}" aria-pressed="${provider.id === activeLearningProviderId}">
-      ${escapeHtml(provider.name)}<span>${hasResult ? "已有内容" : provider.kind === "offline" ? "未下载" : provider.kind === "api" ? "未配置" : "可编辑"}</span>
+    const status = hasResult ? "已有内容" : learningProviderStatus(provider);
+    return `<button type="button" class="secondary${provider.id === activeLearningProviderId ? " active" : ""}" data-learning-provider="${escapeHtml(provider.id)}" aria-pressed="${provider.id === activeLearningProviderId}" ${learningLookupBusy ? "disabled" : ""}>
+      ${escapeHtml(provider.name)}<span>${escapeHtml(status)}</span>
     </button>`;
   }).join("");
   learningProviderTabs.querySelectorAll<HTMLButtonElement>("[data-learning-provider]").forEach((button) => {
@@ -2526,16 +2533,17 @@ function renderLearningDictionary(): void {
   const provider = providers.find((candidate) => candidate.id === activeLearningProviderId);
   const result = detail.lookup_results.find((candidate) => candidate.provider_id === activeLearningProviderId);
   if (!provider || !result) {
-    const message = provider?.kind === "offline"
-      ? `${provider.name} 离线词典包尚未下载。下一阶段会在设置中提供带进度、SHA-256 校验和原子安装的下载入口，数据保存到正式应用目录的 dictionaries/。`
-      : provider?.id === "merriam-webster"
-        ? "Merriam-Webster API 尚未配置。接入时需要单独的 API Key，并按官方要求显示来源标识；免费非商业额度为每个 Key 每天 1,000 次。"
-        : `${provider?.name ?? "该词典"} API 尚未配置。接入后会独立请求并显示本来源的释义、例句和发音，不覆盖其他词典。`;
+    const supported = provider && !["cambridge", "collins"].includes(provider.id);
+    const message = dictionaryProviderEmptyMessage(provider);
     learningProviderPanel.innerHTML = `<div class="learning-provider-empty">
       <span>${provider?.kind === "offline" ? "LOCAL DICTIONARY PACK" : "DICTIONARY API"}</span>
-      <h3>${escapeHtml(provider?.name ?? activeLearningProviderId)} 尚未接入</h3>
+      <h3>${escapeHtml(provider?.name ?? activeLearningProviderId)}</h3>
       <p>${escapeHtml(message)}</p>
+      ${supported ? `<button type="button" data-lookup-learning-provider="${escapeHtml(provider.id)}" ${learningLookupBusy ? "disabled" : ""}>${learningLookupBusy ? "正在查询…" : "查询这个来源"}</button>` : ""}
     </div>`;
+    learningProviderPanel.querySelector<HTMLButtonElement>("[data-lookup-learning-provider]")?.addEventListener("click", () => {
+      void lookupLearningDictionary(provider?.id ?? "");
+    });
     return;
   }
 
@@ -2549,9 +2557,58 @@ function renderLearningDictionary(): void {
       <div><span>${escapeHtml(result.provider_name)}</span><h3>${escapeHtml(result.headword)}</h3></div>
       <div class="learning-dictionary-reading">${result.reading ? escapeHtml(result.reading) : ""}${result.pronunciation ? `<span>${escapeHtml(result.pronunciation)}</span>` : ""}</div>
     </div>
+    ${result.provider_id === "merriam-webster" ? '<img class="mw-logo" src="/merriam-webster-logo.png" width="50" height="50" alt="Merriam-Webster®" />' : ""}
+    ${result.audio_url ? `<audio class="learning-dictionary-audio" controls preload="none" src="${escapeHtml(result.audio_url)}">当前环境无法播放词典发音。</audio>` : ""}
     ${senses}
-    <footer><span>${escapeHtml(result.attribution_text)}</span>${result.license_label ? `<span>${escapeHtml(result.license_label)}</span>` : ""}${result.data_version ? `<span>数据 ${escapeHtml(result.data_version)}</span>` : ""}</footer>
+    <footer><span>${escapeHtml(result.attribution_text)}</span>${result.license_label ? `<span>${escapeHtml(result.license_label)}</span>` : ""}${result.data_version ? `<span>数据 ${escapeHtml(result.data_version)}</span>` : ""}${result.source_url ? `<a href="${escapeHtml(result.source_url)}" target="_blank" rel="noreferrer">来源页面</a>` : ""}<button type="button" class="secondary" data-refresh-learning-provider="${escapeHtml(result.provider_id)}" ${learningLookupBusy ? "disabled" : ""}>${learningLookupBusy ? "正在刷新…" : "刷新来源"}</button></footer>
   </article>`;
+  learningProviderPanel.querySelector<HTMLButtonElement>("[data-refresh-learning-provider]")?.addEventListener("click", () => {
+    void lookupLearningDictionary(result.provider_id);
+  });
+}
+
+function learningProviderStatus(provider: LearningProviderOption): string {
+  if (provider.kind === "summary") return "可编辑";
+  if (provider.kind === "offline") {
+    const packageId = provider.id === "jmdict" ? "jmdict-en" : provider.id === "tomoshi" ? "tomoshi-open" : "freedict-eng-zho";
+    return dictionaryDownloads.some((item) => item.dictionaryId === packageId && item.status === "done") ? "可查询" : "未下载";
+  }
+  if (["cambridge", "collins"].includes(provider.id)) return "待接入";
+  return dictionaryCredentials.some((item) => item.providerId === provider.id && item.configured) ? "可查询" : "未配置";
+}
+
+function dictionaryProviderEmptyMessage(provider: LearningProviderOption | undefined): string {
+  if (!provider) return "词典来源不可用。";
+  if (["cambridge", "collins"].includes(provider.id)) return `${provider.name} 目前只保留独立 API 配置边界，尚未接入正式查询协议。`;
+  const status = learningProviderStatus(provider);
+  if (status === "未下载") return `${provider.name} 的离线包尚未安装。请先到设置 → 学习词典下载；包会保存在正式应用数据目录。`;
+  if (status === "未配置") return `${provider.name} API Key 尚未配置。请先到设置 → 学习词典保存并检查该来源的 Key。`;
+  return provider.kind === "offline"
+    ? "已安装本地数据。第一次查询可能需要解压或建立轻量索引，之后会直接复用。"
+    : "查询只会把当前词语发送给这个词典 API；结果按来源独立保存。";
+}
+
+async function lookupLearningDictionary(providerId: string): Promise<void> {
+  if (!activeLearningItemId || !providerId || learningLookupBusy) return;
+  learningLookupBusy = true;
+  renderLearningDictionary();
+  try {
+    const updated = await invoke<LearningItemDetail>("lookup_learning_dictionary", {
+      itemId: activeLearningItemId,
+      providerId,
+    });
+    learningItems = learningItems.map((item) => item.item.id === updated.item.id ? updated : item);
+    renderLearningItems();
+    renderLearningDictionary();
+  } catch (error) {
+    if (learningProviderPanel) {
+      learningProviderPanel.innerHTML = `<div class="learning-provider-empty"><span>LOOKUP FAILED</span><h3>查询失败</h3><p>${escapeHtml(String(error))}</p><button type="button" data-retry-learning-provider>重试</button></div>`;
+      learningProviderPanel.querySelector<HTMLButtonElement>("[data-retry-learning-provider]")?.addEventListener("click", () => void lookupLearningDictionary(providerId));
+    }
+  } finally {
+    learningLookupBusy = false;
+    if (!learningProviderPanel?.querySelector("[data-retry-learning-provider]")) renderLearningDictionary();
+  }
 }
 
 async function saveLearningMeaning(itemId: string): Promise<void> {

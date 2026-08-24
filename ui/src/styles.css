@@ -148,6 +148,10 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .learning-dictionary-examples { display: grid; gap: 5px; border-left: 2px solid #ddd4c4; padding-left: 12px; color: #6e7068; font-size: 12px; }
 .learning-dictionary-examples p { margin: 0; }
 .learning-provider-result footer { display: flex; flex-wrap: wrap; gap: 6px 14px; border-top: 1px solid #e1dbcf; padding-top: 12px; color: #7a7d74; font-size: 9px; }
+.learning-provider-result footer button { margin-left: auto; padding: 5px 8px; font-size: 9px; }
+.learning-provider-result footer a { color: #31584e; }
+.learning-dictionary-audio { width: min(100%, 360px); height: 34px; }
+.mw-logo { width: 50px; height: 50px; object-fit: contain; }
 .learning-provider-empty { min-height: 300px; display: grid; align-content: center; justify-items: center; gap: 8px; border: 1px dashed #cfc6b7; border-radius: 14px; padding: 36px; background: rgba(255, 253, 247, .56); text-align: center; }
 .learning-provider-empty > span { color: #8c4d3e; font-size: 9px; font-weight: 700; letter-spacing: .08em; }
 .learning-provider-empty h3 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; font-weight: 500; }
