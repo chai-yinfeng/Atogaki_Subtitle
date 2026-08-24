@@ -2,6 +2,7 @@
 
 mod credential_store;
 mod desktop_settings;
+mod dictionary_download;
 mod model_download;
 
 use std::{
@@ -38,8 +39,11 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::{
     desktop_settings::{
-        DesktopSettings, DesktopSettingsService, SaveDesktopSettingsRequest,
-        TranslationCredentialCheck,
+        DesktopSettings, DesktopSettingsService, DictionaryCredentialStatus,
+        SaveDesktopSettingsRequest, SaveDictionaryCredentialRequest, TranslationCredentialCheck,
+    },
+    dictionary_download::{
+        DictionaryCatalogItem, DictionaryDownloadService, DictionaryDownloadState,
     },
     model_download::{
         ModelCatalogItem, ModelDownloadService, ModelDownloadState, NetworkSourceCheck,
@@ -56,6 +60,7 @@ struct DesktopState {
     render_service: LocalRenderService,
     settings_service: DesktopSettingsService,
     model_download_service: ModelDownloadService,
+    dictionary_download_service: DictionaryDownloadService,
 }
 
 const SUBTITLE_OVERLAY_LABEL: &str = "subtitle-overlay";
@@ -1291,6 +1296,41 @@ async fn check_translation_api_key(
 }
 
 #[tauri::command]
+async fn dictionary_credential_statuses(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<DictionaryCredentialStatus>, String> {
+    state
+        .settings_service
+        .dictionary_credential_statuses()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_dictionary_credential(
+    state: State<'_, DesktopState>,
+    request: SaveDictionaryCredentialRequest,
+) -> Result<DictionaryCredentialStatus, String> {
+    state
+        .settings_service
+        .save_dictionary_credential(request)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn check_dictionary_credential(
+    state: State<'_, DesktopState>,
+    provider_id: String,
+) -> Result<DictionaryCredentialStatus, String> {
+    state
+        .settings_service
+        .check_dictionary_credential(&provider_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn save_desktop_settings(
     state: State<'_, DesktopState>,
     request: SaveDesktopSettingsRequest,
@@ -1340,6 +1380,35 @@ async fn model_download_states(
     state: State<'_, DesktopState>,
 ) -> Result<Vec<ModelDownloadState>, String> {
     Ok(state.model_download_service.states().await)
+}
+
+#[tauri::command]
+fn dictionary_catalog(state: State<'_, DesktopState>) -> Vec<DictionaryCatalogItem> {
+    state.dictionary_download_service.catalog()
+}
+
+#[tauri::command]
+fn dictionary_directory(state: State<'_, DesktopState>) -> String {
+    state.dictionary_download_service.directory()
+}
+
+#[tauri::command]
+async fn start_dictionary_download(
+    state: State<'_, DesktopState>,
+    dictionary_id: String,
+) -> Result<DictionaryDownloadState, String> {
+    state
+        .dictionary_download_service
+        .start(&dictionary_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn dictionary_download_states(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<DictionaryDownloadState>, String> {
+    Ok(state.dictionary_download_service.states().await)
 }
 
 #[tauri::command]
@@ -1527,6 +1596,10 @@ fn main() {
             ))?;
             let model_download_service =
                 ModelDownloadService::new(models_directory, settings_service.clone())?;
+            let dictionary_download_service = DictionaryDownloadService::new(
+                data_dir.join("dictionaries"),
+                settings_service.clone(),
+            )?;
             app.manage(DesktopState {
                 data_dir,
                 task_service,
@@ -1536,6 +1609,7 @@ fn main() {
                 render_service,
                 settings_service,
                 model_download_service,
+                dictionary_download_service,
             });
             app.manage(SubtitleOverlayState::default());
             if let Some(main_window) = app.get_webview_window("main") {
@@ -1572,9 +1646,14 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            check_dictionary_credential,
             check_translation_api_key,
             data_directory,
             desktop_settings,
+            dictionary_catalog,
+            dictionary_credential_statuses,
+            dictionary_directory,
+            dictionary_download_states,
             delete_job,
             delete_learning_item,
             delete_glossary,
@@ -1609,12 +1688,14 @@ fn main() {
             rename_job,
             retry_job,
             save_download_network_settings,
+            save_dictionary_credential,
             save_desktop_settings,
             save_glossary,
             save_learning_selection,
             save_playback_position,
             submit_transcription,
             start_model_download,
+            start_dictionary_download,
             test_network_connection,
             submit_video_render,
             open_subtitle_overlay,

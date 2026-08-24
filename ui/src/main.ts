@@ -308,6 +308,36 @@ type ModelDownloadState = {
   source: string | null;
 };
 
+type DictionaryCatalogItem = {
+  id: string;
+  name: string;
+  languagePair: string;
+  versionLabel: string;
+  sizeLabel: string;
+  description: string;
+  license: string;
+  attribution: string;
+  sourceUrl: string;
+};
+
+type DictionaryDownloadState = {
+  dictionaryId: string;
+  status: "queued" | "resolving" | "downloading" | "done" | "failed";
+  downloadedBytes: number;
+  totalBytes: number | null;
+  path: string | null;
+  version: string | null;
+  error: string | null;
+  source: string | null;
+};
+
+type DictionaryCredentialStatus = {
+  providerId: "cambridge" | "collins" | "merriam-webster";
+  providerName: string;
+  configured: boolean;
+  credentialStore: string;
+};
+
 type NetworkSourceCheck = {
   label: string;
   requestedUrl: string;
@@ -843,6 +873,31 @@ app.innerHTML = `
           <div class="credential-check-row"><button id="check-api-key" type="button" class="secondary">检查所选 Key</button><span>仅检查系统凭据条目，不会回显 Key 或调用翻译 API。</span></div>
           <p id="api-key-status" class="settings-message"></p>
         </section>
+        <section class="settings-section">
+          <div class="settings-section-heading"><div><strong>4. 学习词典</strong><span>离线包由你明确点击后下载到正式应用数据目录；商业词典的 Key 分来源保存。</span></div><span id="dictionary-directory"></span></div>
+          <div>
+            <strong class="settings-subheading">离线词典包</strong>
+            <p class="settings-message">JMdict 与 Tomoshi 用于日语；FreeDict 英中是免费离线补充，不等同于 Cambridge／Collins 的学习词典质量。下载会复用上方代理设置并校验发布方摘要。</p>
+          </div>
+          <div id="dictionary-catalog" class="model-catalog"></div>
+          <p id="dictionary-download-message" class="settings-message" role="status"></p>
+          <div>
+            <strong class="settings-subheading">在线词典 API</strong>
+            <p class="settings-message">每个来源独立配置；Key 只写入系统凭据库，不写入 SQLite、日志或任务目录。检查只验证凭据是否存在，不调用词典 API。</p>
+          </div>
+          <div id="dictionary-credentials" class="dictionary-credentials">
+            ${[
+              ["cambridge", "Cambridge Dictionary", "适合英中学习释义；需从 Cambridge Dictionary API 申请。"],
+              ["collins", "Collins Dictionary", "可提供英中结果；额度与展示要求以账户协议为准。"],
+              ["merriam-webster", "Merriam-Webster", "保留英英来源标签页；正式展示需满足 Logo 与署名要求。"],
+            ].map(([id, name, hint]) => `<article class="dictionary-credential-card" data-dictionary-provider="${id}">
+              <div><strong>${name}</strong><span>${hint}</span></div>
+              <input type="password" autocomplete="off" data-dictionary-key="${id}" aria-label="${name} API Key" placeholder="粘贴 API Key；保存后立即清空" />
+              <div class="model-card-action"><span data-dictionary-status="${id}">尚未读取配置</span><div><button type="button" class="secondary" data-check-dictionary-key="${id}">检查</button><button type="button" data-save-dictionary-key="${id}">保存</button><button type="button" class="secondary" data-clear-dictionary-key="${id}">删除</button></div></div>
+            </article>`).join("")}
+          </div>
+          <p id="dictionary-credential-message" class="settings-message" role="status"></p>
+        </section>
         <div class="settings-footer">
           <span id="settings-message" role="status"></span>
           <div><button id="save-settings" type="submit" class="secondary">保存</button><button id="finish-settings" type="button">保存并开始使用</button></div>
@@ -1011,6 +1066,10 @@ const modelCatalogHost = document.querySelector<HTMLDivElement>("#model-catalog"
 const modelDownloadMessage = document.querySelector<HTMLParagraphElement>("#model-download-message");
 const modelsDirectory = document.querySelector<HTMLSpanElement>("#models-directory");
 const modelReadiness = document.querySelector<HTMLSpanElement>("#model-readiness");
+const dictionaryCatalogHost = document.querySelector<HTMLDivElement>("#dictionary-catalog");
+const dictionaryDirectoryLabel = document.querySelector<HTMLSpanElement>("#dictionary-directory");
+const dictionaryDownloadMessage = document.querySelector<HTMLParagraphElement>("#dictionary-download-message");
+const dictionaryCredentialMessage = document.querySelector<HTMLParagraphElement>("#dictionary-credential-message");
 
 let refreshing = false;
 let latestJobs: LocalJob[] = [];
@@ -1047,6 +1106,10 @@ let desktopSettings: DesktopSettings | null = null;
 let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelDownloadPoll: number | null = null;
+let availableDictionaries: DictionaryCatalogItem[] = [];
+let dictionaryDownloads: DictionaryDownloadState[] = [];
+let dictionaryCredentials: DictionaryCredentialStatus[] = [];
+let dictionaryDownloadPoll: number | null = null;
 const settingsDirtyFields = new Set<string>();
 let learningItems: LearningItemDetail[] = [];
 let pendingLearningSelection: PendingLearningSelection | null = null;
@@ -1341,6 +1404,151 @@ function renderModelCatalog(): void {
   });
 }
 
+function renderDictionaryCatalog(): void {
+  if (!dictionaryCatalogHost) return;
+  const activeDownload = dictionaryDownloads.find((download) =>
+    download.status === "queued" || download.status === "resolving" || download.status === "downloading"
+  );
+  dictionaryCatalogHost.innerHTML = availableDictionaries.map((item) => {
+    const download = dictionaryDownloads.find((value) => value.dictionaryId === item.id);
+    const progress = download?.totalBytes
+      ? Math.min(1, download.downloadedBytes / download.totalBytes)
+      : null;
+    const state = download?.status === "done"
+      ? `已安装${download.version ? ` · ${download.version}` : ""}`
+      : download?.status === "failed"
+        ? `失败：${download.error ?? "未知错误"}`
+        : download?.status === "downloading"
+          ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}${download.source ? ` · ${download.source}` : ""}`
+          : download?.status === "resolving" ? "正在获取最新版与校验信息…"
+            : download?.status === "queued" ? "等待下载" : "尚未安装";
+    return `<article class="model-card">
+      <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.languagePair)} · ${escapeHtml(item.sizeLabel)} · ${escapeHtml(item.versionLabel)}</span></div>
+      <span>${escapeHtml(item.description)}</span>
+      <span>${escapeHtml(item.license)} · 署名：${escapeHtml(item.attribution)}</span>
+      <span>来源：${escapeHtml(item.sourceUrl)}</span>
+      ${progress === null ? "" : `<progress max="1" value="${progress}"></progress>`}
+      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span><button type="button" class="secondary" data-download-dictionary="${escapeHtml(item.id)}" ${activeDownload ? "disabled" : ""}>${download?.status === "done" ? "检查更新" : download?.status === "failed" ? "重试" : "下载"}</button></div>
+    </article>`;
+  }).join("");
+  dictionaryCatalogHost.querySelectorAll<HTMLButtonElement>("[data-download-dictionary]").forEach((button) => {
+    button.addEventListener("click", () => void startDictionaryDownload(button.dataset.downloadDictionary ?? ""));
+  });
+}
+
+function renderDictionaryCredentials(): void {
+  dictionaryCredentials.forEach((status) => {
+    const element = document.querySelector<HTMLElement>(`[data-dictionary-status="${status.providerId}"]`);
+    if (!element) return;
+    element.textContent = status.configured
+      ? `已保存至 ${status.credentialStore}；内容不会回显`
+      : `尚未在 ${status.credentialStore} 中配置`;
+    element.classList.toggle("warning", !status.configured);
+  });
+}
+
+async function loadDictionarySettings(): Promise<void> {
+  try {
+    const [catalog, downloads, credentials, directory] = await Promise.all([
+      invoke<DictionaryCatalogItem[]>("dictionary_catalog"),
+      invoke<DictionaryDownloadState[]>("dictionary_download_states"),
+      invoke<DictionaryCredentialStatus[]>("dictionary_credential_statuses"),
+      invoke<string>("dictionary_directory"),
+    ]);
+    availableDictionaries = catalog;
+    dictionaryDownloads = downloads;
+    dictionaryCredentials = credentials;
+    if (dictionaryDirectoryLabel) dictionaryDirectoryLabel.textContent = `目录：${directory}`;
+    renderDictionaryCatalog();
+    renderDictionaryCredentials();
+  } catch (error) {
+    if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = `无法读取词典配置：${String(error)}`;
+  }
+}
+
+async function startDictionaryDownload(dictionaryId: string): Promise<void> {
+  if (!dictionaryId || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return;
+  if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = "正在保存当前网络配置并获取词典发布信息…";
+  try {
+    await invoke<void>("save_download_network_settings", {
+      request: {
+        proxyMode: settingsProxyMode.value,
+        proxyUrl: settingsProxyUrl.value.trim() || null,
+        modelMirrorUrl: settingsModelMirror.value.trim() || null,
+      },
+    });
+    const state = await invoke<DictionaryDownloadState>("start_dictionary_download", { dictionaryId });
+    dictionaryDownloads = dictionaryDownloads.filter((download) => download.dictionaryId !== dictionaryId);
+    dictionaryDownloads.push(state);
+    renderDictionaryCatalog();
+    if (dictionaryDownloadPoll === null) {
+      dictionaryDownloadPoll = window.setInterval(() => void refreshDictionaryDownloads(), 500);
+    }
+  } catch (error) {
+    if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = `无法开始词典下载：${String(error)}`;
+  }
+}
+
+async function refreshDictionaryDownloads(): Promise<void> {
+  try {
+    dictionaryDownloads = await invoke<DictionaryDownloadState[]>("dictionary_download_states");
+    renderDictionaryCatalog();
+    const active = dictionaryDownloads.some((download) =>
+      download.status === "queued" || download.status === "resolving" || download.status === "downloading"
+    );
+    if (!active) {
+      if (dictionaryDownloadPoll !== null) window.clearInterval(dictionaryDownloadPoll);
+      dictionaryDownloadPoll = null;
+      const failed = dictionaryDownloads.find((download) => download.status === "failed");
+      if (dictionaryDownloadMessage) {
+        dictionaryDownloadMessage.textContent = failed
+          ? `下载失败：${failed.error ?? "未知错误"}`
+          : "词典包已校验并安装到正式应用数据目录。";
+      }
+    }
+  } catch (error) {
+    if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = `无法读取词典下载状态：${String(error)}`;
+  }
+}
+
+async function saveDictionaryCredential(providerId: string, clear = false): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>(`[data-dictionary-key="${providerId}"]`);
+  if (!input || (!clear && !input.value.trim())) {
+    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = "请先输入要保存的 API Key。";
+    return;
+  }
+  if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = clear ? "正在删除词典凭据…" : "正在保存词典凭据…";
+  try {
+    const status = await invoke<DictionaryCredentialStatus>("save_dictionary_credential", {
+      request: { providerId, apiKey: clear ? null : input.value.trim(), clear },
+    });
+    input.value = "";
+    dictionaryCredentials = dictionaryCredentials.filter((item) => item.providerId !== status.providerId);
+    dictionaryCredentials.push(status);
+    renderDictionaryCredentials();
+    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = clear
+      ? `${status.providerName} Key 已从 ${status.credentialStore} 删除。`
+      : `${status.providerName} Key 已保存至 ${status.credentialStore}。`;
+  } catch (error) {
+    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = `词典凭据操作失败：${String(error)}`;
+  }
+}
+
+async function checkDictionaryCredential(providerId: string): Promise<void> {
+  if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = "正在检查系统凭据；macOS 可能请求解锁 Keychain…";
+  try {
+    const status = await invoke<DictionaryCredentialStatus>("check_dictionary_credential", { providerId });
+    dictionaryCredentials = dictionaryCredentials.filter((item) => item.providerId !== status.providerId);
+    dictionaryCredentials.push(status);
+    renderDictionaryCredentials();
+    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = status.configured
+      ? `${status.providerName} Key 存在于 ${status.credentialStore}；内容不会回显。`
+      : `${status.credentialStore} 中没有 ${status.providerName} Key。`;
+  } catch (error) {
+    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = `检查失败：${String(error)}`;
+  }
+}
+
 async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
   try {
     const [settings, catalog, downloads] = await Promise.all([
@@ -1351,6 +1559,7 @@ async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
     availableModels = catalog;
     modelDownloads = downloads;
     renderDesktopSettings(settings);
+    await loadDictionarySettings();
     if (openWhenNeeded && settings.needsOnboarding && !settingsDialog?.open) settingsDialog?.showModal();
   } catch (error) {
     if (settingsMessage) settingsMessage.textContent = `无法读取启动配置：${String(error)}`;
@@ -4636,6 +4845,16 @@ settingsProvider?.addEventListener("change", () => {
   }
 });
 checkApiKeyButton?.addEventListener("click", () => void checkSelectedApiKey());
+document.querySelector("#dictionary-credentials")?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) return;
+  const saveId = target.dataset.saveDictionaryKey;
+  const clearId = target.dataset.clearDictionaryKey;
+  const checkId = target.dataset.checkDictionaryKey;
+  if (saveId) void saveDictionaryCredential(saveId);
+  else if (clearId) void saveDictionaryCredential(clearId, true);
+  else if (checkId) void checkDictionaryCredential(checkId);
+});
 settingsProxyMode?.addEventListener("change", syncNetworkSettings);
 testNetworkButton?.addEventListener("click", () => void testNetworkConnection());
 settingsForm?.addEventListener("submit", (event) => {

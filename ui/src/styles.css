@@ -333,6 +333,14 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .model-card progress { width: 100%; height: 7px; accent-color: #2e5d52; }
 .model-card-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .model-card-action button { align-self: auto; padding: 7px 10px; font-size: 11px; white-space: nowrap; }
+.settings-subheading { color: #30332d; font-size: 13px; }
+.dictionary-credentials { display: grid; gap: 9px; }
+.dictionary-credential-card { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(220px, 1fr); gap: 9px 12px; align-items: end; border: 1px solid #ddd5c7; border-radius: 10px; padding: 11px; background: #fffdf7; }
+.dictionary-credential-card > div:first-child { display: grid; gap: 4px; align-self: center; }
+.dictionary-credential-card > div:first-child span, .dictionary-credential-card [data-dictionary-status] { color: #70736b; font-size: 10px; line-height: 1.5; }
+.dictionary-credential-card .model-card-action { grid-column: 1 / -1; }
+.dictionary-credential-card .model-card-action > div { display: flex; gap: 6px; }
+.dictionary-credential-card [data-dictionary-status].warning { color: #a54632; }
 .clear-secret { display: flex !important; align-items: center; gap: 8px; font-weight: 500 !important; }
 .clear-secret input { accent-color: #a54632; }
 .settings-message { min-height: 17px; margin: 0; }
@@ -451,7 +459,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
   .video-render-row { grid-template-columns: 1fr; }
   .video-render-row > button { justify-self: start; }
   .header-actions { width: 100%; justify-content: flex-end; }
-  .settings-path-row, .network-settings-grid, .settings-grid, .model-catalog { grid-template-columns: 1fr; }
+  .settings-path-row, .network-settings-grid, .settings-grid, .model-catalog, .dictionary-credential-card { grid-template-columns: 1fr; }
+  .dictionary-credential-card .model-card-action { grid-column: auto; align-items: flex-start; flex-direction: column; }
   .settings-grid .settings-span { grid-column: auto; }
   .settings-path-row button { justify-self: start; }
   .settings-footer { align-items: stretch; flex-direction: column; }

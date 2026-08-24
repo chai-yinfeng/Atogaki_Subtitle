@@ -31,6 +31,9 @@ const TRANSLATION_PROVIDER: &str = "translation.provider";
 const DEEPL_KEY_SAVED: &str = "translation.deepl_key_saved";
 const DEEPSEEK_KEY_SAVED: &str = "translation.deepseek_key_saved";
 const OPENAI_COMPATIBLE_KEY_SAVED: &str = "translation.openai_compatible_key_saved";
+const CAMBRIDGE_DICTIONARY_KEY_SAVED: &str = "dictionary.cambridge_key_saved";
+const COLLINS_DICTIONARY_KEY_SAVED: &str = "dictionary.collins_key_saved";
+const MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED: &str = "dictionary.merriam_webster_key_saved";
 const DEEPSEEK_MODEL: &str = "translation.deepseek_model";
 const OPENAI_BASE_URL: &str = "translation.openai_base_url";
 const OPENAI_MODEL: &str = "translation.openai_model";
@@ -77,6 +80,24 @@ pub struct TranslationCredentialCheck {
     pub stored_in_system: bool,
     pub available_from_environment: bool,
     pub credential_store: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DictionaryCredentialStatus {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub configured: bool,
+    pub credential_store: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDictionaryCredentialRequest {
+    pub provider_id: String,
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub clear: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -611,6 +632,74 @@ impl DesktopSettingsService {
         })
     }
 
+    /// Lists only non-secret saved markers. Opening settings must not trigger a Keychain prompt.
+    pub async fn dictionary_credential_statuses(&self) -> Result<Vec<DictionaryCredentialStatus>> {
+        let mut statuses = Vec::new();
+        for provider_id in ["cambridge", "collins", "merriam-webster"] {
+            let configured = self
+                .database
+                .get_setting(dictionary_key_saved_setting(provider_id)?)
+                .await?
+                .as_deref()
+                == Some("true");
+            statuses.push(DictionaryCredentialStatus {
+                provider_id: provider_id.to_string(),
+                provider_name: dictionary_provider_display_name(provider_id)?.to_string(),
+                configured,
+                credential_store: self.credentials.backend_name().to_string(),
+            });
+        }
+        Ok(statuses)
+    }
+
+    pub async fn save_dictionary_credential(
+        &self,
+        request: SaveDictionaryCredentialRequest,
+    ) -> Result<DictionaryCredentialStatus> {
+        let marker = dictionary_key_saved_setting(&request.provider_id)?;
+        let credential_id = dictionary_credential_id(&request.provider_id)?;
+        let secret = normalized_secret(request.api_key);
+        if request.clear && secret.is_some() {
+            bail!("cannot save and clear the same dictionary credential");
+        }
+        if request.clear {
+            self.credentials.delete(&credential_id)?;
+            self.database.delete_setting(marker).await?;
+        } else if let Some(secret) = secret {
+            self.credentials.set(&credential_id, &secret)?;
+            self.database.set_setting(marker, "true").await?;
+        } else {
+            bail!("dictionary API key cannot be empty");
+        }
+        Ok(DictionaryCredentialStatus {
+            provider_id: request.provider_id.clone(),
+            provider_name: dictionary_provider_display_name(&request.provider_id)?.to_string(),
+            configured: !request.clear,
+            credential_store: self.credentials.backend_name().to_string(),
+        })
+    }
+
+    /// Explicit user action: reads one provider entry and repairs its non-secret marker.
+    pub async fn check_dictionary_credential(
+        &self,
+        provider_id: &str,
+    ) -> Result<DictionaryCredentialStatus> {
+        let marker = dictionary_key_saved_setting(provider_id)?;
+        let credential_id = dictionary_credential_id(provider_id)?;
+        let configured = normalized_secret(self.credentials.get(&credential_id)?).is_some();
+        if configured {
+            self.database.set_setting(marker, "true").await?;
+        } else {
+            self.database.delete_setting(marker).await?;
+        }
+        Ok(DictionaryCredentialStatus {
+            provider_id: provider_id.to_string(),
+            provider_name: dictionary_provider_display_name(provider_id)?.to_string(),
+            configured,
+            credential_store: self.credentials.backend_name().to_string(),
+        })
+    }
+
     /// Persists only the non-secret network draft used by the model downloader.
     /// This deliberately bypasses provider construction and credential-store access so a
     /// download can use the visible proxy settings without prompting for a DeepL key.
@@ -810,6 +899,29 @@ fn provider_display_name(provider_id: &str) -> &'static str {
         DEEPSEEK_PROVIDER_ID => "DeepSeek",
         OPENAI_COMPATIBLE_PROVIDER_ID => "OpenAI-compatible",
         _ => "翻译服务",
+    }
+}
+
+fn dictionary_key_saved_setting(provider_id: &str) -> Result<&'static str> {
+    match provider_id {
+        "cambridge" => Ok(CAMBRIDGE_DICTIONARY_KEY_SAVED),
+        "collins" => Ok(COLLINS_DICTIONARY_KEY_SAVED),
+        "merriam-webster" => Ok(MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED),
+        _ => bail!("unsupported dictionary provider: {provider_id}"),
+    }
+}
+
+fn dictionary_credential_id(provider_id: &str) -> Result<String> {
+    dictionary_provider_display_name(provider_id)?;
+    Ok(format!("dictionary:{provider_id}"))
+}
+
+fn dictionary_provider_display_name(provider_id: &str) -> Result<&'static str> {
+    match provider_id {
+        "cambridge" => Ok("Cambridge Dictionary"),
+        "collins" => Ok("Collins Dictionary"),
+        "merriam-webster" => Ok("Merriam-Webster"),
+        _ => bail!("unsupported dictionary provider: {provider_id}"),
     }
 }
 
@@ -1210,6 +1322,83 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("true")
+        );
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn dictionary_credentials_are_provider_scoped_and_startup_uses_only_markers() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-dictionary-key-test-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            credentials.clone(),
+        );
+
+        let saved = service
+            .save_dictionary_credential(super::SaveDictionaryCredentialRequest {
+                provider_id: "merriam-webster".to_string(),
+                api_key: Some("dictionary-secret".to_string()),
+                clear: false,
+            })
+            .await
+            .unwrap();
+        assert!(saved.configured);
+        assert_eq!(
+            database
+                .get_setting("dictionary.merriam_webster_key_saved")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("true")
+        );
+        assert!(database.get_setting("dictionary-secret").await.unwrap().is_none());
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+
+        let statuses = service.dictionary_credential_statuses().await.unwrap();
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+        assert!(
+            statuses
+                .iter()
+                .find(|status| status.provider_id == "merriam-webster")
+                .unwrap()
+                .configured
+        );
+        assert!(
+            !statuses
+                .iter()
+                .find(|status| status.provider_id == "cambridge")
+                .unwrap()
+                .configured
+        );
+
+        service
+            .save_dictionary_credential(super::SaveDictionaryCredentialRequest {
+                provider_id: "merriam-webster".to_string(),
+                api_key: None,
+                clear: true,
+            })
+            .await
+            .unwrap();
+        assert!(
+            database
+                .get_setting("dictionary.merriam_webster_key_saved")
+                .await
+                .unwrap()
+                .is_none()
         );
 
         drop(service);
