@@ -145,6 +145,10 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .learning-dictionary-sense { display: grid; gap: 8px; }
 .learning-dictionary-sense > strong { width: fit-content; border-radius: 999px; padding: 3px 8px; color: #31584e; background: #e6eee8; font-size: 10px; }
 .learning-dictionary-sense ol { display: grid; gap: 8px; margin: 0; padding-left: 24px; line-height: 1.65; }
+.learning-dictionary-sense li { padding-left: 2px; }
+.learning-dictionary-sense li > span { margin-right: 10px; }
+.learning-dictionary-sense li > button { padding: 3px 7px; font-size: 9px; white-space: nowrap; }
+.learning-meaning-source { margin-left: 8px; color: #6e756e; font-size: 9px; font-weight: 400; }
 .learning-dictionary-examples { display: grid; gap: 5px; border-left: 2px solid #ddd4c4; padding-left: 12px; color: #6e7068; font-size: 12px; }
 .learning-dictionary-examples p { margin: 0; }
 .learning-provider-result footer { display: flex; flex-wrap: wrap; gap: 6px 14px; border-top: 1px solid #e1dbcf; padding-top: 12px; color: #7a7d74; font-size: 9px; }

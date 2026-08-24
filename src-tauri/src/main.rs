@@ -493,6 +493,14 @@ struct UpdateLearningMeaningRequest {
     meaning_text: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UseLearningDefinitionRequest {
+    item_id: String,
+    provider_id: String,
+    definition: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VideoOutputSelection {
@@ -609,6 +617,22 @@ async fn update_learning_item_meaning(
     state
         .learning_service
         .update_meaning(&request.item_id, request.meaning_text)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn use_learning_dictionary_definition(
+    state: State<'_, DesktopState>,
+    request: UseLearningDefinitionRequest,
+) -> Result<LocalLearningItemDetail, String> {
+    state
+        .learning_service
+        .use_lookup_definition(
+            &request.item_id,
+            &request.provider_id,
+            &request.definition,
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -1727,6 +1751,7 @@ fn main() {
             translation_status,
             update_subtitle_overlay,
             update_learning_item_meaning,
+            use_learning_dictionary_definition,
             update_subtitle,
             restore_subtitle,
             split_subtitle,

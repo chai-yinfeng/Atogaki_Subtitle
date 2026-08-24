@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 use crate::infrastructure::local_db::{
     LocalDatabase, LocalLearningItemDetail, NewLocalLearningLookupResult, NewLocalLearningSelection,
@@ -43,6 +43,41 @@ impl LocalLearningService {
     ) -> Result<LocalLearningItemDetail> {
         self.database
             .update_learning_item_meaning(item_id, meaning_text)
+            .await
+    }
+
+    pub async fn use_lookup_definition(
+        &self,
+        item_id: &str,
+        provider_id: &str,
+        definition: &str,
+    ) -> Result<LocalLearningItemDetail> {
+        let detail = self
+            .database
+            .get_learning_item(item_id)
+            .await?
+            .ok_or_else(|| anyhow!("learning item not found: {item_id}"))?;
+        let result = detail
+            .lookup_results
+            .iter()
+            .find(|result| result.provider_id == provider_id)
+            .ok_or_else(|| anyhow!("dictionary result not found: {provider_id}"))?;
+        let definition = definition.trim();
+        let stored_definition = result
+            .senses
+            .iter()
+            .flat_map(|sense| sense.definitions.iter())
+            .find(|candidate| candidate.trim() == definition)
+            .ok_or_else(|| {
+                anyhow!("selected definition is not part of the saved dictionary result")
+            })?;
+        self.database
+            .update_learning_item_meaning_from_provider(
+                item_id,
+                stored_definition,
+                &result.provider_id,
+                &result.provider_name,
+            )
             .await
     }
 

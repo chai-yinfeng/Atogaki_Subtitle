@@ -120,8 +120,13 @@ impl DictionaryLookupService {
         require_file(&source, "FreeDict 英中")?;
         let version = package_version(&source);
         self.ensure_index("freedict", &version, &source).await?;
-        let entry = self.query_index("freedict", query).await?
-            .ok_or_else(|| anyhow!("FreeDict 英中中没有找到“{query}”的精确词头"))?;
+        let candidates = english_lemma_candidates(query);
+        let entry = self
+            .query_index_candidates("freedict", &candidates)
+            .await?
+            .ok_or_else(|| {
+                anyhow!("FreeDict 英中没有找到“{query}”或其常见英语变形对应的词头")
+            })?;
         Ok(entry.into_lookup(
             item_id,
             "freedict",
@@ -162,20 +167,35 @@ impl DictionaryLookupService {
     }
 
     async fn query_index(&self, provider: &str, query: &str) -> Result<Option<IndexedEntry>> {
+        self.query_index_candidates(provider, &[query.to_string()])
+            .await
+    }
+
+    async fn query_index_candidates(
+        &self,
+        provider: &str,
+        queries: &[String],
+    ) -> Result<Option<IndexedEntry>> {
         let pool = open_index(&self.directory.join(INDEX_FILE)).await?;
         create_index_schema(&pool).await?;
-        let row = sqlx::query(
-            "SELECT e.entry_id, e.headword, e.reading, e.senses_json
-             FROM dictionary_forms f
-             JOIN dictionary_entries e
-               ON e.provider_id = f.provider_id AND e.entry_id = f.entry_id
-             WHERE f.provider_id = ? AND f.form = ? COLLATE NOCASE
-             ORDER BY f.rank ASC LIMIT 1",
-        )
-        .bind(provider)
-        .bind(query)
-        .fetch_optional(&pool)
-        .await?;
+        let mut row = None;
+        for query in queries {
+            row = sqlx::query(
+                "SELECT e.entry_id, e.headword, e.reading, e.senses_json
+                 FROM dictionary_forms f
+                 JOIN dictionary_entries e
+                   ON e.provider_id = f.provider_id AND e.entry_id = f.entry_id
+                 WHERE f.provider_id = ? AND f.form = ? COLLATE NOCASE
+                 ORDER BY f.rank ASC LIMIT 1",
+            )
+            .bind(provider)
+            .bind(query)
+            .fetch_optional(&pool)
+            .await?;
+            if row.is_some() {
+                break;
+            }
+        }
         pool.close().await;
         row.map(|row| {
             Ok(IndexedEntry {
@@ -620,6 +640,59 @@ fn collect_mw_examples(value: &Value) -> Vec<String> {
     let mut examples = Vec::new(); visit(value, &mut examples); examples.sort(); examples.dedup(); examples.truncate(6); examples
 }
 
+fn english_lemma_candidates(query: &str) -> Vec<String> {
+    fn push(candidates: &mut Vec<String>, value: impl Into<String>) {
+        let value = value.into();
+        if value.len() >= 2 && !candidates.iter().any(|candidate| candidate == &value) {
+            candidates.push(value);
+        }
+    }
+
+    let original = query.trim();
+    let mut candidates = Vec::new();
+    if original.is_empty() {
+        return candidates;
+    }
+    push(&mut candidates, original.to_string());
+    let word = original.to_ascii_lowercase();
+    push(&mut candidates, word.clone());
+    if !word.chars().all(|character| character.is_ascii_alphabetic() || character == '\'') {
+        return candidates;
+    }
+    if let Some(stem) = word.strip_suffix("'s") {
+        push(&mut candidates, stem.to_string());
+    }
+    if let Some(stem) = word.strip_suffix("ies") {
+        push(&mut candidates, format!("{stem}y"));
+    }
+    if let Some(stem) = word.strip_suffix("ied") {
+        push(&mut candidates, format!("{stem}y"));
+    }
+    if let Some(stem) = word.strip_suffix("ves") {
+        push(&mut candidates, format!("{stem}f"));
+        push(&mut candidates, format!("{stem}fe"));
+    }
+    if let Some(stem) = word.strip_suffix('s') {
+        push(&mut candidates, stem.to_string());
+    }
+    if let Some(stem) = word.strip_suffix("es") {
+        push(&mut candidates, stem.to_string());
+    }
+    for suffix in ["ing", "ed", "er", "est"] {
+        if let Some(stem) = word.strip_suffix(suffix) {
+            push(&mut candidates, stem.to_string());
+            let mut characters = stem.chars().rev();
+            if let (Some(last), Some(previous)) = (characters.next(), characters.next()) {
+                if last == previous && !matches!(last, 'a' | 'e' | 'i' | 'o' | 'u') {
+                    push(&mut candidates, stem[..stem.len() - last.len_utf8()].to_string());
+                }
+            }
+            push(&mut candidates, format!("{stem}e"));
+        }
+    }
+    candidates
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -629,8 +702,9 @@ mod tests {
     use crate::credential_store::{CredentialStore, SystemCredentialStore};
 
     use super::{
-        INDEX_FILE, create_index_schema, html_lines, mw_audio_url, open_index, package_version,
-        parse_freedict, parse_jmdict, replace_index, tomoshi_senses, TomoshiEntry,
+        INDEX_FILE, TomoshiEntry, create_index_schema, english_lemma_candidates, html_lines,
+        mw_audio_url, open_index, package_version, parse_freedict, parse_jmdict, replace_index,
+        tomoshi_senses,
     };
 
     #[test]
@@ -639,6 +713,16 @@ mod tests {
         assert!(mw_audio_url("bixbite").contains("/bix/"));
         assert!(mw_audio_url("ggreen").contains("/gg/"));
         assert!(mw_audio_url("apple01").contains("/a/"));
+    }
+
+    #[test]
+    fn derives_conservative_english_dictionary_headwords() {
+        assert!(english_lemma_candidates("studies").contains(&"study".to_string()));
+        assert!(english_lemma_candidates("running").contains(&"run".to_string()));
+        assert!(english_lemma_candidates("making").contains(&"make".to_string()));
+        assert!(english_lemma_candidates("stopped").contains(&"stop".to_string()));
+        assert!(english_lemma_candidates("boxes").contains(&"box".to_string()));
+        assert_eq!(english_lemma_candidates("look after"), vec!["look after"]);
     }
 
     /// Manual regression hook for real downloaded packages; CI does not own these large files.

@@ -41,6 +41,7 @@ Windows x86_64 基础发行已经以 alpha 进入扩测，当前主线切回 mac
 - [x] 支持任务自定义名称，并安全删除已结束任务的 SQLite 记录和本地派生产物。
 - [x] 增加首次启动引导、官方 Whisper/VAD 模型下载、DeepL 凭据配置和 provider 热切换。
 - [x] 增加桌面网络与模型来源配置：环境/直连/自定义代理、可选镜像、官方回退、连通性测试和全模型 SHA-256 校验。
+- [x] 模型下载保留中断临时文件，并用 HTTP Range 从镜像或官方源续传；不支持 Range 时安全重下，安装前仍校验完整 SHA-256。
 - [x] 固定提供 small、medium、large-v3 q5_0、large-v3-turbo q5_0/q8_0 五档 Whisper 下载项，覆盖轻量、质量与 turbo 对比需求。
 - [x] 自动刷新任务列表与活动详情；启动时显式标记中断任务，并允许从不可变快照派生重试任务。
 - [x] 运行中的转写任务会持续把阶段写入 SQLite；界面以本机时钟逐秒刷新单一“已运行”耗时与不定量进度，避免 Whisper 不更新数据库时列表秒数冻结，也避免容易混淆的阶段／累计双计时。
@@ -152,6 +153,8 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 建立多词典 provider 结果边界和按来源切换的详情卡片；学习列表保持简明译义与一条例句，未配置来源显示独立空状态。
 - [x] 增加词典包下载器与独立 API 配置窗口：JMdict／Tomoshi 从发布元数据解析最新版并校验 SHA-256，FreeDict 英中固定版本并校验 SHA-512；三家商业词典 Key 独立进入系统凭据库。
 - [x] 接入首批实际词典链路：JMdict／Tomoshi／FreeDict 从已安装包解压、索引或直接查询，Merriam-Webster 支持 Learner's／Collegiate 产品识别、官方 Logo、英英释义、音标和发音；各来源结果与错误相互隔离。
+- [x] 允许从任一已查询词典选择一条释义作为外层简明译义并保留来源；词典 API Key 每个 App 进程只在首次使用时读取系统凭据，后续复用内存缓存。
+- [x] FreeDict 未命中时对常见规则英语变形执行保守词元回退并展示实际词头；查询失败后重新启用来源标签，用户可直接切换其他词典，不再被困在重试／返回界面。
 - [ ] 取得可正式使用的 Cambridge／Collins API 协议与账户后补齐其 adapter；公开发行前重新核对商业词典授权、缓存和展示条款，不把仅有配置入口写成已支持。
 - [x] 第一版音频关联复用原任务媒体与字幕段时间范围，不把媒体二进制写进 SQLite；精确到词的裁剪在取得可靠词级时间或手动边界后再扩展。
 - [x] 将收听字幕流升级为可选择文本的全文阅读模式，保留当前播放句高亮、独立时间码跳转和整句收藏，不建立第三套重复预览页；条目可在学习区删除。
@@ -166,7 +169,7 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 
 2026-08-24 完成词典资源准备层：设置页可按包查看来源、许可、署名、版本和进度，用户明确触发后把 JMdict、Tomoshi 或 FreeDict 英中下载到正式 `dictionaries/`；滚动发布先读取 GitHub Release 摘要，FreeDict 固定 `2025.11.23` 与官方 SHA-512，所有包校验后才安装，更新失败会恢复旧包。Cambridge、Collins、Merriam-Webster 分别保存、检查和删除系统凭据，打开设置只读 SQLite 标记而不触发 Keychain。本里程碑尚未解压、索引或发起词典查询；FreeDict 只定位为开放离线补充，ECDICT 因来源与许可不足未进入默认目录。
 
-2026-08-24 完成首批真实词典查询闭环：JMdict JSON 和 FreeDict StarDict 在第一次查询时于正式 `dictionaries/` 生成版本化轻量 SQLite 索引，Tomoshi `.zst` 原子展开后直接查询其 `forms/entries/zh_defs`，包版本变化才重建；真实包已分别用“勉強”和 `apple` 回归。FreeDict 包内许可固定为 CC BY-SA 3.0 Unported，Tomoshi 只对本次读取的 CC BY-SA 4.0 表作精确署名。Merriam-Webster 仅在用户点击时访问系统凭据与 API；实测当前 Key 属于 Advanced Learner's 而非 Collegiate，adapter 因此会在 Learner's／Collegiate 间识别并记住有效 reference，显示官方未修改 Logo、完整产品名、音标和远程发音，并把本地结果限制为 24 小时缓存。Cambridge／Collins 仍只有凭据边界，未宣称支持查询。
+2026-08-24 完成首批真实词典查询闭环：JMdict JSON 和 FreeDict StarDict 在第一次查询时于正式 `dictionaries/` 生成版本化轻量 SQLite 索引，Tomoshi `.zst` 原子展开后直接查询其 `forms/entries/zh_defs`，包版本变化才重建；真实包已分别用“勉強”和 `apple` 回归。FreeDict 包内许可固定为 CC BY-SA 3.0 Unported，Tomoshi 只对本次读取的 CC BY-SA 4.0 表作精确署名。Merriam-Webster 仅在用户点击时访问系统凭据与 API；实测当前 Key 属于 Advanced Learner's 而非 Collegiate，adapter 因此会在 Learner's／Collegiate 间识别并记住有效 reference，显示官方未修改 Logo、完整产品名、音标和远程发音，并把本地结果限制为 24 小时缓存。Cambridge／Collins 仍只有凭据边界，未宣称支持查询。随后补齐“词典释义设为简明”的来源链路、词典 Key 的单进程惰性缓存、FreeDict 规则词形回退和查询失败后可切换来源的交互修复。
 
 第一版不同时引入自动生成长篇 AI 语法讲解、间隔重复、复杂标签体系或自定义 Anki 模板。学习数据既保留对当前字幕主数据的引用，也保留收藏时快照，避免后续字幕修改让旧学习记录失去上下文。下一里程碑先验证真实收藏行为，再选择词典来源和补充检索／筛选；不提前把复杂复习系统写入架构。
 
@@ -200,10 +203,10 @@ Windows 基础发行先于样式系统：跨平台字体可用性、fallback、�
 - 当前 Web API 和 Postgres schema 是早期探索，不应驱动桌面 MVP 的设计。
 - macOS Apple Silicon 已能从固定源码生成 whisper.cpp v1.8.6 与 FFmpeg 8.1.2 sidecar，随 `.app` 打包并在无 Atogaki 环境变量时运行；FFmpeg 为无 libx264 的 LGPL 构建，libass 字体栈同样从固定源码静态链接。App 已统一声明最低 macOS 12.0，并采用无需开发者账号的 ad-hoc 签名；CI 模式 DMG 与对应源码包均可复现生成。正式分发仍需补 x86_64/Windows 构建机、Developer ID 签名/公证和实际 GitHub Release 上传演练。
 - Atogaki 项目已采用 Apache-2.0；App 会携带项目许可证、macOS arm64 Rust/Tauri 与前端的生成式第三方声明。新的 target、lockfile 或 sidecar 版本仍必须重新审计；当前审计属于工程记录，不替代正式法律意见。
-- 模型下载由桌面主进程的 `reqwest` 发起，不经过 WebView。设置页已提供环境/直连/自定义 HTTP 代理、可选 HTTPS 镜像和连通性测试；点击下载会先保存当前网络草稿，避免 Finder 启动后仍沿用旧环境配置。镜像失败会回退 Hugging Face 官方源，所有模型必须通过固定 SHA-256 才会安装；输入框提供 `https://hf-mirror.com` 作为可选示例而非默认来源。Finder 启动不再要求依赖 zsh 的 `proxy_on`，但认证代理凭据与断点续传尚未实现。
+- 模型下载由桌面主进程的 `reqwest` 发起，不经过 WebView。设置页已提供环境/直连/自定义 HTTP 代理、可选 HTTPS 镜像和连通性测试；点击下载会先保存当前网络草稿，避免 Finder 启动后仍沿用旧环境配置。镜像失败会回退 Hugging Face 官方源，中断临时文件会跨重启保留并通过 HTTP Range 续传，所有模型必须通过固定 SHA-256 才会安装；输入框提供 `https://hf-mirror.com` 作为可选示例而非默认来源。Finder 启动不再要求依赖 zsh 的 `proxy_on`；认证代理凭据仍未实现。
 - 当前识别与翻译选项已可配置；UI 暴露日语、英语或韩语到简体中文，并将语言对持久化到任务、SQLite、词表和导出。日语与英语真实节目均已在打包窗口中完成识别、DeepL 翻译、编辑、导出与烧录回归；韩语代码路径保留，真实体验验证等待 Windows 基础发行和实际用户。
 - 当前字幕 JSON 已有稳定段 ID、来源编辑状态与翻译过期状态；细粒度编辑历史仍待实现。
-- 应用启动时会把遗留的非终态识别任务标记为中断失败，并允许以新 UUID 从冻结选项、词表和当前可用模型重试；尚未实现下载断点续传和识别阶段内的检查点续跑。
+- 应用启动时会把遗留的非终态识别任务标记为中断失败，并允许以新 UUID 从冻结选项、词表和当前可用模型重试；模型下载已支持断点续传，但识别阶段内仍没有检查点续跑。
 - 首页任务、活动任务详情和烧录进度已自动轮询；转写任务同步当前阶段，运行耗时由界面本机时钟逐秒更新，不再依赖 Whisper 阶段内的数据库写入。Whisper 当前没有稳定的机器可读进度协议，故不显示伪百分比或单次 ETA；后续应基于本机历史速度、媒体时长和模型档位生成区间预测。
 - 系统 WebView 不能播放所有 ffmpeg 支持的容器或编码；当前失败时回退任务 `audio.wav`，后续需按需生成视频代理文件。
 - 桌面 DeepL 单段/批量翻译与重启持久化已通过真实 API 窗口回归；`LocalWorkspaceService` 注入可热切换的结构化 provider。DeepL、DeepSeek 和自定义 OpenAI-compatible Key 按 provider ID 写入系统凭据库（macOS Keychain、Windows Credential Manager 或 Linux Secret Service），`DEEPL_AUTH_KEY`／`DEEPSEEK_API_KEY` 仅作兼容回退；SQLite 只保留非敏感设置、“曾成功保存”标记与 provider 批次元数据，启动、设置和模型下载不读取凭据，首次实际翻译才访问系统凭据库并在进程内缓存。

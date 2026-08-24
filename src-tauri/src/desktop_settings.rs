@@ -665,9 +665,11 @@ impl DesktopSettingsService {
         }
         if request.clear {
             self.credentials.delete(&credential_id)?;
+            self.replace_cached_dictionary_key(&credential_id, None, None);
             self.database.delete_setting(marker).await?;
         } else if let Some(secret) = secret {
             self.credentials.set(&credential_id, &secret)?;
+            self.replace_cached_dictionary_key(&credential_id, Some(secret), None);
             self.database.set_setting(marker, "true").await?;
         } else {
             bail!("dictionary API key cannot be empty");
@@ -687,7 +689,21 @@ impl DesktopSettingsService {
     ) -> Result<DictionaryCredentialStatus> {
         let marker = dictionary_key_saved_setting(provider_id)?;
         let credential_id = dictionary_credential_id(provider_id)?;
-        let configured = normalized_secret(self.credentials.get(&credential_id)?).is_some();
+        let configured = match self.credentials.get(&credential_id) {
+            Ok(secret) => {
+                let secret = normalized_secret(secret);
+                self.replace_cached_dictionary_key(&credential_id, secret.clone(), None);
+                secret.is_some()
+            }
+            Err(error) => {
+                self.replace_cached_dictionary_key(
+                    &credential_id,
+                    None,
+                    Some(format!("{error:#}")),
+                );
+                return Err(error);
+            }
+        };
         if configured {
             self.database.set_setting(marker, "true").await?;
         } else {
@@ -701,11 +717,45 @@ impl DesktopSettingsService {
         })
     }
 
-    /// Explicit dictionary lookup action: reads only the selected provider secret.
+    /// The first lookup in an app process reads only the selected provider secret. Later
+    /// lookups reuse the in-memory copy, while the durable secret remains in Keychain (or
+    /// the platform-equivalent credential store).
     pub fn dictionary_api_key(&self, provider_id: &str) -> Result<String> {
         let credential_id = dictionary_credential_id(provider_id)?;
-        normalized_secret(self.credentials.get(&credential_id)?)
-            .ok_or_else(|| anyhow!("{} API Key 尚未配置", dictionary_provider_display_name(provider_id).unwrap_or("词典")))
+        let (secret, error) = cached_provider_key(
+            &credential_id,
+            self.credentials.as_ref(),
+            self.credential_cache.as_ref(),
+        );
+        if let Some(error) = error {
+            bail!("读取 {} API Key 失败：{error}", dictionary_provider_display_name(provider_id)?);
+        }
+        secret.ok_or_else(|| {
+            anyhow!(
+                "{} API Key 尚未配置",
+                dictionary_provider_display_name(provider_id).unwrap_or("词典")
+            )
+        })
+    }
+
+    fn replace_cached_dictionary_key(
+        &self,
+        credential_id: &str,
+        secret: Option<String>,
+        error: Option<String>,
+    ) {
+        let mut cache = self
+            .credential_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.insert(
+            credential_id.to_string(),
+            CredentialCache {
+                loaded: true,
+                secret,
+                error,
+            },
+        );
     }
 
     pub async fn merriam_webster_reference(&self) -> Result<String> {
@@ -1393,9 +1443,39 @@ mod tests {
         );
         assert!(database.get_setting("dictionary-secret").await.unwrap().is_none());
         assert_eq!(*credentials.reads.lock().unwrap(), 0);
-
-        let statuses = service.dictionary_credential_statuses().await.unwrap();
+        assert_eq!(
+            service.dictionary_api_key("merriam-webster").unwrap(),
+            "dictionary-secret"
+        );
+        assert_eq!(
+            service.dictionary_api_key("merriam-webster").unwrap(),
+            "dictionary-secret"
+        );
         assert_eq!(*credentials.reads.lock().unwrap(), 0);
+
+        let restarted_service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models-restarted"),
+            credentials.clone(),
+        );
+        assert_eq!(
+            restarted_service
+                .dictionary_api_key("merriam-webster")
+                .unwrap(),
+            "dictionary-secret"
+        );
+        assert_eq!(
+            restarted_service
+                .dictionary_api_key("merriam-webster")
+                .unwrap(),
+            "dictionary-secret"
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 1);
+
+        let reads_before_status = *credentials.reads.lock().unwrap();
+        let statuses = service.dictionary_credential_statuses().await.unwrap();
+        assert_eq!(*credentials.reads.lock().unwrap(), reads_before_status);
         assert!(
             statuses
                 .iter()
@@ -1427,6 +1507,7 @@ mod tests {
                 .is_none()
         );
 
+        drop(restarted_service);
         drop(service);
         drop(database);
         fs::remove_dir_all(root).unwrap();

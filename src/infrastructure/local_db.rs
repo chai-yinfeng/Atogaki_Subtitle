@@ -1091,6 +1091,44 @@ impl LocalDatabase {
             .ok_or_else(|| anyhow!("updated learning item disappeared: {item_id}"))
     }
 
+    pub async fn update_learning_item_meaning_from_provider(
+        &self,
+        item_id: &str,
+        meaning_text: &str,
+        provider_id: &str,
+        provider_name: &str,
+    ) -> Result<LocalLearningItemDetail> {
+        let meaning_text = meaning_text.trim();
+        if meaning_text.is_empty()
+            || provider_id.trim().is_empty()
+            || provider_name.trim().is_empty()
+        {
+            return Err(anyhow!(
+                "dictionary-backed learning meaning requires definition and provider"
+            ));
+        }
+        let result = sqlx::query(
+            "UPDATE local_learning_items
+             SET meaning_text = ?, meaning_provider_id = ?, meaning_source_label = ?,
+                 updated_at_unix = ?
+             WHERE id = ?",
+        )
+        .bind(meaning_text)
+        .bind(provider_id.trim())
+        .bind(provider_name.trim())
+        .bind(chrono::Utc::now().timestamp())
+        .bind(item_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to use dictionary definition as learning meaning")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("learning item not found: {item_id}"));
+        }
+        self.get_learning_item(item_id)
+            .await?
+            .ok_or_else(|| anyhow!("updated learning item disappeared: {item_id}"))
+    }
+
     pub async fn delete_learning_item(&self, item_id: &str) -> Result<()> {
         let result = sqlx::query("DELETE FROM local_learning_items WHERE id = ?")
             .bind(item_id)
@@ -2772,6 +2810,27 @@ mod tests {
         assert_eq!(
             replaced_dictionary.lookup_results[0].senses[0].definitions,
             vec!["apple; fruit"]
+        );
+        let selected_meaning = database
+            .update_learning_item_meaning_from_provider(
+                &saved.item.id,
+                "apple; fruit",
+                "jmdict",
+                "JMdict",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            selected_meaning.item.meaning_text.as_deref(),
+            Some("apple; fruit")
+        );
+        assert_eq!(
+            selected_meaning.item.meaning_provider_id.as_deref(),
+            Some("jmdict")
+        );
+        assert_eq!(
+            selected_meaning.item.meaning_source_label.as_deref(),
+            Some("JMdict")
         );
 
         database.delete_job(&manifest.job_id).await.unwrap();

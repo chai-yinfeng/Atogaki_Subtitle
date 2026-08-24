@@ -2425,7 +2425,7 @@ function renderLearningItems(): void {
         <div><span>${sourceLabel} · ${escapeHtml(languageLabel(detail.item.source_language))}</span><h3>${escapeHtml(detail.item.source_text)}</h3></div>
         <span>${detail.item.occurrence_count} 个例句</span>
       </div>
-      <label>学习译义<input class="learning-meaning" value="${escapeHtml(detail.item.meaning_text ?? "")}" placeholder="尚未接入标准词典；可先手工填写" /></label>
+      <label>学习译义${detail.item.meaning_source_label ? `<span class="learning-meaning-source">当前来自 ${escapeHtml(detail.item.meaning_source_label)}</span>` : ""}<input class="learning-meaning" value="${escapeHtml(detail.item.meaning_text ?? "")}" placeholder="可手工填写，或从词典详情选择一条释义" /></label>
       <div class="learning-source-meta">${sourceMeta}</div>
       ${context}
       <div class="learning-card-actions">
@@ -2517,8 +2517,8 @@ function renderLearningDictionary(): void {
 
   if (activeLearningProviderId === "summary") {
     const meaning = detail.item.meaning_text
-      ? `<p class="learning-summary-meaning">${escapeHtml(detail.item.meaning_text)}</p>`
-      : '<p class="learning-provider-empty-copy">还没有简明译义。关闭详情后可直接在学习列表中填写。</p>';
+      ? `<p class="learning-summary-meaning">${escapeHtml(detail.item.meaning_text)}</p><p class="learning-source-meta">${detail.item.meaning_source_label ? `选自 ${escapeHtml(detail.item.meaning_source_label)}` : "手工维护"}</p>`
+      : '<p class="learning-provider-empty-copy">还没有简明译义。可在其他词典标签中选择一条释义，也可关闭详情后手工填写。</p>';
     const context = occurrence
       ? `<blockquote><strong>${escapeHtml(occurrence.segment_source_snapshot)}</strong>${occurrence.segment_translation_snapshot ? `<span>${escapeHtml(occurrence.segment_translation_snapshot)}</span>` : ""}</blockquote>
         <p class="learning-source-meta">${escapeHtml(occurrence.job_display_name_snapshot)} · ${escapeHtml(formatTime(occurrence.start_ms))}</p>`
@@ -2547,9 +2547,9 @@ function renderLearningDictionary(): void {
     return;
   }
 
-  const senses = result.senses.map((sense) => `<section class="learning-dictionary-sense">
+  const senses = result.senses.map((sense, senseIndex) => `<section class="learning-dictionary-sense">
     ${sense.part_of_speech ? `<strong>${escapeHtml(sense.part_of_speech)}</strong>` : ""}
-    <ol>${sense.definitions.map((definition) => `<li>${escapeHtml(definition)}</li>`).join("")}</ol>
+    <ol>${sense.definitions.map((definition, definitionIndex) => `<li><span>${escapeHtml(definition)}</span><button type="button" class="secondary" data-use-learning-definition="${senseIndex}:${definitionIndex}">设为简明</button></li>`).join("")}</ol>
     ${sense.examples.length ? `<div class="learning-dictionary-examples">${sense.examples.map((example) => `<p>${escapeHtml(example)}</p>`).join("")}</div>` : ""}
   </section>`).join("");
   learningProviderPanel.innerHTML = `<article class="learning-provider-result">
@@ -2564,6 +2564,13 @@ function renderLearningDictionary(): void {
   </article>`;
   learningProviderPanel.querySelector<HTMLButtonElement>("[data-refresh-learning-provider]")?.addEventListener("click", () => {
     void lookupLearningDictionary(result.provider_id);
+  });
+  learningProviderPanel.querySelectorAll<HTMLButtonElement>("[data-use-learning-definition]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [senseIndex, definitionIndex] = (button.dataset.useLearningDefinition ?? "").split(":").map(Number);
+      const definition = result.senses[senseIndex]?.definitions[definitionIndex];
+      if (definition) void useLearningDictionaryDefinition(result.provider_id, definition);
+    });
   });
 }
 
@@ -2592,6 +2599,7 @@ async function lookupLearningDictionary(providerId: string): Promise<void> {
   if (!activeLearningItemId || !providerId || learningLookupBusy) return;
   learningLookupBusy = true;
   renderLearningDictionary();
+  let failure: string | null = null;
   try {
     const updated = await invoke<LearningItemDetail>("lookup_learning_dictionary", {
       itemId: activeLearningItemId,
@@ -2601,13 +2609,36 @@ async function lookupLearningDictionary(providerId: string): Promise<void> {
     renderLearningItems();
     renderLearningDictionary();
   } catch (error) {
-    if (learningProviderPanel) {
-      learningProviderPanel.innerHTML = `<div class="learning-provider-empty"><span>LOOKUP FAILED</span><h3>查询失败</h3><p>${escapeHtml(String(error))}</p><button type="button" data-retry-learning-provider>重试</button></div>`;
+    failure = String(error);
+  } finally {
+    learningLookupBusy = false;
+    renderLearningDictionary();
+    if (failure && learningProviderPanel) {
+      learningProviderPanel.innerHTML = `<div class="learning-provider-empty"><span>LOOKUP FAILED</span><h3>查询失败</h3><p>${escapeHtml(failure)}</p><p>可以切换到其他词典来源，或稍后重试当前来源。</p><button type="button" data-retry-learning-provider>重试</button></div>`;
       learningProviderPanel.querySelector<HTMLButtonElement>("[data-retry-learning-provider]")?.addEventListener("click", () => void lookupLearningDictionary(providerId));
+    }
+  }
+}
+
+async function useLearningDictionaryDefinition(providerId: string, definition: string): Promise<void> {
+  if (!activeLearningItemId || learningLookupBusy) return;
+  learningLookupBusy = true;
+  renderLearningDictionary();
+  try {
+    const updated = await invoke<LearningItemDetail>("use_learning_dictionary_definition", {
+      request: { itemId: activeLearningItemId, providerId, definition },
+    });
+    learningItems = learningItems.map((item) => item.item.id === updated.item.id ? updated : item);
+    renderLearningItems();
+    activeLearningProviderId = "summary";
+  } catch (error) {
+    if (learningMessage) {
+      learningMessage.textContent = `设置简明译义失败：${String(error)}`;
+      learningMessage.classList.add("warning");
     }
   } finally {
     learningLookupBusy = false;
-    if (!learningProviderPanel?.querySelector("[data-retry-learning-provider]")) renderLearningDictionary();
+    renderLearningDictionary();
   }
 }
 
