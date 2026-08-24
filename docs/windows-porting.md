@@ -1,6 +1,6 @@
 # Windows x86_64 兼容计划
 
-_状态：W1/W2 与 NSIS 自动发布基线完成，首个 Windows prerelease 已发布，W3/W4 多设备实测进行中；最后更新：2026-08-23_
+_状态：W1/W2 与 NSIS 自动发布基线完成，首个 Windows prerelease 已发布，W3/W4 多设备实测进行中；最后更新：2026-08-24_
 
 ## 目标与边界
 
@@ -22,6 +22,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 - Explorer 文件选中路径已经实现并通过 Windows 编译；中文、空格、长路径、非系统盘和现有 Explorer 进程下的窗口行为仍需实机验证。
 - 悬浮字幕的非 macOS 路径尚未在 Windows 普通桌面、多显示器、任务栏和最小化／关闭流程中验证。
+- `v0.1.0-alpha.6` 扩测已报告悬浮字幕显示异常，具体视觉表现与复现条件待补；下一次 Windows 稳定候选前必须完成分诊和回归。
 - 部分错误和能力文案直接提到 VideoToolbox 或 Finder，需要按实际平台显示；实时录音代码仍固定使用 AVFoundation，但实时能力不属于本阶段。
 - Windows NSIS 类型、Release 命名和校验流程已经固定；README 的平台入口与面向非开发者的安装说明仍需随扩测反馈继续完善。
 
