@@ -297,6 +297,7 @@ impl DictionaryLookupService {
         let client = network.client.apply(
             reqwest::Client::builder()
                 .user_agent("Atogaki/0.1 dictionary lookup")
+                .timeout(Duration::from_secs(45))
                 .connect_timeout(Duration::from_secs(20))
                 .read_timeout(Duration::from_secs(40)),
         )?.build()?;

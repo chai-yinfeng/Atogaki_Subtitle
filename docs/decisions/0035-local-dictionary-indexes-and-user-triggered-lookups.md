@@ -19,6 +19,7 @@ Merriam-Webster 的 Key 绑定具体 reference work。真实回归确认当前 K
 - provider 只做精确词形查询。未命中、包缺失、解压失败或某一 API 失败只影响当前标签页，不阻止收藏、简明译义或其他来源。
 - Merriam-Webster 默认先尝试更符合学习场景且已实机验证的 `learners` reference；若官方明确返回当前 Key 未订阅，则尝试 `collegiate`，成功后把 reference ID 作为非敏感设置记住。不会枚举其他产品。
 - Merriam-Webster 请求只在用户点击“查询／刷新来源”时发生。结果显示官方提供且未修改的 50px Logo、完整产品标题、音标、简明定义、例句和可用的远程音频 URL；SQLite 缓存 24 小时，到期即删除。Key 不进入 URL 日志、SQLite 或 UI 回显。
+- 网络请求复用桌面代理设置，并设 45 秒整请求上限；代理离线或第三方无响应必须回到当前来源的可重试错误卡片，不能让整个学习详情永久停在忙碌状态。
 - FreeDict `2025.11.23` 的展示许可固定为 CC BY-SA 3.0 Unported；JMdict 显示 EDRDG 与 CC BY-SA 4.0；Tomoshi 对本次查询经过的 `forms/entries/zh_defs` 显示 CC BY-SA 4.0 及 Tomoshi／EDRDG 署名。
 - XZ 解压通过 `xz2` 的 `static` feature 内建 liblzma，避免 macOS App 在签名后依赖 Homebrew 动态库；Windows 也不要求用户另装 XZ 运行时。最终 Bundle 必须用 `otool`／实机启动确认没有开发机路径依赖。
 - Cambridge 与 Collins 保留 provider 和凭据入口，但在取得可验证协议与账户前不实现虚构请求，也不显示“可查询”。
