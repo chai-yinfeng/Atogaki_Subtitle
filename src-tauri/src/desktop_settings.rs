@@ -31,7 +31,6 @@ const TRANSLATION_PROVIDER: &str = "translation.provider";
 const DEEPL_KEY_SAVED: &str = "translation.deepl_key_saved";
 const DEEPSEEK_KEY_SAVED: &str = "translation.deepseek_key_saved";
 const OPENAI_COMPATIBLE_KEY_SAVED: &str = "translation.openai_compatible_key_saved";
-const CAMBRIDGE_DICTIONARY_KEY_SAVED: &str = "dictionary.cambridge_key_saved";
 const COLLINS_DICTIONARY_KEY_SAVED: &str = "dictionary.collins_key_saved";
 const MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED: &str = "dictionary.merriam_webster_key_saved";
 const MERRIAM_WEBSTER_REFERENCE: &str = "dictionary.merriam_webster_reference";
@@ -636,7 +635,7 @@ impl DesktopSettingsService {
     /// Lists only non-secret saved markers. Opening settings must not trigger a Keychain prompt.
     pub async fn dictionary_credential_statuses(&self) -> Result<Vec<DictionaryCredentialStatus>> {
         let mut statuses = Vec::new();
-        for provider_id in ["cambridge", "collins", "merriam-webster"] {
+        for provider_id in ["collins", "merriam-webster"] {
             let configured = self
                 .database
                 .get_setting(dictionary_key_saved_setting(provider_id)?)
@@ -980,7 +979,6 @@ fn provider_display_name(provider_id: &str) -> &'static str {
 
 fn dictionary_key_saved_setting(provider_id: &str) -> Result<&'static str> {
     match provider_id {
-        "cambridge" => Ok(CAMBRIDGE_DICTIONARY_KEY_SAVED),
         "collins" => Ok(COLLINS_DICTIONARY_KEY_SAVED),
         "merriam-webster" => Ok(MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED),
         _ => bail!("unsupported dictionary provider: {provider_id}"),
@@ -994,7 +992,6 @@ fn dictionary_credential_id(provider_id: &str) -> Result<String> {
 
 fn dictionary_provider_display_name(provider_id: &str) -> Result<&'static str> {
     match provider_id {
-        "cambridge" => Ok("Cambridge Dictionary"),
         "collins" => Ok("Collins Dictionary"),
         "merriam-webster" => Ok("Merriam-Webster"),
         _ => bail!("unsupported dictionary provider: {provider_id}"),
@@ -1483,13 +1480,7 @@ mod tests {
                 .unwrap()
                 .configured
         );
-        assert!(
-            !statuses
-                .iter()
-                .find(|status| status.provider_id == "cambridge")
-                .unwrap()
-                .configured
-        );
+        assert_eq!(statuses.len(), 2);
 
         service
             .save_dictionary_credential(super::SaveDictionaryCredentialRequest {

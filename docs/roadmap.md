@@ -152,13 +152,13 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 建立独立于识别纠错词表的学习数据模型；条目与来源例句分层，保留任务、字幕段、播放时间和收藏时文本快照，删除任务后仍保留学习记录。
 - [x] 支持从收听全文阅读器的字幕原文选择词、短语或语法片段，连同完整例句上下文保存；整句收藏作为无需文本选择的快捷入口。
 - [x] 建立多词典 provider 结果边界和按来源切换的详情卡片；学习列表保持简明译义与一条例句，未配置来源显示独立空状态。
-- [x] 增加词典包下载器与独立 API 配置窗口：JMdict／Tomoshi 从发布元数据解析最新版并校验 SHA-256，ECDICT 固定提交、字节数与 Git blob 摘要；三家商业词典 Key 独立进入系统凭据库。历史 FreeDict 下载入口已在 ECDICT 实机验证后删除。
+- [x] 增加词典包下载器与独立 API 配置窗口：JMdict／Tomoshi 从发布元数据解析最新版并校验 SHA-256，ECDICT 固定提交、字节数与 Git blob 摘要；Collins／Merriam-Webster 凭据独立进入系统凭据库。历史 FreeDict 下载入口已在 ECDICT 实机验证后删除。
 - [x] 接入首批实际词典链路：JMdict／Tomoshi／ECDICT 从已安装包建立索引或直接查询，Merriam-Webster 支持 Learner's／Collegiate 产品识别、官方 Logo、英英释义、音标和发音；各来源结果与错误相互隔离。
 - [x] 允许从任一已查询词典选择一条释义作为外层简明译义并保留来源；词典 API Key 每个 App 进程只在首次使用时读取系统凭据，后续复用内存缓存。
 - [x] 查询失败后重新启用来源标签，用户可直接切换其他词典，不再被困在重试／返回界面；ECDICT 使用上游 `exchange` 词形索引命中常见英语变形。
 - [x] 增加 ECDICT 基础英中作为独立可下载来源：固定仓库提交、字节数与 Git blob 摘要，索引中文释义、音标、词性和 `exchange` 词形；FreeDict 暂留作真实命中率对照。
 - [x] ECDICT 实机验证完全可用后退役 FreeDict：删除下载入口、来源标签、StarDict/XZ adapter、测试和专用依赖；升级不静默删除用户已下载的原始包。
-- [ ] 取得可正式使用的 Cambridge／Collins API 协议与账户后补齐其 adapter；公开发行前重新核对商业词典授权、缓存和展示条款，不把仅有配置入口写成已支持。
+- [ ] 取得可正式使用的 Collins API 协议与账户后补齐 adapter；公开发行前重新核对商业词典授权、缓存和展示条款，不把仅有配置入口写成已支持。Cambridge 因官方确认当前 API 不可用，已从产品来源、凭据和查询路径移除。
 - [x] 第一版音频关联复用原任务媒体与字幕段时间范围，不把媒体二进制写进 SQLite；精确到词的裁剪在取得可靠词级时间或手动边界后再扩展。
 - [x] 将收听字幕流升级为可选择文本的全文阅读模式，保留当前播放句高亮、独立时间码跳转和整句收藏，不建立第三套重复预览页；条目可在学习区删除。
 - [x] 建立与工作台、收听同级的“学习”区域，显示条目、来源例句并允许手工维护译义。
@@ -169,17 +169,19 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 
 2026-08-24 完成学习区第一里程碑：收听区成为连续全文阅读器，可在单个字幕段内选择词／短语／语法或直接收藏整句；SQLite 使用“学习条目＋来源例句”两层结构，UTF-16 选区与 WebView 对齐，同语言同类型同文本合并为一个条目并累积来源。顶层学习区可查看快照、手工维护译义、删除条目或回到原媒体时间。音频仅引用整段时间，不保存 Blob；词典查询留在独立 provider 边界，现有上下文翻译 provider 不作为标准词典。静态 WebView 和自动化回归已通过，打包 App 的真实选择手势、播放返回与长期使用仍待实机验证。
 
-2026-08-24 完成多来源词典详情骨架：学习列表继续只显示用户简明译义和来源例句，点击“查看词典”后按语言显示来源标签；英语预留 Cambridge、Collins、Merriam-Webster，日语预留 JMdict、Tomoshi，整句只显示简明页。SQLite 已能按 provider 独立持久化结构化义项、署名、数据版本和缓存期限，但本轮不下载词典包、不访问凭据或外部 API。后续离线数据进入正式应用目录 `dictionaries/`，由用户在设置中明确下载。
+2026-08-24 完成多来源词典详情骨架：学习列表继续只显示用户简明译义和来源例句，点击“查看词典”后按语言显示来源标签；英语最初预留 Cambridge、Collins、Merriam-Webster，日语预留 JMdict、Tomoshi，整句只显示简明页。SQLite 已能按 provider 独立持久化结构化义项、署名、数据版本和缓存期限，但本轮不下载词典包、不访问凭据或外部 API。后续离线数据进入正式应用目录 `dictionaries/`，由用户在设置中明确下载。
 
-2026-08-24 完成词典资源准备层：设置页可按包查看来源、许可、署名、版本和进度，用户明确触发后把 JMdict、Tomoshi 或 FreeDict 英中下载到正式 `dictionaries/`；滚动发布先读取 GitHub Release 摘要，FreeDict 固定 `2025.11.23` 与官方 SHA-512，所有包校验后才安装，更新失败会恢复旧包。Cambridge、Collins、Merriam-Webster 分别保存、检查和删除系统凭据，打开设置只读 SQLite 标记而不触发 Keychain。本里程碑尚未解压、索引或发起词典查询；FreeDict 只定位为开放离线补充，ECDICT 因来源与许可不足未进入默认目录。
+2026-08-24 完成词典资源准备层：设置页可按包查看来源、许可、署名、版本和进度，用户明确触发后把 JMdict、Tomoshi 或 FreeDict 英中下载到正式 `dictionaries/`；滚动发布先读取 GitHub Release 摘要，FreeDict 固定 `2025.11.23` 与官方 SHA-512，所有包校验后才安装，更新失败会恢复旧包。当时 Cambridge、Collins、Merriam-Webster 分别保存、检查和删除系统凭据，打开设置只读 SQLite 标记而不触发 Keychain；Cambridge 入口后于 2026-08-25 退役。本里程碑尚未解压、索引或发起词典查询；FreeDict 只定位为开放离线补充，ECDICT 因来源与许可不足未进入默认目录。
 
-2026-08-24 完成首批真实词典查询闭环：JMdict JSON 和 FreeDict StarDict 在第一次查询时于正式 `dictionaries/` 生成版本化轻量 SQLite 索引，Tomoshi `.zst` 原子展开后直接查询其 `forms/entries/zh_defs`，包版本变化才重建；真实包已分别用“勉強”和 `apple` 回归。FreeDict 包内许可固定为 CC BY-SA 3.0 Unported，Tomoshi 只对本次读取的 CC BY-SA 4.0 表作精确署名。Merriam-Webster 仅在用户点击时访问系统凭据与 API；实测当前 Key 属于 Advanced Learner's 而非 Collegiate，adapter 因此会在 Learner's／Collegiate 间识别并记住有效 reference，显示官方未修改 Logo、完整产品名、音标和远程发音，并把本地结果限制为 24 小时缓存。Cambridge／Collins 仍只有凭据边界，未宣称支持查询。随后补齐“词典释义设为简明”的来源链路、词典 Key 的单进程惰性缓存、FreeDict 规则词形回退和查询失败后可切换来源的交互修复。
+2026-08-24 完成首批真实词典查询闭环：JMdict JSON 和 FreeDict StarDict 在第一次查询时于正式 `dictionaries/` 生成版本化轻量 SQLite 索引，Tomoshi `.zst` 原子展开后直接查询其 `forms/entries/zh_defs`，包版本变化才重建；真实包已分别用“勉強”和 `apple` 回归。FreeDict 包内许可固定为 CC BY-SA 3.0 Unported，Tomoshi 只对本次读取的 CC BY-SA 4.0 表作精确署名。Merriam-Webster 仅在用户点击时访问系统凭据与 API；实测当前 Key 属于 Advanced Learner's 而非 Collegiate，adapter 因此会在 Learner's／Collegiate 间识别并记住有效 reference，显示官方未修改 Logo、完整产品名、音标和远程发音，并把本地结果限制为 24 小时缓存。当时 Cambridge／Collins 仍只有凭据边界，未宣称支持查询。随后补齐“词典释义设为简明”的来源链路、词典 Key 的单进程惰性缓存、FreeDict 规则词形回退和查询失败后可切换来源的交互修复。
 
 2026-08-24 增加 ECDICT 可测试链路。第一版不使用 2017 年、无发布方 checksum 的 340 万词 SQLite ZIP，而固定 2025-03-28 仓库提交中的 62.9 MiB 基础 CSV（约 76 万条）和 Git blob 对象摘要；用户下载后第一次查询建立本地索引，并把 `exchange` 中 lemma／复数／时态作为隐藏词形。ECDICT 与 FreeDict 并列，待真实节目验证命中率、释义质量、首次索引耗时和峰值内存后，再决定删除 FreeDict。上游 MIT 声明与 README 所述混合历史来源同时展示，许可证实用性结论不替代逐来源审计。
 
 2026-08-25 用户实机确认 ECDICT 下载、索引和查询完全可用，FreeDict 因覆盖不足正式退出产品目录。新版本不再展示、下载或查询 FreeDict，并移除 StarDict/XZ 专用代码；历史安装文件作为用户数据保留，不由升级流程静默删除。
 
 2026-08-25 完成学习区本轮收口审计：`main` 中不再有 FreeDict 产品代码、下载目录、来源标签或专用依赖，ECDICT 已通过正式应用数据和打包 App 实机验证；收藏、词典释义提升为简明译义、凭据惰性缓存、来源语言分册和返回原媒体均已有回归。文本检索、按任务筛选、多来源完整列表及复习系统仍是明确增强项，不阻塞主线转入任务级字幕样式与真实渲染预览。
+
+2026-08-25 Cambridge 官方邮件确认当前 API 不可用后，产品不再展示不可兑现的来源：英文详情、设置凭据、后端 provider 分支和 SQLite 非敏感标记全部退役；历史 Keychain 条目不在启动时隐式读取或删除。Collins 仍保留为明确的“待接入”边界，Merriam-Webster 与三套离线词典不受影响。
 
 第一版不同时引入自动生成长篇 AI 语法讲解、间隔重复、复杂标签体系或自定义 Anki 模板。学习数据既保留对当前字幕主数据的引用，也保留收藏时快照，避免后续字幕修改让旧学习记录失去上下文。后续先依据真实收藏行为补充检索、筛选和多来源查看；不提前把复杂复习系统写入架构。
 

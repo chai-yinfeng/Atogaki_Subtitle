@@ -23,7 +23,7 @@ Merriam-Webster 的 Key 绑定具体 reference work。真实回归确认当前 K
 - 网络请求复用桌面代理设置，并设 45 秒整请求上限；代理离线或第三方无响应必须回到当前来源的可重试错误卡片，不能让整个学习详情永久停在忙碌状态。
 - FreeDict `2025.11.23` 的展示许可固定为 CC BY-SA 3.0 Unported；JMdict 显示 EDRDG 与 CC BY-SA 4.0；Tomoshi 对本次查询经过的 `forms/entries/zh_defs` 显示 CC BY-SA 4.0 及 Tomoshi／EDRDG 署名。
 - FreeDict 在役期间，XZ 解压通过 `xz2` 的 `static` feature 内建 liblzma。FreeDict 退役后该专用依赖一并移除；此条仅记录旧版本分发边界。
-- Cambridge 与 Collins 保留 provider 和凭据入口，但在取得可验证协议与账户前不实现虚构请求，也不显示“可查询”。
+- Collins 保留 provider 和凭据入口，但在取得可验证协议与账户前不实现虚构请求，也不显示“可查询”。Cambridge 因官方确认当前 API 不可用，已删除 provider、来源标签、凭据入口和非敏感 SQLite 标记。
 
 ## 后果
 

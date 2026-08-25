@@ -334,7 +334,7 @@ type DictionaryDownloadState = {
 };
 
 type DictionaryCredentialStatus = {
-  providerId: "cambridge" | "collins" | "merriam-webster";
+  providerId: "collins" | "merriam-webster";
   providerName: string;
   configured: boolean;
   credentialStore: string;
@@ -462,28 +462,28 @@ const fileManagerLabel = desktopPlatform === "macos"
 function subtitleStyleEditorMarkup(track: "source" | "translation", label: string): string {
   return `<fieldset class="subtitle-style-editor" data-style-editor="${track}">
     <legend>${label}样式</legend>
-    <label class="style-font-field">字体族<input data-style-field="font_family" list="subtitle-font-families" autocomplete="off" /></label>
-    <label>字号<input data-style-field="font_size" type="number" min="8" max="200" step="1" /></label>
-    <label>字间距<input data-style-field="letter_spacing" type="number" min="-20" max="50" step="0.5" /></label>
+    <label class="style-font-field">字体族<input data-style-field="font_family" list="subtitle-font-families" autocomplete="off" required /></label>
+    <label>字号<input data-style-field="font_size" type="number" min="8" max="200" step="1" required /></label>
+    <label>字间距<input data-style-field="letter_spacing" type="number" min="-20" max="50" step="0.5" required /></label>
     <label>主色<input data-style-field="primary_color_rgb" type="color" /></label>
-    <label>主色不透明度<input data-style-field="primary_color_alpha" type="number" min="0" max="100" step="1" /></label>
+    <label>主色不透明度<input data-style-field="primary_color_alpha" type="number" min="0" max="100" step="1" required /></label>
     <label>描边色<input data-style-field="outline_color_rgb" type="color" /></label>
-    <label>描边不透明度<input data-style-field="outline_color_alpha" type="number" min="0" max="100" step="1" /></label>
-    <label>描边宽度<input data-style-field="outline_width" type="number" min="0" max="20" step="0.5" /></label>
-    <label>阴影<input data-style-field="shadow" type="number" min="0" max="20" step="0.5" /></label>
+    <label>描边不透明度<input data-style-field="outline_color_alpha" type="number" min="0" max="100" step="1" required /></label>
+    <label>描边宽度<input data-style-field="outline_width" type="number" min="0" max="20" step="0.5" required /></label>
+    <label>阴影<input data-style-field="shadow" type="number" min="0" max="20" step="0.5" required /></label>
     <label>对齐与位置<select data-style-field="alignment">
       <option value="7">左上</option><option value="8">上方居中</option><option value="9">右上</option>
       <option value="4">左侧居中</option><option value="5">画面居中</option><option value="6">右侧居中</option>
       <option value="1">左下</option><option value="2">下方居中</option><option value="3">右下</option>
     </select></label>
-    <label>左边距<input data-style-field="margin_left" type="number" min="0" max="1000" step="1" /></label>
-    <label>右边距<input data-style-field="margin_right" type="number" min="0" max="1000" step="1" /></label>
-    <label>垂直边距<input data-style-field="margin_vertical" type="number" min="0" max="1000" step="1" /></label>
+    <label>左边距<input data-style-field="margin_left" type="number" min="0" max="1000" step="1" required /></label>
+    <label>右边距<input data-style-field="margin_right" type="number" min="0" max="1000" step="1" required /></label>
+    <label>垂直边距<input data-style-field="margin_vertical" type="number" min="0" max="1000" step="1" required /></label>
     <label class="style-check"><input data-style-field="bold" type="checkbox" />粗体</label>
     <label class="style-check"><input data-style-field="italic" type="checkbox" />斜体</label>
     <label class="style-check"><input data-style-field="background_enabled" type="checkbox" />启用背景框</label>
     <label>背景色<input data-style-field="background_color_rgb" type="color" /></label>
-    <label>背景不透明度<input data-style-field="background_color_alpha" type="number" min="0" max="100" step="1" /></label>
+    <label>背景不透明度<input data-style-field="background_color_alpha" type="number" min="0" max="100" step="1" required /></label>
     <p class="subtitle-font-report" data-font-report="${track}"></p>
   </fieldset>`;
 }
@@ -862,20 +862,25 @@ app.innerHTML = `
       </div>
       <p class="dialog-help">这里保存的是任务级原文／译文样式。预览、双语 ASS 和视频烧录复用同一个 ASS 生成器；另一台电脑缺少同名字体时仍可能 fallback。SRT 不保存这些样式。</p>
       <datalist id="subtitle-font-families"></datalist>
-      <div class="subtitle-style-grid">
-        ${subtitleStyleEditorMarkup("source", "原文")}
-        ${subtitleStyleEditorMarkup("translation", "译文")}
-      </div>
-      <section class="subtitle-style-preview-panel">
-        <div class="subtitle-preview-toolbar">
-          <label>预览内容<select id="subtitle-style-preview-track"><option value="bilingual">原文＋译文</option><option value="source">仅原文</option><option value="translation">仅译文</option></select></label>
-          <button id="preview-subtitle-style" type="button" class="secondary">生成真实预览</button>
-          <button id="save-subtitle-style" type="button">保存任务样式</button>
+      <div class="subtitle-style-workspace">
+        <section class="subtitle-style-preview-panel">
+          <div class="subtitle-preview-toolbar">
+            <label>预览内容<select id="subtitle-style-preview-track"><option value="bilingual">原文＋译文</option><option value="source">仅原文</option><option value="translation">仅译文</option></select></label>
+            <button id="preview-subtitle-style" type="button" class="secondary">立即刷新</button>
+            <button id="save-subtitle-style" type="button">保存任务样式</button>
+          </div>
+          <div id="subtitle-style-preview-host" class="subtitle-style-preview-host"><span>预览会使用当前播放位置附近的实际字幕和画面；纯音频任务使用中性背景。</span></div>
+          <p class="subtitle-auto-preview-note">自动预览已开启：停止修改约 700 毫秒后通过 FFmpeg/libass 重新渲染；草稿不会自动保存。</p>
+          <details id="subtitle-font-events" class="subtitle-font-events hidden"><summary>查看 libass 实际字体选择</summary><pre></pre></details>
+          <p id="subtitle-style-message" role="status"></p>
+        </section>
+        <div class="subtitle-style-controls" aria-label="字幕样式属性">
+          <div class="subtitle-style-grid">
+            ${subtitleStyleEditorMarkup("source", "原文")}
+            ${subtitleStyleEditorMarkup("translation", "译文")}
+          </div>
         </div>
-        <div id="subtitle-style-preview-host" class="subtitle-style-preview-host"><span>预览会使用当前播放位置附近的实际字幕和画面；纯音频任务使用中性背景。</span></div>
-        <details id="subtitle-font-events" class="subtitle-font-events hidden"><summary>查看 libass 实际字体选择</summary><pre></pre></details>
-        <p id="subtitle-style-message" role="status"></p>
-      </section>
+      </div>
     </dialog>
     <dialog id="video-render-dialog" class="video-render-dialog">
       <div class="dialog-heading">
@@ -988,7 +993,6 @@ app.innerHTML = `
           </div>
           <div id="dictionary-credentials" class="dictionary-credentials">
             ${[
-              ["cambridge", "Cambridge Dictionary", "适合英中学习释义；需从 Cambridge Dictionary API 申请。"],
               ["collins", "Collins Dictionary", "可提供英中结果；额度与展示要求以账户协议为准。"],
               ["merriam-webster", "Merriam-Webster", "保留英英来源标签页；正式展示需满足 Logo 与署名要求。"],
             ].map(([id, name, hint]) => `<article class="dictionary-credential-card" data-dictionary-provider="${id}">
@@ -1214,6 +1218,8 @@ let mediaCapabilities: MediaCapabilities | null = null;
 let videoRenders: VideoRender[] = [];
 let subtitleFonts: SubtitleFontFamily[] | null = null;
 let subtitleStyleBusy = false;
+let subtitleStylePreviewTimer: number | null = null;
+let subtitleStylePreviewQueued = false;
 let selectedVideoOutputAlreadyExists = false;
 let videoRenderSubmitting = false;
 let desktopSettings: DesktopSettings | null = null;
@@ -2610,7 +2616,6 @@ function learningProviderOptions(detail: LearningItemDetail): LearningProviderOp
   if (detail.item.source_language === "en") {
     providers.push(
       { id: "ecdict", name: "ECDICT 英中", kind: "offline" },
-      { id: "cambridge", name: "Cambridge", kind: "api" },
       { id: "collins", name: "Collins", kind: "api" },
       { id: "merriam-webster", name: "Merriam-Webster", kind: "api" },
     );
@@ -2687,7 +2692,7 @@ function renderLearningDictionary(): void {
   const provider = providers.find((candidate) => candidate.id === activeLearningProviderId);
   const result = detail.lookup_results.find((candidate) => candidate.provider_id === activeLearningProviderId);
   if (!provider || !result) {
-    const supported = provider && !["cambridge", "collins"].includes(provider.id);
+    const supported = provider && provider.id !== "collins";
     const message = dictionaryProviderEmptyMessage(provider);
     learningProviderPanel.innerHTML = `<div class="learning-provider-empty">
       <span>${provider?.kind === "offline" ? "LOCAL DICTIONARY PACK" : "DICTIONARY API"}</span>
@@ -2738,13 +2743,13 @@ function learningProviderStatus(provider: LearningProviderOption): string {
         : "ecdict-eng-zho";
     return dictionaryDownloads.some((item) => item.dictionaryId === packageId && item.status === "done") ? "可查询" : "未下载";
   }
-  if (["cambridge", "collins"].includes(provider.id)) return "待接入";
+  if (provider.id === "collins") return "待接入";
   return dictionaryCredentials.some((item) => item.providerId === provider.id && item.configured) ? "可查询" : "未配置";
 }
 
 function dictionaryProviderEmptyMessage(provider: LearningProviderOption | undefined): string {
   if (!provider) return "词典来源不可用。";
-  if (["cambridge", "collins"].includes(provider.id)) return `${provider.name} 目前只保留独立 API 配置边界，尚未接入正式查询协议。`;
+  if (provider.id === "collins") return `${provider.name} 目前只保留独立 API 配置边界，尚未接入正式查询协议。`;
   const status = learningProviderStatus(provider);
   if (status === "未下载") return `${provider.name} 的离线包尚未安装。请先到设置 → 学习词典下载；包会保存在正式应用数据目录。`;
   if (status === "未配置") return `${provider.name} API Key 尚未配置。请先到设置 → 学习词典保存并检查该来源的 Key。`;
@@ -4448,12 +4453,49 @@ function setSubtitleStyleBusy(busy: boolean): void {
   if (saveSubtitleStyleButton) saveSubtitleStyleButton.disabled = busy;
 }
 
+function cancelScheduledSubtitleStylePreview(): void {
+  if (subtitleStylePreviewTimer !== null) {
+    window.clearTimeout(subtitleStylePreviewTimer);
+    subtitleStylePreviewTimer = null;
+  }
+}
+
+function subtitleStyleDraftIsValid(): boolean {
+  if (!subtitleStyleDialog) return false;
+  return Array.from(
+    subtitleStyleDialog.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-style-field]"),
+  ).every((field) => field.checkValidity() && (field instanceof HTMLSelectElement || field.type === "checkbox" || field.value.trim() !== ""));
+}
+
+function scheduleSubtitleStylePreview(delay = 700): void {
+  if (!subtitleStyleDialog?.open) return;
+  cancelScheduledSubtitleStylePreview();
+  if (subtitleStyleMessage && delay > 0) {
+    subtitleStyleMessage.textContent = "样式已修改；停止操作后将自动刷新真实预览…";
+  }
+  subtitleStylePreviewTimer = window.setTimeout(() => {
+    subtitleStylePreviewTimer = null;
+    if (!subtitleStyleDraftIsValid()) {
+      if (subtitleStyleMessage) subtitleStyleMessage.textContent = "请先补全或修正标红的样式参数；预览暂未刷新。";
+      return;
+    }
+    void previewSubtitleStyleDraft(true);
+  }, delay);
+}
+
+function closeSubtitleStyleDialog(): void {
+  cancelScheduledSubtitleStylePreview();
+  subtitleStylePreviewQueued = false;
+  subtitleStyleDialog?.close();
+}
+
 async function openSubtitleStyleDialog(): Promise<void> {
   if (!activeDetail || workspaceActionBusy || subtitleStyleBusy) return;
   const jobId = activeDetail.job.job_id;
   subtitleStyleDialog?.showModal();
   if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在读取任务样式和本机字体…";
   setSubtitleStyleBusy(true);
+  let readyForPreview = false;
   try {
     const [state, fonts] = await Promise.all([
       invoke<SubtitleStyleState>("get_subtitle_style_state", { jobId }),
@@ -4469,16 +4511,22 @@ async function openSubtitleStyleDialog(): Promise<void> {
     populateSubtitleStyleEditor("source", state.styles.source);
     populateSubtitleStyleEditor("translation", state.styles.translation);
     renderSubtitleFontReport(state.font_report);
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `已读取 ${fonts.length} 个字体族。修改后可先预览，再保存到任务。`;
+    readyForPreview = true;
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `已读取 ${fonts.length} 个字体族，正在生成初始真实预览…`;
   } catch (error) {
     if (subtitleStyleMessage) subtitleStyleMessage.textContent = `无法读取字幕样式：${String(error)}`;
   } finally {
     setSubtitleStyleBusy(false);
+    if (readyForPreview) scheduleSubtitleStylePreview(0);
   }
 }
 
 async function saveSubtitleStyleDraft(): Promise<void> {
   if (!activeDetail || subtitleStyleBusy) return;
+  if (!subtitleStyleDraftIsValid()) {
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = "请先补全或修正标红的样式参数，再保存任务样式。";
+    return;
+  }
   const jobId = activeDetail.job.job_id;
   setSubtitleStyleBusy(true);
   if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在校验并保存任务样式…";
@@ -4492,11 +4540,23 @@ async function saveSubtitleStyleDraft(): Promise<void> {
     if (subtitleStyleMessage) subtitleStyleMessage.textContent = `保存失败：${String(error)}`;
   } finally {
     setSubtitleStyleBusy(false);
+    if (subtitleStylePreviewQueued && subtitleStyleDialog?.open) {
+      subtitleStylePreviewQueued = false;
+      scheduleSubtitleStylePreview(150);
+    }
   }
 }
 
-async function previewSubtitleStyleDraft(): Promise<void> {
-  if (!activeDetail || subtitleStyleBusy || !subtitleStylePreviewTrack) return;
+async function previewSubtitleStyleDraft(automatic = false): Promise<void> {
+  if (!activeDetail || !subtitleStylePreviewTrack || !subtitleStyleDialog?.open) return;
+  if (subtitleStyleBusy) {
+    subtitleStylePreviewQueued = true;
+    return;
+  }
+  if (!subtitleStyleDraftIsValid()) {
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = "请先补全或修正标红的样式参数；预览暂未刷新。";
+    return;
+  }
   const jobId = activeDetail.job.job_id;
   const timestampMs = Math.max(0, Math.round((activeMedia?.currentTime ?? 0) * 1_000));
   setSubtitleStyleBusy(true);
@@ -4510,6 +4570,7 @@ async function previewSubtitleStyleDraft(): Promise<void> {
         timestampMs,
       },
     });
+    if (activeDetail?.job.job_id !== jobId || !subtitleStyleDialog.open) return;
     renderSubtitleFontReport(preview.font_report);
     if (subtitleStylePreviewHost) {
       const image = document.createElement("img");
@@ -4524,11 +4585,15 @@ async function previewSubtitleStyleDraft(): Promise<void> {
         : "本次 FFmpeg 日志没有报告字体替换事件。";
       subtitleFontEvents.classList.remove("hidden");
     }
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `已生成 ${formatTime(preview.timestamp_ms)} 的真实渲染帧；预览草稿尚未自动保存。`;
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `${automatic ? "已自动刷新" : "已刷新"} ${formatTime(preview.timestamp_ms)} 的真实渲染帧；预览草稿尚未保存。`;
   } catch (error) {
     if (subtitleStyleMessage) subtitleStyleMessage.textContent = `预览失败：${String(error)}`;
   } finally {
     setSubtitleStyleBusy(false);
+    if (subtitleStylePreviewQueued && subtitleStyleDialog?.open) {
+      subtitleStylePreviewQueued = false;
+      scheduleSubtitleStylePreview(150);
+    }
   }
 }
 
@@ -5542,10 +5607,21 @@ karaokeOpenWorkspaceButton?.addEventListener("click", () => {
 exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
 editSubtitleStylesButton?.addEventListener("click", () => void openSubtitleStyleDialog());
-previewSubtitleStyleButton?.addEventListener("click", () => void previewSubtitleStyleDraft());
+previewSubtitleStyleButton?.addEventListener("click", () => {
+  cancelScheduledSubtitleStylePreview();
+  void previewSubtitleStyleDraft();
+});
 saveSubtitleStyleButton?.addEventListener("click", () => void saveSubtitleStyleDraft());
 revealExportButton?.addEventListener("click", () => void revealExportedSubtitle());
-document.querySelector<HTMLButtonElement>("#close-subtitle-style")?.addEventListener("click", () => subtitleStyleDialog?.close());
+document.querySelector<HTMLButtonElement>("#close-subtitle-style")?.addEventListener("click", closeSubtitleStyleDialog);
+subtitleStyleDialog?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-style-field]").forEach((field) => {
+  field.addEventListener("input", () => scheduleSubtitleStylePreview());
+});
+subtitleStylePreviewTrack?.addEventListener("change", () => scheduleSubtitleStylePreview(0));
+subtitleStyleDialog?.addEventListener("close", () => {
+  cancelScheduledSubtitleStylePreview();
+  subtitleStylePreviewQueued = false;
+});
 document.querySelector<HTMLButtonElement>("#close-video-render")?.addEventListener("click", () => videoRenderDialog?.close());
 document.querySelector<HTMLButtonElement>("#choose-video-output")?.addEventListener("click", () => void chooseVideoOutput());
 submitVideoRenderButton?.addEventListener("click", () => void submitVideoRender());

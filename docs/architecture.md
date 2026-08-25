@@ -60,7 +60,7 @@ macOS Apple Silicon 是当前已验证发行基线，Windows x86_64 是下一平
 
 - 媒体、模型、任务产物：默认本地文件系统。
 - 任务元数据（包括源语言和目标语言）、字幕段、带源语言的词表与编辑状态：桌面 MVP 使用 SQLite；生成快照首次导入后，人工编辑和 SQLite 生成的机器译文以 SQLite 为准，后续快照同步不会用旧 `segments.json` 清空它们。
-- 密钥：通过统一凭据接口按 provider ID 写入 macOS Keychain、Windows Credential Manager 或 Linux Secret Service，不写入 SQLite、任务 JSON 或日志；字幕翻译使用自身 provider ID，Cambridge／Collins／Merriam-Webster 使用 `dictionary:<provider>` 隔离命名。`DEEPL_AUTH_KEY`／`DEEPSEEK_API_KEY` 仅作为兼容环境变量回退，且不会被自动迁移或回显。
+- 密钥：通过统一凭据接口按 provider ID 写入 macOS Keychain、Windows Credential Manager 或 Linux Secret Service，不写入 SQLite、任务 JSON 或日志；字幕翻译使用自身 provider ID，当前 Collins／Merriam-Webster 使用 `dictionary:<provider>` 隔离命名。Cambridge 因官方确认 API 不可用已退出产品路径。`DEEPL_AUTH_KEY`／`DEEPSEEK_API_KEY` 仅作为兼容环境变量回退，且不会被自动迁移或回显。
 - 桌面设置：模型路径、翻译 provider ID、非敏感模型／端点／风格、引导状态、无凭据代理配置、可选镜像地址与“曾保存凭据”标记写入 SQLite；模型二进制位于用户选择的位置或应用数据目录的 `models/`，用户触发下载的词典归档与版本 sidecar 位于 `dictionaries/`，两者都不打入 App Bundle。
 - `status.json`：保留为任务产物与故障恢复副本，不作为唯一长期数据库。
 

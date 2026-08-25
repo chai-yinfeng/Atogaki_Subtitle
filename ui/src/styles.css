@@ -371,9 +371,11 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .confirmation-message { white-space: pre-wrap; line-height: 1.6; }
 .confirmation-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .video-render-dialog { width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 40px); border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: #22251f; background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
-.subtitle-style-dialog { width: min(1120px, calc(100vw - 40px)); max-height: calc(100vh - 40px); overflow-y: auto; border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: #22251f; background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
-.subtitle-style-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
-.subtitle-style-editor { min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 11px; border: 1px solid #d8d0c2; border-radius: 13px; padding: 15px; background: #fffdf7; }
+.subtitle-style-dialog { box-sizing: border-box; width: min(1240px, calc(100vw - 40px)); height: min(800px, calc(100vh - 40px)); overflow: hidden; border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: #22251f; background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
+.subtitle-style-workspace { min-height: 0; height: calc(100% - 108px); display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(360px, .9fr); gap: 18px; margin-top: 16px; }
+.subtitle-style-controls { min-height: 0; overflow-y: auto; padding-right: 5px; scrollbar-gutter: stable; }
+.subtitle-style-grid { display: grid; gap: 14px; }
+.subtitle-style-editor { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 11px; border: 1px solid #d8d0c2; border-radius: 13px; padding: 15px; background: #fffdf7; }
 .subtitle-style-editor legend { padding: 0 7px; color: #30332d; font-size: 14px; font-weight: 800; }
 .subtitle-style-editor label { min-width: 0; display: grid; gap: 5px; color: #666960; font-size: 11px; font-weight: 700; }
 .subtitle-style-editor input:not([type="checkbox"]), .subtitle-style-editor select { min-width: 0; width: 100%; border: 1px solid #d3ccbd; border-radius: 8px; padding: 8px; color: #30332d; background: #fff; }
@@ -382,13 +384,14 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .subtitle-style-editor .style-check { display: flex; align-items: center; align-self: center; gap: 7px; }
 .subtitle-font-report { grid-column: 1 / -1; min-height: 34px; margin: 2px 0 0; border-radius: 8px; padding: 8px 10px; color: #53645d; background: #eef4ef; font-size: 10px; line-height: 1.55; }
 .subtitle-font-report.warning { color: #7c5329; background: #fff1d9; }
-.subtitle-style-preview-panel { display: grid; gap: 12px; margin-top: 16px; border-top: 1px solid #ddd5c7; padding-top: 16px; }
+.subtitle-style-preview-panel { min-width: 0; align-content: start; display: grid; gap: 12px; }
 .subtitle-preview-toolbar { display: flex; align-items: end; justify-content: flex-end; gap: 10px; }
 .subtitle-preview-toolbar label { margin-right: auto; display: grid; gap: 5px; color: #666960; font-size: 11px; font-weight: 700; }
 .subtitle-preview-toolbar select { min-width: 180px; border: 1px solid #d3ccbd; border-radius: 8px; padding: 8px; background: #fff; }
 .subtitle-style-preview-host { aspect-ratio: 16 / 9; display: grid; place-items: center; overflow: hidden; border: 1px solid #c9c1b4; border-radius: 12px; color: #bfc3bd; background: #20242b; }
 .subtitle-style-preview-host img { width: 100%; height: 100%; object-fit: contain; }
 .subtitle-style-preview-host span { max-width: 460px; padding: 20px; text-align: center; font-size: 12px; line-height: 1.7; }
+.subtitle-auto-preview-note { margin: -3px 0 0; color: #73766e; font-size: 10px; line-height: 1.55; }
 .subtitle-font-events { border-radius: 9px; padding: 8px 11px; color: #62655e; background: #ebe7dd; font-size: 11px; }
 .subtitle-font-events pre { max-height: 140px; overflow: auto; white-space: pre-wrap; }
 #subtitle-style-message { min-height: 18px; margin: 0; color: #6f716a; font-size: 12px; }
@@ -454,6 +457,9 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 }
 
 @media (max-width: 1100px) {
+  .subtitle-style-dialog { height: auto; max-height: calc(100vh - 40px); overflow-y: auto; }
+  .subtitle-style-workspace { height: auto; grid-template-columns: 1fr; }
+  .subtitle-style-controls { overflow: visible; }
   .glossary-manager { grid-template-columns: 1fr; min-height: 0; }
   .glossary-manager aside { grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); border-right: 0; border-bottom: 1px solid #d8d0c1; padding: 0 0 14px; }
   .glossary-list { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }

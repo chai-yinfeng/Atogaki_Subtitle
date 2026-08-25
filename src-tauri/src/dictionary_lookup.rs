@@ -83,7 +83,7 @@ impl DictionaryLookupService {
                 ensure_language(&detail, "en", "Merriam-Webster")?;
                 self.lookup_merriam_webster(item_id, query).await?
             }
-            "cambridge" | "collins" => bail!("该来源目前仅保留配置入口，尚未接入查询协议"),
+            "collins" => bail!("该来源目前仅保留配置入口，尚未接入查询协议"),
             _ => bail!("不支持的词典来源：{provider_id}"),
         };
         self.learning.upsert_lookup_result(result).await

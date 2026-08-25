@@ -8,7 +8,7 @@
 
 ## 背景
 
-学习区需要让用户自行下载 JMdict、Tomoshi 等离线数据，并分别配置 Cambridge、Collins、Merriam-Webster API。离线数据更新频率不同，固定“最新版”裸链接无法同时保证版本可追溯与内容完整性；商业 API Key 若与字幕翻译共用一个设置项，则容易覆盖、误读或扩散到 SQLite。
+学习区需要让用户自行下载 JMdict、Tomoshi 等离线数据，并为可用商业来源分别配置 API。离线数据更新频率不同，固定“最新版”裸链接无法同时保证版本可追溯与内容完整性；商业 API Key 若与字幕翻译共用一个设置项，则容易覆盖、误读或扩散到 SQLite。Cambridge 最初在候选内，但于 2026-08-25 因官方确认 API 当前不可用而退役。
 
 英文到中文也存在开放离线数据。FreeDict 当前提供由 WikDict/Wiktionary 导入的 `eng-zho` 包、版本化下载地址与 SHA-512，但词头、校订深度和学习型结构不能等同于 Cambridge 或 Collins。ECDICT 词量更大，但其汇总数据的逐项来源与再分发许可暂不足以作为随 App 分发的默认正式包。后续决策 0036 允许用户明确下载固定基础 CSV，并继续显示来源审计提示；这不改变“不内置数据”的边界。
 
@@ -18,7 +18,7 @@
 - JMdict 使用 `scriptin/jmdict-simplified` 的日英 JSON 发布包，Tomoshi 使用其开放 SQLite 发布包。点击下载时从 GitHub Releases API 解析最新 tag、预期资产、大小与发布方 SHA-256；缺少摘要时拒绝安装。
 - FreeDict 英中曾作为可选离线补充，固定到 `2025.11.23` StarDict 包并校验 FreeDict 数据库公布的 SHA-512。2026-08-25 在 ECDICT 实机验证通过后，FreeDict 因覆盖不足从产品目录退役；本条只保留历史决策依据。
 - 所有下载先写同目录 `.part`，流式计算摘要；通过后才替换稳定文件名，更新失败会恢复旧包；版本另存为不含用户数据的 sidecar。App 启动清理残留 `.part`，但不自动更新或删除已安装词典。
-- Cambridge、Collins、Merriam-Webster 使用 `dictionary:<provider>` 凭据 ID 分别写入平台系统凭据库。SQLite 只保存“曾由本 App 成功保存”的布尔标记；打开设置和列出状态不读取 Keychain，只有用户主动保存、删除或检查时访问。
+- 当前 Collins、Merriam-Webster 使用 `dictionary:<provider>` 凭据 ID 分别写入平台系统凭据库。SQLite 只保存“曾由本 App 成功保存”的布尔标记；打开设置和列出状态不读取 Keychain，只有用户主动保存、删除或检查时访问。Cambridge 的旧非敏感 SQLite 标记由迁移删除；为避免启动时产生系统授权提示，升级不隐式读取或删除可能存在的历史 Keychain 条目。
 - Merriam-Webster 继续作为独立来源标签页，与其他来源并列切换；不做自动排名、合并或评价。请求只由用户点击触发，结果显示官方未修改 Logo、完整产品名与署名，并使用有期限的本地缓存；公开分发前仍须重新确认非商业用途和当时有效条款。
 
 ## 后果
