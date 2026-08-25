@@ -16,7 +16,10 @@ use crate::{
         TranslationContextSegment, TranslationOptions, TranslationProvider, TranslationRequest,
         TranslationTargetSegment, UnconfiguredTranslationProvider,
     },
-    domain::{LanguageCode, TranscriptSegment, subtitle},
+    domain::{
+        LanguageCode, TranscriptSegment,
+        subtitle::{self, SubtitleStyleSet},
+    },
     infrastructure::{
         job_store::Job,
         local_db::{
@@ -37,6 +40,7 @@ pub struct LocalWorkspaceJob {
     pub job: LocalJobRecord,
     pub segments: Vec<LocalSubtitleSegmentRecord>,
     pub translation_runs: Vec<LocalTranslationRunRecord>,
+    pub subtitle_styles: SubtitleStyleSet,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,11 +184,21 @@ impl LocalWorkspaceService {
             .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
         let segments = self.database.list_segments(job_id).await?;
         let translation_runs = self.database.list_translation_runs(job_id).await?;
+        let subtitle_styles = self.database.get_subtitle_styles(job_id).await?;
         Ok(LocalWorkspaceJob {
             job,
             segments,
             translation_runs,
+            subtitle_styles,
         })
+    }
+
+    pub async fn save_subtitle_styles(
+        &self,
+        job_id: &str,
+        styles: &SubtitleStyleSet,
+    ) -> Result<SubtitleStyleSet> {
+        self.database.save_subtitle_styles(job_id, styles).await
     }
 
     pub async fn update_subtitle(
@@ -352,7 +366,12 @@ impl LocalWorkspaceService {
             &segments,
             subtitle::SubtitleTrack::Bilingual,
         )?;
-        subtitle::write_ass(&job.bilingual_ass, &segments)?;
+        subtitle::write_ass_track_with_styles(
+            &job.bilingual_ass,
+            &segments,
+            subtitle::SubtitleTrack::Bilingual,
+            &workspace.subtitle_styles,
+        )?;
 
         Ok(LocalSubtitleExport {
             source_srt: job.source_srt.display().to_string(),
@@ -398,7 +417,12 @@ impl LocalWorkspaceService {
                     .is_none_or(|text| text.trim().is_empty())
             })
             .count();
-        subtitle::write_ass_track(output, &segments, track)?;
+        subtitle::write_ass_track_with_styles(
+            output,
+            &segments,
+            track,
+            &workspace.subtitle_styles,
+        )?;
         Ok(missing_translation_count)
     }
 
@@ -495,7 +519,12 @@ impl LocalWorkspaceService {
                     (&task_job.bilingual_srt, &plan.bilingual_srt)
                 }
                 LocalSubtitleExportArtifact::BilingualAss => {
-                    subtitle::write_ass(&task_job.bilingual_ass, &segments)?;
+                    subtitle::write_ass_track_with_styles(
+                        &task_job.bilingual_ass,
+                        &segments,
+                        subtitle::SubtitleTrack::Bilingual,
+                        &workspace.subtitle_styles,
+                    )?;
                     (&task_job.bilingual_ass, &plan.bilingual_ass)
                 }
             };
@@ -847,7 +876,9 @@ fn translation_context(
     (before, after)
 }
 
-fn workspace_segments(records: &[LocalSubtitleSegmentRecord]) -> Result<Vec<TranscriptSegment>> {
+pub(crate) fn workspace_segments(
+    records: &[LocalSubtitleSegmentRecord],
+) -> Result<Vec<TranscriptSegment>> {
     records
         .iter()
         .map(|record| {

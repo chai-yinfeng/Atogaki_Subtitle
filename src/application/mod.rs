@@ -8,6 +8,8 @@ pub mod local_learning_service;
 pub mod local_render_service;
 pub mod local_task_service;
 pub mod local_workspace_service;
+pub mod subtitle_font_service;
+pub mod subtitle_style_service;
 pub mod transcription_options;
 pub mod translation_options;
 pub mod translation_provider;
@@ -25,6 +27,10 @@ pub use local_workspace_service::{
     LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
     LocalTranslationStatus, LocalWorkspaceJob, LocalWorkspaceService,
 };
+pub use subtitle_font_service::{
+    SubtitleFontCoverage, SubtitleFontFamily, SubtitleFontReport, SubtitleFontService,
+};
+pub use subtitle_style_service::{SubtitleStylePreview, SubtitleStyleService, SubtitleStyleState};
 pub use transcription_options::TranscriptionOptions;
 pub use translation_options::TranslationOptions;
 pub use translation_provider::{

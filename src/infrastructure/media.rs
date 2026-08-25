@@ -43,6 +43,77 @@ pub struct MediaCapabilities {
     pub ready_for_hard_subtitles: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SubtitlePreviewRender {
+    pub output_path: String,
+    pub font_events: Vec<String>,
+}
+
+pub async fn render_ass_preview_frame(
+    ffmpeg: &Path,
+    input: Option<&Path>,
+    ass: &Path,
+    output: &Path,
+    timestamp_ms: u64,
+) -> Result<SubtitlePreviewRender> {
+    if !ass.is_file() {
+        anyhow::bail!("ASS subtitle file does not exist: {}", ass.display());
+    }
+    if !supports_filter(ffmpeg, "ass").await? {
+        anyhow::bail!("the bundled FFmpeg sidecar does not provide the libass filter");
+    }
+    let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
+    let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
+    let mut command = sidecar_command(ffmpeg);
+    command.arg("-y");
+    if let Some(input) = input {
+        if !input.is_file() {
+            anyhow::bail!("preview media does not exist: {}", input.display());
+        }
+        command.args([
+            "-ss",
+            &format!("{:.3}", timestamp_ms as f64 / 1_000.0),
+            "-copyts",
+            "-i",
+        ]);
+        command.arg(input);
+    } else {
+        command.args(["-f", "lavfi", "-i", "color=c=0x20242B:s=1920x1080:d=2"]);
+    }
+    command.args(["-vf", &filter, "-frames:v", "1", "-an", "-c:v", "png"]);
+    command.arg(output);
+    let result = command
+        .output()
+        .await
+        .context("failed to launch FFmpeg subtitle preview")?;
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    if !result.status.success() || !output.is_file() {
+        anyhow::bail!(
+            "FFmpeg subtitle preview failed: {}",
+            summarize_render_error(&stderr)
+        );
+    }
+    let mut font_events = Vec::new();
+    for line in stderr.lines().map(str::trim).filter(|line| {
+        line.contains("fontselect:")
+            || line.contains("Glyph 0x")
+            || line.contains("glyph not found")
+    }) {
+        let event = line
+            .split_once("] ")
+            .map(|(_, event)| event)
+            .unwrap_or(line)
+            .to_string();
+        if !font_events.contains(&event) {
+            font_events.push(event);
+        }
+    }
+    Ok(SubtitlePreviewRender {
+        output_path: output.display().to_string(),
+        font_events,
+    })
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct MediaProbe {
     pub duration_ms: u64,
@@ -900,9 +971,9 @@ fn escape_filter_path(path: &Path) -> String {
 mod tests {
     use super::{
         AudioEncoder, HardSubtitleEncoder, audio_copy_failed, burn_args, paired_ffprobe_path,
-        source_relative_target_bitrate,
+        render_ass_preview_frame, source_relative_target_bitrate,
     };
-    use std::path::Path;
+    use std::{fs, path::Path};
 
     fn string_args(encoder: HardSubtitleEncoder) -> Vec<String> {
         burn_args(
@@ -976,5 +1047,34 @@ mod tests {
             "Could not find tag for codec pcm_s16le in stream #1"
         ));
         assert!(!audio_copy_failed("VideoToolbox session failed"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the bundled FFmpeg/libass sidecar"]
+    async fn bundled_libass_renders_a_preview_png() {
+        let ffmpeg = std::env::var("ATOGAKI_TEST_FFMPEG").expect("set ATOGAKI_TEST_FFMPEG");
+        let root =
+            std::env::temp_dir().join(format!("atogaki-preview-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let ass = root.join("preview.ass");
+        let png = root.join("preview.png");
+        crate::domain::subtitle::write_ass_track(
+            &ass,
+            &[crate::domain::TranscriptSegment::new(
+                0,
+                2_000,
+                "字幕 preview".to_string(),
+            )],
+            crate::domain::subtitle::SubtitleTrack::Source,
+        )
+        .unwrap();
+
+        let preview = render_ass_preview_frame(Path::new(&ffmpeg), None, &ass, &png, 1_000)
+            .await
+            .unwrap();
+
+        assert_eq!(preview.output_path, png.display().to_string());
+        assert!(png.metadata().unwrap().len() > 1_000);
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -10,7 +10,10 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
 
-use crate::{application::job_snapshot::JobSnapshot, domain::TranscriptSegment};
+use crate::{
+    application::job_snapshot::JobSnapshot,
+    domain::{TranscriptSegment, subtitle::SubtitleStyleSet},
+};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
 
@@ -376,6 +379,51 @@ impl LocalDatabase {
             .await
             .with_context(|| format!("failed to delete local setting {key}"))?;
         Ok(())
+    }
+
+    pub async fn get_subtitle_styles(&self, job_id: &str) -> Result<SubtitleStyleSet> {
+        self.get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        let styles_json: Option<String> =
+            sqlx::query_scalar("SELECT styles_json FROM local_subtitle_styles WHERE job_id = ?")
+                .bind(job_id)
+                .fetch_optional(&self.pool)
+                .await
+                .with_context(|| format!("failed to read subtitle styles for task {job_id}"))?;
+        let styles: SubtitleStyleSet = styles_json
+            .map(|json| serde_json::from_str(&json).context("invalid stored subtitle styles"))
+            .transpose()?
+            .unwrap_or_default();
+        styles.validate()?;
+        Ok(styles)
+    }
+
+    pub async fn save_subtitle_styles(
+        &self,
+        job_id: &str,
+        styles: &SubtitleStyleSet,
+    ) -> Result<SubtitleStyleSet> {
+        self.get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        styles.validate()?;
+        let styles_json =
+            serde_json::to_string(styles).context("failed to encode subtitle styles")?;
+        sqlx::query(
+            "INSERT INTO local_subtitle_styles (job_id, styles_json, updated_at_unix)
+             VALUES (?, ?, ?)
+             ON CONFLICT(job_id) DO UPDATE SET
+                styles_json = excluded.styles_json,
+                updated_at_unix = excluded.updated_at_unix",
+        )
+        .bind(job_id)
+        .bind(styles_json)
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to save subtitle styles for task {job_id}"))?;
+        Ok(styles.clone())
     }
 
     pub async fn mark_job_failed(&self, job_id: &str, error: &str) -> Result<()> {
@@ -2621,6 +2669,25 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].id, segment.id);
         assert_eq!(segments[0].source_text, "テスト");
+
+        let default_styles = database
+            .get_subtitle_styles(&manifest.job_id)
+            .await
+            .unwrap();
+        let mut custom_styles = default_styles.clone();
+        custom_styles.source.font_family = "Arial".to_string();
+        custom_styles.source.font_size = 54.0;
+        database
+            .save_subtitle_styles(&manifest.job_id, &custom_styles)
+            .await
+            .unwrap();
+        assert_eq!(
+            database
+                .get_subtitle_styles(&manifest.job_id)
+                .await
+                .unwrap(),
+            custom_styles
+        );
 
         let stale = database
             .update_segment(
