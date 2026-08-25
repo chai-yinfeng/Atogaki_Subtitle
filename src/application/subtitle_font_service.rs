@@ -44,13 +44,17 @@ impl SubtitleFontService {
             let Some((primary, _)) = face.families.first() else {
                 continue;
             };
+            if !is_user_facing_font_family(primary) {
+                continue;
+            }
             let entry = grouped
                 .entry(primary.clone())
                 .or_insert_with(|| (Vec::new(), 0, true));
             entry.1 += 1;
             entry.2 &= face.monospaced;
             for (alias, _) in &face.families {
-                if alias != primary && !entry.0.contains(alias) {
+                if alias != primary && is_user_facing_font_family(alias) && !entry.0.contains(alias)
+                {
                     entry.0.push(alias.clone());
                 }
             }
@@ -103,7 +107,15 @@ impl SubtitleFontService {
                         .iter()
                         .any(|alias| alias.eq_ignore_ascii_case(requested))
             })
-            .map(|family| family.family.as_str());
+            .map(|family| family.family.clone())
+            .or_else(|| {
+                self.database.faces().find_map(|face| {
+                    face.families
+                        .iter()
+                        .find(|(family, _)| family.eq_ignore_ascii_case(requested))
+                        .map(|(family, _)| family.clone())
+                })
+            });
         let Some(matched_name) = matched_name else {
             return SubtitleFontCoverage {
                 requested_family: requested.to_string(),
@@ -114,7 +126,7 @@ impl SubtitleFontService {
                 needs_fallback: !text.trim().is_empty(),
             };
         };
-        let families = [Family::Name(matched_name)];
+        let families = [Family::Name(&matched_name)];
         let query = Query {
             families: &families,
             weight: if style.bold {
@@ -135,7 +147,7 @@ impl SubtitleFontService {
                 .find(|face| {
                     face.families
                         .iter()
-                        .any(|(family, _)| family == matched_name)
+                        .any(|(family, _)| family == &matched_name)
                 })
                 .map(|face| face.id)
         });
@@ -164,12 +176,17 @@ impl SubtitleFontService {
         SubtitleFontCoverage {
             requested_family: requested.to_string(),
             installed: true,
-            matched_family: Some(matched_name.to_string()),
+            matched_family: Some(matched_name),
             post_script_name,
             needs_fallback: !missing_characters.is_empty(),
             missing_characters,
         }
     }
+}
+
+fn is_user_facing_font_family(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty() && !name.starts_with('.')
 }
 
 fn unique_visible_characters(text: &str, limit: usize) -> Vec<String> {
@@ -191,10 +208,17 @@ fn unique_visible_characters(text: &str, limit: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::unique_visible_characters;
+    use super::{is_user_facing_font_family, unique_visible_characters};
 
     #[test]
     fn coverage_samples_deduplicate_and_ignore_layout_characters() {
         assert_eq!(unique_visible_characters("a a\n学a", 32), ["a", "学"]);
+    }
+
+    #[test]
+    fn internal_dot_prefixed_font_families_are_not_user_choices() {
+        assert!(!is_user_facing_font_family(".AppleSystemUIFont"));
+        assert!(!is_user_facing_font_family("  .SF NS  "));
+        assert!(is_user_facing_font_family("Hiragino Sans"));
     }
 }

@@ -462,7 +462,12 @@ const fileManagerLabel = desktopPlatform === "macos"
 function subtitleStyleEditorMarkup(track: "source" | "translation", label: string): string {
   return `<fieldset class="subtitle-style-editor" data-style-editor="${track}">
     <legend>${label}样式</legend>
-    <label class="style-font-field">字体族<input data-style-field="font_family" list="subtitle-font-families" autocomplete="off" required /></label>
+    <label class="style-font-field">字体族
+      <span class="style-font-picker">
+        <input data-style-field="font_family" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="subtitle-font-picker-options" required />
+        <button type="button" class="style-font-picker-toggle secondary" data-font-picker-toggle="${track}" aria-label="浏览${label}字体">浏览</button>
+      </span>
+    </label>
     <label>字号<input data-style-field="font_size" type="number" min="8" max="200" step="1" required /></label>
     <label>字间距<input data-style-field="letter_spacing" type="number" min="-20" max="50" step="0.5" required /></label>
     <label>主色<input data-style-field="primary_color_rgb" type="color" /></label>
@@ -861,7 +866,6 @@ app.innerHTML = `
         <button id="close-subtitle-style" type="button" class="secondary">关闭</button>
       </div>
       <p class="dialog-help">这里保存的是任务级原文／译文样式。预览、双语 ASS 和视频烧录复用同一个 ASS 生成器；另一台电脑缺少同名字体时仍可能 fallback。SRT 不保存这些样式。</p>
-      <datalist id="subtitle-font-families"></datalist>
       <div class="subtitle-style-workspace">
         <section class="subtitle-style-preview-panel">
           <div class="subtitle-preview-toolbar">
@@ -881,6 +885,11 @@ app.innerHTML = `
           </div>
         </div>
       </div>
+      <aside id="subtitle-font-picker" class="subtitle-font-picker hidden" aria-label="字体候选">
+        <div class="subtitle-font-picker-heading"><strong>选择本机字体</strong><span id="subtitle-font-picker-count"></span></div>
+        <p id="subtitle-font-picker-sample"></p>
+        <div id="subtitle-font-picker-options" class="subtitle-font-picker-options" role="listbox"></div>
+      </aside>
     </dialog>
     <dialog id="video-render-dialog" class="video-render-dialog">
       <div class="dialog-heading">
@@ -1152,7 +1161,10 @@ const submitVideoRenderButton = document.querySelector<HTMLButtonElement>("#subm
 const videoRenderList = document.querySelector<HTMLDivElement>("#video-render-list");
 const videoRenderCount = document.querySelector<HTMLSpanElement>("#video-render-count");
 const subtitleStyleDialog = document.querySelector<HTMLDialogElement>("#subtitle-style-dialog");
-const subtitleFontFamilies = document.querySelector<HTMLDataListElement>("#subtitle-font-families");
+const subtitleFontPicker = document.querySelector<HTMLElement>("#subtitle-font-picker");
+const subtitleFontPickerCount = document.querySelector<HTMLSpanElement>("#subtitle-font-picker-count");
+const subtitleFontPickerSample = document.querySelector<HTMLParagraphElement>("#subtitle-font-picker-sample");
+const subtitleFontPickerOptions = document.querySelector<HTMLDivElement>("#subtitle-font-picker-options");
 const subtitleStylePreviewTrack = document.querySelector<HTMLSelectElement>("#subtitle-style-preview-track");
 const subtitleStylePreviewHost = document.querySelector<HTMLDivElement>("#subtitle-style-preview-host");
 const subtitleFontEvents = document.querySelector<HTMLDetailsElement>("#subtitle-font-events");
@@ -1220,6 +1232,7 @@ let subtitleFonts: SubtitleFontFamily[] | null = null;
 let subtitleStyleBusy = false;
 let subtitleStylePreviewTimer: number | null = null;
 let subtitleStylePreviewQueued = false;
+let activeSubtitleFontTrack: "source" | "translation" | null = null;
 let selectedVideoOutputAlreadyExists = false;
 let videoRenderSubmitting = false;
 let desktopSettings: DesktopSettings | null = null;
@@ -4361,6 +4374,124 @@ function subtitleStyleField<T extends HTMLInputElement | HTMLSelectElement>(
   return input;
 }
 
+function subtitleFontSampleText(track: "source" | "translation"): string {
+  const text = activeDetail?.segments
+    .map((segment) => track === "source" ? segment.source_text : segment.translated_text ?? "")
+    .find((candidate) => candidate.trim().length > 0)
+    ?.replace(/\s+/g, " ")
+    .trim();
+  const sample = text ? Array.from(text).slice(0, 22).join("") : "字幕样张";
+  return `${sample} · Aa 123`;
+}
+
+function subtitleFontPriorityFamilies(track: "source" | "translation"): string[] {
+  if (track === "translation") {
+    return ["Hiragino Sans GB", "PingFang SC", "Songti SC", "Kaiti SC", "STHeiti", "Arial Unicode MS"];
+  }
+  switch (activeDetail?.job.source_language) {
+    case "ja":
+      return ["Hiragino Sans", "Hiragino Mincho ProN", "Yu Gothic", "Yu Mincho"];
+    case "ko":
+      return ["Apple SD Gothic Neo", "Nanum Gothic", "Nanum Myeongjo"];
+    default:
+      return ["Helvetica Neue", "Arial", "Avenir Next", "Georgia", "Times New Roman"];
+  }
+}
+
+function closeSubtitleFontPicker(): void {
+  activeSubtitleFontTrack = null;
+  subtitleFontPicker?.classList.add("hidden");
+  subtitleStyleDialog?.querySelectorAll<HTMLInputElement>('[data-style-field="font_family"]')
+    .forEach((input) => input.setAttribute("aria-expanded", "false"));
+}
+
+function renderSubtitleFontPicker(): void {
+  if (!activeSubtitleFontTrack || !subtitleFonts || !subtitleFontPickerOptions) return;
+  const input = subtitleStyleField<HTMLInputElement>(activeSubtitleFontTrack, "font_family");
+  const query = input.value.trim().toLocaleLowerCase();
+  const priority = subtitleFontPriorityFamilies(activeSubtitleFontTrack);
+  const current = input.value.trim();
+  const matches = subtitleFonts
+    .filter((font) => {
+      if (!query) return true;
+      return font.family.toLocaleLowerCase().includes(query)
+        || font.aliases.some((alias) => alias.toLocaleLowerCase().includes(query));
+    })
+    .sort((left, right) => {
+      const rank = (font: SubtitleFontFamily): number => {
+        if (font.family.localeCompare(current, undefined, { sensitivity: "accent" }) === 0) return -3;
+        if (query && font.family.toLocaleLowerCase().startsWith(query)) return -2;
+        const commonIndex = priority.findIndex((family) => family.toLocaleLowerCase() === font.family.toLocaleLowerCase());
+        return commonIndex >= 0 ? commonIndex : 100;
+      };
+      return rank(left) - rank(right) || left.family.localeCompare(right.family);
+    });
+  const visible = matches.slice(0, 80);
+  subtitleFontPickerOptions.replaceChildren();
+  if (visible.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "subtitle-font-picker-empty";
+    empty.textContent = "没有匹配的本机字体；可以继续输入 family 名，但导出时可能发生 fallback。";
+    subtitleFontPickerOptions.append(empty);
+  } else {
+    const sampleText = subtitleFontSampleText(activeSubtitleFontTrack);
+    for (const font of visible) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "subtitle-font-option";
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", String(font.family === current));
+      const heading = document.createElement("span");
+      heading.className = "subtitle-font-option-heading";
+      const name = document.createElement("strong");
+      name.textContent = font.family;
+      const meta = document.createElement("small");
+      const common = priority.some((family) => family.toLocaleLowerCase() === font.family.toLocaleLowerCase());
+      meta.textContent = `${common ? "常用 · " : ""}${font.face_count} 个字重${font.monospaced ? " · 等宽" : ""}`;
+      heading.append(name, meta);
+      const sample = document.createElement("span");
+      sample.className = "subtitle-font-option-sample";
+      sample.style.fontFamily = `"${font.family.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+      sample.textContent = sampleText;
+      option.append(heading, sample);
+      option.addEventListener("click", () => {
+        input.value = font.family;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.focus();
+        closeSubtitleFontPicker();
+      });
+      subtitleFontPickerOptions.append(option);
+    }
+  }
+  if (subtitleFontPickerCount) {
+    subtitleFontPickerCount.textContent = `显示 ${visible.length}／${matches.length} · 本机 ${subtitleFonts.length}`;
+  }
+  if (subtitleFontPickerSample) {
+    subtitleFontPickerSample.textContent = `样张：${subtitleFontSampleText(activeSubtitleFontTrack)}（快速参考，最终以左侧 libass 预览为准）`;
+  }
+}
+
+function positionSubtitleFontPicker(): void {
+  if (!activeSubtitleFontTrack || !subtitleFontPicker) return;
+  const input = subtitleStyleField<HTMLInputElement>(activeSubtitleFontTrack, "font_family");
+  const rect = input.getBoundingClientRect();
+  const width = Math.min(520, Math.max(360, rect.width + 90));
+  subtitleFontPicker.style.width = `${width}px`;
+  subtitleFontPicker.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`;
+  const height = Math.min(380, subtitleFontPicker.offsetHeight || 380);
+  const below = rect.bottom + 7;
+  subtitleFontPicker.style.top = `${window.innerHeight - below >= height ? below : Math.max(12, rect.top - height - 7)}px`;
+}
+
+function openSubtitleFontPicker(track: "source" | "translation"): void {
+  if (!subtitleFonts || !subtitleFontPicker) return;
+  activeSubtitleFontTrack = track;
+  subtitleStyleField<HTMLInputElement>(track, "font_family").setAttribute("aria-expanded", "true");
+  subtitleFontPicker.classList.remove("hidden");
+  renderSubtitleFontPicker();
+  positionSubtitleFontPicker();
+}
+
 function splitSubtitleColor(value: string | null, fallback: string): { rgb: string; alpha: number } {
   const normalized = value && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value) ? value : fallback;
   const rgb = normalized.slice(0, 7);
@@ -4503,11 +4634,6 @@ async function openSubtitleStyleDialog(): Promise<void> {
     ]);
     if (activeDetail?.job.job_id !== jobId) return;
     subtitleFonts = fonts;
-    if (subtitleFontFamilies) {
-      subtitleFontFamilies.innerHTML = fonts
-        .map((font) => `<option value="${escapeHtml(font.family)}">${escapeHtml(font.aliases.join(" · "))}</option>`)
-        .join("");
-    }
     populateSubtitleStyleEditor("source", state.styles.source);
     populateSubtitleStyleEditor("translation", state.styles.translation);
     renderSubtitleFontReport(state.font_report);
@@ -5617,10 +5743,44 @@ document.querySelector<HTMLButtonElement>("#close-subtitle-style")?.addEventList
 subtitleStyleDialog?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-style-field]").forEach((field) => {
   field.addEventListener("input", () => scheduleSubtitleStylePreview());
 });
+for (const track of ["source", "translation"] as const) {
+  const input = subtitleStyleField<HTMLInputElement>(track, "font_family");
+  input.addEventListener("focus", () => openSubtitleFontPicker(track));
+  input.addEventListener("input", () => {
+    if (activeSubtitleFontTrack === track) {
+      renderSubtitleFontPicker();
+      positionSubtitleFontPicker();
+    }
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" && !subtitleFontPicker?.classList.contains("hidden")) {
+      event.preventDefault();
+      subtitleFontPickerOptions?.querySelector<HTMLButtonElement>(".subtitle-font-option")?.focus();
+    } else if (event.key === "Escape") {
+      closeSubtitleFontPicker();
+    }
+  });
+  subtitleStyleDialog?.querySelector<HTMLButtonElement>(`[data-font-picker-toggle="${track}"]`)?.addEventListener("click", () => {
+    if (activeSubtitleFontTrack === track && !subtitleFontPicker?.classList.contains("hidden")) {
+      closeSubtitleFontPicker();
+    } else {
+      input.focus();
+      openSubtitleFontPicker(track);
+    }
+  });
+}
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target;
+  if (!(target instanceof Node) || subtitleFontPicker?.contains(target) || (target instanceof Element && target.closest(".style-font-picker"))) return;
+  closeSubtitleFontPicker();
+});
+subtitleStyleDialog?.querySelector<HTMLElement>(".subtitle-style-controls")?.addEventListener("scroll", closeSubtitleFontPicker);
+window.addEventListener("resize", closeSubtitleFontPicker);
 subtitleStylePreviewTrack?.addEventListener("change", () => scheduleSubtitleStylePreview(0));
 subtitleStyleDialog?.addEventListener("close", () => {
   cancelScheduledSubtitleStylePreview();
   subtitleStylePreviewQueued = false;
+  closeSubtitleFontPicker();
 });
 document.querySelector<HTMLButtonElement>("#close-video-render")?.addEventListener("click", () => videoRenderDialog?.close());
 document.querySelector<HTMLButtonElement>("#choose-video-output")?.addEventListener("click", () => void chooseVideoOutput());
