@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-08-24_
+_最后更新：2026-08-25_
 
 ## 仓库组织
 
@@ -11,9 +11,9 @@ Atogaki_Sub/
 ├── Cargo.toml                 # Rust package 与依赖
 ├── src/                       # 可复用的处理核心与当前 CLI
 │   ├── lib.rs                 # 供 CLI 与桌面 App 复用的库入口
-│   ├── application/           # 用例、任务规格、状态与编排
-│   ├── domain/                # 字幕段、词表、分段与导出规则
-│   ├── infrastructure/        # ffmpeg、Whisper、翻译 provider、文件与数据库适配器
+│   ├── application/           # 任务、工作区、学习、字幕样式与本地服务
+│   ├── domain/                # 字幕段、样式、词表、分段与导出规则
+│   ├── infrastructure/        # ffmpeg、Whisper、翻译 provider、SQLite 与文件适配器
 │   └── interface/             # CLI / HTTP 等输入适配层
 ├── assets/                    # 版本化的示例和内置词表
 ├── migrations/                # 现有 Postgres 实验性迁移；不作为桌面 MVP 依赖
@@ -33,22 +33,22 @@ Atogaki_Sub/
 
 ```text
 桌面 UI（Tauri）
-  └─ application：导入、任务、编辑、翻译、导出用例
-       ├─ domain：时间轴字幕、词表、字幕格式
-       └─ infrastructure：文件系统、SQLite、ffmpeg、ASR、翻译服务
+  └─ application：导入、任务、编辑、翻译、学习、样式、导出用例
+       ├─ domain：时间轴字幕、任务级样式、词表、字幕格式
+       └─ infrastructure：文件系统、SQLite、ffmpeg、ASR、翻译与词典服务
 ```
 
 UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `application` 中的用例并订阅任务状态。当前 CLI 同样是该应用层的一个适配器。
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
-当前 Tauri 壳共享一个 `LocalDatabase` 实例，并分别注册 `LocalTaskService`、`LocalWorkspaceService`、`LocalLearningService` 与 `LocalRenderService`：任务服务负责创建、排队和同步识别任务；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；学习服务负责收藏字幕选区、管理来源例句和手工译义；烧录服务负责冻结 SQLite 字幕快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
+当前 Tauri 壳共享一个 `LocalDatabase` 实例，并注册 `LocalTaskService`、`LocalWorkspaceService`、`LocalLearningService`、`SubtitleStyleService` 与 `LocalRenderService`：任务服务负责创建、排队、同步识别任务和持久化工作台顺序；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；学习服务负责收藏字幕选区、管理来源例句、简明译义与多 provider 结果；字幕样式服务通过 `SubtitleFontService` 枚举系统字体、检查任务文字覆盖，并调用与正式输出相同的 FFmpeg/libass 路径生成预览；烧录服务负责冻结 SQLite 字幕与样式快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
 
-`DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 按 provider ID 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。模型下载、词典包下载与云端 provider 共用可热切换的网络配置：跟随启动环境、强制直连或自定义 HTTP 代理；模型还可使用用户提供的 HTTPS 镜像根地址。DeepL、DeepSeek 与自定义 OpenAI-compatible provider 都延迟到首次实际翻译才读取对应密钥。`ModelDownloadService` 每次只运行一个下载，按镜像到官方源回退，写入应用管理目录中的 `.part` 文件，校验固定 SHA-256 后原子安装并更新模型设置；`DictionaryDownloadService` 在 `dictionaries/` 内按相同临时文件边界工作，滚动发布包解析 GitHub Release 的 tag、资产与 SHA-256，ECDICT 固定文件校验精确字节数和 Git blob 对象摘要，更新失败时恢复旧包。UI 只轮询进度，不直接访问网络、模型或词典文件。
+`DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 按 provider ID 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。模型下载、词典包下载与云端 provider 共用可热切换的网络配置：跟随启动环境、强制直连或自定义 HTTP 代理；模型还可使用用户提供的 HTTPS 镜像根地址。DeepL、DeepSeek、自定义 OpenAI-compatible 与在线词典 provider 都延迟到首次实际请求才读取对应密钥，并在单个 App 进程内复用成功取得的值。`ModelDownloadService` 每次只运行一个下载，按镜像到官方源回退，写入应用管理目录中的 `.part` 文件；合法临时文件跨重启保留，后续请求只有在 HTTP Range／Content-Range 与本地边界一致时才追加，否则安全重启下载，最终通过固定 SHA-256 后原子安装。`DictionaryDownloadService` 在 `dictionaries/` 内按版本化临时文件边界工作，滚动发布包解析 GitHub Release 的 tag、资产与 SHA-256，ECDICT 固定文件校验精确字节数和 Git blob 对象摘要，更新失败时恢复旧包。`DictionaryLookupService` 隔离各来源错误，按需建立 JMdict／ECDICT 索引、读取 Tomoshi 数据库或调用 Merriam-Webster，并把结构化结果交给学习服务持久化。UI 只轮询进度，不直接访问网络、模型或词典文件。
 
 正式桌面 App 把固定版本的 `whisper-cli`、`ffmpeg` 和 `ffprobe` 作为按平台/CPU 架构生成的 Tauri sidecar 放在主程序同目录；Finder 启动不依赖 shell、Homebrew 或用户 `PATH`。模型仍按设备下载到应用数据目录或由用户选择，不进入 Bundle。开发环境可用 `ATOGAKI_WHISPER_CLI`、`ATOGAKI_FFMPEG` 和 `ATOGAKI_FFPROBE` 覆盖 sidecar。macOS FFmpeg 从固定源码构建 libass 字体栈与 LGPL 配置，发布物附带许可证和构建清单，不包含 libx264。
 
-macOS Apple Silicon 是当前已验证发行基线，Windows x86_64 是下一平台目标。Windows 首版保持同一 application/domain 边界，以 CPU Whisper、Credential Manager、WebView2、平台应用数据目录和 LGPL MPEG-4 烧录为基线；Windows sidecar、依赖声明和对应源码归档必须按新 target 独立构建与审计，不能把 macOS arm64 产物或审计结果直接视为跨平台结论。
+macOS Apple Silicon 是当前已验证发行基线。Windows 11 x86_64 已建立 CPU Whisper、Credential Manager、WebView2、平台应用数据目录和 LGPL MPEG-4 烧录的独立预发布基线，但 `v0.1.0-alpha.6` 之后新增的学习、词典、字体样式、任务排序和窗口交互尚未完成 Windows 实机回归。Windows sidecar、依赖声明和对应源码归档继续按目标平台独立构建与审计，不能把 macOS arm64 产物、字体行为或验收结果直接视为跨平台结论。
 
 启动恢复采用显式失败而非静默续跑：数据库中仍为非终态的识别任务会与任务目录快照核对，未完成者标记为上次退出导致的失败。重试从旧任务的输入、识别参数和词表快照创建新 UUID 任务，旧目录保持只读证据；旧模型路径不可用时才使用当前设备设置中的替代模型。ffmpeg/Whisper 子进程设置为随异步任务销毁而终止。
 
@@ -70,6 +70,8 @@ macOS Apple Silicon 是当前已验证发行基线，Windows x86_64 是下一平
 - 新任务把 Whisper/VAD 模型路径、VAD 阈值、分段和运行选项写入 `recognition-options.json`。该文件是识别结果的可复现记录；既有任务不反向补造当时未记录的参数。
 - 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态、时间轴编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。SQLite 是人工时间轴的主数据源，手动时间在任务快照再次同步时必须保留；时间改变不使译文过期，但后续字幕导出和烧录使用新时间。
 - 当前字幕段属于隐式单轨，同轨不允许新增重叠。多人同时发言出现真实需求后，先通过单独决策引入轨道实体和 `track_id`，再设计说话人样式；当前 schema 不提前加入未被使用的逐段排版字段。
+- 每个任务保存一份版本化的原文／译文 `SubtitleStyleSet`；字体、颜色、描边、背景、对齐、位置和边距先经过统一校验与 ASS 序列化，再供 libass 预览、双语 ASS 和烧录快照复用。SRT 不承诺保留视觉样式，系统字体文件不复制进 App 或任务目录。
+- `local_jobs.sort_position` 只表达用户任务顺序，不改写业务更新时间。尚未排序的旧数据库继续按更新时间展示；第一次排序在事务中保存当前完整 ID 顺序，新任务在下一次人工排序前默认置顶。
 - 每个任务用规范代码持久化源语言和目标语言；首批桌面组合为 `ja`、`en` 或 `ko` 到 `zh-Hans`，旧任务迁移为 `ja` 到 `zh-Hans`。Whisper 与翻译 provider 只在各自基础设施适配器中转换服务专用代码。
 - SQLite 另外记录译文是否人工编辑；只修改原文时保留旧译文并标记为过期，同时修改译文时视为已人工校正。
 - 学习资料使用 `local_learning_items`、`local_learning_occurrences` 和 `local_learning_lookup_results` 分层：第一层按语言对、类型和规范化原文合并词／短语／语法或整句条目，第二层保存每次出现的任务／字幕引用、UTF-16 选区、收藏时双语快照和整段时间范围，第三层按 provider 保存命中词形、读音、结构化义项、署名、数据版本和可选缓存期限。任务删除后来源外键置空而快照继续存在；媒体与音频不写入 SQLite。用户简明译义、字幕语境翻译和标准词典内容相互独立，不能把字幕翻译 provider 的结果标记为词典释义。

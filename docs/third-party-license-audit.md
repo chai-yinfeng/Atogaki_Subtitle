@@ -101,6 +101,8 @@ src-tauri/target/release/bundle/sources/
 
 归档包含七份精确上游源码、逐文件 `SHA256SUMS`、当前二进制构建清单、固定版本文件、完整 sidecar 构建脚本和许可证文本。脚本会先验证打包前 sidecar 与源码基线完全一致；任一版本或哈希漂移都会停止。Tauri 对最终 Bundle 做 ad-hoc 签名后 Mach-O 文件哈希会变化，因此 App 内 sidecar 改用 `codesign` 校验，整个交付物再由 DMG SHA-256 固定。
 
+2026-08-25 的 [macOS Apple Silicon `v0.1.0-alpha.8`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.8) 已实际上传 DMG、DMG SHA-256、重新下载并逐项校验生成的 `Atogaki-0.1.0-third-party-sources.tar.xz` 及其 SHA-256。归档包含上述七份固定源码、内部 `SHA256SUMS`、许可证、构建脚本和本次 sidecar 清单；该 Release 没有 Windows 二进制或 Windows 对应源码资产。
+
 ## 模型与云端服务
 
 Whisper/VAD 模型不打包进 App 或 DMG，由用户在设备上选择或下载。内建目录只保存下载地址、固定 SHA-256 和上游许可/说明链接；正式发布前仍应逐项复核模型页面的许可证与使用条件。模型镜像只改变传输来源，不改变已接受的模型字节。
