@@ -720,6 +720,19 @@ async fn rename_job(
 }
 
 #[tauri::command]
+async fn reorder_jobs(
+    state: State<'_, DesktopState>,
+    job_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .task_service
+        .reorder_persisted_jobs(&job_ids)
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn relink_job_media(
     app: AppHandle,
     state: State<'_, DesktopState>,
@@ -1811,6 +1824,7 @@ fn main() {
             reveal_rendered_video,
             relink_job_media,
             rename_job,
+            reorder_jobs,
             retry_job,
             save_download_network_settings,
             save_dictionary_credential,
@@ -1878,6 +1892,7 @@ mod tests {
             started_at_unix: Some(1),
             completed_at_unix: Some(1),
             updated_at_unix: 1,
+            sort_position: None,
         }
     }
 

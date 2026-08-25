@@ -41,6 +41,7 @@ pub struct LocalJobRecord {
     pub started_at_unix: Option<i64>,
     pub completed_at_unix: Option<i64>,
     pub updated_at_unix: i64,
+    pub sort_position: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
@@ -532,9 +533,11 @@ impl LocalDatabase {
             "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
                 source_language, target_language,
-                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix
+                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix,
+                sort_position
              FROM local_jobs
-             ORDER BY updated_at_unix DESC, job_id DESC",
+             ORDER BY sort_position IS NOT NULL, sort_position ASC,
+                updated_at_unix DESC, job_id DESC",
         )
         .fetch_all(&self.pool)
         .await
@@ -565,7 +568,8 @@ impl LocalDatabase {
             "SELECT job_id, display_name, storage_dir, input_path, render_output_path, status, message,
                 error_message, glossary_id, glossary_name, glossary_snapshot_path,
                 source_language, target_language,
-                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix
+                created_at_unix, started_at_unix, completed_at_unix, updated_at_unix,
+                sort_position
              FROM local_jobs
              WHERE job_id = ?",
         )
@@ -573,6 +577,41 @@ impl LocalDatabase {
         .fetch_optional(&self.pool)
         .await
         .context("failed to read local task")
+    }
+
+    pub async fn reorder_jobs(&self, job_ids: &[String]) -> Result<Vec<LocalJobRecord>> {
+        let requested = job_ids.iter().cloned().collect::<HashSet<_>>();
+        if requested.len() != job_ids.len() {
+            return Err(anyhow!("task order contains duplicate ids"));
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin task reorder transaction")?;
+        let existing = sqlx::query_scalar::<_, String>("SELECT job_id FROM local_jobs")
+            .fetch_all(&mut *tx)
+            .await
+            .context("failed to read tasks before reordering")?;
+        if existing.len() != job_ids.len()
+            || existing.iter().any(|job_id| !requested.contains(job_id))
+        {
+            return Err(anyhow!(
+                "task list changed while reordering; refresh and try again"
+            ));
+        }
+        for (position, job_id) in job_ids.iter().enumerate() {
+            sqlx::query("UPDATE local_jobs SET sort_position = ? WHERE job_id = ?")
+                .bind(i64::try_from(position).context("task order exceeds SQLite i64")?)
+                .bind(job_id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("failed to reorder local task {job_id}"))?;
+        }
+        tx.commit()
+            .await
+            .context("failed to commit task reorder transaction")?;
+        self.list_jobs().await
     }
 
     pub async fn update_job_input_path(
@@ -2763,6 +2802,74 @@ mod tests {
         assert!(!restored.translation_edited);
         assert!(!restored.translation_stale);
         assert!(!restored.timing_edited);
+
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn persists_manual_task_order_and_places_new_tasks_first() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-task-order-test-{}", uuid::Uuid::new_v4()));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let first_job = Job::create_in(&root).unwrap();
+        let second_job = Job::create_in(&root).unwrap();
+        let first = JobManifest::new(
+            &first_job,
+            None,
+            None,
+            crate::domain::LanguagePair::default(),
+        );
+        let second = JobManifest::new(
+            &second_job,
+            None,
+            None,
+            crate::domain::LanguagePair::default(),
+        );
+        for manifest in [&first, &second] {
+            database
+                .sync_snapshot(&JobSnapshot {
+                    manifest: manifest.clone(),
+                    segments: Vec::new(),
+                })
+                .await
+                .unwrap();
+        }
+
+        let requested = vec![second.job_id.clone(), first.job_id.clone()];
+        let reordered = database.reorder_jobs(&requested).await.unwrap();
+        assert_eq!(
+            reordered
+                .iter()
+                .map(|job| job.job_id.as_str())
+                .collect::<Vec<_>>(),
+            [second.job_id.as_str(), first.job_id.as_str()]
+        );
+        assert!(
+            database
+                .reorder_jobs(&[first.job_id.clone()])
+                .await
+                .is_err()
+        );
+
+        let newest_job = Job::create_in(&root).unwrap();
+        let newest = JobManifest::new(
+            &newest_job,
+            None,
+            None,
+            crate::domain::LanguagePair::default(),
+        );
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: newest.clone(),
+                segments: Vec::new(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(database.list_jobs().await.unwrap()[0].job_id, newest.job_id);
 
         database.close().await;
         drop(database);

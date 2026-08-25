@@ -50,8 +50,13 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .section-heading h2 { margin-bottom: 20px; font-size: 24px; }
 .section-heading span { color: #75776f; font-size: 14px; }
 .job-list { display: grid; gap: 10px; overflow-anchor: none; }
-.job-card { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid #ded7c9; border-radius: 12px; padding: 8px 10px 8px 18px; color: inherit; background: rgba(255, 253, 247, .76); }
+.job-card { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 1px solid #ded7c9; border-radius: 12px; padding: 8px 10px; color: inherit; background: rgba(255, 253, 247, .76); transition: border-color .14s ease, background .14s ease, opacity .14s ease; }
 .job-card:hover { border-color: #9aae9f; background: #fffdf7; }
+.job-card.dragging { opacity: .42; }
+.job-card.drag-target { border-color: #2e5d52; background: #edf3ee; }
+.job-drag-handle { display: grid; width: 28px; height: 38px; place-items: center; border-radius: 7px; color: #8a8c83; font-size: 20px; line-height: 1; cursor: grab; user-select: none; }
+.job-drag-handle:hover, .job-drag-handle:focus-visible { color: #2e5d52; background: #e2ece5; outline: none; }
+.job-drag-handle:active { cursor: grabbing; }
 .job-open { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 8px 9px 0; border-radius: 0; color: inherit; background: transparent; text-align: left; }
 .job-open:hover { background: transparent; }
 .job-card h3 { margin-bottom: 5px; font-size: 15px; }
@@ -401,7 +406,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .subtitle-font-picker-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .subtitle-font-picker-heading strong { font-size: 13px; }
 .subtitle-font-picker-heading span, .subtitle-font-picker > p { color: #aeb5b5; font-size: 10px; }
-.subtitle-font-picker > p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subtitle-font-picker > p { margin: 0; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
 .subtitle-font-picker-options { min-height: 0; display: grid; align-content: start; gap: 5px; overflow-y: auto; padding-right: 3px; }
 .subtitle-font-option { width: 100%; display: grid; gap: 6px; border: 1px solid #3d454e; border-radius: 8px; padding: 8px 10px; color: #eef0eb; background: #2a3038; text-align: left; }
 .subtitle-font-option:hover, .subtitle-font-option:focus-visible, .subtitle-font-option[aria-selected="true"] { border-color: #8eb8aa; color: #fff; background: #35433f; }
@@ -487,8 +492,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
   .listening-subtitle { grid-template-columns: 54px minmax(0, 1fr); }
   .collect-learning-sentence { grid-column: 2; justify-self: start; opacity: 1; }
   .learning-item-list { grid-template-columns: 1fr; }
-  .job-card { grid-template-columns: 1fr; }
-  .job-actions { justify-content: flex-end; }
+  .job-card { grid-template-columns: auto minmax(0, 1fr); }
+  .job-actions { grid-column: 2; justify-content: flex-end; }
   .create-task form { grid-template-columns: 1fr; }
   .secondary { justify-self: start; }
   .workspace-heading { grid-template-columns: 1fr; }

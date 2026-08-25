@@ -271,6 +271,17 @@ impl LocalTaskService {
         database.rename_job(job_id, display_name).await
     }
 
+    pub async fn reorder_persisted_jobs(
+        &self,
+        job_ids: &[String],
+    ) -> Result<Vec<crate::infrastructure::local_db::LocalJobRecord>> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("task ordering requires SQLite persistence"))?;
+        database.reorder_jobs(job_ids).await
+    }
+
     /// Reconnects a durable task to source media that the user moved after
     /// transcription. Derived audio and subtitle data stay in the task folder.
     pub async fn relink_persisted_job_input(

@@ -23,6 +23,7 @@ type LocalJob = {
   started_at_unix: number | null;
   completed_at_unix: number | null;
   updated_at_unix: number;
+  sort_position: number | null;
   translation_status: "not_ready" | "untranslated" | "partial" | "translated" | "stale";
   segment_count: number;
   translated_segment_count: number;
@@ -1200,6 +1201,7 @@ const dictionaryDownloadMessage = document.querySelector<HTMLParagraphElement>("
 const dictionaryCredentialMessage = document.querySelector<HTMLParagraphElement>("#dictionary-credential-message");
 
 let refreshing = false;
+let jobOrderBusy = false;
 let latestJobs: LocalJob[] = [];
 let currentArea: TopLevelArea = "workbench";
 let renderedJobsFingerprint: string | null = null;
@@ -2088,7 +2090,8 @@ function renderJobs(jobs: LocalJob[]): void {
   jobList.innerHTML = jobs
     .map(
       (job) => `
-        <article class="job-card">
+        <article class="job-card" data-job-card="${escapeHtml(job.job_id)}">
+          <span class="job-drag-handle" draggable="true" role="button" tabindex="0" aria-label="拖动调整${escapeHtml(displayName(job))}的顺序" title="拖动排序；聚焦后也可用上下方向键">⠿</span>
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
             <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-started-at="${job.started_at_unix ?? ""}" data-completed-at="${job.completed_at_unix ?? ""}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
             <span class="job-statuses">
@@ -2104,6 +2107,7 @@ function renderJobs(jobs: LocalJob[]): void {
         </article>`,
     )
     .join("");
+  enableJobOrdering();
   jobList.querySelectorAll<HTMLButtonElement>("[data-job-id]").forEach((button) => {
     button.addEventListener("click", () => void openJob(button.dataset.jobId ?? ""));
   });
@@ -2123,6 +2127,82 @@ function renderJobs(jobs: LocalJob[]): void {
     button.addEventListener("click", () => {
       const job = jobs.find((item) => item.job_id === button.dataset.deleteJob);
       if (job) void deleteJob(job);
+    });
+  });
+}
+
+function jobCardsInDisplayOrder(): HTMLElement[] {
+  return Array.from(jobList?.querySelectorAll<HTMLElement>("[data-job-card]") ?? []);
+}
+
+async function persistDisplayedJobOrder(): Promise<void> {
+  if (jobOrderBusy) return;
+  const jobIds = jobCardsInDisplayOrder().map((card) => card.dataset.jobCard ?? "");
+  if (jobIds.some((jobId) => !jobId) || jobIds.length !== latestJobs.length) return;
+  if (jobIds.every((jobId, index) => latestJobs[index]?.job_id === jobId)) return;
+  jobOrderBusy = true;
+  if (jobManagementMessage) jobManagementMessage.textContent = "正在保存任务顺序…";
+  try {
+    await invoke<void>("reorder_jobs", { jobIds });
+    const jobsById = new Map(latestJobs.map((job) => [job.job_id, job]));
+    latestJobs = jobIds.flatMap((jobId) => {
+      const job = jobsById.get(jobId);
+      return job ? [job] : [];
+    });
+    renderedJobsFingerprint = JSON.stringify(latestJobs);
+    renderListeningJobs(latestJobs);
+    if (jobManagementMessage) jobManagementMessage.textContent = "任务顺序已保存。";
+  } catch (error) {
+    if (jobManagementMessage) jobManagementMessage.textContent = `保存任务顺序失败：${String(error)}`;
+    renderedJobsFingerprint = null;
+    jobOrderBusy = false;
+    await refresh();
+  } finally {
+    jobOrderBusy = false;
+  }
+}
+
+function enableJobOrdering(): void {
+  if (!jobList) return;
+  let draggedCard: HTMLElement | null = null;
+  jobList.querySelectorAll<HTMLElement>(".job-drag-handle").forEach((handle) => {
+    const card = handle.closest<HTMLElement>("[data-job-card]");
+    if (!card) return;
+    handle.addEventListener("dragstart", (event) => {
+      draggedCard = card;
+      card.classList.add("dragging");
+      event.dataTransfer?.setData("text/plain", card.dataset.jobCard ?? "");
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+    });
+    handle.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+      draggedCard = null;
+      jobCardsInDisplayOrder().forEach((jobCard) => jobCard.classList.remove("drag-target"));
+      void persistDisplayedJobOrder();
+    });
+    handle.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      const sibling = event.key === "ArrowUp" ? card.previousElementSibling : card.nextElementSibling;
+      if (!(sibling instanceof HTMLElement)) return;
+      if (event.key === "ArrowUp") jobList.insertBefore(card, sibling);
+      else jobList.insertBefore(sibling, card);
+      handle.focus();
+      void persistDisplayedJobOrder();
+    });
+  });
+  jobList.querySelectorAll<HTMLElement>("[data-job-card]").forEach((card) => {
+    card.addEventListener("dragover", (event) => {
+      if (!draggedCard || draggedCard === card) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      const before = event.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2;
+      jobList.insertBefore(draggedCard, before ? card : card.nextElementSibling);
+      jobCardsInDisplayOrder().forEach((jobCard) => jobCard.classList.toggle("drag-target", jobCard === card));
+    });
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      void persistDisplayedJobOrder();
     });
   });
 }
@@ -2213,7 +2293,7 @@ async function deleteJob(job: LocalJob): Promise<void> {
 }
 
 async function refresh(): Promise<void> {
-  if (!jobList || refreshing) return;
+  if (!jobList || refreshing || jobOrderBusy) return;
   refreshing = true;
   if (!activeDetail && renderedJobsFingerprint === null && jobList.childElementCount === 0) {
     jobList.innerHTML = `<div class="empty-state">正在读取任务…</div>`;
@@ -4426,7 +4506,7 @@ function renderSubtitleFontPicker(): void {
       };
       return rank(left) - rank(right) || left.family.localeCompare(right.family);
     });
-  const visible = matches.slice(0, 80);
+  const visible = matches;
   subtitleFontPickerOptions.replaceChildren();
   if (visible.length === 0) {
     const empty = document.createElement("p");
@@ -4464,7 +4544,7 @@ function renderSubtitleFontPicker(): void {
     }
   }
   if (subtitleFontPickerCount) {
-    subtitleFontPickerCount.textContent = `显示 ${visible.length}／${matches.length} · 本机 ${subtitleFonts.length}`;
+    subtitleFontPickerCount.textContent = `${matches.length} 个结果 · 本机 ${subtitleFonts.length}`;
   }
   if (subtitleFontPickerSample) {
     subtitleFontPickerSample.textContent = `样张：${subtitleFontSampleText(activeSubtitleFontTrack)}（快速参考，最终以左侧 libass 预览为准）`;
