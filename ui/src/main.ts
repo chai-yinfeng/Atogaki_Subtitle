@@ -400,6 +400,42 @@ type VideoOutputSelection = {
   alreadyExists: boolean;
 };
 
+type SubtitleStyle = {
+  font_family: string;
+  font_size: number;
+  primary_color: string;
+  outline_color: string;
+  outline_width: number;
+  shadow: number;
+  background_color: string | null;
+  bold: boolean;
+  italic: boolean;
+  alignment: number;
+  margin_left: number;
+  margin_right: number;
+  margin_vertical: number;
+  letter_spacing: number;
+};
+
+type SubtitleStyleSet = { schema_version?: number; source: SubtitleStyle; translation: SubtitleStyle };
+type SubtitleFontFamily = { family: string; aliases: string[]; face_count: number; monospaced: boolean };
+type SubtitleFontCoverage = {
+  requested_family: string;
+  installed: boolean;
+  matched_family: string | null;
+  post_script_name: string | null;
+  missing_characters: string[];
+  needs_fallback: boolean;
+};
+type SubtitleFontReport = { source: SubtitleFontCoverage; translation: SubtitleFontCoverage };
+type SubtitleStyleState = { styles: SubtitleStyleSet; font_report: SubtitleFontReport };
+type SubtitleStylePreview = {
+  output_path: string;
+  timestamp_ms: number;
+  font_report: SubtitleFontReport;
+  font_events: string[];
+};
+
 type SubtitleOverlayPayload = {
   sourceText: string;
   translatedText: string | null;
@@ -422,6 +458,35 @@ const fileManagerLabel = desktopPlatform === "macos"
   : desktopPlatform === "windows"
     ? "Explorer"
     : "文件管理器";
+
+function subtitleStyleEditorMarkup(track: "source" | "translation", label: string): string {
+  return `<fieldset class="subtitle-style-editor" data-style-editor="${track}">
+    <legend>${label}样式</legend>
+    <label class="style-font-field">字体族<input data-style-field="font_family" list="subtitle-font-families" autocomplete="off" /></label>
+    <label>字号<input data-style-field="font_size" type="number" min="8" max="200" step="1" /></label>
+    <label>字间距<input data-style-field="letter_spacing" type="number" min="-20" max="50" step="0.5" /></label>
+    <label>主色<input data-style-field="primary_color_rgb" type="color" /></label>
+    <label>主色不透明度<input data-style-field="primary_color_alpha" type="number" min="0" max="100" step="1" /></label>
+    <label>描边色<input data-style-field="outline_color_rgb" type="color" /></label>
+    <label>描边不透明度<input data-style-field="outline_color_alpha" type="number" min="0" max="100" step="1" /></label>
+    <label>描边宽度<input data-style-field="outline_width" type="number" min="0" max="20" step="0.5" /></label>
+    <label>阴影<input data-style-field="shadow" type="number" min="0" max="20" step="0.5" /></label>
+    <label>对齐与位置<select data-style-field="alignment">
+      <option value="7">左上</option><option value="8">上方居中</option><option value="9">右上</option>
+      <option value="4">左侧居中</option><option value="5">画面居中</option><option value="6">右侧居中</option>
+      <option value="1">左下</option><option value="2">下方居中</option><option value="3">右下</option>
+    </select></label>
+    <label>左边距<input data-style-field="margin_left" type="number" min="0" max="1000" step="1" /></label>
+    <label>右边距<input data-style-field="margin_right" type="number" min="0" max="1000" step="1" /></label>
+    <label>垂直边距<input data-style-field="margin_vertical" type="number" min="0" max="1000" step="1" /></label>
+    <label class="style-check"><input data-style-field="bold" type="checkbox" />粗体</label>
+    <label class="style-check"><input data-style-field="italic" type="checkbox" />斜体</label>
+    <label class="style-check"><input data-style-field="background_enabled" type="checkbox" />启用背景框</label>
+    <label>背景色<input data-style-field="background_color_rgb" type="color" /></label>
+    <label>背景不透明度<input data-style-field="background_color_alpha" type="number" min="0" max="100" step="1" /></label>
+    <p class="subtitle-font-report" data-font-report="${track}"></p>
+  </fieldset>`;
+}
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("missing app root");
@@ -693,11 +758,15 @@ app.innerHTML = `
         </div>
         <div class="export-grid">
           <article class="export-card">
-            <div><span class="module-number">01</span><h3>字幕文件</h3><p>按需要选择原文、译文或双语 SRT/ASS；只导出原文时不要求先完成翻译。</p></div>
+            <div><span class="module-number">01</span><h3>字体、样式与预览</h3><p>设置任务级原文／译文样式，并用最终烧录所用的 FFmpeg/libass 生成真实预览帧。</p></div>
+            <div class="export-card-actions"><button id="edit-subtitle-styles" type="button">设置并预览…</button></div>
+          </article>
+          <article class="export-card">
+            <div><span class="module-number">02</span><h3>字幕文件</h3><p>按需要选择原文、译文或双语 SRT/ASS；SRT 只保留文字和时间，ASS 保留完整样式。</p></div>
             <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 ${fileManagerLabel} 中显示</button></div>
           </article>
           <article class="export-card">
-            <div><span class="module-number">02</span><h3>带字幕视频</h3><p>把当前字幕冻结为一次独立烧录任务；提交后仍可返回字幕校对继续工作。</p></div>
+            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>把当前字幕和已保存样式冻结为一次独立烧录任务；提交后仍可返回字幕校对继续工作。</p></div>
             <div class="export-card-actions"><button id="render-video" type="button">导出带字幕视频…</button></div>
           </article>
         </div>
@@ -785,6 +854,28 @@ app.innerHTML = `
         <p>规则只用于识别后的文本规范化，不会进入 Whisper prompt；当前字幕修改仍需单独保存。</p>
         <div class="rename-job-footer"><span id="glossary-correction-message" role="status"></span><button type="submit">加入词表</button></div>
       </form>
+    </dialog>
+    <dialog id="subtitle-style-dialog" class="subtitle-style-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">SUBTITLE STYLE & LIBASS PREVIEW</p><h2>字体与成品预览</h2></div>
+        <button id="close-subtitle-style" type="button" class="secondary">关闭</button>
+      </div>
+      <p class="dialog-help">这里保存的是任务级原文／译文样式。预览、双语 ASS 和视频烧录复用同一个 ASS 生成器；另一台电脑缺少同名字体时仍可能 fallback。SRT 不保存这些样式。</p>
+      <datalist id="subtitle-font-families"></datalist>
+      <div class="subtitle-style-grid">
+        ${subtitleStyleEditorMarkup("source", "原文")}
+        ${subtitleStyleEditorMarkup("translation", "译文")}
+      </div>
+      <section class="subtitle-style-preview-panel">
+        <div class="subtitle-preview-toolbar">
+          <label>预览内容<select id="subtitle-style-preview-track"><option value="bilingual">原文＋译文</option><option value="source">仅原文</option><option value="translation">仅译文</option></select></label>
+          <button id="preview-subtitle-style" type="button" class="secondary">生成真实预览</button>
+          <button id="save-subtitle-style" type="button">保存任务样式</button>
+        </div>
+        <div id="subtitle-style-preview-host" class="subtitle-style-preview-host"><span>预览会使用当前播放位置附近的实际字幕和画面；纯音频任务使用中性背景。</span></div>
+        <details id="subtitle-font-events" class="subtitle-font-events hidden"><summary>查看 libass 实际字体选择</summary><pre></pre></details>
+        <p id="subtitle-style-message" role="status"></p>
+      </section>
     </dialog>
     <dialog id="video-render-dialog" class="video-render-dialog">
       <div class="dialog-heading">
@@ -1014,6 +1105,7 @@ const translateAllButton = document.querySelector<HTMLButtonElement>("#translate
 const openSubtitleOverlayButton = document.querySelector<HTMLButtonElement>("#open-subtitle-overlay");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
 const renderVideoButton = document.querySelector<HTMLButtonElement>("#render-video");
+const editSubtitleStylesButton = document.querySelector<HTMLButtonElement>("#edit-subtitle-styles");
 const revealExportButton = document.querySelector<HTMLButtonElement>("#reveal-export");
 const subtitleExportDialog = document.querySelector<HTMLDialogElement>("#subtitle-export-dialog");
 const subtitleExportForm = document.querySelector<HTMLFormElement>("#subtitle-export-form");
@@ -1055,6 +1147,14 @@ const videoRenderMessage = document.querySelector<HTMLSpanElement>("#video-rende
 const submitVideoRenderButton = document.querySelector<HTMLButtonElement>("#submit-video-render");
 const videoRenderList = document.querySelector<HTMLDivElement>("#video-render-list");
 const videoRenderCount = document.querySelector<HTMLSpanElement>("#video-render-count");
+const subtitleStyleDialog = document.querySelector<HTMLDialogElement>("#subtitle-style-dialog");
+const subtitleFontFamilies = document.querySelector<HTMLDataListElement>("#subtitle-font-families");
+const subtitleStylePreviewTrack = document.querySelector<HTMLSelectElement>("#subtitle-style-preview-track");
+const subtitleStylePreviewHost = document.querySelector<HTMLDivElement>("#subtitle-style-preview-host");
+const subtitleFontEvents = document.querySelector<HTMLDetailsElement>("#subtitle-font-events");
+const subtitleStyleMessage = document.querySelector<HTMLParagraphElement>("#subtitle-style-message");
+const previewSubtitleStyleButton = document.querySelector<HTMLButtonElement>("#preview-subtitle-style");
+const saveSubtitleStyleButton = document.querySelector<HTMLButtonElement>("#save-subtitle-style");
 const settingsDialog = document.querySelector<HTMLDialogElement>("#settings-dialog");
 const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
 const settingsWhisperModel = document.querySelector<HTMLInputElement>("#settings-whisper-model");
@@ -1112,6 +1212,8 @@ let taskGlossaryConfigurationId: string | null = null;
 let selectedTaskContentGroups = new Set<string>();
 let mediaCapabilities: MediaCapabilities | null = null;
 let videoRenders: VideoRender[] = [];
+let subtitleFonts: SubtitleFontFamily[] | null = null;
+let subtitleStyleBusy = false;
 let selectedVideoOutputAlreadyExists = false;
 let videoRenderSubmitting = false;
 let desktopSettings: DesktopSettings | null = null;
@@ -4239,6 +4341,197 @@ async function translateAllSubtitles(): Promise<void> {
   }
 }
 
+function subtitleStyleEditor(track: "source" | "translation"): HTMLElement {
+  const editor = subtitleStyleDialog?.querySelector<HTMLElement>(`[data-style-editor="${track}"]`);
+  if (!editor) throw new Error(`missing ${track} subtitle style editor`);
+  return editor;
+}
+
+function subtitleStyleField<T extends HTMLInputElement | HTMLSelectElement>(
+  track: "source" | "translation",
+  field: string,
+): T {
+  const input = subtitleStyleEditor(track).querySelector<T>(`[data-style-field="${field}"]`);
+  if (!input) throw new Error(`missing ${track} subtitle style field ${field}`);
+  return input;
+}
+
+function splitSubtitleColor(value: string | null, fallback: string): { rgb: string; alpha: number } {
+  const normalized = value && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value) ? value : fallback;
+  const rgb = normalized.slice(0, 7);
+  const alphaByte = normalized.length === 9 ? Number.parseInt(normalized.slice(7), 16) : 255;
+  return { rgb, alpha: Math.round(alphaByte / 255 * 100) };
+}
+
+function joinSubtitleColor(rgb: string, alphaPercent: number): string {
+  const alpha = Math.round(Math.max(0, Math.min(100, alphaPercent)) / 100 * 255);
+  return `${rgb.toUpperCase()}${alpha.toString(16).padStart(2, "0").toUpperCase()}`;
+}
+
+function populateSubtitleStyleEditor(track: "source" | "translation", style: SubtitleStyle): void {
+  subtitleStyleField<HTMLInputElement>(track, "font_family").value = style.font_family;
+  for (const field of ["font_size", "letter_spacing", "outline_width", "shadow", "margin_left", "margin_right", "margin_vertical"] as const) {
+    subtitleStyleField<HTMLInputElement>(track, field).value = String(style[field]);
+  }
+  subtitleStyleField<HTMLSelectElement>(track, "alignment").value = String(style.alignment);
+  subtitleStyleField<HTMLInputElement>(track, "bold").checked = style.bold;
+  subtitleStyleField<HTMLInputElement>(track, "italic").checked = style.italic;
+  const primary = splitSubtitleColor(style.primary_color, "#FFFFFF");
+  const outline = splitSubtitleColor(style.outline_color, "#00000080");
+  const background = splitSubtitleColor(style.background_color, "#000000CC");
+  subtitleStyleField<HTMLInputElement>(track, "primary_color_rgb").value = primary.rgb;
+  subtitleStyleField<HTMLInputElement>(track, "primary_color_alpha").value = String(primary.alpha);
+  subtitleStyleField<HTMLInputElement>(track, "outline_color_rgb").value = outline.rgb;
+  subtitleStyleField<HTMLInputElement>(track, "outline_color_alpha").value = String(outline.alpha);
+  subtitleStyleField<HTMLInputElement>(track, "background_enabled").checked = style.background_color !== null;
+  subtitleStyleField<HTMLInputElement>(track, "background_color_rgb").value = background.rgb;
+  subtitleStyleField<HTMLInputElement>(track, "background_color_alpha").value = String(background.alpha);
+}
+
+function readSubtitleStyleEditor(track: "source" | "translation"): SubtitleStyle {
+  const number = (field: string): number => Number(subtitleStyleField<HTMLInputElement>(track, field).value);
+  const primaryRgb = subtitleStyleField<HTMLInputElement>(track, "primary_color_rgb").value;
+  const outlineRgb = subtitleStyleField<HTMLInputElement>(track, "outline_color_rgb").value;
+  const backgroundEnabled = subtitleStyleField<HTMLInputElement>(track, "background_enabled").checked;
+  return {
+    font_family: subtitleStyleField<HTMLInputElement>(track, "font_family").value.trim(),
+    font_size: number("font_size"),
+    primary_color: joinSubtitleColor(primaryRgb, number("primary_color_alpha")),
+    outline_color: joinSubtitleColor(outlineRgb, number("outline_color_alpha")),
+    outline_width: number("outline_width"),
+    shadow: number("shadow"),
+    background_color: backgroundEnabled
+      ? joinSubtitleColor(
+        subtitleStyleField<HTMLInputElement>(track, "background_color_rgb").value,
+        number("background_color_alpha"),
+      )
+      : null,
+    bold: subtitleStyleField<HTMLInputElement>(track, "bold").checked,
+    italic: subtitleStyleField<HTMLInputElement>(track, "italic").checked,
+    alignment: number("alignment"),
+    margin_left: number("margin_left"),
+    margin_right: number("margin_right"),
+    margin_vertical: number("margin_vertical"),
+    letter_spacing: number("letter_spacing"),
+  };
+}
+
+function currentSubtitleStyles(): SubtitleStyleSet {
+  return { source: readSubtitleStyleEditor("source"), translation: readSubtitleStyleEditor("translation") };
+}
+
+function renderSubtitleFontCoverage(track: "source" | "translation", coverage: SubtitleFontCoverage): void {
+  const host = subtitleStyleDialog?.querySelector<HTMLElement>(`[data-font-report="${track}"]`);
+  if (!host) return;
+  if (!coverage.installed) {
+    host.className = "subtitle-font-report warning";
+    host.textContent = `本机没有“${coverage.requested_family}”；libass 会选择 fallback。`;
+    return;
+  }
+  if (coverage.needs_fallback) {
+    host.className = "subtitle-font-report warning";
+    host.textContent = `已匹配 ${coverage.matched_family ?? coverage.requested_family}，但任务字符 ${coverage.missing_characters.join(" ")} 缺少字形，将发生 fallback。`;
+    return;
+  }
+  host.className = "subtitle-font-report ready";
+  host.textContent = `已匹配 ${coverage.matched_family ?? coverage.requested_family}${coverage.post_script_name ? ` · ${coverage.post_script_name}` : ""}；任务字符覆盖完整。`;
+}
+
+function renderSubtitleFontReport(report: SubtitleFontReport): void {
+  renderSubtitleFontCoverage("source", report.source);
+  renderSubtitleFontCoverage("translation", report.translation);
+}
+
+function setSubtitleStyleBusy(busy: boolean): void {
+  subtitleStyleBusy = busy;
+  if (previewSubtitleStyleButton) previewSubtitleStyleButton.disabled = busy;
+  if (saveSubtitleStyleButton) saveSubtitleStyleButton.disabled = busy;
+}
+
+async function openSubtitleStyleDialog(): Promise<void> {
+  if (!activeDetail || workspaceActionBusy || subtitleStyleBusy) return;
+  const jobId = activeDetail.job.job_id;
+  subtitleStyleDialog?.showModal();
+  if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在读取任务样式和本机字体…";
+  setSubtitleStyleBusy(true);
+  try {
+    const [state, fonts] = await Promise.all([
+      invoke<SubtitleStyleState>("get_subtitle_style_state", { jobId }),
+      subtitleFonts ? Promise.resolve(subtitleFonts) : invoke<SubtitleFontFamily[]>("list_subtitle_fonts"),
+    ]);
+    if (activeDetail?.job.job_id !== jobId) return;
+    subtitleFonts = fonts;
+    if (subtitleFontFamilies) {
+      subtitleFontFamilies.innerHTML = fonts
+        .map((font) => `<option value="${escapeHtml(font.family)}">${escapeHtml(font.aliases.join(" · "))}</option>`)
+        .join("");
+    }
+    populateSubtitleStyleEditor("source", state.styles.source);
+    populateSubtitleStyleEditor("translation", state.styles.translation);
+    renderSubtitleFontReport(state.font_report);
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `已读取 ${fonts.length} 个字体族。修改后可先预览，再保存到任务。`;
+  } catch (error) {
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `无法读取字幕样式：${String(error)}`;
+  } finally {
+    setSubtitleStyleBusy(false);
+  }
+}
+
+async function saveSubtitleStyleDraft(): Promise<void> {
+  if (!activeDetail || subtitleStyleBusy) return;
+  const jobId = activeDetail.job.job_id;
+  setSubtitleStyleBusy(true);
+  if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在校验并保存任务样式…";
+  try {
+    const state = await invoke<SubtitleStyleState>("save_subtitle_styles", {
+      request: { jobId, styles: currentSubtitleStyles() },
+    });
+    renderSubtitleFontReport(state.font_report);
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = "任务样式已保存；之后的 ASS 导出和视频烧录都会使用它。";
+  } catch (error) {
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `保存失败：${String(error)}`;
+  } finally {
+    setSubtitleStyleBusy(false);
+  }
+}
+
+async function previewSubtitleStyleDraft(): Promise<void> {
+  if (!activeDetail || subtitleStyleBusy || !subtitleStylePreviewTrack) return;
+  const jobId = activeDetail.job.job_id;
+  const timestampMs = Math.max(0, Math.round((activeMedia?.currentTime ?? 0) * 1_000));
+  setSubtitleStyleBusy(true);
+  if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在通过 FFmpeg/libass 生成预览帧…";
+  try {
+    const preview = await invoke<SubtitleStylePreview>("preview_subtitle_styles", {
+      request: {
+        jobId,
+        styles: currentSubtitleStyles(),
+        subtitleTrack: subtitleStylePreviewTrack.value,
+        timestampMs,
+      },
+    });
+    renderSubtitleFontReport(preview.font_report);
+    if (subtitleStylePreviewHost) {
+      const image = document.createElement("img");
+      image.alt = `libass 字幕预览，时间 ${formatTime(preview.timestamp_ms)}`;
+      image.src = convertFileSrc(preview.output_path);
+      subtitleStylePreviewHost.replaceChildren(image);
+    }
+    if (subtitleFontEvents) {
+      const pre = subtitleFontEvents.querySelector("pre");
+      if (pre) pre.textContent = preview.font_events.length > 0
+        ? preview.font_events.join("\n")
+        : "本次 FFmpeg 日志没有报告字体替换事件。";
+      subtitleFontEvents.classList.remove("hidden");
+    }
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `已生成 ${formatTime(preview.timestamp_ms)} 的真实渲染帧；预览草稿尚未自动保存。`;
+  } catch (error) {
+    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `预览失败：${String(error)}`;
+  } finally {
+    setSubtitleStyleBusy(false);
+  }
+}
+
 async function exportSubtitles(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;
   if (hasUnsavedSubtitleEdits()) {
@@ -5248,7 +5541,11 @@ karaokeOpenWorkspaceButton?.addEventListener("click", () => {
 });
 exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
+editSubtitleStylesButton?.addEventListener("click", () => void openSubtitleStyleDialog());
+previewSubtitleStyleButton?.addEventListener("click", () => void previewSubtitleStyleDraft());
+saveSubtitleStyleButton?.addEventListener("click", () => void saveSubtitleStyleDraft());
 revealExportButton?.addEventListener("click", () => void revealExportedSubtitle());
+document.querySelector<HTMLButtonElement>("#close-subtitle-style")?.addEventListener("click", () => subtitleStyleDialog?.close());
 document.querySelector<HTMLButtonElement>("#close-video-render")?.addEventListener("click", () => videoRenderDialog?.close());
 document.querySelector<HTMLButtonElement>("#choose-video-output")?.addEventListener("click", () => void chooseVideoOutput());
 submitVideoRenderButton?.addEventListener("click", () => void submitVideoRender());

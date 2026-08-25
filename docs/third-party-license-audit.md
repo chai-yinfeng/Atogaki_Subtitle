@@ -1,6 +1,6 @@
 # 第三方依赖许可证审计
 
-_审计日期：2026-08-24_
+_审计日期：2026-08-25_
 
 本记录用于 Atogaki `0.1.0` macOS Apple Silicon 预发布基线和 Windows x86_64 构建基线的工程审计，不构成法律意见。每次升级锁文件、sidecar 或目标平台后都必须重新生成并复核。
 
@@ -25,6 +25,7 @@ _审计日期：2026-08-24_
 
 - MPL-2.0 出现在 `cssparser`、`cssparser-macros`、`dtoa-short`、`option-ext` 和 `selectors` 等依赖中。当前使用的是未修改的上游 crate；MPL 义务由随 App 提供许可证声明来承接，不会把独立的 Atogaki 源码整体改为 MPL。
 - `r-efi` 声明为 `MIT OR Apache-2.0 OR LGPL-2.1-or-later`，分发可采用其许可表达式中的宽松选项；报告生成器仍允许完整 SPDX 表达式中的 LGPL 标识。
+- 字幕字体检查新增 `fontdb 0.23.0`、`ttf-parser 0.25.1` 及其 `memmap2`／`slotmap`／`core_maths` 依赖，许可证均落在已接受的 MIT 或 Apache-2.0 宽松边界；macOS arm64 与 Windows x86_64 报告已随锁文件重新生成。该能力只读取已安装字体元数据和字形表，不把任何用户字体复制进 App 或导出物，字体本身的嵌入／再分发授权仍不在本轮能力范围内。
 - 生成配置遇到未知或未接受的许可证会失败，防止新增依赖静默进入分发物。
 
 复现命令：

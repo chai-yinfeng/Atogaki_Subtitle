@@ -19,10 +19,14 @@ use atogaki_subtitle::{
         LocalGlossaryService, LocalGlossaryTermDraft, LocalLearningService, LocalRenderRequest,
         LocalRenderService, LocalSubtitleExport, LocalSubtitleExportArtifact,
         LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
-        MutableTranslationProvider, TranscriptionOptions, UnconfiguredTranslationProvider,
-        job_spec::TranscribeSpec,
+        MutableTranslationProvider, SubtitleFontFamily, SubtitleFontService, SubtitleStylePreview,
+        SubtitleStyleService, SubtitleStyleState, TranscriptionOptions,
+        UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
     },
-    domain::{LanguageCode, subtitle::SubtitleTrack},
+    domain::{
+        LanguageCode,
+        subtitle::{SubtitleStyleSet, SubtitleTrack},
+    },
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
@@ -59,6 +63,7 @@ struct DesktopState {
     glossary_service: LocalGlossaryService,
     learning_service: LocalLearningService,
     render_service: LocalRenderService,
+    subtitle_style_service: SubtitleStyleService,
     settings_service: DesktopSettingsService,
     model_download_service: ModelDownloadService,
     dictionary_download_service: DictionaryDownloadService,
@@ -333,6 +338,23 @@ async fn media_capabilities(state: State<'_, DesktopState>) -> Result<MediaCapab
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn list_subtitle_fonts(state: State<'_, DesktopState>) -> Vec<SubtitleFontFamily> {
+    state.subtitle_style_service.fonts().to_vec()
+}
+
+#[tauri::command]
+async fn get_subtitle_style_state(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<SubtitleStyleState, String> {
+    state
+        .subtitle_style_service
+        .get(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubmitTranscriptionRequest {
@@ -467,6 +489,22 @@ struct VideoRenderRequest {
     output_path: String,
     subtitle_track: SubtitleTrack,
     overwrite_existing: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveSubtitleStylesRequest {
+    job_id: String,
+    styles: SubtitleStyleSet,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewSubtitleStylesRequest {
+    job_id: String,
+    styles: SubtitleStyleSet,
+    subtitle_track: SubtitleTrack,
+    timestamp_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1094,6 +1132,38 @@ async fn get_waveform_window(
 }
 
 #[tauri::command]
+async fn save_subtitle_styles(
+    state: State<'_, DesktopState>,
+    request: SaveSubtitleStylesRequest,
+) -> Result<SubtitleStyleState, String> {
+    state
+        .subtitle_style_service
+        .save(&request.job_id, &request.styles)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn preview_subtitle_styles(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    request: PreviewSubtitleStylesRequest,
+) -> Result<SubtitleStylePreview, String> {
+    let preview = state
+        .subtitle_style_service
+        .preview(
+            &request.job_id,
+            &request.styles,
+            request.subtitle_track,
+            request.timestamp_ms,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    allow_playback_file(&app, Some(&preview.output_path))?;
+    Ok(preview)
+}
+
+#[tauri::command]
 async fn submit_video_render(
     state: State<'_, DesktopState>,
     request: VideoRenderRequest,
@@ -1633,6 +1703,11 @@ fn main() {
                 database.clone(),
                 workspace_service.clone(),
             ))?;
+            let subtitle_style_service = SubtitleStyleService::new(
+                config.ffmpeg.clone(),
+                workspace_service.clone(),
+                SubtitleFontService::load_system(),
+            );
             let model_download_service =
                 ModelDownloadService::new(models_directory, settings_service.clone())?;
             let dictionary_download_service = DictionaryDownloadService::new(
@@ -1651,6 +1726,7 @@ fn main() {
                 glossary_service,
                 learning_service,
                 render_service,
+                subtitle_style_service,
                 settings_service,
                 model_download_service,
                 dictionary_download_service,
@@ -1707,10 +1783,12 @@ fn main() {
             get_job_glossary_snapshot,
             get_job_detail,
             get_playback_position,
+            get_subtitle_style_state,
             get_waveform_window,
             list_glossaries,
             list_jobs,
             list_learning_items,
+            list_subtitle_fonts,
             lookup_learning_dictionary,
             list_video_renders,
             model_catalog,
@@ -1726,6 +1804,7 @@ fn main() {
             hide_subtitle_overlay,
             preview_glossary_application,
             preview_glossary_prompt,
+            preview_subtitle_styles,
             preview_workspace_subtitle_export,
             recognition_defaults,
             reveal_exported_subtitle,
@@ -1739,6 +1818,7 @@ fn main() {
             save_glossary,
             save_learning_selection,
             save_playback_position,
+            save_subtitle_styles,
             submit_transcription,
             start_model_download,
             start_dictionary_download,
