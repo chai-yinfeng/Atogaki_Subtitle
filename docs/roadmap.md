@@ -226,6 +226,8 @@ Windows 基础发行先于样式系统：跨平台字体可用性、fallback、�
 
 2026-08-25 本轮发行限定为 macOS Apple Silicon：原计划的 `v0.1.0-alpha.7` 在公开 Release 前取消，已推送 tag 保持不可变且不创建 Release；macOS-only 候选顺延为 `v0.1.0-alpha.8`。Windows 未对学习区、词典、字体／真实渲染预览、任务排序和相关窗口交互完成实机回归，因此继续停留在 `v0.1.0-alpha.6`，待专门测试后使用新的版本号发布。
 
+2026-08-25 已发布 [macOS Apple Silicon 预发布版 `v0.1.0-alpha.8`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.8)。最终 DMG 从固定 tag 的干净提交重新构建并通过 `hdiutil verify`、只读挂载结构、App 图标、三个 sidecar、根许可证和第三方声明检查；Release 同时提供 DMG SHA-256 及重新下载、逐项校验生成的 macOS 对应源码归档。该 Release 不包含 Windows 资产。
+
 ## 当前技术债清单
 
 - 当前 Web API 和 Postgres schema 是早期探索，不应驱动桌面 MVP 的设计。
