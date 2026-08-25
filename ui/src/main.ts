@@ -2091,7 +2091,7 @@ function renderJobs(jobs: LocalJob[]): void {
     .map(
       (job) => `
         <article class="job-card" data-job-card="${escapeHtml(job.job_id)}">
-          <span class="job-drag-handle" draggable="true" role="button" tabindex="0" aria-label="拖动调整${escapeHtml(displayName(job))}的顺序" title="拖动排序；聚焦后也可用上下方向键">⠿</span>
+          <span class="job-drag-handle" role="button" tabindex="0" aria-label="拖动调整${escapeHtml(displayName(job))}的顺序" title="拖动排序；聚焦后也可用上下方向键">⠿</span>
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
             <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-started-at="${job.started_at_unix ?? ""}" data-completed-at="${job.completed_at_unix ?? ""}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
             <span class="job-statuses">
@@ -2164,22 +2164,54 @@ async function persistDisplayedJobOrder(): Promise<void> {
 
 function enableJobOrdering(): void {
   if (!jobList) return;
-  let draggedCard: HTMLElement | null = null;
   jobList.querySelectorAll<HTMLElement>(".job-drag-handle").forEach((handle) => {
     const card = handle.closest<HTMLElement>("[data-job-card]");
     if (!card) return;
-    handle.addEventListener("dragstart", (event) => {
-      draggedCard = card;
-      card.classList.add("dragging");
-      event.dataTransfer?.setData("text/plain", card.dataset.jobCard ?? "");
-      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-    });
-    handle.addEventListener("dragend", () => {
+    let pointerId: number | null = null;
+    let startY = 0;
+    let moved = false;
+    const finishPointerOrder = (event: PointerEvent): void => {
+      if (pointerId !== event.pointerId) return;
+      pointerId = null;
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
       card.classList.remove("dragging");
-      draggedCard = null;
       jobCardsInDisplayOrder().forEach((jobCard) => jobCard.classList.remove("drag-target"));
-      void persistDisplayedJobOrder();
+      if (moved) void persistDisplayedJobOrder();
+      moved = false;
+    };
+    handle.addEventListener("pointerdown", (event) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      event.preventDefault();
+      pointerId = event.pointerId;
+      startY = event.clientY;
+      moved = false;
+      handle.setPointerCapture(event.pointerId);
     });
+    handle.addEventListener("pointermove", (event) => {
+      if (pointerId !== event.pointerId) return;
+      if (!moved && Math.abs(event.clientY - startY) < 4) return;
+      moved = true;
+      card.classList.add("dragging");
+      const target = jobCardsInDisplayOrder()
+        .filter((jobCard) => jobCard !== card)
+        .reduce<HTMLElement | null>((nearest, jobCard) => {
+          if (!nearest) return jobCard;
+          const distance = Math.abs(event.clientY - (jobCard.getBoundingClientRect().top + jobCard.offsetHeight / 2));
+          const nearestDistance = Math.abs(event.clientY - (nearest.getBoundingClientRect().top + nearest.offsetHeight / 2));
+          return distance < nearestDistance ? jobCard : nearest;
+        }, null);
+      if (target) {
+        const before = event.clientY < target.getBoundingClientRect().top + target.offsetHeight / 2;
+        jobList.insertBefore(card, before ? target : target.nextElementSibling);
+        jobCardsInDisplayOrder().forEach((jobCard) => jobCard.classList.toggle("drag-target", jobCard === target));
+      }
+      const edge = 52;
+      if (event.clientY < edge) window.scrollBy({ top: -18, behavior: "auto" });
+      else if (event.clientY > window.innerHeight - edge) window.scrollBy({ top: 18, behavior: "auto" });
+    });
+    handle.addEventListener("pointerup", finishPointerOrder);
+    handle.addEventListener("pointercancel", finishPointerOrder);
+    handle.addEventListener("lostpointercapture", finishPointerOrder);
     handle.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       event.preventDefault();
@@ -2188,20 +2220,6 @@ function enableJobOrdering(): void {
       if (event.key === "ArrowUp") jobList.insertBefore(card, sibling);
       else jobList.insertBefore(sibling, card);
       handle.focus();
-      void persistDisplayedJobOrder();
-    });
-  });
-  jobList.querySelectorAll<HTMLElement>("[data-job-card]").forEach((card) => {
-    card.addEventListener("dragover", (event) => {
-      if (!draggedCard || draggedCard === card) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-      const before = event.clientY < card.getBoundingClientRect().top + card.offsetHeight / 2;
-      jobList.insertBefore(draggedCard, before ? card : card.nextElementSibling);
-      jobCardsInDisplayOrder().forEach((jobCard) => jobCard.classList.toggle("drag-target", jobCard === card));
-    });
-    card.addEventListener("drop", (event) => {
-      event.preventDefault();
       void persistDisplayedJobOrder();
     });
   });

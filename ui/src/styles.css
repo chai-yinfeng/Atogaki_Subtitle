@@ -54,7 +54,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .job-card:hover { border-color: #9aae9f; background: #fffdf7; }
 .job-card.dragging { opacity: .42; }
 .job-card.drag-target { border-color: #2e5d52; background: #edf3ee; }
-.job-drag-handle { display: grid; width: 28px; height: 38px; place-items: center; border-radius: 7px; color: #8a8c83; font-size: 20px; line-height: 1; cursor: grab; user-select: none; }
+.job-drag-handle { display: grid; width: 28px; height: 38px; place-items: center; border-radius: 7px; color: #8a8c83; font-size: 20px; line-height: 1; cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
 .job-drag-handle:hover, .job-drag-handle:focus-visible { color: #2e5d52; background: #e2ece5; outline: none; }
 .job-drag-handle:active { cursor: grabbing; }
 .job-open { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 8px 9px 0; border-radius: 0; color: inherit; background: transparent; text-align: left; }
