@@ -218,14 +218,11 @@ impl OpenAiCompatibleTranslationProvider {
                         translation.segment_id
                     )
                 })?;
-                if translation.translated_text.trim().is_empty() {
-                    bail!(
-                        "{} returned an empty translation for subtitle {}",
-                        self.provider_name,
-                        translation.segment_id
-                    );
-                }
-                let translated_text = restore_terms(&translation.translated_text, protected)?;
+                let translated_text = if translation.translated_text.trim().is_empty() {
+                    translation.translated_text
+                } else {
+                    restore_terms(&translation.translated_text, protected)?
+                };
                 Ok(TranslationResult {
                     segment_id: translation.segment_id,
                     translated_text,
@@ -525,7 +522,7 @@ mod tests {
         assert_eq!(response.usage.input_tokens, Some(120));
         assert_eq!(response.usage.output_tokens, Some(18));
 
-        let error = provider
+        let empty = provider
             .decode_response(
                 &json!({
                     "choices": [{
@@ -537,12 +534,9 @@ mod tests {
                 .to_string(),
                 &prepared_by_id,
             )
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("empty translation for subtitle s1")
-        );
+            .unwrap();
+        assert_eq!(empty.translations[0].segment_id, "s1");
+        assert!(empty.translations[0].translated_text.trim().is_empty());
 
         let error = provider
             .decode_response(

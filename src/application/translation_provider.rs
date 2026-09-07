@@ -69,9 +69,10 @@ pub trait TranslationProvider: Debug + Send + Sync {
     /// Translate the target segments while preserving their stable IDs.
     ///
     /// The application supplies semantic before/after context. Each adapter
-    /// decides how to encode that context, but must return exactly one non-empty
-    /// result for every target ID. Transactional persistence and source
-    /// fingerprint checks remain the responsibility of the application service.
+    /// decides how to encode that context, but must return exactly one result
+    /// for every target ID. Empty per-segment text is retained for application-
+    /// level retry/reporting. Transactional persistence and source fingerprint
+    /// checks remain the responsibility of the application service.
     fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a>;
 }
 

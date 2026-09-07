@@ -26,8 +26,8 @@ pub use local_render_service::{LocalRenderRequest, LocalRenderService};
 pub use local_retranscription_service::{LocalRetranscriptionPreview, LocalRetranscriptionService};
 pub use local_task_service::LocalTaskService;
 pub use local_workspace_service::{
-    LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
-    LocalTranslationStatus, LocalWorkspaceJob, LocalWorkspaceService,
+    LocalBatchTranslationResult, LocalSubtitleExport, LocalSubtitleExportArtifact,
+    LocalSubtitleExportPlan, LocalTranslationStatus, LocalWorkspaceJob, LocalWorkspaceService,
 };
 pub use subtitle_font_service::{
     SubtitleFontCoverage, SubtitleFontFamily, SubtitleFontReport, SubtitleFontService,

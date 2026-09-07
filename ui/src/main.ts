@@ -126,6 +126,14 @@ type RetranscriptionPreview = {
   context_mode: "isolated";
 };
 
+type BatchTranslationResult = {
+  segments: SubtitleSegment[];
+  requested_count: number;
+  translated_count: number;
+  empty_segment_ids: string[];
+  resumed: boolean;
+};
+
 type SubtitleUndoEntry = {
   before: SubtitleSegment;
   afterFingerprint: string;
@@ -3999,9 +4007,14 @@ function mountMedia(
     activeMedia = element;
     element.playbackRate = Number(activePlaybackRateSelect()?.value || "1");
     host.replaceChildren(element);
-    element.src = convertFileSrc(path);
+    element.src = path.startsWith("atogaki-media:") || path.startsWith("http://atogaki-media.localhost/")
+      ? path
+      : convertFileSrc(path);
     updatePlaybackControls();
-    if (!isFallback) message.textContent = resumeMs > 0 ? `${path} · 已恢复到 ${formatTime(resumeMs)}` : path;
+    if (!isFallback) {
+      const displayPath = activeDetail?.job.input_path ?? path;
+      message.textContent = resumeMs > 0 ? `${displayPath} · 已恢复到 ${formatTime(resumeMs)}` : displayPath;
+    }
   };
 
   loadPath(firstPath, firstPath === fallbackPath && primaryPath === null);
@@ -4692,43 +4705,63 @@ async function translateAllSubtitles(): Promise<void> {
     setWorkspaceAction("请先保存各段尚未保存的修改，再执行全部重译。", true);
     return;
   }
+  const pendingSegments = activeDetail.segments.filter(
+    (segment) => segment.translation_stale || !segment.translated_text?.trim(),
+  );
+  const isResume = pendingSegments.length > 0 && pendingSegments.length < activeDetail.segments.length;
+  const requestCount = pendingSegments.length || activeDetail.segments.length;
   const confirmed = await confirmAction({
-    title: "全部翻译／重译？",
-    message: `将把 ${activeDetail.segments.length} 段${languageLabel(activeSourceLanguage())}原文发送到 ${translationStatus.provider}，并覆盖现有${languageLabel(activeTargetLanguage())}译文，包括人工修改。`,
-    confirmLabel: "发送并覆盖",
-    danger: true,
+    title: isResume ? "继续翻译未完成字幕？" : "全部翻译／重译？",
+    message: isResume
+      ? `将只把 ${requestCount} 段缺失或过期原文发送到 ${translationStatus.provider}；已经成功的译文保持不变。`
+      : `将把 ${requestCount} 段${languageLabel(activeSourceLanguage())}原文发送到 ${translationStatus.provider}，并覆盖现有${languageLabel(activeTargetLanguage())}译文，包括人工修改。`,
+    confirmLabel: isResume ? "继续未完成批次" : "发送并覆盖",
+    danger: !isResume,
   });
   if (!confirmed) return;
   if (activeDetail?.job.job_id !== jobId || taskTranslationActivities.has(jobId)) return;
 
-  const batchCount = Math.ceil(activeDetail.segments.length / 12);
-  const segmentTotal = activeDetail.segments.length;
+  const batchCount = Math.ceil(requestCount / 12);
   const stopElapsed = startTaskTranslation(
     jobId,
-    `正在通过 ${translationStatus.provider} 翻译 ${activeDetail.segments.length} 段字幕（${batchCount} 批）`,
+    `正在通过 ${translationStatus.provider}${isResume ? "继续" : ""}翻译 ${requestCount} 段字幕（${batchCount} 批）；成功批次会立即保存`,
   );
   try {
-    const translatedSegments = await invoke<SubtitleSegment[]>("translate_all_subtitles", {
+    const result = await invoke<BatchTranslationResult>("translate_all_subtitles", {
       jobId,
     });
     if (activeDetail?.job.job_id === jobId) {
-      activeDetail.segments = translatedSegments;
+      activeDetail.segments = result.segments;
       renderSubtitleListPreservingView(activeDetail.segments);
       updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
     }
     try {
       await reloadTranslatedWorkspace(jobId);
       if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`已翻译 ${segmentTotal} 段，原子写入并从 SQLite 重新读取。`);
+        if (result.empty_segment_ids.length > 0) {
+          const emptyIds = new Set(result.empty_segment_ids);
+          const emptyLabels = result.segments
+            .map((segment, index) => ({ segment, index }))
+            .filter(({ segment }) => emptyIds.has(segment.id))
+            .map(({ segment, index }) => `第 ${index + 1} 段（${formatTime(segment.start_ms)}）`);
+          setWorkspaceAction(`已保存 ${result.translated_count}/${result.requested_count} 段；${emptyLabels.join("、")}在单独重试后仍为空，已保留为待翻译。`, true);
+        } else {
+          setWorkspaceAction(`${result.resumed ? "续译" : "翻译"}完成：${result.translated_count} 段已按批次写入 SQLite。`);
+        }
       }
     } catch (reloadError) {
       if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`全部翻译已经原子写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+        setWorkspaceAction(`翻译批次已经写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
       }
     }
   } catch (error) {
     if (activeDetail?.job.job_id === jobId) {
-      setWorkspaceAction(`全部翻译失败：${String(error)}`, true);
+      try {
+        await reloadTranslatedWorkspace(jobId);
+        setWorkspaceAction(`翻译在后续批次停止，之前成功的批次已经保留；再次点击会从缺失或过期段继续。错误：${String(error)}`, true);
+      } catch (reloadError) {
+        setWorkspaceAction(`翻译停止：${String(error)}；已完成批次可能已保存，但重新读取失败：${String(reloadError)}`, true);
+      }
     }
   } finally {
     stopElapsed();

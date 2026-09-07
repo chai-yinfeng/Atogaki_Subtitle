@@ -42,7 +42,7 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
-当前 Tauri 壳共享一个 `LocalDatabase` 实例，并注册 `LocalTaskService`、`LocalWorkspaceService`、`LocalLearningService`、`SubtitleStyleService` 与 `LocalRenderService`：任务服务负责创建、排队、同步识别任务和持久化工作台顺序；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；学习服务负责收藏字幕选区、管理来源例句、简明译义与多 provider 结果；字幕样式服务通过 `SubtitleFontService` 枚举系统字体、检查任务文字覆盖，并调用与正式输出相同的 FFmpeg/libass 路径生成预览；烧录服务负责冻结 SQLite 字幕与样式快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，Tauri 只将该任务登记的媒体文件临时加入 asset protocol 范围，前端不能任意读取文件系统。
+当前 Tauri 壳共享一个 `LocalDatabase` 实例，并注册 `LocalTaskService`、`LocalWorkspaceService`、`LocalLearningService`、`SubtitleStyleService` 与 `LocalRenderService`：任务服务负责创建、排队、同步识别任务和持久化工作台顺序；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；学习服务负责收藏字幕选区、管理来源例句、简明译义与多 provider 结果；字幕样式服务通过 `SubtitleFontService` 枚举系统字体、检查任务文字覆盖，并调用与正式输出相同的 FFmpeg/libass 路径生成预览；烧录服务负责冻结 SQLite 字幕与样式快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，原媒体和任务音频只以进程内不透明令牌登记到 `atogaki-media` 协议；协议正确响应单段／多段 HTTP Range，避免长视频通过通用 asset protocol 时出现画面可播但音轨未继续取流的问题，前端仍不能任意读取文件系统。
 
 `DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 按 provider ID 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。模型下载、词典包下载与云端 provider 共用可热切换的网络配置：跟随启动环境、强制直连或自定义 HTTP 代理；模型还可使用用户提供的 HTTPS 镜像根地址。DeepL、DeepSeek、自定义 OpenAI-compatible 与在线词典 provider 都延迟到首次实际请求才读取对应密钥，并在单个 App 进程内复用成功取得的值。`ModelDownloadService` 每次只运行一个下载，按镜像到官方源回退，写入应用管理目录中的 `.part` 文件；合法临时文件跨重启保留，后续请求只有在 HTTP Range／Content-Range 与本地边界一致时才追加，否则安全重启下载，最终通过固定 SHA-256 后原子安装。`DictionaryDownloadService` 在 `dictionaries/` 内按版本化临时文件边界工作，滚动发布包解析 GitHub Release 的 tag、资产与 SHA-256，ECDICT 固定文件校验精确字节数和 Git blob 对象摘要，更新失败时恢复旧包。`DictionaryLookupService` 隔离各来源错误，按需建立 JMdict／ECDICT 索引、读取 Tomoshi 数据库或调用 Merriam-Webster，并把结构化结果交给学习服务持久化。UI 只轮询进度，不直接访问网络、模型或词典文件。
 
@@ -77,7 +77,7 @@ macOS Apple Silicon 是当前已验证发行基线。Windows 11 x86_64 已建立
 - 学习资料使用 `local_learning_items`、`local_learning_occurrences` 和 `local_learning_lookup_results` 分层：第一层按语言对、类型和规范化原文合并词／短语／语法或整句条目，第二层保存每次出现的任务／字幕引用、UTF-16 选区、收藏时双语快照和整段时间范围，第三层按 provider 保存命中词形、读音、结构化义项、署名、数据版本和可选缓存期限。任务删除后来源外键置空而快照继续存在；媒体与音频不写入 SQLite。用户简明译义、字幕语境翻译和标准词典内容相互独立，不能把字幕翻译 provider 的结果标记为词典释义。
 - SQLite 词表是带源语言的可编辑主数据；每个转写任务只能选择同语言词表，并使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新原文并把已有译文标记为过期。
 - 词表分类只存在于 SQLite 主数据和桌面应用层；处理核心读取已解析的文本快照，避免把 UI 的内容包概念耦合进 Whisper 适配器。
-- 翻译 provider 接收任务语言对、带稳定 ID 的目标字幕段、语义分离的前后文、风格提示和受保护术语，并返回带相同 ID 的结构化译文。应用层校验结果数量、重复／遗漏 ID 和空译文，在所有批次完成后使用带原文校验的 SQLite 事务一次性写入；翻译期间若原文已被修改，本次结果整体拒绝，避免译文错配。
+- 翻译 provider 接收任务语言对、带稳定 ID 的目标字幕段、语义分离的前后文、风格提示和受保护术语，并返回带相同 ID 的结构化译文。应用层校验结果数量、重复／遗漏 ID，每个成功批次立即用带原文校验的 SQLite 事务写入；批次失败后再次执行只选择缺失或过期段。空译文单独补充请求一次，仍为空则保持待翻译并返回具体段落提醒。
 - 当前 provider 按 12 段分批；单段和批量请求都会从 SQLite 当前原文读取前后 30 秒、最多 2000 字的局部上下文。DeepL adapter 将其编码为共享 `context`；OpenAI-compatible adapter 显式发送前文、目标段和后文，并要求只返回目标 ID 的 JSON。上下文用于消歧，但不负责修复 ASR 跨段断句。
 - SQLite 为每个成功的 provider 批次记录 provider ID、返回模型、端点类型、段数、可得的 token 用量和完成时间，不保存请求正文、译文副本或 API Key。这些运行记录用于状态展示与真实节目 A/B，不是可恢复的译文版本历史。
 - 桌面 SRT/ASS 是 SQLite 工作区的派生输出。每次用户导出会先刷新任务目录内的 `source.srt`、`translation.srt` 等固定投影，再将原文、译文和双语 SRT/ASS 复制到用户选择的目录；单语文件以规范语言代码命名（如 `.en.srt`、`.zh-Hans.srt`）。目标文件使用经过文件系统安全化的任务显示名称作为前缀，已存在时必须由界面显式确认覆盖。存在过期译文时拒绝导出；缺失译文时允许导出并显式报告缺失段数。

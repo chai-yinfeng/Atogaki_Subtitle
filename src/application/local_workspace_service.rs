@@ -54,6 +54,15 @@ pub struct LocalTranslationStatus {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct LocalBatchTranslationResult {
+    pub segments: Vec<LocalSubtitleSegmentRecord>,
+    pub requested_count: usize,
+    pub translated_count: usize,
+    pub empty_segment_ids: Vec<String>,
+    pub resumed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct LocalSubtitleExport {
     pub source_srt: String,
     pub translated_srt: String,
@@ -307,16 +316,23 @@ impl LocalWorkspaceService {
             .find(|segment| segment.id == segment_id)
             .cloned()
             .ok_or_else(|| anyhow!("subtitle segment not found: {segment_id}"))?;
-        let translated = self
+        let (translated, empty_segment_ids) = self
             .translate_records(job_id, &context_segments, &[segment])
             .await?;
+        if empty_segment_ids.iter().any(|id| id == segment_id) {
+            return Err(anyhow!(
+                "{} returned an empty translation for subtitle {} after an isolated retry",
+                self.translation_provider.status().name,
+                segment_id
+            ));
+        }
         translated
             .into_iter()
             .find(|segment| segment.id == segment_id)
             .ok_or_else(|| anyhow!("translated subtitle segment disappeared: {segment_id}"))
     }
 
-    pub async fn translate_all(&self, job_id: &str) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+    pub async fn translate_all(&self, job_id: &str) -> Result<LocalBatchTranslationResult> {
         let translation_lock = self.translation_lock_for_job(job_id).await;
         let _guard = translation_lock.lock().await;
         let segments = self.database.list_segments(job_id).await?;
@@ -325,7 +341,33 @@ impl LocalWorkspaceService {
                 "cannot translate a workspace without subtitle segments"
             ));
         }
-        self.translate_records(job_id, &segments, &segments).await
+        let pending = segments
+            .iter()
+            .filter(|segment| {
+                segment.translation_stale
+                    || segment
+                        .translated_text
+                        .as_deref()
+                        .is_none_or(|text| text.trim().is_empty())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let resumed = !pending.is_empty() && pending.len() < segments.len();
+        let targets = if pending.is_empty() {
+            &segments
+        } else {
+            &pending
+        };
+        let requested_count = targets.len();
+        let (segments, empty_segment_ids) =
+            self.translate_records(job_id, &segments, targets).await?;
+        Ok(LocalBatchTranslationResult {
+            segments,
+            requested_count,
+            translated_count: requested_count.saturating_sub(empty_segment_ids.len()),
+            empty_segment_ids,
+            resumed,
+        })
     }
 
     async fn translation_lock_for_job(&self, job_id: &str) -> Arc<Mutex<()>> {
@@ -556,7 +598,7 @@ impl LocalWorkspaceService {
         job_id: &str,
         context_segments: &[LocalSubtitleSegmentRecord],
         segments_to_translate: &[LocalSubtitleSegmentRecord],
-    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+    ) -> Result<(Vec<LocalSubtitleSegmentRecord>, Vec<String>)> {
         let provider = self.translation_provider.status();
         if !provider.configured {
             return Err(anyhow!(
@@ -591,7 +633,7 @@ impl LocalWorkspaceService {
             LanguageCode::from_str(&job.target_language).map_err(anyhow::Error::msg)?,
         )
         .with_protected_terms(protected_terms);
-        let mut updates = Vec::with_capacity(segments_to_translate.len());
+        let mut empty_segment_ids = Vec::new();
         for batch in segments_to_translate.chunks(TRANSLATION_BATCH_SIZE) {
             let targets = batch
                 .iter()
@@ -617,62 +659,158 @@ impl LocalWorkspaceService {
                         provider.name
                     )
                 })?;
-            if response.translations.len() != batch.len() {
-                return Err(anyhow!(
-                    "{} returned {} translations for {} subtitle segments",
-                    provider.name,
-                    response.translations.len(),
-                    batch.len()
-                ));
+            let response_model = response.model.clone().or_else(|| provider.model.clone());
+            let response_usage = response.usage.clone();
+            let (updates, empty) =
+                validated_translation_updates(&provider.name, batch, response.translations)?;
+            if !updates.is_empty() {
+                self.database
+                    .apply_machine_translations(job_id, &updates)
+                    .await?;
             }
-            let mut translated_by_id = response
-                .translations
-                .into_iter()
-                .map(|translation| (translation.segment_id.clone(), translation))
-                .collect::<std::collections::HashMap<_, _>>();
-            if translated_by_id.len() != batch.len() {
-                return Err(anyhow!("{} returned duplicate subtitle IDs", provider.name));
+            self.record_translation_batch(
+                job_id,
+                &provider,
+                response_model,
+                batch.len(),
+                response_usage,
+            )
+            .await?;
+
+            if empty.is_empty() {
+                continue;
             }
-            for segment in batch {
-                let translation = translated_by_id.remove(&segment.id).ok_or_else(|| {
-                    anyhow!(
-                        "{} did not return translation for subtitle {}",
-                        provider.name,
-                        segment.id
-                    )
-                })?;
-                if translation.translated_text.trim().is_empty() {
-                    return Err(anyhow!(
-                        "{} returned an empty translation for subtitle {}",
-                        provider.name,
-                        segment.id
-                    ));
-                }
-                updates.push(LocalMachineTranslation {
+            let empty_ids = empty.iter().cloned().collect::<HashSet<_>>();
+            let retry_batch = batch
+                .iter()
+                .filter(|segment| empty_ids.contains(&segment.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let retry_targets = retry_batch
+                .iter()
+                .map(|segment| TranslationTargetSegment {
                     segment_id: segment.id.clone(),
                     source_text: segment.source_text.clone(),
-                    translated_text: translation.translated_text,
-                });
-            }
-            self.database
-                .record_translation_run(&NewLocalTranslationRun {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    job_id: job_id.to_string(),
-                    provider_id: provider.id.clone(),
-                    provider_name: provider.name.clone(),
-                    model: response.model.or_else(|| provider.model.clone()),
-                    endpoint_kind: provider.endpoint_kind.clone(),
-                    segment_count: i64::try_from(batch.len())
-                        .context("translation batch size exceeds SQLite i64")?,
-                    input_tokens: response.usage.input_tokens,
-                    output_tokens: response.usage.output_tokens,
                 })
-                .await?;
+                .collect::<Vec<_>>();
+            let (retry_before, retry_after) = translation_context(context_segments, &retry_batch);
+            let retry_response = self
+                .translation_provider
+                .translate(TranslationRequest {
+                    options: options.clone(),
+                    before_context: retry_before,
+                    targets: retry_targets,
+                    after_context: retry_after,
+                    style_instruction: Some(
+                        "Every target is a previously empty short fragment. Translate each one visibly using its context; punctuation alone is acceptable when that is the faithful subtitle."
+                            .to_string(),
+                    ),
+                })
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to retry {} empty subtitle translation(s) with {}",
+                        retry_batch.len(),
+                        provider.name
+                    )
+                })?;
+            let retry_model = retry_response
+                .model
+                .clone()
+                .or_else(|| provider.model.clone());
+            let retry_usage = retry_response.usage.clone();
+            let (retry_updates, still_empty) = validated_translation_updates(
+                &provider.name,
+                &retry_batch,
+                retry_response.translations,
+            )?;
+            if !retry_updates.is_empty() {
+                self.database
+                    .apply_machine_translations(job_id, &retry_updates)
+                    .await?;
+            }
+            self.record_translation_batch(
+                job_id,
+                &provider,
+                retry_model,
+                retry_batch.len(),
+                retry_usage,
+            )
+            .await?;
+            empty_segment_ids.extend(still_empty);
         }
+        Ok((
+            self.database.list_segments(job_id).await?,
+            empty_segment_ids,
+        ))
+    }
+
+    async fn record_translation_batch(
+        &self,
+        job_id: &str,
+        provider: &crate::application::TranslationProviderStatus,
+        model: Option<String>,
+        segment_count: usize,
+        usage: crate::application::TranslationUsage,
+    ) -> Result<()> {
         self.database
-            .apply_machine_translations(job_id, &updates)
+            .record_translation_run(&NewLocalTranslationRun {
+                id: uuid::Uuid::new_v4().to_string(),
+                job_id: job_id.to_string(),
+                provider_id: provider.id.clone(),
+                provider_name: provider.name.clone(),
+                model,
+                endpoint_kind: provider.endpoint_kind.clone(),
+                segment_count: i64::try_from(segment_count)
+                    .context("translation batch size exceeds SQLite i64")?,
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+            })
             .await
     }
+}
+
+fn validated_translation_updates(
+    provider_name: &str,
+    batch: &[LocalSubtitleSegmentRecord],
+    translations: Vec<crate::application::TranslationResult>,
+) -> Result<(Vec<LocalMachineTranslation>, Vec<String>)> {
+    if translations.len() != batch.len() {
+        return Err(anyhow!(
+            "{} returned {} translations for {} subtitle segments",
+            provider_name,
+            translations.len(),
+            batch.len()
+        ));
+    }
+    let mut translated_by_id = translations
+        .into_iter()
+        .map(|translation| (translation.segment_id.clone(), translation))
+        .collect::<HashMap<_, _>>();
+    if translated_by_id.len() != batch.len() {
+        return Err(anyhow!("{} returned duplicate subtitle IDs", provider_name));
+    }
+    let mut updates = Vec::with_capacity(batch.len());
+    let mut empty = Vec::new();
+    for segment in batch {
+        let translation = translated_by_id.remove(&segment.id).ok_or_else(|| {
+            anyhow!(
+                "{} did not return translation for subtitle {}",
+                provider_name,
+                segment.id
+            )
+        })?;
+        if translation.translated_text.trim().is_empty() {
+            empty.push(segment.id.clone());
+        } else {
+            updates.push(LocalMachineTranslation {
+                segment_id: segment.id.clone(),
+                source_text: segment.source_text.clone(),
+                translated_text: translation.translated_text,
+            });
+        }
+    }
+    Ok((updates, empty))
 }
 
 fn planned_subtitle_export(
@@ -945,6 +1083,16 @@ mod tests {
         maximum_active: Arc<std::sync::atomic::AtomicUsize>,
     }
 
+    #[derive(Debug, Clone)]
+    struct EmptyFragmentProvider {
+        requests: Arc<StdMutex<Vec<TranslationRequest>>>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct FailAfterFirstBatchProvider {
+        request_count: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
     impl FakeTranslationProvider {
         fn new(omit_last_result: bool) -> Self {
             Self {
@@ -1013,6 +1161,77 @@ mod tests {
                 maximum_active.fetch_max(now_active, std::sync::atomic::Ordering::SeqCst);
                 tokio::time::sleep(std::time::Duration::from_millis(75)).await;
                 active.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(TranslationResponse {
+                    translations: request
+                        .targets
+                        .into_iter()
+                        .map(|target| TranslationResult {
+                            segment_id: target.segment_id,
+                            translated_text: format!("译：{}", target.source_text),
+                        })
+                        .collect(),
+                    model: None,
+                    usage: TranslationUsage::default(),
+                })
+            })
+        }
+    }
+
+    impl TranslationProvider for EmptyFragmentProvider {
+        fn status(&self) -> TranslationProviderStatus {
+            TranslationProviderStatus {
+                id: "empty-fragment".to_string(),
+                name: "Empty Fragment".to_string(),
+                configured: true,
+                model: None,
+                endpoint_kind: "test".to_string(),
+                configuration_hint: None,
+            }
+        }
+
+        fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+            self.requests.lock().unwrap().push(request.clone());
+            Box::pin(async move {
+                Ok(TranslationResponse {
+                    translations: request
+                        .targets
+                        .into_iter()
+                        .map(|target| TranslationResult {
+                            translated_text: if target.source_text == "す。" {
+                                String::new()
+                            } else {
+                                format!("译：{}", target.source_text)
+                            },
+                            segment_id: target.segment_id,
+                        })
+                        .collect(),
+                    model: None,
+                    usage: TranslationUsage::default(),
+                })
+            })
+        }
+    }
+
+    impl TranslationProvider for FailAfterFirstBatchProvider {
+        fn status(&self) -> TranslationProviderStatus {
+            TranslationProviderStatus {
+                id: "checkpoint".to_string(),
+                name: "Checkpoint".to_string(),
+                configured: true,
+                model: None,
+                endpoint_kind: "test".to_string(),
+                configuration_hint: None,
+            }
+        }
+
+        fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+            let request_index = self
+                .request_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move {
+                if request_index > 0 {
+                    return Err(anyhow::anyhow!("later batch failed"));
+                }
                 Ok(TranslationResponse {
                     translations: request
                         .targets
@@ -1121,16 +1340,18 @@ mod tests {
         assert_eq!(status.model.as_deref(), Some("deterministic-v1"));
 
         let translated = service.translate_all(&manifest.job_id).await.unwrap();
-        assert_eq!(translated[0].id, first.id);
+        assert_eq!(translated.segments[0].id, first.id);
         assert_eq!(
-            translated[0].translated_text.as_deref(),
+            translated.segments[0].translated_text.as_deref(),
             Some("译：The first line")
         );
-        assert_eq!(translated[1].id, second.id);
+        assert_eq!(translated.segments[1].id, second.id);
         assert_eq!(
-            translated[1].translated_text.as_deref(),
+            translated.segments[1].translated_text.as_deref(),
             Some("译：The second line")
         );
+        assert_eq!(translated.translated_count, 2);
+        assert!(translated.empty_segment_ids.is_empty());
 
         {
             let requests = provider.requests.lock().unwrap();
@@ -1272,13 +1493,13 @@ mod tests {
             .unwrap();
         assert_eq!(split.len(), 3);
         let translated = service.translate_all(&manifest.job_id).await.unwrap();
-        assert_eq!(translated.len(), 3);
+        assert_eq!(translated.segments.len(), 3);
         assert_eq!(
-            translated[0].translated_text.as_deref(),
+            translated.segments[0].translated_text.as_deref(),
             Some("译：Good morning")
         );
         assert_eq!(
-            translated[1].translated_text.as_deref(),
+            translated.segments[1].translated_text.as_deref(),
             Some("译：everyone")
         );
 
@@ -1394,6 +1615,117 @@ mod tests {
         );
 
         drop(service);
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn empty_fragment_is_retried_then_left_missing_without_blocking_other_segments() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-empty-fragment-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![
+                    TranscriptSegment::new(0, 1_000, "前文".to_string()),
+                    TranscriptSegment::new(1_000, 1_350, "す。".to_string()),
+                    TranscriptSegment::new(1_350, 2_000, "后文".to_string()),
+                ],
+            })
+            .await
+            .unwrap();
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let service = LocalWorkspaceService::with_provider(
+            database.clone(),
+            Arc::new(EmptyFragmentProvider {
+                requests: Arc::clone(&requests),
+            }),
+        );
+
+        let result = service.translate_all(&manifest.job_id).await.unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 2);
+        assert_eq!(result.translated_count, 2);
+        assert_eq!(result.empty_segment_ids.len(), 1);
+        assert_eq!(
+            result.segments[0].translated_text.as_deref(),
+            Some("译：前文")
+        );
+        assert!(result.segments[1].translated_text.is_none());
+        assert_eq!(
+            result.segments[2].translated_text.as_deref(),
+            Some("译：后文")
+        );
+
+        drop(service);
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn successful_batches_are_checkpointed_and_next_run_resumes_missing_segments() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-translation-checkpoint-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let segments = (0..13)
+            .map(|index| {
+                TranscriptSegment::new(index * 1_000, (index + 1) * 1_000, format!("第{index}段"))
+            })
+            .collect::<Vec<_>>();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments,
+            })
+            .await
+            .unwrap();
+        let failing = LocalWorkspaceService::with_provider(
+            database.clone(),
+            Arc::new(FailAfterFirstBatchProvider {
+                request_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            }),
+        );
+
+        assert!(failing.translate_all(&manifest.job_id).await.is_err());
+        let checkpoint = database.list_segments(&manifest.job_id).await.unwrap();
+        assert_eq!(
+            checkpoint
+                .iter()
+                .filter(|segment| segment.translated_text.is_some())
+                .count(),
+            12
+        );
+        drop(failing);
+
+        let provider = Arc::new(FakeTranslationProvider::new(false));
+        let resumed = LocalWorkspaceService::with_provider(database.clone(), provider.clone())
+            .translate_all(&manifest.job_id)
+            .await
+            .unwrap();
+        assert!(resumed.resumed);
+        assert_eq!(resumed.requested_count, 1);
+        assert_eq!(provider.requests.lock().unwrap()[0].targets.len(), 1);
+        assert!(
+            resumed
+                .segments
+                .iter()
+                .all(|segment| segment.translated_text.is_some())
+        );
+
         database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
