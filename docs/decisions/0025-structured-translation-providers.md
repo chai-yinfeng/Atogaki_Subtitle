@@ -19,7 +19,7 @@ DeepL 的 `context` 参数适合机器翻译，但 LLM provider 需要同时接�
 6. API Key 按 provider ID 延迟读取系统凭据库，并缓存到当前进程；启动和只读浏览不会触发凭据读取。SQLite 只保存“该 provider 曾保存 Key”的布尔标记和非敏感配置。
 7. 任务词表的受保护词先替换为不透明占位符；只有响应完整保留每个占位符时才恢复原词并允许写入。
 8. 翻译互斥以任务 ID 为范围：同一任务的单段／全部翻译不能并发写入，不同任务可以同时调用 provider。桌面端同样按任务保存进行中状态，切换任务不会串用进度或结果。
-9. OpenAI-compatible adapter 将单个字幕的空 `translated_text` 视为 provider 响应错误，并在工作区校验之前触发既有的一次重试；提示明确要求短语法片段也必须结合上下文返回非空译文。
+9. OpenAI-compatible adapter 将单个字幕的空 `translated_text`，以及数量不足、重复 ID、未知 ID 等结构错误视为 provider 响应错误，并在工作区校验之前触发既有的一次重试；提示明确要求短语法片段也必须结合上下文返回非空译文。
 
 ## 影响
 

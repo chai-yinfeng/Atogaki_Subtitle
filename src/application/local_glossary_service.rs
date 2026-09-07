@@ -563,9 +563,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(glossary.source_language, "ja");
-        assert!(glossary.core_term_count >= 20);
+        assert_eq!(glossary.core_term_count, 19);
         assert_eq!(glossary.content_group_count, 6);
-        assert_eq!(glossary.correction_only_count, 10);
+        assert_eq!(glossary.correction_only_count, 11);
         let detail = service.get(&glossary.id).await.unwrap();
         let resolved = glossary_for_task(&detail, &[]).unwrap();
         assert_eq!(
@@ -576,6 +576,7 @@ mod tests {
             resolved.corrected_text("euphoniumとeupho"),
             "ユーフォニアムとユーフォ"
         );
+        assert_eq!(resolved.corrected_text("UFO"), "ユーフォ");
         let prompt = service
             .prompt_preview(&detail.glossary.id, &[])
             .await
@@ -588,6 +589,13 @@ mod tests {
         assert!(!prompt.contains("表記:"));
         assert!(!prompt.contains("黒江真由"));
         assert!(!prompt.contains("U4"));
+        assert!(!prompt.contains("、ユーフォ、"));
+        assert!(
+            !resolved
+                .translation_protected_terms()
+                .iter()
+                .any(|term| matches!(term.as_str(), "ユーフォ" | "ユーフォニアム"))
+        );
 
         let third_season = glossary_for_task(&detail, &["三期キャラクター".to_string()]).unwrap();
         assert!(

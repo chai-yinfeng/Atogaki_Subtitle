@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fmt, future::Future, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    future::Future,
+    time::Duration,
+};
 
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::{Client, Url};
@@ -186,10 +191,26 @@ impl OpenAiCompatibleTranslationProvider {
             .ok_or_else(|| anyhow!("{} returned empty JSON content", self.provider_name))?;
         let decoded: StructuredTranslations = serde_json::from_str(content)
             .with_context(|| format!("failed to parse {} translation JSON", self.provider_name))?;
+        if decoded.translations.len() != prepared_by_id.len() {
+            bail!(
+                "{} returned {} translations for {} subtitle segments",
+                self.provider_name,
+                decoded.translations.len(),
+                prepared_by_id.len()
+            );
+        }
+        let mut seen_ids = HashSet::with_capacity(decoded.translations.len());
         let translations = decoded
             .translations
             .into_iter()
             .map(|translation| {
+                if !seen_ids.insert(translation.segment_id.clone()) {
+                    bail!(
+                        "{} returned duplicate subtitle ID {}",
+                        self.provider_name,
+                        translation.segment_id
+                    );
+                }
                 let protected = prepared_by_id.get(&translation.segment_id).ok_or_else(|| {
                     anyhow!(
                         "{} returned unknown subtitle ID {}",
@@ -521,6 +542,25 @@ mod tests {
             error
                 .to_string()
                 .contains("empty translation for subtitle s1")
+        );
+
+        let error = provider
+            .decode_response(
+                &json!({
+                    "choices": [{
+                        "message": {
+                            "content": "{\"translations\":[]}"
+                        }
+                    }]
+                })
+                .to_string(),
+                &prepared_by_id,
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("returned 0 translations for 1 subtitle segments")
         );
     }
 }

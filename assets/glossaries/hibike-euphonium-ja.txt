@@ -9,8 +9,6 @@
 響け！ユーフォニアム2
 響け！ユーフォニアム3
 響け！ユーフォニアム３
-ユーフォ
-ユーフォニアム
 北宇治高校吹奏楽部
 北宇治
 京アニ => 京都アニメーション
@@ -140,6 +138,7 @@ ReCoda
 # @correction-only
 # Observed cross-language ASR renderings in an otherwise Japanese transcript.
 U4 => ユーフォ
+UFO => ユーフォ
 U 4 => ユーフォ
 u4 => ユーフォ
 u 4 => ユーフォ
