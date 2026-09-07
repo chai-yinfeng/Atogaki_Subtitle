@@ -147,7 +147,7 @@ impl OpenAiCompatibleTranslationProvider {
             .filter(|style| !style.trim().is_empty())
             .unwrap_or(&self.style_instruction);
         let system_prompt = format!(
-            "You translate segmented spoken-language subtitles into {}. Use the surrounding context only to resolve meaning; do not translate or return context segments. Preserve every target segment_id exactly once. Preserve every token shaped like [[ATOGAKI_TERM_N]] exactly. Return JSON only with this schema: {{\"translations\":[{{\"segment_id\":\"...\",\"translated_text\":\"...\"}}]}}. Do not merge, split, omit, reorder semantically, or add commentary. Translation style: {}",
+            "You translate segmented spoken-language subtitles into {}. Use the surrounding context only to resolve meaning; do not translate or return context segments. Preserve every target segment_id exactly once. Every translated_text must contain at least one visible character. Translate short grammatical fragments and punctuation-bearing fragments using their context; never omit them or return an empty string. Preserve every token shaped like [[ATOGAKI_TERM_N]] exactly. Return JSON only with this schema: {{\"translations\":[{{\"segment_id\":\"...\",\"translated_text\":\"...\"}}]}}. Do not merge, split, omit, reorder semantically, or add commentary. Translation style: {}",
             request.options.target_language.display_name_zh(),
             if style.is_empty() {
                 "accurate and natural spoken subtitles"
@@ -197,9 +197,17 @@ impl OpenAiCompatibleTranslationProvider {
                         translation.segment_id
                     )
                 })?;
+                if translation.translated_text.trim().is_empty() {
+                    bail!(
+                        "{} returned an empty translation for subtitle {}",
+                        self.provider_name,
+                        translation.segment_id
+                    );
+                }
+                let translated_text = restore_terms(&translation.translated_text, protected)?;
                 Ok(TranslationResult {
                     segment_id: translation.segment_id,
-                    translated_text: restore_terms(&translation.translated_text, protected)?,
+                    translated_text,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -467,6 +475,12 @@ mod tests {
                 .unwrap()
                 .contains("[[ATOGAKI_TERM_0]]")
         );
+        assert!(
+            body["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("must contain at least one visible character")
+        );
 
         let prepared_by_id = prepared.into_iter().collect::<HashMap<_, _>>();
         let response = provider
@@ -489,5 +503,24 @@ mod tests {
         assert_eq!(response.model.as_deref(), Some("deepseek-v4-flash-202608"));
         assert_eq!(response.usage.input_tokens, Some(120));
         assert_eq!(response.usage.output_tokens, Some(18));
+
+        let error = provider
+            .decode_response(
+                &json!({
+                    "choices": [{
+                        "message": {
+                            "content": "{\"translations\":[{\"segment_id\":\"s1\",\"translated_text\":\"   \"}]}"
+                        }
+                    }]
+                })
+                .to_string(),
+                &prepared_by_id,
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("empty translation for subtitle s1")
+        );
     }
 }

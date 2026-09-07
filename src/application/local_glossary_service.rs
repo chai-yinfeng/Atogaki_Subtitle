@@ -34,6 +34,7 @@ pub struct LocalGlossaryPromptPreview {
     pub selected_content_term_count: usize,
     pub correction_only_count: usize,
     pub included_prompt_term_count: usize,
+    pub omitted_prompt_term_count: usize,
     pub prompt_character_count: usize,
     pub prompt: Option<String>,
 }
@@ -283,15 +284,10 @@ fn prompt_preview_from_detail(
             .iter()
             .filter(|term| term.prompt_scope == "correction_only")
             .count(),
-        included_prompt_term_count: detail
-            .terms
-            .iter()
-            .filter(|term| {
-                term.prompt_scope == "core"
-                    || term.prompt_scope == "content"
-                        && selected.contains(term.content_group.as_deref().unwrap_or_default())
-            })
-            .count(),
+        included_prompt_term_count: glossary.whisper_prompt_term_count(),
+        omitted_prompt_term_count: glossary
+            .available_whisper_prompt_term_count()
+            .saturating_sub(glossary.whisper_prompt_term_count()),
         prompt_character_count: prompt
             .as_deref()
             .map(|text| text.chars().count())
@@ -481,7 +477,9 @@ mod tests {
             .await
             .unwrap();
         let core_prompt = core_only.prompt.unwrap();
-        assert!(core_prompt.contains("スイ（表記: suis）"));
+        assert!(core_prompt.contains("suis"));
+        assert!(!core_prompt.contains("スイ"));
+        assert!(!core_prompt.contains("表記:"));
         assert!(!core_prompt.contains("月に吠える"));
         assert!(!core_prompt.contains("水井"));
 
@@ -532,7 +530,8 @@ mod tests {
         assert_eq!(resolved.corrected_text("すいとなぶな"), "suisとn-buna");
         let preview = service.prompt_preview(&glossary.id, &[]).await.unwrap();
         let prompt = preview.prompt.unwrap();
-        assert!(prompt.contains("スイ（表記: suis）"));
+        assert!(prompt.contains("suis"));
+        assert!(!prompt.contains("スイ"));
         assert!(!prompt.contains("すい"));
         assert!(!prompt.contains("月に吠える"));
 
@@ -588,7 +587,9 @@ mod tests {
             .prompt
             .unwrap();
         assert!(prompt.contains("響け！ユーフォニアム"));
-        assert!(prompt.contains("おうまえくみこ（表記: 黄前久美子）"));
+        assert!(prompt.contains("黄前久美子"));
+        assert!(!prompt.contains("おうまえくみこ"));
+        assert!(!prompt.contains("表記:"));
         assert!(!prompt.contains("黒江真由"));
         assert!(!prompt.contains("U4"));
 
@@ -597,7 +598,7 @@ mod tests {
             third_season
                 .whisper_prompt(None)
                 .unwrap()
-                .contains("くろえまゆ（表記: 黒江真由）")
+                .contains("黒江真由")
         );
 
         drop(service);

@@ -65,6 +65,7 @@ type GlossaryPromptPreview = {
   selected_content_term_count: number;
   correction_only_count: number;
   included_prompt_term_count: number;
+  omitted_prompt_term_count: number;
   prompt_character_count: number;
   prompt: string | null;
 };
@@ -1254,6 +1255,9 @@ let activeLearningProviderId = "summary";
 let learningActionBusy = false;
 let learningLookupBusy = false;
 let workspaceElapsedTimer: number | null = null;
+type TaskTranslationActivity = { message: string; startedAt: number };
+const taskTranslationActivities = new Map<string, TaskTranslationActivity>();
+let taskTranslationElapsedTimer: number | null = null;
 let playbackPositionSaveTimer: number | null = null;
 let lastPlaybackPositionSavedAt = 0;
 let karaokeWaveformWindow: WaveformWindow | null = null;
@@ -1957,7 +1961,10 @@ async function refreshTaskPromptPreview(): Promise<void> {
     });
     taskPromptPreview.textContent = preview.prompt || "当前选择不会向 Whisper 发送词表提示。";
     if (taskPromptSummary) {
-      taskPromptSummary.textContent = `核心 ${preview.core_term_count} · 已选内容 ${preview.selected_content_term_count} · prompt ${preview.included_prompt_term_count} 词／${preview.prompt_character_count} 字 · 仅修正 ${preview.correction_only_count}`;
+      const omitted = preview.omitted_prompt_term_count > 0
+        ? ` · 因长度省略 ${preview.omitted_prompt_term_count}`
+        : "";
+      taskPromptSummary.textContent = `核心 ${preview.core_term_count} · 已选内容 ${preview.selected_content_term_count} · 实际 prompt ${preview.included_prompt_term_count} 词／${preview.prompt_character_count} 字${omitted} · 仅修正 ${preview.correction_only_count}`;
     }
   } catch (error) {
     taskPromptPreview.textContent = `无法生成 prompt：${String(error)}`;
@@ -1992,6 +1999,10 @@ function renderGlossaryList(): void {
 
 function updateTranslationControls(): void {
   const hasSegments = (activeDetail?.segments.length ?? 0) > 0;
+  const taskTranslationBusy = activeDetail
+    ? taskTranslationActivities.has(activeDetail.job.job_id)
+    : false;
+  const taskBusy = workspaceActionBusy || taskTranslationBusy;
   if (translationStatusText) {
     const model = translationStatus.model ? ` · ${translationStatus.model}` : "";
     const source = languageLabel(activeSourceLanguage());
@@ -2014,13 +2025,13 @@ function updateTranslationControls(): void {
     }
   }
   if (translateAllButton) {
-    translateAllButton.disabled = workspaceActionBusy || !hasSegments || !translationStatus.configured;
+    translateAllButton.disabled = taskBusy || !hasSegments || !translationStatus.configured;
   }
-  if (exportButton) exportButton.disabled = workspaceActionBusy || !hasSegments;
+  if (exportButton) exportButton.disabled = taskBusy || !hasSegments;
   if (renderVideoButton) {
     const inputPath = activeDetail?.job.input_path;
     renderVideoButton.disabled =
-      workspaceActionBusy || !hasSegments || !inputPath || !activeDetail?.playback_path || isAudioPath(inputPath);
+      taskBusy || !hasSegments || !inputPath || !activeDetail?.playback_path || isAudioPath(inputPath);
     renderVideoButton.title = inputPath && isAudioPath(inputPath)
       ? "音频任务不能烧录视频"
       : inputPath && !activeDetail?.playback_path
@@ -2028,18 +2039,19 @@ function updateTranslationControls(): void {
         : "";
   }
   if (revealExportButton) {
-    revealExportButton.disabled = workspaceActionBusy || !lastExportedSubtitlePath;
+    revealExportButton.disabled = taskBusy || !lastExportedSubtitlePath;
   }
   const previewButton = document.querySelector<HTMLButtonElement>("#preview-glossary");
   if (previewButton) {
-    previewButton.disabled = workspaceActionBusy || !hasSegments || !workspaceGlossary?.value;
+    previewButton.disabled = taskBusy || !hasSegments || !workspaceGlossary?.value;
   }
   subtitleList?.querySelectorAll<HTMLButtonElement>(".translate-segment").forEach((button) => {
-    button.disabled = workspaceActionBusy || !translationStatus.configured;
+    button.disabled = taskBusy || !translationStatus.configured;
   });
   subtitleList?.querySelectorAll<HTMLButtonElement>(".capture-glossary-term").forEach((button) => {
-    button.disabled = workspaceActionBusy || !workspaceGlossary?.value;
+    button.disabled = taskBusy || !workspaceGlossary?.value;
   });
+  if (relinkJobMediaButton) relinkJobMediaButton.disabled = taskBusy;
 }
 
 function setWorkspaceAction(message: string, isError = false): void {
@@ -2066,6 +2078,34 @@ function startWorkspaceElapsed(message: string): () => void {
   return () => {
     if (workspaceElapsedTimer !== null) window.clearInterval(workspaceElapsedTimer);
     workspaceElapsedTimer = null;
+  };
+}
+
+function renderActiveTaskTranslationActivity(): void {
+  const jobId = activeDetail?.job.job_id;
+  const activity = jobId ? taskTranslationActivities.get(jobId) : undefined;
+  if (!activity || currentArea !== "workspace") return;
+  setWorkspaceAction(
+    `${activity.message} · 已运行 ${formatElapsed((Date.now() - activity.startedAt) / 1_000)}`,
+  );
+}
+
+function startTaskTranslation(jobId: string, message: string): () => void {
+  const activity = { message, startedAt: Date.now() };
+  taskTranslationActivities.set(jobId, activity);
+  renderActiveTaskTranslationActivity();
+  updateTranslationControls();
+  if (taskTranslationElapsedTimer === null) {
+    taskTranslationElapsedTimer = window.setInterval(renderActiveTaskTranslationActivity, 1_000);
+  }
+  return () => {
+    if (taskTranslationActivities.get(jobId) !== activity) return;
+    taskTranslationActivities.delete(jobId);
+    if (taskTranslationActivities.size === 0 && taskTranslationElapsedTimer !== null) {
+      window.clearInterval(taskTranslationElapsedTimer);
+      taskTranslationElapsedTimer = null;
+    }
+    updateTranslationControls();
   };
 }
 
@@ -3671,6 +3711,7 @@ function renderWorkspace(detail: JobDetail): void {
   updateActiveSubtitle(0);
   renderSubtitleOverlayButton();
   updateTranslationControls();
+  renderActiveTaskTranslationActivity();
   void refreshVideoRenders();
 }
 
@@ -4131,33 +4172,50 @@ async function translateSegment(
   state: HTMLSpanElement,
 ): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
-  setWorkspaceBusy(true);
-  const stopElapsed = startWorkspaceElapsed(`正在保存并发送本段到 ${translationStatus.provider}`);
+  const jobId = activeDetail.job.job_id;
+  if (taskTranslationActivities.has(jobId)) return;
+  const stopElapsed = startTaskTranslation(jobId, `正在保存并发送本段到 ${translationStatus.provider}`);
   state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
   state.classList.remove("warning");
   try {
-    const saved = await persistSegment(segment.id, sourceInput.value, translationInput.value);
-    replaceActiveSegment(saved);
+    const saved = await invoke<SubtitleSegment>("update_subtitle", {
+      request: {
+        jobId,
+        segmentId: segment.id,
+        sourceText: sourceInput.value,
+        translatedText: translationInput.value.trim() || null,
+        startMs: segment.start_ms,
+        endMs: segment.end_ms,
+      },
+    });
+    if (activeDetail?.job.job_id === jobId) replaceActiveSegment(saved);
     const translated = await invoke<SubtitleSegment>("translate_subtitle", {
-      jobId: activeDetail.job.job_id,
+      jobId,
       segmentId: segment.id,
     });
-    replaceActiveSegment(translated);
-    renderSubtitleListPreservingView(activeDetail.segments, segment.id);
-    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    if (activeDetail?.job.job_id === jobId) {
+      replaceActiveSegment(translated);
+      renderSubtitleListPreservingView(activeDetail.segments, segment.id);
+      updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    }
     try {
-      await reloadTranslatedWorkspace(activeDetail.job.job_id);
-      setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并从 SQLite 重新读取。`);
+      await reloadTranslatedWorkspace(jobId);
+      if (activeDetail?.job.job_id === jobId) {
+        setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并从 SQLite 重新读取。`);
+      }
     } catch (reloadError) {
-      setWorkspaceAction(`翻译已经写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+      if (activeDetail?.job.job_id === jobId) {
+        setWorkspaceAction(`翻译已经写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+      }
     }
   } catch (error) {
-    state.textContent = `翻译失败：${String(error)}`;
-    state.classList.add("warning");
-    setWorkspaceAction(`翻译失败：${String(error)}`, true);
+    if (activeDetail?.job.job_id === jobId) {
+      state.textContent = `翻译失败：${String(error)}`;
+      state.classList.add("warning");
+      setWorkspaceAction(`翻译失败：${String(error)}`, true);
+    }
   } finally {
     stopElapsed();
-    setWorkspaceBusy(false);
   }
 }
 
@@ -4443,6 +4501,8 @@ function highlightSegment(segmentId: string | null): void {
 
 async function translateAllSubtitles(): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
+  const jobId = activeDetail.job.job_id;
+  if (taskTranslationActivities.has(jobId)) return;
   if (hasUnsavedSubtitleEdits()) {
     setWorkspaceAction("请先保存各段尚未保存的修改，再执行全部重译。", true);
     return;
@@ -4454,30 +4514,39 @@ async function translateAllSubtitles(): Promise<void> {
     danger: true,
   });
   if (!confirmed) return;
+  if (activeDetail?.job.job_id !== jobId || taskTranslationActivities.has(jobId)) return;
 
-  setWorkspaceBusy(true);
   const batchCount = Math.ceil(activeDetail.segments.length / 12);
-  const stopElapsed = startWorkspaceElapsed(
+  const segmentTotal = activeDetail.segments.length;
+  const stopElapsed = startTaskTranslation(
+    jobId,
     `正在通过 ${translationStatus.provider} 翻译 ${activeDetail.segments.length} 段字幕（${batchCount} 批）`,
   );
   try {
-    const jobId = activeDetail.job.job_id;
-    activeDetail.segments = await invoke<SubtitleSegment[]>("translate_all_subtitles", {
+    const translatedSegments = await invoke<SubtitleSegment[]>("translate_all_subtitles", {
       jobId,
     });
-    renderSubtitleListPreservingView(activeDetail.segments);
-    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    if (activeDetail?.job.job_id === jobId) {
+      activeDetail.segments = translatedSegments;
+      renderSubtitleListPreservingView(activeDetail.segments);
+      updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    }
     try {
       await reloadTranslatedWorkspace(jobId);
-      setWorkspaceAction(`已翻译 ${activeDetail.segments.length} 段，原子写入并从 SQLite 重新读取。`);
+      if (activeDetail?.job.job_id === jobId) {
+        setWorkspaceAction(`已翻译 ${segmentTotal} 段，原子写入并从 SQLite 重新读取。`);
+      }
     } catch (reloadError) {
-      setWorkspaceAction(`全部翻译已经原子写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+      if (activeDetail?.job.job_id === jobId) {
+        setWorkspaceAction(`全部翻译已经原子写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+      }
     }
   } catch (error) {
-    setWorkspaceAction(`全部翻译失败：${String(error)}`, true);
+    if (activeDetail?.job.job_id === jobId) {
+      setWorkspaceAction(`全部翻译失败：${String(error)}`, true);
+    }
   } finally {
     stopElapsed();
-    setWorkspaceBusy(false);
   }
 }
 

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::{self, OpenOptions},
     io,
     path::{Path, PathBuf},
@@ -92,7 +92,7 @@ pub enum LocalSubtitleExportArtifact {
 pub struct LocalWorkspaceService {
     database: LocalDatabase,
     translation_provider: Arc<dyn TranslationProvider>,
-    translation_lock: Arc<Mutex<()>>,
+    translation_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl LocalWorkspaceService {
@@ -107,7 +107,7 @@ impl LocalWorkspaceService {
         Self {
             database,
             translation_provider,
-            translation_lock: Arc::new(Mutex::new(())),
+            translation_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -299,7 +299,8 @@ impl LocalWorkspaceService {
         job_id: &str,
         segment_id: &str,
     ) -> Result<LocalSubtitleSegmentRecord> {
-        let _guard = self.translation_lock.lock().await;
+        let translation_lock = self.translation_lock_for_job(job_id).await;
+        let _guard = translation_lock.lock().await;
         let context_segments = self.database.list_segments(job_id).await?;
         let segment = context_segments
             .iter()
@@ -316,7 +317,8 @@ impl LocalWorkspaceService {
     }
 
     pub async fn translate_all(&self, job_id: &str) -> Result<Vec<LocalSubtitleSegmentRecord>> {
-        let _guard = self.translation_lock.lock().await;
+        let translation_lock = self.translation_lock_for_job(job_id).await;
+        let _guard = translation_lock.lock().await;
         let segments = self.database.list_segments(job_id).await?;
         if segments.is_empty() {
             return Err(anyhow!(
@@ -324,6 +326,15 @@ impl LocalWorkspaceService {
             ));
         }
         self.translate_records(job_id, &segments, &segments).await
+    }
+
+    async fn translation_lock_for_job(&self, job_id: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.translation_locks.lock().await;
+        Arc::clone(
+            locks
+                .entry(job_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
     }
 
     pub async fn export_subtitles(&self, job_id: &str) -> Result<LocalSubtitleExport> {
@@ -928,6 +939,12 @@ mod tests {
         omit_last_result: bool,
     }
 
+    #[derive(Debug, Clone)]
+    struct ConcurrentTranslationProvider {
+        active: Arc<std::sync::atomic::AtomicUsize>,
+        maximum_active: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
     impl FakeTranslationProvider {
         fn new(omit_last_result: bool) -> Self {
             Self {
@@ -971,6 +988,42 @@ mod tests {
                         input_tokens: Some(42),
                         output_tokens: Some(12),
                     },
+                })
+            })
+        }
+    }
+
+    impl TranslationProvider for ConcurrentTranslationProvider {
+        fn status(&self) -> TranslationProviderStatus {
+            TranslationProviderStatus {
+                id: "concurrent-fake".to_string(),
+                name: "Concurrent Fake".to_string(),
+                configured: true,
+                model: None,
+                endpoint_kind: "test".to_string(),
+                configuration_hint: None,
+            }
+        }
+
+        fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+            let active = Arc::clone(&self.active);
+            let maximum_active = Arc::clone(&self.maximum_active);
+            Box::pin(async move {
+                let now_active = active.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                maximum_active.fetch_max(now_active, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+                active.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(TranslationResponse {
+                    translations: request
+                        .targets
+                        .into_iter()
+                        .map(|target| TranslationResult {
+                            segment_id: target.segment_id,
+                            translated_text: format!("译：{}", target.source_text),
+                        })
+                        .collect(),
+                    model: None,
+                    usage: TranslationUsage::default(),
                 })
             })
         }
@@ -1112,6 +1165,63 @@ mod tests {
         assert_eq!(runs[0].segment_count, 2);
         assert_eq!(runs[0].input_tokens, Some(42));
         assert_eq!(runs[0].output_tokens, Some(12));
+
+        drop(service);
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn translations_for_different_tasks_can_run_concurrently() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-concurrent-translation-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let first_job = Job::create_in(&root).unwrap();
+        let second_job = Job::create_in(&root).unwrap();
+        let first_manifest = JobManifest::new(
+            &first_job,
+            None,
+            None,
+            LanguagePair::japanese_to_simplified_chinese(),
+        );
+        let second_manifest = JobManifest::new(
+            &second_job,
+            None,
+            None,
+            LanguagePair::japanese_to_simplified_chinese(),
+        );
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        for (manifest, text) in [
+            (&first_manifest, "第一任务"),
+            (&second_manifest, "第二任务"),
+        ] {
+            database
+                .sync_snapshot(&JobSnapshot {
+                    manifest: manifest.clone(),
+                    segments: vec![TranscriptSegment::new(0, 1_000, text.to_string())],
+                })
+                .await
+                .unwrap();
+        }
+        let maximum_active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Arc::new(ConcurrentTranslationProvider {
+            active: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            maximum_active: Arc::clone(&maximum_active),
+        });
+        let service = LocalWorkspaceService::with_provider(database.clone(), provider);
+
+        let (first, second) = tokio::join!(
+            service.translate_all(&first_manifest.job_id),
+            service.translate_all(&second_manifest.job_id),
+        );
+
+        first.unwrap();
+        second.unwrap();
+        assert_eq!(maximum_active.load(std::sync::atomic::Ordering::SeqCst), 2);
 
         drop(service);
         database.close().await;

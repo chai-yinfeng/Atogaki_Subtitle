@@ -915,7 +915,9 @@ mod tests {
                 .join("whisper-prompt.txt"),
         )
         .unwrap();
-        assert!(prompt.contains("ナブナ（表記: n-buna）"));
+        assert!(prompt.contains("n-buna"));
+        assert!(!prompt.contains("ナブナ"));
+        assert!(!prompt.contains("表記:"));
 
         drop(service);
         database.close().await;
