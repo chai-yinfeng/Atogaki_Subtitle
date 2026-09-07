@@ -65,7 +65,6 @@ type GlossaryPromptPreview = {
   selected_content_term_count: number;
   correction_only_count: number;
   included_prompt_term_count: number;
-  omitted_prompt_term_count: number;
   prompt_character_count: number;
   prompt: string | null;
 };
@@ -1961,10 +1960,7 @@ async function refreshTaskPromptPreview(): Promise<void> {
     });
     taskPromptPreview.textContent = preview.prompt || "当前选择不会向 Whisper 发送词表提示。";
     if (taskPromptSummary) {
-      const omitted = preview.omitted_prompt_term_count > 0
-        ? ` · 因长度省略 ${preview.omitted_prompt_term_count}`
-        : "";
-      taskPromptSummary.textContent = `核心 ${preview.core_term_count} · 已选内容 ${preview.selected_content_term_count} · 实际 prompt ${preview.included_prompt_term_count} 词／${preview.prompt_character_count} 字${omitted} · 仅修正 ${preview.correction_only_count}`;
+      taskPromptSummary.textContent = `核心 ${preview.core_term_count} · 已选内容 ${preview.selected_content_term_count} · prompt ${preview.included_prompt_term_count} 词／${preview.prompt_character_count} 字 · 仅修正 ${preview.correction_only_count}`;
     }
   } catch (error) {
     taskPromptPreview.textContent = `无法生成 prompt：${String(error)}`;

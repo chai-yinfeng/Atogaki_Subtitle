@@ -34,7 +34,6 @@ pub struct LocalGlossaryPromptPreview {
     pub selected_content_term_count: usize,
     pub correction_only_count: usize,
     pub included_prompt_term_count: usize,
-    pub omitted_prompt_term_count: usize,
     pub prompt_character_count: usize,
     pub prompt: Option<String>,
 }
@@ -285,9 +284,6 @@ fn prompt_preview_from_detail(
             .filter(|term| term.prompt_scope == "correction_only")
             .count(),
         included_prompt_term_count: glossary.whisper_prompt_term_count(),
-        omitted_prompt_term_count: glossary
-            .available_whisper_prompt_term_count()
-            .saturating_sub(glossary.whisper_prompt_term_count()),
         prompt_character_count: prompt
             .as_deref()
             .map(|text| text.chars().count())

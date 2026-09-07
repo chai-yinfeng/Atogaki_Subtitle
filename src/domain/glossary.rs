@@ -4,10 +4,6 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::{application::TranscriptionOptions, domain::TranscriptSegment};
 
-// whisper.cpp only keeps a limited initial-prompt context. Japanese text is
-// close enough to one token per character that a conservative character cap
-// prevents large optional packs from crowding out the highest-priority terms.
-const MAX_GENERATED_WHISPER_PROMPT_CHARS: usize = 210;
 const WHISPER_GLOSSARY_PREFIX: &str = "以下の固有名詞が出る可能性があります: ";
 const WHISPER_GLOSSARY_SUFFIX: &str = "。";
 
@@ -120,8 +116,7 @@ impl Glossary {
     }
 
     pub fn corrected_text(&self, text: &str) -> String {
-        let text = remove_legacy_prompt_metadata(text, &self.entries);
-        apply_replacements_to_text(&text, &self.replacements())
+        apply_replacements_to_text(text, &self.replacements())
     }
 
     pub fn whisper_prompt(&self, initial_prompt: Option<&str>) -> Option<String> {
@@ -142,10 +137,6 @@ impl Glossary {
 
     pub fn whisper_prompt_term_count(&self) -> usize {
         self.whisper_prompt_terms().len()
-    }
-
-    pub fn available_whisper_prompt_term_count(&self) -> usize {
-        self.canonical_whisper_prompt_terms().len()
     }
 
     /// Proper nouns selected for the Whisper prompt are also protected from
@@ -172,22 +163,6 @@ impl Glossary {
     }
 
     fn whisper_prompt_terms(&self) -> Vec<String> {
-        let mut character_count =
-            WHISPER_GLOSSARY_PREFIX.chars().count() + WHISPER_GLOSSARY_SUFFIX.chars().count();
-        let mut included = Vec::new();
-        for term in self.canonical_whisper_prompt_terms() {
-            let separator_count = usize::from(!included.is_empty());
-            let next_count = character_count + separator_count + term.chars().count();
-            if next_count > MAX_GENERATED_WHISPER_PROMPT_CHARS {
-                continue;
-            }
-            character_count = next_count;
-            included.push(term);
-        }
-        included
-    }
-
-    fn canonical_whisper_prompt_terms(&self) -> Vec<String> {
         let mut seen = HashSet::new();
         self.entries
             .iter()
@@ -239,10 +214,7 @@ fn apply_glossary_to_segments(
         .into_iter()
         .map(|mut segment| {
             let original_ja = segment.source_text.clone();
-            let without_prompt_metadata =
-                remove_legacy_prompt_metadata(&segment.source_text, &glossary.entries);
-            segment.source_text =
-                apply_replacements_to_text(&without_prompt_metadata, &replacements);
+            segment.source_text = apply_replacements_to_text(&segment.source_text, &replacements);
 
             if segment.source_text != original_ja {
                 report.changed_segments += 1;
@@ -262,21 +234,6 @@ fn apply_glossary_to_segments(
         .collect();
 
     (segments, report)
-}
-
-fn remove_legacy_prompt_metadata(text: &str, entries: &[GlossaryEntry]) -> String {
-    entries
-        .iter()
-        .filter_map(|entry| {
-            entry.target_text.as_ref().map(|target| {
-                [
-                    format!("{}（表記:", entry.source_text),
-                    format!("{target}（表記:"),
-                ]
-            })
-        })
-        .flatten()
-        .fold(text.to_string(), |text, marker| text.replace(&marker, ""))
 }
 
 fn load_from_options(options: &TranscriptionOptions) -> Result<Glossary> {
@@ -472,36 +429,6 @@ mod tests {
         assert!(!prompt.contains("表記:"));
 
         fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn generated_prompt_is_bounded_and_keeps_whole_terms() {
-        let glossary = Glossary::from_entries((0..100).map(|index| GlossaryEntry {
-            source_text: format!("固有名詞{index}"),
-            target_text: None,
-            include_in_prompt: true,
-        }))
-        .unwrap();
-
-        let prompt = glossary.whisper_prompt(None).unwrap();
-        assert!(prompt.chars().count() <= MAX_GENERATED_WHISPER_PROMPT_CHARS);
-        assert!(glossary.whisper_prompt_term_count() < 100);
-        assert!(prompt.ends_with('。'));
-    }
-
-    #[test]
-    fn removes_legacy_prompt_metadata_leakage_before_correction() {
-        let glossary = Glossary::from_entries([GlossaryEntry {
-            source_text: "やまおかゆり".to_string(),
-            target_text: Some("山岡ゆり".to_string()),
-            include_in_prompt: true,
-        }])
-        .unwrap();
-
-        assert_eq!(
-            glossary.corrected_text("やまおかゆり（表記: 今日は最終回です"),
-            " 今日は最終回です"
-        );
     }
 
     #[test]
