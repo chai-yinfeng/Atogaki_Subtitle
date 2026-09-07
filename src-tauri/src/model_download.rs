@@ -364,7 +364,7 @@ pub async fn test_download_network(
                 resolved_host: None,
                 status: None,
                 ok: false,
-                error: Some(error.to_string()),
+                error: Some(format!("{error}; {}", network.failure_guidance())),
             },
         });
     }

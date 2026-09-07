@@ -22,6 +22,7 @@ pub struct OpenAiCompatibleTranslationProvider {
     model: String,
     style_instruction: String,
     disable_deepseek_thinking: bool,
+    network_failure_guidance: String,
     client: Client,
 }
 
@@ -58,6 +59,7 @@ impl OpenAiCompatibleTranslationProvider {
             model,
             style_instruction: config.style_instruction.trim().to_string(),
             disable_deepseek_thinking: config.disable_deepseek_thinking,
+            network_failure_guidance: network.failure_guidance(),
             client,
         })
     }
@@ -96,7 +98,12 @@ impl OpenAiCompatibleTranslationProvider {
             .json(&body)
             .send()
             .await
-            .with_context(|| format!("failed to call {}", self.provider_name))?;
+            .with_context(|| {
+                format!(
+                    "failed to call {}; {}",
+                    self.provider_name, self.network_failure_guidance
+                )
+            })?;
         let status = response.status();
         let response_text = response
             .text()

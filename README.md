@@ -49,6 +49,8 @@ Whisper 模型建议：
 
 Finder 启动的 App 不会执行 `.zshrc`，因此终端中的 `proxy_on` 不一定传给它。透明/TUN 代理通常可以直接生效；使用本地 HTTP 代理端口时，请在 App 设置中填写，例如 `http://127.0.0.1:7897`。模型镜像失败后会回退 Hugging Face 官方源。
 
+自定义代理是显式的网络边界，Atogaki 不会在代理失效时静默绕过它。如果翻译错误包含 `tunnel error` 或 `Connection refused`，请启动对应代理、修正监听端口，或在设置中选择“直连”；错误信息会同时标出当前网络模式和可执行的处理方式。
+
 各 provider 的 API Key 在 macOS 按独立条目写入 Keychain，在 Windows 写入 Credential Manager；SQLite 只保存 provider、模型、端点、风格等非敏感设置及“曾成功保存 Key”的状态标记，任务目录也不会复制 Key。启动和普通设置加载不读取系统凭据；忘记是否保存过时，可切换到对应 provider 后点击“检查所选 Key”，它只确认系统凭据条目是否存在，不会回显 Key 或调用翻译 API。未来 Linux 版本使用 Secret Service。`DEEPL_AUTH_KEY` 和 `DEEPSEEK_API_KEY` 仅作为开发兼容回退。
 
 ## 基本使用

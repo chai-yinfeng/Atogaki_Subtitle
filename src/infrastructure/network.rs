@@ -64,6 +64,24 @@ impl NetworkClientConfig {
         self.custom_proxy_url.as_deref()
     }
 
+    pub fn failure_guidance(&self) -> String {
+        match self.proxy_mode {
+            NetworkProxyMode::Environment => concat!(
+                "network mode follows the app launch environment; verify its HTTP(S) proxy ",
+                "is running, or choose Direct in Settings"
+            )
+            .to_string(),
+            NetworkProxyMode::Direct => {
+                "network mode is Direct; verify that the service is reachable from this device"
+                    .to_string()
+            }
+            NetworkProxyMode::Custom => format!(
+                "network mode uses custom proxy {}; start that proxy, correct its address, or choose Direct in Settings",
+                self.custom_proxy_url.as_deref().unwrap_or("(missing)")
+            ),
+        }
+    }
+
     pub fn apply(&self, builder: ClientBuilder) -> Result<ClientBuilder> {
         match self.proxy_mode {
             NetworkProxyMode::Environment => Ok(builder),
@@ -145,6 +163,12 @@ mod tests {
         assert!(
             NetworkClientConfig::new("custom", Some("socks5://127.0.0.1:7897".to_string()))
                 .is_err()
+        );
+        assert!(
+            NetworkClientConfig::new("custom", Some("http://127.0.0.1:7897".to_string()))
+                .unwrap()
+                .failure_guidance()
+                .contains("start that proxy")
         );
     }
 

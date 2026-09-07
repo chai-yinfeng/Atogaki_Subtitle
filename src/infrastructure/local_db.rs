@@ -2533,6 +2533,10 @@ fn normalized_glossary_terms(
         .collect::<Result<Vec<_>>>()?;
     let correction_targets = terms
         .iter()
+        // A prompted correction already includes its canonical target in Whisper's
+        // prompt. Correction-only rules do not, so they must not suppress an
+        // explicit core/content spelling of that target.
+        .filter(|term| term.prompt_scope != "correction_only")
         .filter_map(|term| term.target_text.clone())
         .collect::<HashSet<_>>();
     terms.retain(|term| {

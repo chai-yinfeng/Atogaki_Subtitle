@@ -74,12 +74,27 @@ impl LocalGlossaryService {
     }
 
     pub async fn ensure_builtins(&self) -> Result<()> {
-        let source = include_str!("../../assets/glossaries/yorushika.txt");
-        let version = format!("sha256:{:x}", Sha256::digest(source.as_bytes()));
-        let terms = parse_builtin_glossary(source)?;
-        self.database
-            .ensure_builtin_glossary("Yorushika", "yorushika", &version, "ja", terms)
-            .await
+        for (name, builtin_key, source_language, source) in [
+            (
+                "Yorushika",
+                "yorushika",
+                "ja",
+                include_str!("../../assets/glossaries/yorushika.txt"),
+            ),
+            (
+                "Sound! Euphonium (English)",
+                "hibike-euphonium-en",
+                "en",
+                include_str!("../../assets/glossaries/hibike-euphonium-en.txt"),
+            ),
+        ] {
+            let version = format!("sha256:{:x}", Sha256::digest(source.as_bytes()));
+            let terms = parse_builtin_glossary(source)?;
+            self.database
+                .ensure_builtin_glossary(name, builtin_key, &version, source_language, terms)
+                .await?;
+        }
+        Ok(())
     }
 
     pub async fn list(&self) -> Result<Vec<LocalGlossaryRecord>> {
@@ -500,7 +515,13 @@ mod tests {
             .unwrap();
         let service = LocalGlossaryService::new(database.clone());
         service.ensure_builtins().await.unwrap();
-        let glossary = service.list().await.unwrap().remove(0);
+        let glossary = service
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|glossary| glossary.builtin_key.as_deref() == Some("yorushika"))
+            .unwrap();
 
         assert_eq!(glossary.core_term_count, 12);
         assert_eq!(glossary.content_term_count, 129);
@@ -520,6 +541,60 @@ mod tests {
         assert!(detail.terms.iter().any(|term| {
             term.source_text == "盗作" && term.content_group.as_deref() == Some("盗作")
         }));
+
+        drop(service);
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn hibike_euphonium_builtin_is_scoped_to_english_commentary() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-hibike-euphonium-glossary-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let service = LocalGlossaryService::new(database.clone());
+        service.ensure_builtins().await.unwrap();
+        let glossary = service
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|glossary| glossary.builtin_key.as_deref() == Some("hibike-euphonium-en"))
+            .unwrap();
+
+        assert_eq!(glossary.source_language, "en");
+        assert_eq!(glossary.core_term_count, 18);
+        assert_eq!(glossary.content_group_count, 5);
+        assert_eq!(glossary.correction_only_count, 4);
+        let detail = service.get(&glossary.id).await.unwrap();
+        let resolved = glossary_for_task(&detail, &[]).unwrap();
+        assert_eq!(
+            resolved.corrected_text("The U4 part carries the melody."),
+            "The Eupho part carries the melody."
+        );
+        let prompt = service
+            .prompt_preview(&detail.glossary.id, &[])
+            .await
+            .unwrap()
+            .prompt
+            .unwrap();
+        assert!(prompt.contains("Hibike! Euphonium"));
+        assert!(prompt.contains("Kumiko Oumae"));
+        assert!(!prompt.contains("Mayu Kuroe"));
+        assert!(!prompt.contains("U4"));
+
+        let third_season = glossary_for_task(&detail, &["Third season".to_string()]).unwrap();
+        assert!(
+            third_season
+                .whisper_prompt(None)
+                .unwrap()
+                .contains("Mayu Kuroe")
+        );
 
         drop(service);
         database.close().await;

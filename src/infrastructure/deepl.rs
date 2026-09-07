@@ -16,6 +16,7 @@ use crate::{
 #[derive(Clone)]
 pub struct DeepLTranslationProvider {
     auth_key: Option<String>,
+    network_failure_guidance: String,
     client: Client,
 }
 
@@ -35,6 +36,7 @@ impl DeepLTranslationProvider {
             .context("failed to build DeepL client")?;
         Ok(Self {
             auth_key: auth_key.filter(|key| !key.trim().is_empty()),
+            network_failure_guidance: network.failure_guidance(),
             client,
         })
     }
@@ -84,7 +86,8 @@ impl TranslationProvider for DeepLTranslationProvider {
                 &texts,
                 context.as_deref(),
             )
-            .await?;
+            .await
+            .with_context(|| self.network_failure_guidance.clone())?;
             Ok(TranslationResponse {
                 translations: request
                     .targets
