@@ -59,5 +59,15 @@ DESTINATION="$ARTIFACT_DIR/Atogaki-${VERSION}-${COMMIT}-macos-arm64.dmg"
 cp "$SOURCE_DMG" "$DESTINATION"
 shasum -a 256 "$DESTINATION" > "$DESTINATION.sha256"
 
+# Local test installers are replaceable build artifacts. Only prune the exact
+# Atogaki macOS naming scheme, and only after the new DMG passed verification
+# and its checksum was written successfully.
+for OLD_DMG in "$ARTIFACT_DIR"/Atogaki-*-macos-arm64.dmg(N); do
+  if [[ "$OLD_DMG" != "$DESTINATION" ]]; then
+    rm "$OLD_DMG"
+    [[ ! -f "$OLD_DMG.sha256" ]] || rm "$OLD_DMG.sha256"
+  fi
+done
+
 print "Local test DMG: $DESTINATION"
 print "SHA-256: $(cut -d ' ' -f 1 "$DESTINATION.sha256")"
