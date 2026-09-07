@@ -82,10 +82,10 @@ impl LocalGlossaryService {
                 include_str!("../../assets/glossaries/yorushika.txt"),
             ),
             (
-                "Sound! Euphonium (English)",
-                "hibike-euphonium-en",
-                "en",
-                include_str!("../../assets/glossaries/hibike-euphonium-en.txt"),
+                "響け！ユーフォニアム",
+                "hibike-euphonium-ja",
+                "ja",
+                include_str!("../../assets/glossaries/hibike-euphonium-ja.txt"),
             ),
         ] {
             let version = format!("sha256:{:x}", Sha256::digest(source.as_bytes()));
@@ -549,7 +549,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hibike_euphonium_builtin_is_scoped_to_english_commentary() {
+    async fn hibike_euphonium_builtin_is_scoped_to_japanese_commentary() {
         let root = std::env::temp_dir().join(format!(
             "atogaki-hibike-euphonium-glossary-test-{}",
             uuid::Uuid::new_v4()
@@ -564,18 +564,22 @@ mod tests {
             .await
             .unwrap()
             .into_iter()
-            .find(|glossary| glossary.builtin_key.as_deref() == Some("hibike-euphonium-en"))
+            .find(|glossary| glossary.builtin_key.as_deref() == Some("hibike-euphonium-ja"))
             .unwrap();
 
-        assert_eq!(glossary.source_language, "en");
-        assert_eq!(glossary.core_term_count, 18);
-        assert_eq!(glossary.content_group_count, 5);
-        assert_eq!(glossary.correction_only_count, 4);
+        assert_eq!(glossary.source_language, "ja");
+        assert!(glossary.core_term_count >= 20);
+        assert_eq!(glossary.content_group_count, 6);
+        assert_eq!(glossary.correction_only_count, 10);
         let detail = service.get(&glossary.id).await.unwrap();
         let resolved = glossary_for_task(&detail, &[]).unwrap();
         assert_eq!(
-            resolved.corrected_text("The U4 part carries the melody."),
-            "The Eupho part carries the melody."
+            resolved.corrected_text("久美子のU4が聞こえる。"),
+            "久美子のユーフォが聞こえる。"
+        );
+        assert_eq!(
+            resolved.corrected_text("euphoniumとeupho"),
+            "ユーフォニアムとユーフォ"
         );
         let prompt = service
             .prompt_preview(&detail.glossary.id, &[])
@@ -583,17 +587,17 @@ mod tests {
             .unwrap()
             .prompt
             .unwrap();
-        assert!(prompt.contains("Hibike! Euphonium"));
-        assert!(prompt.contains("Kumiko Oumae"));
-        assert!(!prompt.contains("Mayu Kuroe"));
+        assert!(prompt.contains("響け！ユーフォニアム"));
+        assert!(prompt.contains("おうまえくみこ（表記: 黄前久美子）"));
+        assert!(!prompt.contains("黒江真由"));
         assert!(!prompt.contains("U4"));
 
-        let third_season = glossary_for_task(&detail, &["Third season".to_string()]).unwrap();
+        let third_season = glossary_for_task(&detail, &["三期キャラクター".to_string()]).unwrap();
         assert!(
             third_season
                 .whisper_prompt(None)
                 .unwrap()
-                .contains("Mayu Kuroe")
+                .contains("くろえまゆ（表記: 黒江真由）")
         );
 
         drop(service);

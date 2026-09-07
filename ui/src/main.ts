@@ -956,7 +956,7 @@ app.innerHTML = `
               <input id="settings-model-mirror" inputmode="url" placeholder="https://hf-mirror.com" />
             </label>
           </div>
-          <div class="network-test-row"><button id="test-network" type="button" class="secondary">测试当前网络配置</button><span>该代理也用于云端翻译；若显示连接被拒绝，请启动代理、改正端口或切换为直连。下载会自动保存当前配置。</span></div>
+          <div class="network-test-row"><button id="test-network" type="button" class="secondary">测试当前网络配置</button><span>测试只检查当前输入，不会切换或保存模式；修改后请点击“保存配置”。该代理也用于云端翻译。</span></div>
           <div id="network-test-results" class="network-test-results" role="status"></div>
           <div id="model-catalog" class="model-catalog"></div>
           <p id="model-download-message" class="settings-message" role="status"></p>
