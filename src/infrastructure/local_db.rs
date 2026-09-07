@@ -2190,6 +2190,101 @@ impl LocalDatabase {
         Ok(())
     }
 
+    /// Replaces exactly the subtitle blocks fully contained in a user-selected
+    /// range. The expected snapshot makes preview confirmation fail safely if
+    /// another edit happened while the preview was open.
+    pub async fn replace_segment_range(
+        &self,
+        job_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+        expected_segments: &[LocalSubtitleSegmentRecord],
+        candidates: &[TranscriptSegment],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        if start_ms < 0 || end_ms <= start_ms {
+            return Err(anyhow!("invalid retranscription range"));
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin selected-range replacement transaction")?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let current = list_segments_in_transaction(&mut tx, job_id).await?;
+        let affected = current
+            .iter()
+            .filter(|segment| segment.start_ms < end_ms && segment.end_ms > start_ms)
+            .cloned()
+            .collect::<Vec<_>>();
+        if affected != expected_segments {
+            return Err(anyhow!(
+                "subtitles changed while the retranscription preview was open"
+            ));
+        }
+        if affected
+            .iter()
+            .any(|segment| segment.start_ms < start_ms || segment.end_ms > end_ms)
+        {
+            return Err(anyhow!(
+                "selected range cuts through an existing subtitle; align or expand the range first"
+            ));
+        }
+
+        let mut replacements = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            let candidate_start = to_i64(candidate.start_ms, "candidate start")?;
+            let candidate_end = to_i64(candidate.end_ms, "candidate end")?;
+            if candidate_start < start_ms
+                || candidate_end > end_ms
+                || candidate_end <= candidate_start
+            {
+                return Err(anyhow!(
+                    "retranscription candidate is outside the selected range"
+                ));
+            }
+            replacements.push(LocalSubtitleSegmentRecord {
+                id: candidate.id.clone(),
+                job_id: job_id.to_string(),
+                segment_index: 0,
+                start_ms: candidate_start,
+                end_ms: candidate_end,
+                source_text: candidate.source_text.clone(),
+                translated_text: None,
+                source_edited: false,
+                translation_edited: false,
+                translation_stale: false,
+                timing_edited: false,
+            });
+        }
+        replacements.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
+        if replacements
+            .windows(2)
+            .any(|pair| pair[0].end_ms > pair[1].start_ms)
+        {
+            return Err(anyhow!("retranscription candidates overlap on one track"));
+        }
+
+        let mut updated = current
+            .into_iter()
+            .filter(|segment| segment.end_ms <= start_ms || segment.start_ms >= end_ms)
+            .collect::<Vec<_>>();
+        updated.extend(replacements);
+        updated.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
+        if updated
+            .windows(2)
+            .any(|pair| pair[0].end_ms > pair[1].start_ms)
+        {
+            return Err(anyhow!(
+                "selected-range replacement would overlap an adjacent subtitle"
+            ));
+        }
+        persist_structure_segments(&mut tx, job_id, &mut updated).await?;
+        tx.commit()
+            .await
+            .context("failed to commit selected-range replacement")?;
+        Ok(updated)
+    }
+
     async fn merge_snapshot_segments_in_transaction(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -3512,6 +3607,58 @@ mod tests {
         assert_eq!(custom_copy.glossary.name, "Yorushika（自定义）");
         let unchanged_builtin = database.get_glossary(&builtin.id).await.unwrap().unwrap();
         assert_eq!(unchanged_builtin.terms[0].source_text, "新版内置项");
+
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn selected_range_replacement_is_atomic_and_preserves_outside_segments() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-range-replacement-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        let first = TranscriptSegment::new(0, 1_000, "前".to_string());
+        let middle = TranscriptSegment::new(1_000, 2_000, "循环".to_string());
+        let last = TranscriptSegment::new(2_000, 3_000, "后".to_string());
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest,
+                segments: vec![first.clone(), middle, last.clone()],
+            })
+            .await
+            .unwrap();
+        let original = database.list_segments(job.id().as_str()).await.unwrap();
+        let affected = vec![original[1].clone()];
+        let candidates = vec![
+            TranscriptSegment::new(1_000, 1_450, "新的".to_string()),
+            TranscriptSegment::new(1_450, 2_000, "识别".to_string()),
+        ];
+
+        let updated = database
+            .replace_segment_range(job.id().as_str(), 1_000, 2_000, &affected, &candidates)
+            .await
+            .unwrap();
+        assert_eq!(updated.len(), 4);
+        assert_eq!(updated[0].id, first.id);
+        assert_eq!(updated[1].source_text, "新的");
+        assert_eq!(updated[2].source_text, "识别");
+        assert_eq!(updated[3].id, last.id);
+        assert!(updated[1].translated_text.is_none());
+
+        let stale_preview = database
+            .replace_segment_range(job.id().as_str(), 1_000, 2_000, &affected, &candidates)
+            .await
+            .unwrap_err();
+        assert!(stale_preview.to_string().contains("preview was open"));
 
         database.close().await;
         drop(database);

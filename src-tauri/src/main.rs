@@ -17,7 +17,8 @@ use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
         LocalGlossaryService, LocalGlossaryTermDraft, LocalLearningService, LocalRenderRequest,
-        LocalRenderService, LocalSubtitleExport, LocalSubtitleExportArtifact,
+        LocalRenderService, LocalRetranscriptionPreview, LocalRetranscriptionService,
+        LocalSubtitleExport, LocalSubtitleExportArtifact,
         LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
         MutableTranslationProvider, SubtitleFontFamily, SubtitleFontService, SubtitleStylePreview,
         SubtitleStyleService, SubtitleStyleState, TranscriptionOptions,
@@ -63,6 +64,7 @@ struct DesktopState {
     glossary_service: LocalGlossaryService,
     learning_service: LocalLearningService,
     render_service: LocalRenderService,
+    retranscription_service: LocalRetranscriptionService,
     subtitle_style_service: SubtitleStyleService,
     settings_service: DesktopSettingsService,
     model_download_service: ModelDownloadService,
@@ -463,6 +465,21 @@ struct WaveformWindowRequest {
     start_ms: i64,
     end_ms: i64,
     point_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewRetranscriptionRequest {
+    job_id: String,
+    start_ms: i64,
+    end_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfirmRetranscriptionRequest {
+    job_id: String,
+    preview_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1145,6 +1162,30 @@ async fn get_waveform_window(
 }
 
 #[tauri::command]
+async fn preview_retranscription(
+    state: State<'_, DesktopState>,
+    request: PreviewRetranscriptionRequest,
+) -> Result<LocalRetranscriptionPreview, String> {
+    state
+        .retranscription_service
+        .preview(&request.job_id, request.start_ms, request.end_ms)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn confirm_retranscription(
+    state: State<'_, DesktopState>,
+    request: ConfirmRetranscriptionRequest,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .retranscription_service
+        .confirm(&request.job_id, &request.preview_id)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
 async fn save_subtitle_styles(
     state: State<'_, DesktopState>,
     request: SaveSubtitleStylesRequest,
@@ -1716,6 +1757,11 @@ fn main() {
                 database.clone(),
                 workspace_service.clone(),
             ))?;
+            let retranscription_service = LocalRetranscriptionService::new(
+                config.ffmpeg.clone(),
+                config.whisper_cli.clone(),
+                database.clone(),
+            );
             let subtitle_style_service = SubtitleStyleService::new(
                 config.ffmpeg.clone(),
                 workspace_service.clone(),
@@ -1739,6 +1785,7 @@ fn main() {
                 glossary_service,
                 learning_service,
                 render_service,
+                retranscription_service,
                 subtitle_style_service,
                 settings_service,
                 model_download_service,
@@ -1798,6 +1845,8 @@ fn main() {
             get_playback_position,
             get_subtitle_style_state,
             get_waveform_window,
+            preview_retranscription,
+            confirm_retranscription,
             list_glossaries,
             list_jobs,
             list_learning_items,

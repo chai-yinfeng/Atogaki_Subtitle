@@ -257,6 +257,12 @@ pub struct WhisperArgs {
     #[arg(long, default_value_t = 0.30)]
     pub no_speech_threshold: f32,
 
+    #[arg(
+        long,
+        help = "Whisper text context token limit; 0 isolates decoding windows"
+    )]
+    pub max_context: Option<u32>,
+
     #[arg(long, action = ArgAction::SetTrue)]
     pub output_json_full: bool,
 
@@ -284,6 +290,7 @@ impl From<WhisperArgs> for TranscriptionOptions {
             max_len: args.max_len,
             split_on_word: args.split_on_word,
             no_speech_threshold: args.no_speech_threshold,
+            max_context: args.max_context,
             output_json_full: args.output_json_full,
             no_gpu: args.no_gpu,
         }

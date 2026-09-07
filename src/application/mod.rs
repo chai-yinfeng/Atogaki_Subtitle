@@ -6,6 +6,7 @@ pub mod job_status;
 pub mod local_glossary_service;
 pub mod local_learning_service;
 pub mod local_render_service;
+pub mod local_retranscription_service;
 pub mod local_task_service;
 pub mod local_workspace_service;
 pub mod subtitle_font_service;
@@ -22,6 +23,7 @@ pub use local_glossary_service::{
 };
 pub use local_learning_service::LocalLearningService;
 pub use local_render_service::{LocalRenderRequest, LocalRenderService};
+pub use local_retranscription_service::{LocalRetranscriptionPreview, LocalRetranscriptionService};
 pub use local_task_service::LocalTaskService;
 pub use local_workspace_service::{
     LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,

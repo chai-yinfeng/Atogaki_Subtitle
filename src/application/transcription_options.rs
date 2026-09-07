@@ -24,6 +24,11 @@ pub struct TranscriptionOptions {
     pub max_len: u32,
     pub split_on_word: bool,
     pub no_speech_threshold: f32,
+    /// Maximum number of previous text tokens Whisper may carry into the next
+    /// decoding window. `None` keeps whisper.cpp's default; `Some(0)` makes an
+    /// explicitly isolated pass for repairing a selected range.
+    #[serde(default)]
+    pub max_context: Option<u32>,
     pub output_json_full: bool,
     pub no_gpu: bool,
 }
@@ -44,6 +49,7 @@ impl TranscriptionOptions {
             max_len: 32,
             split_on_word: true,
             no_speech_threshold: 0.30,
+            max_context: None,
             output_json_full: false,
             no_gpu: false,
         }

@@ -354,6 +354,47 @@ pub async fn extract_wav(ffmpeg: &Path, input: &Path, output: &Path) -> Result<P
     Ok(output.to_path_buf())
 }
 
+/// Copies an exact millisecond range from an already normalized task WAV.
+/// The selected boundaries are never expanded or shortened implicitly.
+pub async fn extract_wav_range(
+    ffmpeg: &Path,
+    input: &Path,
+    output: &Path,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<PathBuf> {
+    if !input.is_file() {
+        anyhow::bail!("input audio does not exist: {}", input.display());
+    }
+    if end_ms <= start_ms {
+        anyhow::bail!("audio range end must be after start");
+    }
+
+    let mut cmd = sidecar_command(ffmpeg);
+    cmd.args([
+        "-y",
+        "-ss",
+        &format!("{:.3}", start_ms as f64 / 1_000.0),
+        "-i",
+    ]);
+    cmd.arg(input);
+    cmd.args([
+        "-t",
+        &format!("{:.3}", (end_ms - start_ms) as f64 / 1_000.0),
+        "-vn",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-c:a",
+        "pcm_s16le",
+    ]);
+    cmd.arg(output);
+
+    run_checked(cmd, "ffmpeg extract selected wav range").await?;
+    Ok(output.to_path_buf())
+}
+
 pub async fn render_subtitles(
     ffmpeg: &Path,
     input: &Path,

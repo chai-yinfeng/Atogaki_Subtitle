@@ -155,6 +155,10 @@ fn build_args(
         args.push("-ml".into());
         args.push(options.max_len.to_string().into());
     }
+    if let Some(max_context) = options.max_context {
+        args.push("--max-context".into());
+        args.push(max_context.to_string().into());
+    }
     if options.split_on_word {
         args.push("-sow".into());
     }
@@ -329,5 +333,23 @@ mod tests {
         let args = string_args(LanguageCode::English, false);
 
         assert!(args.windows(2).any(|pair| pair == ["-l", "en"]));
+    }
+
+    #[test]
+    fn isolated_range_explicitly_disables_text_context() {
+        let mut options = TranscriptionOptions::new("model.bin".into(), LanguageCode::Japanese);
+        options.max_context = Some(0);
+        let args = build_args(
+            &options,
+            Path::new("selected.wav"),
+            Path::new("preview"),
+            None,
+            false,
+        )
+        .into_iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+        assert!(args.windows(2).any(|pair| pair == ["--max-context", "0"]));
     }
 }

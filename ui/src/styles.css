@@ -199,6 +199,16 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .waveform-navigation button.active { border-color: #8c4d3e; color: #fffaf1; background: #8c4d3e; }
 .waveform-status { margin: 8px 0; color: #74776f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
 .karaoke-waveform { width: 100%; height: 260px; display: block; border: 1px solid #d6d0c3; border-radius: 10px; cursor: crosshair; touch-action: none; }
+.retranscription-range { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(155px, .35fr) minmax(155px, .35fr); align-items: end; gap: 10px 14px; margin-top: 13px; border-top: 1px solid #ded7c9; padding-top: 13px; }
+.retranscription-range h4, .retranscription-range p { margin: 0; }
+.retranscription-range h4 { font-family: Georgia, "Songti SC", serif; font-size: 18px; font-weight: 500; }
+.retranscription-range > div:first-child p:last-child { color: #74776f; font-size: 10px; line-height: 1.5; }
+.retranscription-range label { display: grid; gap: 5px; color: #62655e; font-size: 10px; font-weight: 700; }
+.retranscription-range input { width: 100%; border: 1px solid #d3ccbd; border-radius: 8px; padding: 8px; color: #30332d; background: #fffdf7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.retranscription-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.retranscription-actions button { padding: 7px 10px; font-size: 10px; }
+.retranscription-range > .media-message { grid-column: 1 / -1; color: #74776f; font-size: 10px; }
+.retranscription-range > .media-message.warning { color: #b34b36; }
 .karaoke-current-segment { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .4fr); align-items: start; gap: 16px; border: 1px solid #d8d0c1; border-radius: 12px; padding: 14px; background: #f8f5ec; }
 .karaoke-current-segment > div { min-width: 0; display: grid; gap: 6px; }
 .karaoke-current-segment span { color: #8c4d3e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
@@ -443,6 +453,15 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .dialog-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
 .dialog-heading h2 { margin-bottom: 0; }
 .dialog-help { color: #6f716a; font-size: 13px; line-height: 1.6; }
+.retranscription-dialog { width: min(980px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.retranscription-comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.retranscription-comparison > section { min-width: 0; border: 1px solid #d8d0c1; border-radius: 10px; padding: 12px; background: #fffdf7; }
+.retranscription-comparison h3 { margin: 0 0 10px; font-size: 15px; }
+.retranscription-list { max-height: 46vh; display: grid; gap: 7px; overflow-y: auto; }
+.retranscription-list article { border-bottom: 1px solid #e3dccf; padding-bottom: 7px; }
+.retranscription-list article:last-child { border-bottom: 0; }
+.retranscription-list span { color: #8c4d3e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.retranscription-list p { margin: 3px 0 0; color: #30332d; font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
 .glossary-manager { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 18px; min-height: 440px; }
 .glossary-manager aside { display: grid; align-content: start; gap: 12px; border-right: 1px solid #d8d0c1; padding-right: 16px; }
 .glossary-list { display: grid; gap: 7px; }
@@ -472,6 +491,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
   .listening-library { position: static; }
   .karaoke-player-strip { grid-template-columns: 1fr; }
   .karaoke-current-segment { grid-template-columns: 1fr; }
+  .retranscription-range, .retranscription-comparison { grid-template-columns: 1fr; }
   .review-grid { grid-template-columns: 1fr; }
   .media-panel { position: static; }
   .subtitle-list { max-height: none; overflow: visible; }

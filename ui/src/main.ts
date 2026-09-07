@@ -106,6 +106,26 @@ type SubtitleSegment = {
   timing_edited: boolean;
 };
 
+type RetranscriptionCandidate = {
+  id: string;
+  start_ms: number;
+  end_ms: number;
+  source_text: string;
+  translated_text: string | null;
+  source_edited: boolean;
+  translation_stale: boolean;
+};
+
+type RetranscriptionPreview = {
+  preview_id: string;
+  job_id: string;
+  start_ms: number;
+  end_ms: number;
+  original_segments: SubtitleSegment[];
+  candidate_segments: RetranscriptionCandidate[];
+  context_mode: "isolated";
+};
+
 type SubtitleUndoEntry = {
   before: SubtitleSegment;
   afterFingerprint: string;
@@ -649,6 +669,13 @@ app.innerHTML = `
             </div>
             <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。拖动字幕块可移动，拖动左右边缘可单独修剪；空白合法，同轨不能重叠。</div>
             <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="可点击定位的声音波形与字幕时间轴"></canvas>
+            <div class="retranscription-range" aria-labelledby="retranscription-heading">
+              <div><p class="eyebrow">RECOGNIZE SELECTED RANGE</p><h4 id="retranscription-heading">局部重新识别</h4><p>只识别明确填写的范围，并隔离前文识别上下文。生成候选后不会自动覆盖字幕。</p></div>
+              <label>开始<input id="retranscription-start" inputmode="decimal" placeholder="00:49:00.000" /></label>
+              <label>结束<input id="retranscription-end" inputmode="decimal" placeholder="00:55:00.000" /></label>
+              <div class="retranscription-actions"><button id="retranscription-use-window" type="button" class="secondary">使用当前可视范围</button><button id="retranscription-expand-segments" type="button" class="secondary">扩展到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
+              <p id="retranscription-message" class="media-message">范围边界不能切穿已有字幕块；需要时请显式扩展。</p>
+            </div>
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
             <div class="karaoke-text-editor"><span id="karaoke-segment-time">当前没有字幕</span><label>原文<textarea id="karaoke-current-source" rows="3" placeholder="当前时间没有原文字幕" disabled></textarea></label><label>译文<textarea id="karaoke-current-translation" rows="3" placeholder="尚无译文" disabled></textarea></label></div>
@@ -848,6 +875,20 @@ app.innerHTML = `
           <button id="accept-confirmation" type="submit">继续</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="retranscription-dialog" class="retranscription-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">RETRANSCRIPTION PREVIEW</p><h2>局部识别候选</h2></div>
+        <button id="close-retranscription-preview" type="button" class="secondary">关闭</button>
+      </div>
+      <p id="retranscription-preview-summary" class="dialog-help"></p>
+      <div class="retranscription-comparison">
+        <section><h3>当前字幕</h3><div id="retranscription-original-list" class="retranscription-list"></div></section>
+        <section><h3>新识别候选</h3><div id="retranscription-candidate-list" class="retranscription-list"></div></section>
+      </div>
+      <p>确认后只替换所示范围；新字幕没有译文，需要重新翻译。范围外字幕和人工修改保持不变。</p>
+      <div class="confirmation-actions"><button id="cancel-retranscription" type="button" class="secondary">保留当前字幕</button><button id="confirm-retranscription" type="button">用候选替换</button></div>
+      <p id="retranscription-confirm-message" role="status"></p>
     </dialog>
     <dialog id="glossary-correction-dialog" class="rename-job-dialog glossary-correction-dialog">
       <form id="glossary-correction-form">
@@ -1058,6 +1099,12 @@ const karaokeUndoTextButton = document.querySelector<HTMLButtonElement>("#karaok
 const karaokeCutSegmentButton = document.querySelector<HTMLButtonElement>("#karaoke-cut-segment");
 const karaokeJoinSegmentButton = document.querySelector<HTMLButtonElement>("#karaoke-join-segment");
 const karaokeTimingMessage = document.querySelector<HTMLParagraphElement>("#karaoke-timing-message");
+const retranscriptionStartInput = document.querySelector<HTMLInputElement>("#retranscription-start");
+const retranscriptionEndInput = document.querySelector<HTMLInputElement>("#retranscription-end");
+const retranscriptionUseWindowButton = document.querySelector<HTMLButtonElement>("#retranscription-use-window");
+const retranscriptionExpandSegmentsButton = document.querySelector<HTMLButtonElement>("#retranscription-expand-segments");
+const previewRetranscriptionButton = document.querySelector<HTMLButtonElement>("#preview-retranscription");
+const retranscriptionMessage = document.querySelector<HTMLParagraphElement>("#retranscription-message");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
 const sourceLanguage = document.querySelector<HTMLSelectElement>("#source-language");
@@ -1143,6 +1190,12 @@ const renameJobForm = document.querySelector<HTMLFormElement>("#rename-job-form"
 const renameJobInput = document.querySelector<HTMLInputElement>("#rename-job-input");
 const renameJobMessage = document.querySelector<HTMLSpanElement>("#rename-job-message");
 const confirmationDialog = document.querySelector<HTMLDialogElement>("#confirmation-dialog");
+const retranscriptionDialog = document.querySelector<HTMLDialogElement>("#retranscription-dialog");
+const retranscriptionPreviewSummary = document.querySelector<HTMLParagraphElement>("#retranscription-preview-summary");
+const retranscriptionOriginalList = document.querySelector<HTMLDivElement>("#retranscription-original-list");
+const retranscriptionCandidateList = document.querySelector<HTMLDivElement>("#retranscription-candidate-list");
+const retranscriptionConfirmMessage = document.querySelector<HTMLParagraphElement>("#retranscription-confirm-message");
+const confirmRetranscriptionButton = document.querySelector<HTMLButtonElement>("#confirm-retranscription");
 const confirmationForm = document.querySelector<HTMLFormElement>("#confirmation-form");
 const confirmationTitle = document.querySelector<HTMLHeadingElement>("#confirmation-title");
 const confirmationMessage = document.querySelector<HTMLParagraphElement>("#confirmation-message");
@@ -1276,6 +1329,8 @@ let karaokePendingWaveformStartMs = 0;
 let karaokeGestureStart: { durationMs: number; anchorMs: number; ratio: number } | null = null;
 let karaokeTextDraftSegmentId: string | null = null;
 let karaokeTextDraftDirty = false;
+let activeRetranscriptionPreview: RetranscriptionPreview | null = null;
+let retranscriptionBusy = false;
 let currentWorkspaceSection: WorkspaceSection = "translation";
 type SubtitleFollowState = { userScrollingUntil: number; autoScrollingUntil: number; resumeTimer: number | null };
 const subtitleFollowStates = new WeakMap<HTMLElement, SubtitleFollowState>();
@@ -3044,6 +3099,9 @@ async function openKaraokeJob(jobId: string): Promise<void> {
   karaokeTextDraftDirty = false;
   karaokeViewStartMs = 0;
   karaokeFollowPlayhead = true;
+  activeRetranscriptionPreview = null;
+  if (retranscriptionStartInput) retranscriptionStartInput.value = "";
+  if (retranscriptionEndInput) retranscriptionEndInput.value = "";
   syncKaraokeFollowButton();
   renderKaraokeTimeline();
   karaokeMediaMessage.textContent = "正在读取字幕编辑任务…";
@@ -3060,10 +3118,141 @@ async function openKaraokeJob(jobId: string): Promise<void> {
     updateStructureUndoButton();
     setSubtitleEditAction("拖动字幕块可整体移动，拖动左右边缘可单独修剪；按 10 ms 吸附，空白合法，同轨不能重叠。");
     await loadKaraokeWaveform(karaokeResumeMs, true);
+    useVisibleWindowForRetranscription();
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
     karaokeMediaMessage.textContent = `无法打开字幕编辑任务：${String(error)}`;
     if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "波形不可用。";
+  }
+}
+
+function setRetranscriptionMessage(message: string, isError = false): void {
+  if (!retranscriptionMessage) return;
+  retranscriptionMessage.textContent = message;
+  retranscriptionMessage.classList.toggle("warning", isError);
+}
+
+function useVisibleWindowForRetranscription(): void {
+  if (!karaokeWaveformWindow || !retranscriptionStartInput || !retranscriptionEndInput) return;
+  retranscriptionStartInput.value = formatPreciseTime(karaokeWaveformWindow.start_ms);
+  retranscriptionEndInput.value = formatPreciseTime(karaokeWaveformWindow.end_ms);
+  setRetranscriptionMessage("已填写当前可视范围；若边界穿过字幕，请显式扩展到完整字幕块。");
+}
+
+function retranscriptionRange(): { startMs: number; endMs: number } | null {
+  const startMs = parseTimecode(retranscriptionStartInput?.value ?? "");
+  const endMs = parseTimecode(retranscriptionEndInput?.value ?? "");
+  if (startMs === null || endMs === null || endMs <= startMs) {
+    setRetranscriptionMessage("请输入有效范围，且结束时间必须晚于开始时间。", true);
+    return null;
+  }
+  return { startMs, endMs };
+}
+
+function expandRetranscriptionRangeToSegments(): void {
+  if (!activeDetail || !retranscriptionStartInput || !retranscriptionEndInput) return;
+  const range = retranscriptionRange();
+  if (!range) return;
+  const intersecting = activeDetail.segments.filter(
+    (segment) => segment.start_ms < range.endMs && segment.end_ms > range.startMs,
+  );
+  if (intersecting.length === 0) {
+    setRetranscriptionMessage("这个范围没有相交字幕块，边界保持不变。可用于补识别字幕空白。", false);
+    return;
+  }
+  const startMs = Math.min(range.startMs, ...intersecting.map((segment) => segment.start_ms));
+  const endMs = Math.max(range.endMs, ...intersecting.map((segment) => segment.end_ms));
+  retranscriptionStartInput.value = formatPreciseTime(startMs);
+  retranscriptionEndInput.value = formatPreciseTime(endMs);
+  setRetranscriptionMessage(`已明确扩展到 ${intersecting.length} 个完整字幕块；不会再切穿它们。`);
+}
+
+function renderRetranscriptionItems(
+  host: HTMLDivElement | null,
+  items: Array<SubtitleSegment | RetranscriptionCandidate>,
+): void {
+  if (!host) return;
+  host.replaceChildren();
+  if (items.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "这个范围没有字幕。";
+    host.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("article");
+    const time = document.createElement("span");
+    const text = document.createElement("p");
+    time.textContent = `${formatPreciseTime(item.start_ms)} → ${formatPreciseTime(item.end_ms)}`;
+    text.textContent = item.source_text;
+    row.append(time, text);
+    host.append(row);
+  }
+}
+
+function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
+  activeRetranscriptionPreview = preview;
+  if (retranscriptionPreviewSummary) {
+    retranscriptionPreviewSummary.textContent = `${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)} · 当前 ${preview.original_segments.length} 段 · 候选 ${preview.candidate_segments.length} 段 · 已隔离前文文字上下文`;
+  }
+  renderRetranscriptionItems(retranscriptionOriginalList, preview.original_segments);
+  renderRetranscriptionItems(retranscriptionCandidateList, preview.candidate_segments);
+  if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "";
+  retranscriptionDialog?.showModal();
+}
+
+async function previewSelectedRange(): Promise<void> {
+  if (!activeDetail || retranscriptionBusy) return;
+  if (karaokeTextDraftDirty) {
+    setRetranscriptionMessage("重新识别前请先保存或放弃当前文字修改。", true);
+    return;
+  }
+  const range = retranscriptionRange();
+  if (!range) return;
+  retranscriptionBusy = true;
+  if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = true;
+  setRetranscriptionMessage("正在提取所选音频并用当前任务的模型和词表重新识别…");
+  try {
+    const preview = await invoke<RetranscriptionPreview>("preview_retranscription", {
+      request: {
+        jobId: activeDetail.job.job_id,
+        startMs: range.startMs,
+        endMs: range.endMs,
+      },
+    });
+    if (!activeDetail || preview.job_id !== activeDetail.job.job_id) return;
+    showRetranscriptionPreview(preview);
+    setRetranscriptionMessage("候选已生成；关闭预览不会修改任何字幕。");
+  } catch (error) {
+    setRetranscriptionMessage(`局部重新识别失败：${String(error)}`, true);
+  } finally {
+    retranscriptionBusy = false;
+    if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = false;
+  }
+}
+
+async function confirmSelectedRangeReplacement(): Promise<void> {
+  if (!activeDetail || !activeRetranscriptionPreview || retranscriptionBusy) return;
+  const preview = activeRetranscriptionPreview;
+  const before = cloneSubtitleSegments(activeDetail.segments);
+  retranscriptionBusy = true;
+  if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = true;
+  if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "正在原子替换所选范围…";
+  try {
+    const after = await invoke<SubtitleSegment[]>("confirm_retranscription", {
+      request: { jobId: activeDetail.job.job_id, previewId: preview.preview_id },
+    });
+    rememberStructureEdit(before, after, `局部重新识别 ${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)}`);
+    applySubtitleStructure(after, preview.candidate_segments[0]?.id);
+    retranscriptionDialog?.close();
+    activeRetranscriptionPreview = null;
+    setSubtitleEditAction(`已替换所选范围为 ${preview.candidate_segments.length} 段新识别字幕；新段需要重新翻译，可用会话撤销恢复。`);
+  } catch (error) {
+    if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = `替换失败：${String(error)}`;
+  } finally {
+    retranscriptionBusy = false;
+    if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = false;
   }
 }
 
@@ -5904,6 +6093,12 @@ karaokeWaveform?.addEventListener("click", (event) => {
 });
 karaokeCutSegmentButton?.addEventListener("click", () => void cutKaraokeSegmentAtPlayhead());
 karaokeJoinSegmentButton?.addEventListener("click", () => void joinKaraokeSegmentWithNext());
+retranscriptionUseWindowButton?.addEventListener("click", useVisibleWindowForRetranscription);
+retranscriptionExpandSegmentsButton?.addEventListener("click", expandRetranscriptionRangeToSegments);
+previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
+document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());
+document.querySelector<HTMLButtonElement>("#cancel-retranscription")?.addEventListener("click", () => retranscriptionDialog?.close());
+confirmRetranscriptionButton?.addEventListener("click", () => void confirmSelectedRangeReplacement());
 karaokeCurrentSource?.addEventListener("input", markKaraokeTextDirty);
 karaokeCurrentTranslation?.addEventListener("input", markKaraokeTextDirty);
 karaokeSaveTextButton?.addEventListener("click", () => void saveKaraokeTextDraft());
