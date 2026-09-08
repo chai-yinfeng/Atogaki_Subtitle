@@ -1,6 +1,6 @@
 # Windows x86_64 兼容计划
 
-_状态：W1/W2 与 NSIS 自动发布基线完成，首个 Windows prerelease 已发布，W3/W4 多设备实测进行中；最后更新：2026-08-24_
+_状态：alpha.6 后共享功能已持续通过 Windows 编译门禁；下一候选需先恢复安装配置、分诊悬浮字幕，再完成增量实机矩阵；最后更新：2026-09-08_
 
 ## 目标与边界
 
@@ -25,6 +25,32 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 - `v0.1.0-alpha.6` 扩测已报告悬浮字幕显示异常，具体视觉表现与复现条件待补；下一次 Windows 稳定候选前必须完成分诊和回归。
 - 部分错误和能力文案直接提到 VideoToolbox 或 Finder，需要按实际平台显示；实时录音代码仍固定使用 AVFoundation，但实时能力不属于本阶段。
 - Windows NSIS 类型、Release 命名和校验流程已经固定；README 的平台入口与面向非开发者的安装说明仍需随扩测反馈继续完善。
+
+## alpha.6 到当前主线的同步盘点
+
+从 `v0.1.0-alpha.6` 到 macOS `v0.1.0-alpha.9` 的产品功能主要实现于共享 Rust、SQLite migration 和前端层，不需要复制一套 Windows 业务代码。涉及这些功能的提交已经逐批通过 Windows Server 2022 上的前端生产构建、共享 Rust 测试和 Tauri `cargo check`；最近两项门禁分别是[可恢复翻译与媒体 Range](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34171091363)和[视频导出质量档](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34172209864)。这些结果只证明源码可编译，不代表 WebView2、Credential Manager、字体、sidecar 或真实窗口已经验收。
+
+| 能力 | 当前共享实现 | Windows 下一候选需要验证 |
+| --- | --- | --- |
+| 学习收藏与来源回听 | 收藏词／语法／整句、日英韩分册、从来源时间继续播放已经进入共享 UI、服务和 SQLite | WebView2 文本选区、播放跳转、升级旧数据库和删除来源后的快照 |
+| 学习词典 | JMdict、Tomoshi、ECDICT 包下载／索引及 Collins、Merriam-Webster 凭据入口已经共享 | Windows Credential Manager、下载目录权限、压缩包解码、ECDICT 首次索引耗时与文件锁 |
+| 字幕样式与字体 | 任务级双轨样式、系统字体浏览、字形覆盖、libass 实际预览和烧录共用一套实现 | Windows 字体 family／fallback、中文日文韩文字形、FFmpeg/libass 预览与最终成品一致性 |
+| 工作台排序 | 拖动、键盘排序和 SQLite 持久化已经共享 | WebView2 下实体鼠标、触控板、高 DPI 命中和重启顺序 |
+| 模型续传 | HTTP Range、临时文件恢复和完整 SHA-256 校验已经共享 | Windows 文件占用、暂停后续传、镜像不支持 Range 时安全重下 |
+| 日语词表与转录修正 | 《響け！ユーフォニアム》词表、prompt 污染修复、无启发式截断及 U4／UFO 修正均为跨平台数据与核心逻辑 | 用日语短样本确认任务快照、prompt 与修正预览；不要求 Windows 专属实现 |
+| 可恢复云翻译 | DeepSeek 分批落库、缺失／过期段续跑、空段提示及不同任务并发已经共享 | Credential Manager 读取、代理切换、部分成功后重启恢复和真实 API 限流 |
+| 局部重新识别 | 明确范围、隔离上下文、候选预览和确认替换已经共享 | Windows sidecar 路径、CPU 耗时、取消／失败残留和替换后的时间轴 |
+| 长视频播放 | 受令牌保护的自定义媒体协议与 Range 响应显式包含 Windows URL 形式 | 必须用 WebView2 实测有声长视频、随机 seek、任务切换和 `audio.wav` 回退；编译门禁不能证明音轨正常 |
+| 视频导出质量档 | 省空间／均衡／高质量、原分辨率、目标码率和大小估算已经共享 | Windows MPEG-4 软件编码下三档实际大小／画质、音频复制或重编码和 Explorer 定位 |
+
+以下内容不属于 Windows 产品功能同步：macOS ICNS／DMG Finder 布局、ad-hoc 签名，以及只清理本机 macOS 测试 DMG 的脚本。
+
+下一候选目前有两个发布前阻塞项：
+
+1. `v0.1.0-alpha.6` 报告的悬浮字幕显示异常尚无足够复现信息。非 macOS 路径仍使用 alpha.6 时的无边框普通 Tauri 窗口、`always_on_top`、`skip_taskbar` 与 WebView 内容，没有随 alpha.7–alpha.9 得到 Windows 专项修复。应先区分“未创建／空白／不更新／被遮挡／DPI 裁切／无法拖动关闭”，再决定是修正窗口参数、WebView 生命周期还是字幕 payload 同步。
+2. 当前 `src-tauri/tauri.windows.conf.json` 只保留 Windows ICO，不再像 alpha.6 那样显式声明 `targets: ["nsis"]`、`installMode: "currentUser"` 和 `English`／`SimpChinese`。下一次打包前必须恢复或在统一配置中等价固定，并由安装冒烟确认，不能依赖 Tauri 默认值推断发行行为。
+
+因此 Windows 可以继续推进，但合理顺序是：先生成不发布的当前主线 Artifact → 取得悬浮字幕准确复现 → 修复窗口和安装配置 → 跑下面的增量矩阵 → 最后才决定新的 Windows tag。不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
 
 ## 实施顺序
 
