@@ -22,7 +22,9 @@ pub use local_glossary_service::{
     LocalGlossarySegmentChange, LocalGlossaryService, LocalGlossaryTermDraft,
 };
 pub use local_learning_service::LocalLearningService;
-pub use local_render_service::{LocalRenderRequest, LocalRenderService};
+pub use local_render_service::{
+    LocalRenderEstimate, LocalRenderQuality, LocalRenderRequest, LocalRenderService,
+};
 pub use local_retranscription_service::{LocalRetranscriptionPreview, LocalRetranscriptionService};
 pub use local_task_service::LocalTaskService;
 pub use local_workspace_service::{

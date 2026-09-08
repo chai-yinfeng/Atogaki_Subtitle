@@ -19,8 +19,8 @@ use atogaki_subtitle::{
     application::{
         LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
         LocalBatchTranslationResult, LocalGlossaryService, LocalGlossaryTermDraft,
-        LocalLearningService, LocalRenderRequest, LocalRenderService, LocalRetranscriptionPreview,
-        LocalRetranscriptionService,
+        LocalLearningService, LocalRenderEstimate, LocalRenderQuality, LocalRenderRequest,
+        LocalRenderService, LocalRetranscriptionPreview, LocalRetranscriptionService,
         LocalSubtitleExport, LocalSubtitleExportArtifact,
         LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
         MutableTranslationProvider, SubtitleFontFamily, SubtitleFontService, SubtitleStylePreview,
@@ -534,6 +534,7 @@ struct VideoRenderRequest {
     source_job_id: String,
     output_path: String,
     subtitle_track: SubtitleTrack,
+    quality: LocalRenderQuality,
     overwrite_existing: bool,
 }
 
@@ -1257,8 +1258,21 @@ async fn submit_video_render(
             source_job_id: request.source_job_id,
             output_path: PathBuf::from(request.output_path),
             subtitle_track: request.subtitle_track,
+            quality: request.quality,
             overwrite_existing: request.overwrite_existing,
         })
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn video_render_estimates(
+    state: State<'_, DesktopState>,
+    source_job_id: String,
+) -> Result<Vec<LocalRenderEstimate>, String> {
+    state
+        .render_service
+        .estimates(&source_job_id)
         .await
         .map_err(|error| error.to_string())
 }
@@ -2117,6 +2131,7 @@ fn main() {
             start_dictionary_download,
             test_network_connection,
             submit_video_render,
+            video_render_estimates,
             open_subtitle_overlay,
             cancel_video_render,
             translate_all_subtitles,

@@ -407,6 +407,18 @@ type MediaCapabilities = {
   ready_for_hard_subtitles: boolean;
 };
 
+type VideoRenderQuality = "compact" | "balanced" | "high";
+type VideoRenderEstimate = {
+  quality: VideoRenderQuality;
+  width: number | null;
+  height: number | null;
+  duration_ms: number;
+  target_video_bitrate_bps: number;
+  estimated_audio_bitrate_bps: number;
+  estimated_size_bytes: number;
+  bitrate_source: "source_bitrate" | "resolution_fallback";
+};
+
 type VideoRender = {
   id: string;
   source_job_id: string;
@@ -955,11 +967,19 @@ app.innerHTML = `
             <option value="source">仅原文</option>
           </select>
         </label>
+        <label>导出质量
+          <select id="video-render-quality">
+            <option value="balanced">均衡（推荐，源码率约 120%）</option>
+            <option value="compact">省空间（源码率约 75%）</option>
+            <option value="high">高质量（源码率约 180%）</option>
+          </select>
+        </label>
+        <div id="video-render-estimate" class="video-render-estimate">正在读取源视频规格…</div>
         <label>输出视频
           <input id="video-output-path" placeholder="选择 MP4 保存位置，或粘贴完整路径" />
         </label>
         <button id="choose-video-output" type="button" class="secondary">选择位置</button>
-        <p>${desktopPlatform === "macos" ? "优先使用 VideoToolbox，失败时回退" : "使用"}内置 LGPL MPEG-4 软件编码。提交时会把 SQLite 当前字幕冻结为本次 ASS 快照；可读取源视频码率时，成品会以源码率加约 20% 余量编码。</p>
+        <p>${desktopPlatform === "macos" ? "优先使用 VideoToolbox，失败时回退" : "使用"}内置 LGPL MPEG-4 软件编码。三档质量保持原始分辨率，明确调整目标视频码率；预计大小包含音频和约 2% 封装余量，实际结果会随画面复杂度与编码器浮动。</p>
       </div>
       <div class="video-render-footer">
         <span id="video-render-message" role="status"></span>
@@ -1217,6 +1237,8 @@ const glossaryCorrectionMessage = document.querySelector<HTMLSpanElement>("#glos
 const videoRenderDialog = document.querySelector<HTMLDialogElement>("#video-render-dialog");
 const mediaCapabilitiesHost = document.querySelector<HTMLDivElement>("#media-capabilities");
 const videoSubtitleTrack = document.querySelector<HTMLSelectElement>("#video-subtitle-track");
+const videoRenderQuality = document.querySelector<HTMLSelectElement>("#video-render-quality");
+const videoRenderEstimate = document.querySelector<HTMLDivElement>("#video-render-estimate");
 const videoOutputPath = document.querySelector<HTMLInputElement>("#video-output-path");
 const videoRenderMessage = document.querySelector<HTMLSpanElement>("#video-render-message");
 const submitVideoRenderButton = document.querySelector<HTMLButtonElement>("#submit-video-render");
@@ -1290,6 +1312,7 @@ let pendingGlossaryCorrection: {
 let taskGlossaryConfigurationId: string | null = null;
 let selectedTaskContentGroups = new Set<string>();
 let mediaCapabilities: MediaCapabilities | null = null;
+let videoRenderEstimates: VideoRenderEstimate[] = [];
 let videoRenders: VideoRender[] = [];
 let subtitleFonts: SubtitleFontFamily[] | null = null;
 let subtitleStyleBusy = false;
@@ -5307,6 +5330,49 @@ async function refreshVideoRenders(): Promise<void> {
   }
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  return `${Math.max(0, bytes / 1024 ** 2).toFixed(0)} MB`;
+}
+
+function renderVideoEstimate(): void {
+  if (!videoRenderEstimate || !videoRenderQuality) return;
+  const quality = videoRenderQuality.value as VideoRenderQuality;
+  const estimate = videoRenderEstimates.find((candidate) => candidate.quality === quality);
+  if (!estimate) {
+    videoRenderEstimate.textContent = "正在读取源视频规格…";
+    return;
+  }
+  const resolution = estimate.width && estimate.height
+    ? `${estimate.width} × ${estimate.height}（保持原分辨率）`
+    : "保持原分辨率";
+  const bitrate = `${(estimate.target_video_bitrate_bps / 1_000_000).toFixed(2)} Mbps`;
+  const basis = estimate.bitrate_source === "source_bitrate"
+    ? "按源视频码率计算"
+    : "源文件未报告视频码率，按分辨率基准计算";
+  videoRenderEstimate.classList.toggle("warning", estimate.bitrate_source === "resolution_fallback");
+  videoRenderEstimate.innerHTML = `<strong>${escapeHtml(resolution)} · 目标视频码率 ${escapeHtml(bitrate)}</strong><span>预计成品约 ${escapeHtml(formatFileSize(estimate.estimated_size_bytes))} · ${escapeHtml(basis)}</span>`;
+}
+
+async function refreshVideoRenderEstimates(jobId: string): Promise<void> {
+  if (videoRenderEstimate) {
+    videoRenderEstimate.textContent = "正在读取源视频规格…";
+    videoRenderEstimate.classList.remove("warning");
+  }
+  try {
+    const estimates = await invoke<VideoRenderEstimate[]>("video_render_estimates", { sourceJobId: jobId });
+    if (activeDetail?.job.job_id !== jobId) return;
+    videoRenderEstimates = estimates;
+    renderVideoEstimate();
+  } catch (error) {
+    videoRenderEstimates = [];
+    if (videoRenderEstimate) {
+      videoRenderEstimate.textContent = `无法读取视频规格：${String(error)}`;
+      videoRenderEstimate.classList.add("warning");
+    }
+  }
+}
+
 function renderMediaCapabilities(): void {
   if (!mediaCapabilitiesHost) return;
   if (!mediaCapabilities) {
@@ -5347,6 +5413,7 @@ async function openVideoRenderDialog(): Promise<void> {
   if (videoRenderMessage) videoRenderMessage.textContent = "";
   if (videoOutputPath && !videoOutputPath.value) videoOutputPath.placeholder = suggestedVideoName();
   selectedVideoOutputAlreadyExists = false;
+  videoRenderEstimates = [];
   if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
   videoRenderDialog?.showModal();
   renderMediaCapabilities();
@@ -5365,6 +5432,7 @@ async function openVideoRenderDialog(): Promise<void> {
         if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
       }),
     refreshVideoRenders(),
+    refreshVideoRenderEstimates(activeDetail.job.job_id),
   ]);
 }
 
@@ -5396,7 +5464,7 @@ async function chooseVideoOutput(): Promise<void> {
 }
 
 async function submitVideoRender(): Promise<void> {
-  if (!activeDetail || !videoOutputPath || !videoSubtitleTrack || videoRenderSubmitting) return;
+  if (!activeDetail || !videoOutputPath || !videoSubtitleTrack || !videoRenderQuality || videoRenderSubmitting) return;
   const outputPath = videoOutputPath.value.trim();
   if (!outputPath.toLowerCase().endsWith(".mp4")) {
     if (videoRenderMessage) videoRenderMessage.textContent = "输出路径必须以 .mp4 结尾。";
@@ -5424,6 +5492,7 @@ async function submitVideoRender(): Promise<void> {
         sourceJobId: activeDetail.job.job_id,
         outputPath,
         subtitleTrack: videoSubtitleTrack.value,
+        quality: videoRenderQuality.value,
         overwriteExisting,
       },
     });
@@ -6206,6 +6275,7 @@ videoOutputPath?.addEventListener("input", () => {
 videoSubtitleTrack?.addEventListener("change", () => {
   if (videoOutputPath && !videoOutputPath.value) videoOutputPath.placeholder = suggestedVideoName();
 });
+videoRenderQuality?.addEventListener("change", renderVideoEstimate);
 subtitleExportForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   const artifacts = Array.from(subtitleExportForm.querySelectorAll<HTMLInputElement>('input[name="subtitle-artifact"]:checked'))

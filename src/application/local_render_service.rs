@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
+use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
@@ -23,11 +24,50 @@ use crate::{
 
 const RENDER_QUEUE_CAPACITY: usize = 4;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalRenderQuality {
+    Compact,
+    Balanced,
+    High,
+}
+
+impl LocalRenderQuality {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Balanced => "balanced",
+            Self::High => "high",
+        }
+    }
+
+    fn apply_to(self, balanced_bitrate: u64) -> u64 {
+        match self {
+            Self::Compact => balanced_bitrate.saturating_mul(5) / 8,
+            Self::Balanced => balanced_bitrate,
+            Self::High => balanced_bitrate.saturating_mul(3) / 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalRenderEstimate {
+    pub quality: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub duration_ms: u64,
+    pub target_video_bitrate_bps: u64,
+    pub estimated_audio_bitrate_bps: u64,
+    pub estimated_size_bytes: u64,
+    pub bitrate_source: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct LocalRenderRequest {
     pub source_job_id: String,
     pub output_path: PathBuf,
     pub subtitle_track: SubtitleTrack,
+    pub quality: LocalRenderQuality,
     pub overwrite_existing: bool,
 }
 
@@ -43,6 +83,7 @@ pub struct LocalRenderService {
 struct QueuedRender {
     record: LocalRenderJobRecord,
     duration_ms: u64,
+    target_video_bitrate_bps: u64,
     overwrite_existing: bool,
     cancelled: Arc<AtomicBool>,
 }
@@ -73,6 +114,31 @@ impl LocalRenderService {
 
     pub async fn capabilities(&self) -> Result<media::MediaCapabilities> {
         media::inspect_capabilities(&self.ffmpeg).await
+    }
+
+    pub async fn estimates(&self, source_job_id: &str) -> Result<Vec<LocalRenderEstimate>> {
+        let job = self
+            .database
+            .get_job(source_job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {source_job_id}"))?;
+        let input = job
+            .input_path
+            .as_deref()
+            .map(Path::new)
+            .ok_or_else(|| anyhow!("source task does not have an input media path"))?;
+        let probe = media::probe_media(&self.ffmpeg, input).await?;
+        if !probe.has_video {
+            bail!("the selected task contains audio only; video subtitle rendering is unavailable");
+        }
+        Ok([
+            LocalRenderQuality::Compact,
+            LocalRenderQuality::Balanced,
+            LocalRenderQuality::High,
+        ]
+        .into_iter()
+        .map(|quality| render_estimate(probe, quality))
+        .collect())
     }
 
     pub async fn submit(&self, request: LocalRenderRequest) -> Result<LocalRenderJobRecord> {
@@ -112,6 +178,7 @@ impl LocalRenderService {
         if !probe.has_video {
             bail!("the selected task contains audio only; video subtitle rendering is unavailable");
         }
+        let estimate = render_estimate(probe, request.quality);
 
         let render_id = format!("render-{}", Uuid::new_v4());
         let render_directory = PathBuf::from(&workspace.job.storage_dir).join("renders");
@@ -166,6 +233,7 @@ impl LocalRenderService {
             .send(QueuedRender {
                 record: record.clone(),
                 duration_ms: probe.duration_ms,
+                target_video_bitrate_bps: estimate.target_video_bitrate_bps,
                 overwrite_existing: request.overwrite_existing,
                 cancelled,
             })
@@ -248,6 +316,7 @@ async fn run_render_worker(
         let options = RenderOptions {
             video_crf: 20,
             video_preset: "medium".to_string(),
+            target_video_bitrate_bps: Some(render.target_video_bitrate_bps),
             soft_subtitles: false,
         };
         let result = media::render_subtitles_with_progress(
@@ -302,6 +371,46 @@ async fn run_render_worker(
             }
         }
         cancellations.lock().await.remove(&render_id);
+    }
+}
+
+fn render_estimate(probe: media::MediaProbe, quality: LocalRenderQuality) -> LocalRenderEstimate {
+    const AUDIO_FALLBACK_BITRATE_BPS: u64 = 192_000;
+    let (balanced_bitrate, bitrate_source) = match probe.video_bitrate_bps {
+        Some(source) => (source.saturating_mul(6) / 5, "source_bitrate"),
+        None => {
+            let height = probe.height.unwrap_or(1080);
+            let baseline = if height <= 480 {
+                1_500_000
+            } else if height <= 720 {
+                3_000_000
+            } else if height <= 1080 {
+                6_000_000
+            } else {
+                12_000_000
+            };
+            (baseline, "resolution_fallback")
+        }
+    };
+    let target_video_bitrate_bps = quality.apply_to(balanced_bitrate).max(250_000);
+    let estimated_audio_bitrate_bps = probe
+        .audio_bitrate_bps
+        .unwrap_or(AUDIO_FALLBACK_BITRATE_BPS);
+    let estimated_size_bytes = target_video_bitrate_bps
+        .saturating_add(estimated_audio_bitrate_bps)
+        .saturating_mul(probe.duration_ms)
+        .saturating_div(8_000)
+        .saturating_mul(102)
+        .saturating_div(100);
+    LocalRenderEstimate {
+        quality: quality.key().to_string(),
+        width: probe.width,
+        height: probe.height,
+        duration_ms: probe.duration_ms,
+        target_video_bitrate_bps,
+        estimated_audio_bitrate_bps,
+        estimated_size_bytes,
+        bitrate_source: bitrate_source.to_string(),
     }
 }
 
@@ -393,8 +502,8 @@ mod tests {
     use std::{fs, process::Command, time::Duration};
 
     use super::{
-        LocalRenderRequest, LocalRenderService, install_rendered_output, temporary_output_path,
-        validate_output_path,
+        LocalRenderQuality, LocalRenderRequest, LocalRenderService, install_rendered_output,
+        render_estimate, temporary_output_path, validate_output_path,
     };
     use crate::{
         application::{
@@ -402,8 +511,33 @@ mod tests {
             job_status::JobStatus,
         },
         domain::{TranscriptSegment, subtitle::SubtitleTrack},
-        infrastructure::{config::desktop_ffmpeg_path, job_store::Job, local_db::LocalDatabase},
+        infrastructure::{
+            config::desktop_ffmpeg_path, job_store::Job, local_db::LocalDatabase, media::MediaProbe,
+        },
     };
+
+    #[test]
+    fn render_quality_presets_have_explicit_bitrates_and_size_estimates() {
+        let probe = MediaProbe {
+            duration_ms: 60_000,
+            has_video: true,
+            video_bitrate_bps: Some(4_000_000),
+            width: Some(1920),
+            height: Some(1080),
+            audio_bitrate_bps: Some(128_000),
+        };
+
+        let compact = render_estimate(probe, LocalRenderQuality::Compact);
+        let balanced = render_estimate(probe, LocalRenderQuality::Balanced);
+        let high = render_estimate(probe, LocalRenderQuality::High);
+
+        assert_eq!(compact.target_video_bitrate_bps, 3_000_000);
+        assert_eq!(balanced.target_video_bitrate_bps, 4_800_000);
+        assert_eq!(high.target_video_bitrate_bps, 7_200_000);
+        assert_eq!(balanced.estimated_size_bytes, 37_699_200);
+        assert_eq!(balanced.bitrate_source, "source_bitrate");
+        assert_eq!((balanced.width, balanced.height), (Some(1920), Some(1080)));
+    }
 
     #[test]
     fn completed_render_replaces_an_existing_output_without_exposing_partial_data() {
@@ -485,6 +619,7 @@ mod tests {
                 source_job_id: manifest.job_id.clone(),
                 output_path: output.clone(),
                 subtitle_track: SubtitleTrack::Bilingual,
+                quality: LocalRenderQuality::Balanced,
                 overwrite_existing: false,
             })
             .await

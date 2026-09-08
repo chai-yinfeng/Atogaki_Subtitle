@@ -119,6 +119,9 @@ pub struct MediaProbe {
     pub duration_ms: u64,
     pub has_video: bool,
     pub video_bitrate_bps: Option<u64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub audio_bitrate_bps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -245,7 +248,7 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=index,bit_rate",
+            "stream=index,bit_rate,width,height",
             "-of",
             "default=noprint_wrappers=1",
         ])
@@ -268,12 +271,46 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
         .find_map(|line| line.strip_prefix("bit_rate="))
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0);
+    let width = parse_probe_field::<u32>(&video_fields, "width=");
+    let height = parse_probe_field::<u32>(&video_fields, "height=");
+
+    let audio_output = sidecar_command(&ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=bit_rate",
+            "-of",
+            "default=noprint_wrappers=1",
+        ])
+        .arg(input)
+        .output()
+        .await
+        .with_context(|| format!("failed to inspect audio streams with {}", ffprobe.display()))?;
+    let audio_fields = String::from_utf8_lossy(&audio_output.stdout);
+    let audio_bitrate_bps = audio_output
+        .status
+        .success()
+        .then(|| parse_probe_field::<u64>(&audio_fields, "bit_rate="))
+        .flatten();
 
     Ok(MediaProbe {
         duration_ms,
         has_video,
         video_bitrate_bps,
+        width,
+        height,
+        audio_bitrate_bps,
     })
+}
+
+fn parse_probe_field<T: std::str::FromStr>(fields: &str, prefix: &str) -> Option<T> {
+    fields
+        .lines()
+        .find_map(|line| line.strip_prefix(prefix))
+        .and_then(|value| value.parse::<T>().ok())
 }
 
 fn ffprobe_path(ffmpeg: &Path) -> PathBuf {
@@ -473,7 +510,9 @@ pub async fn render_subtitles_with_progress(
         input,
         ass,
         output,
-        source_relative_target_bitrate(source_video_bitrate_bps),
+        options
+            .target_video_bitrate_bps
+            .or_else(|| source_relative_target_bitrate(source_video_bitrate_bps)),
         &execution,
     )
     .await

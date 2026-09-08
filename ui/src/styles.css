@@ -438,6 +438,9 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .video-render-form input, .video-render-form select { width: 100%; border: 1px solid #d3ccbd; border-radius: 8px; padding: 10px; color: #30332d; background: #fffdf7; }
 .video-render-form > button { grid-column: 2; align-self: end; }
 .video-render-form > p { grid-column: 1 / -1; margin: 0; color: #73766e; font-size: 11px; line-height: 1.6; }
+.video-render-estimate { grid-column: 1 / -1; display: grid; gap: 5px; border: 1px solid #d8d0c2; border-radius: 10px; padding: 12px 14px; color: #4f534c; background: #fffaf0; font-size: 12px; line-height: 1.5; }
+.video-render-estimate strong { color: #273f38; font-size: 14px; }
+.video-render-estimate.warning { border-color: #c99178; color: #81452d; background: #fff5ef; }
 .video-render-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; border-top: 1px solid #ded7c9; padding-top: 14px; }
 .video-render-footer span { color: #6f716a; font-size: 12px; overflow-wrap: anywhere; }
 .video-render-history { margin-top: 22px; border-top: 1px solid #ded7c9; padding-top: 18px; }
