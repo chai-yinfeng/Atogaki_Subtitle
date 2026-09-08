@@ -49,7 +49,7 @@ pub async fn transcribe(
     let prompt = glossary::build_whisper_prompt(options)?;
 
     if !options.no_gpu {
-        eprintln!("whisper-cli: requesting GPU device 0 (Metal on supported macOS builds)");
+        eprintln!("whisper-cli: requesting GPU device 0 when supported by this build");
     }
 
     let first = run_whisper(
@@ -68,7 +68,7 @@ pub async fn transcribe(
         }
 
         eprintln!(
-            "whisper-cli failed in GPU/Metal mode; retrying with --no-gpu. Original failure: {}",
+            "whisper-cli failed in GPU mode; retrying with --no-gpu. Original failure: {}",
             error.summary()
         );
         run_whisper(

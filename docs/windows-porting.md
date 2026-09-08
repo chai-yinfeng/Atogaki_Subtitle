@@ -1,6 +1,6 @@
 # Windows x86_64 兼容计划
 
-_状态：alpha.6 后共享功能已持续通过 Windows 编译门禁；下一候选需先恢复安装配置、分诊悬浮字幕，再完成增量实机矩阵；最后更新：2026-09-08_
+_状态：alpha.6 后共享功能与 Windows 配置已同步到当前主线，等待原生编译门禁和后续安装候选实测；悬浮字幕异常作为已知限制暂缓；最后更新：2026-09-08_
 
 ## 目标与边界
 
@@ -45,12 +45,15 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 以下内容不属于 Windows 产品功能同步：macOS ICNS／DMG Finder 布局、ad-hoc 签名，以及只清理本机 macOS 测试 DMG 的脚本。
 
-下一候选目前有两个发布前阻塞项：
+2026-09-08 已完成不含悬浮字幕修复的源码同步准备：
 
-1. `v0.1.0-alpha.6` 报告的悬浮字幕显示异常尚无足够复现信息。非 macOS 路径仍使用 alpha.6 时的无边框普通 Tauri 窗口、`always_on_top`、`skip_taskbar` 与 WebView 内容，没有随 alpha.7–alpha.9 得到 Windows 专项修复。应先区分“未创建／空白／不更新／被遮挡／DPI 裁切／无法拖动关闭”，再决定是修正窗口参数、WebView 生命周期还是字幕 payload 同步。
-2. 当前 `src-tauri/tauri.windows.conf.json` 只保留 Windows ICO，不再像 alpha.6 那样显式声明 `targets: ["nsis"]`、`installMode: "currentUser"` 和 `English`／`SimpChinese`。下一次打包前必须恢复或在统一配置中等价固定，并由安装冒烟确认，不能依赖 Tauri 默认值推断发行行为。
+- Windows 覆盖配置重新同时固定 ICO、NSIS、`currentUser` 和 `English`／`SimpChinese`，并增加独立校验脚本；Windows 编译与 sidecar 流水线都会在构建前验证，避免以后修改图标时再次覆盖安装配置。
+- 字幕编辑快捷键按平台显示 `⌘B` 或 `Ctrl+B`；翻译和词典凭据检查按平台提示 Keychain 或 Windows Credential Manager；Whisper GPU 日志改为平台中性表述。
+- 共享核心、桌面 Rust 测试、桌面编译和前端生产构建已在 macOS 开发机通过。Windows 原生编译结果仍以推送后的 Windows Server 2022 门禁为准；这一阶段不生成 NSIS Artifact。
 
-因此 Windows 可以继续推进，但合理顺序是：先生成不发布的当前主线 Artifact → 取得悬浮字幕准确复现 → 修复窗口和安装配置 → 跑下面的增量矩阵 → 最后才决定新的 Windows tag。不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
+`v0.1.0-alpha.6` 报告的悬浮字幕显示异常尚无足够复现信息。非 macOS 路径仍使用 alpha.6 时的无边框普通 Tauri 窗口、`always_on_top`、`skip_taskbar` 与 WebView 内容，本轮按用户决定不修改。它不阻止其他 Windows 源码能力和编译基线追平，但在未来打包评估时必须明确选择：作为已知限制保留入口，或暂时在 Windows 隐藏入口；未经实测不得宣称悬浮字幕已经同步可用。
+
+接下来的合理顺序是：Windows 原生编译门禁 → 评估当前同步进度 → 如决定继续则生成不发布的 NSIS Artifact 并跑增量矩阵 → 最后才决定新的 Windows tag。不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
 
 ## 实施顺序
 

@@ -15,6 +15,7 @@ on:
       - "src-tauri/icons/**"
       - "src-tauri/src/**"
       - "src-tauri/tauri*.json"
+      - "scripts/verify-windows-tauri-config.mjs"
       - "ui/index.html"
       - "ui/overlay.html"
       - "ui/package-lock.json"
@@ -34,6 +35,7 @@ on:
       - "src-tauri/icons/**"
       - "src-tauri/src/**"
       - "src-tauri/tauri*.json"
+      - "scripts/verify-windows-tauri-config.mjs"
       - "ui/index.html"
       - "ui/overlay.html"
       - "ui/package-lock.json"
@@ -72,6 +74,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci --prefix ui
+
+      - name: Verify Windows bundle configuration
+        run: node ./scripts/verify-windows-tauri-config.mjs
 
       - name: Build frontend
         run: npm run build --prefix ui

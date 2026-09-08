@@ -16,6 +16,7 @@ on:
       - "scripts/package-sidecar-sources-windows.ps1"
       - "scripts/generate-rust-licenses-windows.ps1"
       - "scripts/smoke-test-nsis-windows.ps1"
+      - "scripts/verify-windows-tauri-config.mjs"
       - "scripts/sidecar-versions.zsh"
       - "src-tauri/icons/**"
       - "src-tauri/tauri.windows.conf.json"
@@ -32,6 +33,7 @@ on:
       - "scripts/package-sidecar-sources-windows.ps1"
       - "scripts/generate-rust-licenses-windows.ps1"
       - "scripts/smoke-test-nsis-windows.ps1"
+      - "scripts/verify-windows-tauri-config.mjs"
       - "scripts/sidecar-versions.zsh"
       - "src-tauri/icons/**"
       - "src-tauri/tauri.windows.conf.json"
@@ -136,6 +138,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci --prefix ui
+
+      - name: Verify Windows bundle configuration
+        run: node ./scripts/verify-windows-tauri-config.mjs
 
       - name: Generate and verify frontend licenses
         run: |

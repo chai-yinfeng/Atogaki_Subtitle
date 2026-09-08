@@ -69,6 +69,6 @@ Windows 预发布资产包括带版本名的 NSIS 安装器、相邻 SHA-256，�
 
 Windows 日常共享代码只在 PR／`main` 运行编译门禁；完整安装包不跟随普通产品提交。发布 job 拒绝不存在、指向其他 commit、格式不是 `vX.Y.Z-alpha.N` 或缺少 `docs/release-notes/<tag>.md` 的 tag，也拒绝覆盖已有 Release。
 
-下一次 Windows 候选打包前还必须检查配置合并后的最终 Tauri bundle：显式保持 NSIS、current-user 安装和 English／SimpChinese 安装器语言。当前主线的 `tauri.windows.conf.json` 只保留 ICO，这三项不能依赖默认值。先以不发布 Artifact 通过安装、覆盖升级和卸载冒烟，再按 `docs/windows-testing.md` 完成 alpha.6 后功能矩阵；悬浮字幕显示异常未分诊前不创建新的 Windows Release。
+当前主线已重新显式固定 NSIS、current-user 安装和 English／SimpChinese 安装器语言，并让两个 Windows workflow 在构建前运行配置断言。下一次 Windows 候选仍应先以不发布 Artifact 通过安装、覆盖升级和卸载冒烟，再按 `docs/windows-testing.md` 完成 alpha.6 后功能矩阵。悬浮字幕显示异常暂缓；如果发布候选保留入口，发布说明必须把它列为未经修复的已知限制，不得把共享编译通过描述为该功能可用。
 
 同一候选只有在两个平台都完成各自实机回归时才发布双平台资产。macOS 主线功能不能仅因共享代码可编译就自动进入 Windows Release；当前 Windows 用户继续使用 `v0.1.0-alpha.6`，学习区、词典、字体样式、任务拖动和悬浮窗口等新增交互应在下一 Windows 候选逐项验证。

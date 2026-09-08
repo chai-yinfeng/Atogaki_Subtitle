@@ -499,6 +499,12 @@ const fileManagerLabel = desktopPlatform === "macos"
   : desktopPlatform === "windows"
     ? "Explorer"
     : "文件管理器";
+const primaryShortcutModifier = desktopPlatform === "macos" ? "⌘" : "Ctrl+";
+const credentialCheckHint = desktopPlatform === "macos"
+  ? "macOS 可能请求解锁 Keychain"
+  : desktopPlatform === "windows"
+    ? "将读取 Windows Credential Manager"
+    : "将读取系统凭据库";
 
 function subtitleStyleEditorMarkup(track: "source" | "translation", label: string): string {
   return `<fieldset class="subtitle-style-editor" data-style-editor="${track}">
@@ -678,7 +684,7 @@ app.innerHTML = `
                 <label>时间缩放<input id="karaoke-zoom" type="range" min="0" max="100" value="66" aria-label="时间轴缩放"><output id="karaoke-zoom-label">30 秒</output></label>
                 <label>波形强度<input id="karaoke-waveform-gain" type="range" min="1" max="8" step="0.25" value="1" aria-label="波形显示强度"><output id="karaoke-waveform-gain-label">1×</output></label>
               </div>
-              <p class="shortcut-help">空格/K 播放暂停 · ←/→ 100 ms · Shift+←/→ 10 ms · ⌘B 切开 · 触控板横向平移／捏合缩放</p>
+              <p class="shortcut-help">空格/K 播放暂停 · ←/→ 100 ms · Shift+←/→ 10 ms · ${primaryShortcutModifier}B 切开 · 触控板横向平移／捏合缩放</p>
               <p id="karaoke-media-message" class="media-message">正在打开当前任务的媒体。</p>
             </div>
           </div>
@@ -699,7 +705,7 @@ app.innerHTML = `
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
             <div class="karaoke-text-editor"><span id="karaoke-segment-time">当前没有字幕</span><label>原文<textarea id="karaoke-current-source" rows="3" placeholder="当前时间没有原文字幕" disabled></textarea></label><label>译文<textarea id="karaoke-current-translation" rows="3" placeholder="尚无译文" disabled></textarea></label></div>
-            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤销上次文字保存</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ⌘B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会原子写入 SQLite。</p></div>
+            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤销上次文字保存</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会原子写入 SQLite。</p></div>
           </section>
         </section>
       </div>
@@ -1526,7 +1532,7 @@ function syncProviderSettings(): void {
 async function checkSelectedApiKey(): Promise<void> {
   if (!settingsProvider || !checkApiKeyButton || !apiKeyStatus || settingsProvider.value === "none") return;
   checkApiKeyButton.disabled = true;
-  apiKeyStatus.textContent = `正在检查 ${settingsProvider.value} 的系统凭据；macOS 可能请求解锁 Keychain…`;
+  apiKeyStatus.textContent = `正在检查 ${settingsProvider.value} 的系统凭据；${credentialCheckHint}…`;
   apiKeyStatus.classList.remove("warning");
   try {
     const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", {
@@ -1761,7 +1767,7 @@ async function saveDictionaryCredential(providerId: string, clear = false): Prom
 }
 
 async function checkDictionaryCredential(providerId: string): Promise<void> {
-  if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = "正在检查系统凭据；macOS 可能请求解锁 Keychain…";
+  if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = `正在检查系统凭据；${credentialCheckHint}…`;
   try {
     const status = await invoke<DictionaryCredentialStatus>("check_dictionary_credential", { providerId });
     dictionaryCredentials = dictionaryCredentials.filter((item) => item.providerId !== status.providerId);
