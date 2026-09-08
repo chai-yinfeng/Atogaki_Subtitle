@@ -1,6 +1,6 @@
 # 发布说明
 
-_最后更新：2026-08-25_
+_最后更新：2026-09-08_
 
 macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 已建立未签名预发布基线，按选定稳定候选集中构建和实机回归；两个平台共享产品代码，但不要求每次 macOS 开发提交都同步生成 Windows 安装包。
 
@@ -53,7 +53,7 @@ macOS 当前继续手工发布，以保留本机最终 Finder 布局和真实窗
 
 当前 Apple Silicon App 使用 ad-hoc 签名并声明最低 macOS 12.0；这可以保证 Bundle 完整性，但不能代替 Developer ID 签名与公证，也不会消除外部下载时的 Gatekeeper 提示。DMG 已在本机用 `hdiutil verify` 通过结构校验，并确认包含 `.app`、Applications 链接、三个 sidecar、Apache-2.0 项目许可证和第三方构建清单。Tauri 配置现已固定 660×400 Finder 窗口及“App 左、Applications 右”的图标位置；`CI=true` 的无美化产物仍只用于结构校验。当前 macOS 26 环境的非 CI Finder 美化脚本仍需在最终发布前实机构建并复核，自动化不能用无布局产物替代这项发布门禁。
 
-2026-08-25 的 [`v0.1.0-alpha.8`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.8) 是当前 macOS Apple Silicon 基线：从固定 tag 重新构建，上传 DMG、SHA-256、macOS 对应源码归档及其 SHA-256。该 Release 明确不包含 Windows 资产；先前的 `v0.1.0-alpha.7` 在 Release 创建前因 Windows 未完成本轮交互测试而取消，tag 保留且未复用。
+2026-09-08 的 `v0.1.0-alpha.9` 是当前 macOS Apple Silicon 候选：集中修复日语节目词表／转录、可恢复翻译、局部重新识别和长视频播放，并补充视频导出规格预览。候选只有在最终 App 实机回归和四项发布资产核验完成后才创建公开 Release。该版本不包含 Windows 资产；现有 Windows 用户继续使用 `v0.1.0-alpha.6`。
 
 ## Windows 11 x86_64
 
