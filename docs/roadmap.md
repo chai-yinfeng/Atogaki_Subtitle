@@ -85,7 +85,7 @@ _最后更新：2026-09-08_
 
 2026-08-21 发布 Apple Silicon 预发布版本 `v0.1.0-alpha.5`：新增 DeepSeek 预设与通用 OpenAI-compatible 翻译 provider，以及任务内“字幕编辑”进阶工作面，支持波形缓存、精确播放、独立字幕块拖动与修剪、Cut／Join、文字编辑和撤销。本轮还将排队时间与真实处理用时分离，并允许原媒体移动后重新定位。最终候选 DMG 已完成本机安装与真实使用回归，未发现阻塞问题；悬浮字幕导致 Dock 图标可能闪动仍作为已知限制保留。
 
-2026-09-08 准备 Apple Silicon 预发布版本 `v0.1.0-alpha.9`：集中交付《響け！ユーフォニアム》日语词表与转录污染修复、选定范围重新识别预览、DeepSeek 分批落库／空译文恢复、长视频专用 Range 播放，以及带字幕视频质量档和规格估算。Windows 仍以 alpha.6 为实机基线；alpha.9 只发布 macOS 资产。
+2026-09-08 已发布 [macOS Apple Silicon 预发布版 `v0.1.0-alpha.9`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.9)：集中交付《響け！ユーフォニアム》日语词表与转录污染修复、选定范围重新识别预览、DeepSeek 分批落库／空译文恢复、长视频专用 Range 播放，以及带字幕视频质量档和规格估算。最终 DMG 从固定 tag 构建并完成自动门禁、只读挂载结构检查和真实窗口回归；四项发布资产已核对上传。Windows 仍以 alpha.6 为实机基线；alpha.9 只发布 macOS 资产。
 
 ## 1.3. 翻译 Provider 扩展（时间轴精修之后）
 

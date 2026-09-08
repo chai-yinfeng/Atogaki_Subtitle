@@ -149,6 +149,13 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 ## 最近一次打包窗口回归
 
+2026-09-08 从固定 tag `v0.1.0-alpha.9` 的提交 `efcb90a` 生成 macOS Apple Silicon DMG：前端构建、两组 Rust 测试、Cargo check、Clippy、格式和差异检查通过；Clippy 仅保留已有的参数数量、测试锁跨 await 和测试切片写法警告。最终 DMG 通过 SHA-256、只读挂载结构和深度严格签名检查，确认 App、Applications 链接、ICNS、FFmpeg／ffprobe／whisper-cli、根许可证和第三方声明齐全。
+
+- 使用最终 DMG 内 App 打开正式数据中的长视频任务，播放器成功载入、开始播放并跳至已有字幕处；未出现 WebView 媒体加载错误。由于自动化无法代替人耳判断声压，本轮把“后段确实可听”保留为安装后用户抽查项，协议与 Range 请求回归由 Rust 测试覆盖。
+- 高级字幕编辑中确认“局部重新识别”显示明确起止范围、隔离前文上下文，并承诺只生成候选预览、不自动覆盖现有字幕；本轮没有对正式任务提交重新识别。
+- 带字幕视频对话框从 Bundle 内识别 FFmpeg 8.1.2，并显示均衡质量档、`1280 × 720（保持原分辨率）`、目标视频码率 `0.43 Mbps` 和预计成品约 `230 MB`；没有启动实际烧录。
+- Release 同时上传 DMG、相邻 SHA-256、对应第三方源码归档及其 SHA-256。DMG SHA-256 为 `04b6e0087fe4102dc902eea1de6402e4cde359536896e9a3a3a14e3ea0233996`，源码归档 SHA-256 为 `531e1e4d41b9bdb65dc8484719c5b192d737db6ba38ec81791d578ffe2cf2533`。本版本不包含 Windows 资产。
+
 2026-08-25 从固定 tag `v0.1.0-alpha.8` 的干净提交生成 macOS Apple Silicon DMG：前端构建、两组 Rust 测试、Clippy、格式和差异检查通过；最终 DMG 通过 `hdiutil verify`，只读挂载后确认 App、Applications 链接、ICNS、三个 sidecar、根许可证和第三方声明存在。重新下载并逐项校验的 FFmpeg／whisper.cpp／libass 对应源码归档已与 DMG 一同发布。本候选不包含 Windows 资产；任务拖动仍以本节第 47 项的物理设备结果为最终交互验收。
 
 2026-08-09 使用语言抽象分支的 ad-hoc 签名打包 App、独立 `/private/tmp/atogaki-english-regression-20260809.Qctexv` 数据目录和 `Daily English Podcast.mp4` 的 90 秒只读片段完成真实英语闭环：
