@@ -8,7 +8,7 @@ _最后更新：2026-09-09_
 
 1. 以真实收藏、查词和回看行为验证学习闭环，优先补影响使用频率的检索、筛选与多来源查看。
 2. 按真实字幕编辑频率小步补齐 A/B 循环、试听、lead-in／lead-out、多选平移和时间质量检查，不提前扩展复杂视频特效。
-3. macOS Apple Silicon 继续作为日常开发与发布质量基线；Windows 已恢复明确的 NSIS current-user／中英配置，把 alpha.6 后共享功能推进到同一源码基线，并生成通过自动安装门禁的临时候选。下一步在 Windows 11 实机集中验证学习区、词典、字体样式、任务排序、可恢复翻译、局部重新识别、长视频 Range 播放和导出质量档，再决定发布；悬浮字幕异常暂缓且不得标记为可用。
+3. macOS Apple Silicon 继续作为日常开发与发布质量基线；Windows 已通过 `v0.1.0-alpha.10` 同步 alpha.6 后共享功能，字幕样式预览完成实机确认。下一步继续在 Windows 11 扩测学习区、词典、任务排序、可恢复翻译、局部重新识别、长视频 Range 播放和导出质量档；悬浮字幕异常暂缓且不得标记为可用。
 4. 窄版重新识别在出现真实模型／参数对照痛点时推进；实时辅助和多人字幕轨道保持远期阶段。
 
 ## 0. 处理核心稳固（已完成）
@@ -85,7 +85,7 @@ _最后更新：2026-09-09_
 
 2026-08-21 发布 Apple Silicon 预发布版本 `v0.1.0-alpha.5`：新增 DeepSeek 预设与通用 OpenAI-compatible 翻译 provider，以及任务内“字幕编辑”进阶工作面，支持波形缓存、精确播放、独立字幕块拖动与修剪、Cut／Join、文字编辑和撤销。本轮还将排队时间与真实处理用时分离，并允许原媒体移动后重新定位。最终候选 DMG 已完成本机安装与真实使用回归，未发现阻塞问题；悬浮字幕导致 Dock 图标可能闪动仍作为已知限制保留。
 
-2026-09-08 已发布 [macOS Apple Silicon 预发布版 `v0.1.0-alpha.9`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.9)：集中交付《響け！ユーフォニアム》日语词表与转录污染修复、选定范围重新识别预览、DeepSeek 分批落库／空译文恢复、长视频专用 Range 播放，以及带字幕视频质量档和规格估算。最终 DMG 从固定 tag 构建并完成自动门禁、只读挂载结构检查和真实窗口回归；四项发布资产已核对上传。Windows 仍以 alpha.6 为实机基线；alpha.9 只发布 macOS 资产。
+2026-09-08 已发布 [macOS Apple Silicon 预发布版 `v0.1.0-alpha.9`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.9)：集中交付《響け！ユーフォニアム》日语词表与转录污染修复、选定范围重新识别预览、DeepSeek 分批落库／空译文恢复、长视频专用 Range 播放，以及带字幕视频质量档和规格估算。最终 DMG 从固定 tag 构建并完成自动门禁、只读挂载结构检查和真实窗口回归；四项发布资产已核对上传。该版本只发布 macOS 资产，Windows 同步版随后以 alpha.10 单独发布。
 
 ## 1.3. 翻译 Provider 扩展（时间轴精修之后）
 
@@ -131,6 +131,8 @@ _最后更新：2026-09-09_
 同日提交 `3af0728` 通过 [Windows 原生编译门禁 34308936600](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936600)和[完整候选流水线 34308936563](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936563)。后者从冷构建 sidecar 到 NSIS 安装后，实际使用 DirectWrite/libass 与 MJPEG 生成字幕预览图片，再通过 PE、合规资源和静默卸载检查；新安装包 Artifact 已可用于实机复核字体预览。本次仍未创建 tag 或 Release。
 
 用户随后在 Windows 11 实机确认字体／样式预览恢复正常，并同意将本轮同步固定为 `v0.1.0-alpha.10` Windows 专项预发布候选。悬浮字幕仍按已知限制处理，不作为本轮修复范围；发布说明必须明确不建议使用。Windows 媒体播放器对 MPEG-4 成品的先提示后播放行为继续记录，不在缺少 stream 证据时改动当前可工作的 LGPL 编码通路。
+
+2026-09-09 已发布 [Windows 11 x86_64 预发布版 `v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)。[固定 tag 流水线 34311527438](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34311527438)从提交 `aa9fdbb` 重建 NSIS，重新核对目标许可证与对应源码，并在安装后实际执行 DirectWrite/libass MJPEG 字幕预览、PE、sidecar、合规资源和静默卸载门禁；安装器、对应源码包和两份 SHA-256 共四项资产均已发布。悬浮字幕不稳定和媒体播放器 MPEG-4 提示按已知限制公开，剩余实机矩阵继续扩测。
 
 Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续以 macOS Apple Silicon 为质量基线，不为每个功能分支 push 生成 Windows 安装包。共享代码在 PR 或进入 `main` 时运行路径过滤后的 Windows 编译门禁；完整 sidecar、许可证和 NSIS 流水线只在 Windows 打包基础设施变化时自动验证，普通产品代码由选定的 Windows 稳定候选 commit 手动触发。平台继续共享同一业务代码，不维护长期 Windows 产品分支。详见决策记录 0031。
 

@@ -2,7 +2,7 @@
 
 Atogaki 是一个面向中文使用者的、本地优先的外语音视频理解与学习工作台。它通过识别、翻译、字幕校对、词典与可回看的媒体时间轴，把用户本机已有的节目整理成可以理解、复习和导出的双语资料。项目最初用于整理ヨルシカ「後書き」电台；字幕编辑、样式和烧录是建立可信资料的基础能力，但 Atogaki 目前不以替代完整视频字幕制作软件为目标。
 
-项目目前处于预发布阶段。macOS Apple Silicon 是日常开发和完整体验基线，最新测试版为 [`v0.1.0-alpha.8`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.8)，采用 ad-hoc 签名且尚未公证。Windows 11 x86_64 已发布较早的未签名 [`v0.1.0-alpha.6`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6)，但不包含此后加入的学习区、词典和字幕样式等能力；Windows 会在选定候选完成专项实机测试后再更新。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+项目目前处于预发布阶段。macOS Apple Silicon 是日常开发和完整体验基线，当前版本为 [`v0.1.0-alpha.9`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.9)，采用 ad-hoc 签名且尚未公证。Windows 11 x86_64 当前版本为未签名的 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，已同步学习区、词典、字幕样式、可恢复翻译、局部重新识别、长视频播放和视频质量档；Windows 悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
 ## 能做什么
 
@@ -22,9 +22,9 @@ Atogaki 是一个面向中文使用者的、本地优先的外语音视频理解
 
 ## 安装与首次配置
 
-当前首先支持 Apple Silicon Mac。普通测试者应从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载带版本名的 DMG 和相邻 SHA-256；开发者也可以按下文从源码构建。DMG 不提交到 Git 历史。
+当前提供 Apple Silicon macOS DMG 和 Windows 11 x86_64 NSIS 安装器。普通测试者应从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。
 
-macOS 测试版没有 Developer ID 签名或公证。核对下载来源与 SHA-256 后，首次打开若被 Gatekeeper 阻止，可在 Finder 中右键 App 选择“打开”。Windows `alpha.6` 安装包同样没有商业代码签名，SmartScreen 可能显示“未知发布者”；不要为运行测试版而全局关闭系统安全功能。
+macOS 测试版没有 Developer ID 签名或公证。核对下载来源与 SHA-256 后，首次打开若被 Gatekeeper 阻止，可在 Finder 中右键 App 选择“打开”。Windows `alpha.10` 安装包同样没有商业代码签名，SmartScreen 可能显示“未知发布者”；不要为运行测试版而全局关闭系统安全功能。
 
 首次打开 App 时，启动配置会引导完成三部分；学习词典可在进入 App 后按需配置：
 
@@ -169,7 +169,7 @@ Atogaki_Sub/
 - 正确性、可编辑性和可回看性优先于实时性；实时辅助属于后续阶段。
 - 时间轴和人工修正是一等数据，重新识别与重试应派生新任务而非覆盖旧结果。
 - 首批语言组合是日语、英语或韩语识别、简体中文翻译；任务会持久化语言对，provider 与领域接口不写死某一种组合。
-- macOS Apple Silicon 是当前主要质量基线；Windows 11 x86_64 已有独立构建和预发布基线，但只在选定候选完成许可证审计与真实设备回归后更新。x86_64 macOS 尚未列入当前主线。
+- macOS Apple Silicon 是当前主要质量基线；Windows 11 x86_64 已通过独立许可证审计、安装门禁和选定候选实机回归发布 `alpha.10`，后续仍按稳定候选集中更新。Windows 悬浮字幕不稳定且不建议使用；x86_64 macOS 尚未列入当前主线。
 - 当前没有账号、云端文件托管、跨设备同步或自动媒体下载。
 
 项目方向见 [`docs/product-direction.md`](docs/product-direction.md)，完成度和技术债见 [`docs/roadmap.md`](docs/roadmap.md)。适合后续补充的公开材料包括 App 截图/短演示、已知问题、测试设备矩阵、贡献指南和稳定 Release 下载入口；这些应在首轮功能回归与外部测试反馈稳定后加入。

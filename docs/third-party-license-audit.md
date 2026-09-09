@@ -1,6 +1,6 @@
 # 第三方依赖许可证审计
 
-_审计日期：2026-08-25_
+_审计日期：2026-09-09_
 
 本记录用于 Atogaki `0.1.0` macOS Apple Silicon 预发布基线和 Windows x86_64 构建基线的工程审计，不构成法律意见。每次升级锁文件、sidecar 或目标平台后都必须重新生成并复核。
 
@@ -59,6 +59,8 @@ Windows sidecar 与 macOS 使用同一组固定上游版本和源码 SHA-256，�
 2026-08-22 的 [Windows sidecars 32575359901](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32575359901) 在 Windows Server 2022 runner 上重新生成 Rust target 与前端报告并确认仓库无差异，完成 LGPL 配置与 PE 依赖检查、对应源码归档、NSIS 安装后能力检查和卸载；这使上述 Windows 构建结论成为已执行的 CI 基线，而不是只在 macOS 上准备的交叉平台材料。
 
 2026-08-23 的 [`v0.1.0-alpha.6` 发布流水线](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32622817441)在固定 tag 上再次从源码冷构建并完成同一审计与安装门禁；其[公开 prerelease](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6)同时提供安装器、安装器 SHA-256、45.5 MB 对应源码包及其 SHA-256，验证 Windows LGPL 交付材料已实际随二进制发布。
+
+2026-09-09 的 [`v0.1.0-alpha.10` 发布流水线](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34311527438)在固定 tag `aa9fdbb` 上重新生成并核对 Windows Rust／前端许可证，复用已审计 sidecar 构建，并在安装后实际渲染 DirectWrite/libass MJPEG 字幕预览。其[公开 prerelease](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)提供 SHA-256 为 `68bb27e36048b1fc383211ba45ad1d9b120e49bf74c99b02464cf63cd2a16517` 的 28,230,248 字节安装器，以及 SHA-256 为 `c8a73e62333a2ba045853d46b3e1c615298e8bb9d0c732063531c806270af004` 的 45,543,185 字节对应源码包，并分别附带校验文件。
 
 这证明依赖闭包和构建材料达到 Windows 打包基线；未签名 NSIS 的 SmartScreen 行为、真实用户数据目录、Credential Manager、媒体闭环与卸载边界仍必须在 Windows 11 实机验收，不能由许可证审计替代。
 

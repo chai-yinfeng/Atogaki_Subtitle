@@ -48,7 +48,7 @@ UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `applic
 
 正式桌面 App 把固定版本的 `whisper-cli`、`ffmpeg` 和 `ffprobe` 作为按平台/CPU 架构生成的 Tauri sidecar 放在主程序同目录；Finder 启动不依赖 shell、Homebrew 或用户 `PATH`。模型仍按设备下载到应用数据目录或由用户选择，不进入 Bundle。开发环境可用 `ATOGAKI_WHISPER_CLI`、`ATOGAKI_FFMPEG` 和 `ATOGAKI_FFPROBE` 覆盖 sidecar。macOS FFmpeg 从固定源码构建 libass 字体栈与 LGPL 配置，发布物附带许可证和构建清单，不包含 libx264。
 
-macOS Apple Silicon 是当前已验证发行基线。Windows 11 x86_64 已建立 CPU Whisper、Credential Manager、WebView2、平台应用数据目录和 LGPL MPEG-4 烧录的独立预发布基线，但 `v0.1.0-alpha.6` 之后新增的学习、词典、字体样式、任务排序和窗口交互尚未完成 Windows 实机回归。Windows sidecar、依赖声明和对应源码归档继续按目标平台独立构建与审计，不能把 macOS arm64 产物、字体行为或验收结果直接视为跨平台结论。
+macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 已通过 `v0.1.0-alpha.10` 建立包含 CPU Whisper、Credential Manager、WebView2、平台应用数据目录、学习与词典、字幕样式、可恢复翻译、局部重新识别、Range 媒体播放和 LGPL MPEG-4 烧录的独立预发布基线；字幕样式预览已完成实机确认，其他未记录矩阵仍继续扩测。Windows 悬浮字幕不稳定且不建议使用。Windows sidecar、依赖声明和对应源码归档继续按目标平台独立构建与审计，不能把 macOS arm64 产物或验收结果直接视为跨平台结论。
 
 启动恢复采用显式失败而非静默续跑：数据库中仍为非终态的识别任务会与任务目录快照核对，未完成者标记为上次退出导致的失败。重试从旧任务的输入、识别参数和词表快照创建新 UUID 任务，旧目录保持只读证据；旧模型路径不可用时才使用当前设备设置中的替代模型。ffmpeg/Whisper 子进程设置为随异步任务销毁而终止。
 

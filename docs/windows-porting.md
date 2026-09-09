@@ -1,6 +1,6 @@
 # Windows x86_64 兼容计划
 
-_状态：alpha.6 后共享功能与 Windows 配置已同步，并已生成通过自动安装门禁的未发布 NSIS 候选；等待 Windows 11 实机增量回归，悬浮字幕异常作为已知限制暂缓；最后更新：2026-09-09_
+_状态：alpha.6 后共享功能已随 `v0.1.0-alpha.10` 发布；字幕样式预览通过 Windows 11 实机确认，剩余矩阵继续扩测，悬浮字幕异常作为已知限制暂缓；最后更新：2026-09-09_
 
 ## 目标与边界
 
@@ -22,7 +22,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 - Explorer 文件选中路径已经实现并通过 Windows 编译；中文、空格、长路径、非系统盘和现有 Explorer 进程下的窗口行为仍需实机验证。
 - 悬浮字幕的非 macOS 路径尚未在 Windows 普通桌面、多显示器、任务栏和最小化／关闭流程中验证。
-- `v0.1.0-alpha.6` 之后的扩测已报告悬浮字幕点击无反应，以及主窗口消失后无法从界面唤回、只能结束进程等不一致表现。本轮按产品决定暂不修复；下一次 Windows Release 必须标注“不稳定、不建议使用”，不能宣称该功能可用。
+- `v0.1.0-alpha.6` 之后的扩测已报告悬浮字幕点击无反应，以及主窗口消失后无法从界面唤回、只能结束进程等不一致表现。本轮按产品决定暂不修复；`alpha.10` 已标注“不稳定、不建议使用”，后续 Release 在修复并实测前也不能宣称该功能可用。
 - 部分错误和能力文案直接提到 VideoToolbox 或 Finder，需要按实际平台显示；实时录音代码仍固定使用 AVFoundation，但实时能力不属于本阶段。
 - Windows NSIS 类型、Release 命名和校验流程已经固定；README 的平台入口与面向非开发者的安装说明仍需随扩测反馈继续完善。
 
@@ -53,7 +53,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 `v0.1.0-alpha.6` 之后报告的悬浮字幕异常在不同设备上表现为点击无反应，或主窗口消失后找不到悬浮窗口与恢复入口、只能从任务管理器结束进程。非 macOS 路径仍使用 alpha.6 时的无边框普通 Tauri 窗口、`always_on_top`、`skip_taskbar` 与 WebView 内容，本轮按用户决定不修改。它不阻止其他 Windows 能力发布，但 Release 必须明确标注该功能不稳定且不建议使用；未经实测不得宣称悬浮字幕已经同步可用。
 
-当前源码同步、原生编译和不发布的 NSIS 候选已经完成。[Windows 预览修复候选流水线 34308936563](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936563)在提交 `3af0728` 上重新构建并校验 Whisper、LGPL-only FFmpeg／ffprobe、目标许可证与对应源码，生成 current-user NSIS，并完成 CI runner 上的安装、PE／sidecar／合规资源检查、真实 DirectWrite/libass MJPEG 预览和卸载冒烟。安装包 Artifact 约 26.9 MiB，sidecar 审计包约 72.4 MiB，保留至 2026-09-23；由于没有传入 release tag，没有创建 tag 或 GitHub Release。下一步是跑实机增量矩阵，再决定新的 Windows tag；不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
+源码同步、原生编译和预览修复候选完成后，用户在 Windows 11 实机确认字幕样式预览正常。[固定 tag 发布流水线 34311527438](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34311527438)随后从提交 `aa9fdbb` 重建并校验 Whisper、LGPL-only FFmpeg／ffprobe、目标许可证与对应源码，生成 current-user NSIS，并完成安装、PE／sidecar／合规资源检查、真实 DirectWrite/libass MJPEG 预览和卸载冒烟。最终 [`v0.1.0-alpha.10` prerelease](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)提供安装器、对应源码包及各自 SHA-256。下一步继续扩大实机增量矩阵；未测试项不得因公开发布自动标记完成。
 
 ## 实施顺序
 

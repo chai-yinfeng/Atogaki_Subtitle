@@ -1,6 +1,6 @@
 # Windows 11 实机测试清单
 
-_当前公开基线：`v0.1.0-alpha.6` Windows x86_64 预发布；提交 `3af0728` 的预览修复候选已生成，正等待 alpha.6 后增量矩阵实测；未签名 alpha，仅供知情测试_
+_当前公开基线：`v0.1.0-alpha.10` Windows 11 x86_64 预发布；字幕样式预览已完成实机确认，其他增量矩阵继续扩测；未签名 alpha，仅供知情测试_
 
 ## 测试边界
 
@@ -8,9 +8,9 @@ _当前公开基线：`v0.1.0-alpha.6` Windows x86_64 预发布；提交 `3af072
 
 测试前记录 Windows 版本与 OS build、CPU、内存、显示器数量／缩放比例，以及设备是否安装过 Rust、Node、FFmpeg、Whisper 或 Atogaki。优先使用没有这些开发工具的 Windows 11 x86_64 设备、虚拟机、Windows Sandbox 或独立测试账户。
 
-## 0. 获取并校验候选
+## 0. 获取并校验版本
 
-1. 本轮测试从 [Windows 预览修复候选流水线 34308936563](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936563) 下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact；它对应提交 `3af0728`，保留至 2026-09-23。公开旧基线仍可从 [`v0.1.0-alpha.6` GitHub Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6) 获取，但不要用旧包执行本轮增量矩阵。
+1. 从 [`v0.1.0-alpha.10` GitHub Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10) 下载 `Atogaki-v0.1.0-alpha.10-windows-x86_64-setup.exe` 及相邻 `.sha256`。它对应固定 tag 提交 `aa9fdbb`；不要再使用已过期的候选 Artifact 或 `alpha.6` 旧包执行当前增量矩阵。
 2. 在解压目录打开 PowerShell，校验安装器旁的 SHA-256：
 
 ```powershell
@@ -71,6 +71,8 @@ $actual -eq $expected
 悬浮字幕异常在本轮源码同步中暂缓，不作为其他 alpha.6 后功能进入 Windows 编译基线的阻塞项。当前实机反馈包括点击无反应，以及点击后主窗口消失、无法从界面唤回、只能通过任务管理器结束进程；在修复前，Windows Release 必须明确标注该功能不稳定且不建议使用。若后续候选仍要专门测试，则在 100%、125%、150% 和 200% 缩放下记录窗口是否创建、是否空白、首条字幕是否出现、播放跨段是否更新、置顶、拖动、缩放、关闭、Alt+Tab／任务栏、多显示器移动和主窗口退出行为；若决定隐藏入口，也必须确认快捷键和旧窗口状态不能绕过限制重新打开。
 
 ## 当前实机记录
+
+2026-09-09 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10) 已由[固定 tag 发布流水线 34311527438](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34311527438)发布。最终流水线从标签提交重新生成并校验许可证、NSIS 与四项 Release 资产，安装后实际通过 DirectWrite/libass 生成 MJPEG 预览，并完成 PE、sidecar、合规资源和静默卸载检查。后续反馈统一使用 Release 安装器；未逐项记录的学习、词典、WebView2、凭据、长视频与真实媒体闭环仍保持“未测”，不因发布自动视为通过。
 
 2026-09-09 用户在 Windows 11 实机确认提交 `3af0728` 的修复候选可以正常显示字幕样式预览；当前测试范围内没有发现新的发布阻塞项，同意将后续文档提交固定为 `v0.1.0-alpha.10` 候选。悬浮字幕不纳入本轮修复，必须在发布说明中标注为不稳定且不建议使用；Windows 媒体播放器的 MPEG-4 提示继续作为非阻塞兼容性观察项。
 
