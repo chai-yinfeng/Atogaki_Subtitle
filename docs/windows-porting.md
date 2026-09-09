@@ -22,7 +22,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 - Explorer 文件选中路径已经实现并通过 Windows 编译；中文、空格、长路径、非系统盘和现有 Explorer 进程下的窗口行为仍需实机验证。
 - 悬浮字幕的非 macOS 路径尚未在 Windows 普通桌面、多显示器、任务栏和最小化／关闭流程中验证。
-- `v0.1.0-alpha.6` 扩测已报告悬浮字幕显示异常，具体视觉表现与复现条件待补；下一次 Windows 稳定候选前必须完成分诊和回归。
+- `v0.1.0-alpha.6` 之后的扩测已报告悬浮字幕点击无反应，以及主窗口消失后无法从界面唤回、只能结束进程等不一致表现。本轮按产品决定暂不修复；下一次 Windows Release 必须标注“不稳定、不建议使用”，不能宣称该功能可用。
 - 部分错误和能力文案直接提到 VideoToolbox 或 Finder，需要按实际平台显示；实时录音代码仍固定使用 AVFoundation，但实时能力不属于本阶段。
 - Windows NSIS 类型、Release 命名和校验流程已经固定；README 的平台入口与面向非开发者的安装说明仍需随扩测反馈继续完善。
 
@@ -51,7 +51,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 - 字幕编辑快捷键按平台显示 `⌘B` 或 `Ctrl+B`；翻译和词典凭据检查按平台提示 Keychain 或 Windows Credential Manager；Whisper GPU 日志改为平台中性表述。
 - 共享核心、桌面 Rust 测试、桌面编译和前端生产构建已在 macOS 开发机通过。[Windows 原生编译门禁 34280369794](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34280369794)随后在提交 `10df74d` 上通过配置断言、前端构建、格式、共享核心测试和 Tauri Windows 桌面壳编译；这一阶段没有生成 NSIS Artifact。
 
-`v0.1.0-alpha.6` 报告的悬浮字幕显示异常尚无足够复现信息。非 macOS 路径仍使用 alpha.6 时的无边框普通 Tauri 窗口、`always_on_top`、`skip_taskbar` 与 WebView 内容，本轮按用户决定不修改。它不阻止其他 Windows 源码能力和编译基线追平，但在未来打包评估时必须明确选择：作为已知限制保留入口，或暂时在 Windows 隐藏入口；未经实测不得宣称悬浮字幕已经同步可用。
+`v0.1.0-alpha.6` 之后报告的悬浮字幕异常在不同设备上表现为点击无反应，或主窗口消失后找不到悬浮窗口与恢复入口、只能从任务管理器结束进程。非 macOS 路径仍使用 alpha.6 时的无边框普通 Tauri 窗口、`always_on_top`、`skip_taskbar` 与 WebView 内容，本轮按用户决定不修改。它不阻止其他 Windows 能力发布，但 Release 必须明确标注该功能不稳定且不建议使用；未经实测不得宣称悬浮字幕已经同步可用。
 
 当前源码同步、原生编译和不发布的 NSIS 候选已经完成。[Windows 临时候选流水线 34302977783](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34302977783)在提交 `f7e5651` 上重新构建并校验 Whisper、LGPL-only FFmpeg／ffprobe、目标许可证与对应源码，生成 current-user NSIS，完成 CI runner 上的安装、PE／sidecar／合规资源检查和卸载冒烟。安装包 Artifact 约 26.9 MiB，sidecar 审计包约 72.4 MiB，保留至 2026-09-23；由于没有传入 release tag，没有创建 tag 或 GitHub Release。下一步是跑实机增量矩阵，再决定新的 Windows tag；不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
 

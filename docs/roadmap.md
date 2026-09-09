@@ -126,6 +126,8 @@ _最后更新：2026-09-09_
 
 2026-09-09 在提交 `f7e5651` 上完成 [Windows 临时 NSIS 候选流水线 34302977783](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34302977783)：Windows 配置断言、固定源码 sidecar、目标许可证、Tauri release／NSIS、安装后 PE 与 sidecar 能力检查、合规资源检查和静默卸载全部通过。约 26.9 MiB 的未签名安装包 Artifact 与约 72.4 MiB 的审计 sidecar Artifact 保留至 2026-09-23；本次未传入 release tag，因此没有发布。下一门禁是 Windows 11 实机增量矩阵，不把 CI 安装冒烟等同于 WebView2、Credential Manager、长视频音轨或真实媒体闭环验收。
 
+2026-09-09 候选实测补出两项媒体兼容问题：Windows FFmpeg 在关闭自动依赖探测后没有 PNG 编码器，导致 libass 字体预览失败，而错误摘要误显示版本 banner；现改为按能力使用 PNG 或原生 MJPEG，并把真实 libass 图片渲染纳入安装冒烟。Windows 自带媒体播放器对 MPEG-4 Part 2 烧录成品显示编码不支持提示后仍能播放，具体是视频兼容提示还是源音频直通所致仍需结合成品 stream 信息确认，暂不在缺少样本证据时更换编码链路。悬浮字幕则在不同机器表现为点击无反应或主窗口消失且无法唤回，本轮不修，发布说明必须标注为不稳定且不建议使用。
+
 Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续以 macOS Apple Silicon 为质量基线，不为每个功能分支 push 生成 Windows 安装包。共享代码在 PR 或进入 `main` 时运行路径过滤后的 Windows 编译门禁；完整 sidecar、许可证和 NSIS 流水线只在 Windows 打包基础设施变化时自动验证，普通产品代码由选定的 Windows 稳定候选 commit 手动触发。平台继续共享同一业务代码，不维护长期 Windows 产品分支。详见决策记录 0031。
 
 2026-08-22 开始 W3 代码准备：字幕和烧录成品可调用 Windows Explorer 选中文件，界面按平台显示 Finder／Explorer，并把 Windows 首版 MPEG-4 记为正常软件编码基线，而不是伪装成 VideoToolbox 失败回退。相关 Windows 原生编译已通过，Explorer 窗口行为、中文／长路径和多显示器仍留给实机验证。

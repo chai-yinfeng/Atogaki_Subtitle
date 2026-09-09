@@ -132,7 +132,7 @@ impl SubtitleStyleService {
             output_path,
             font_events,
         } = rendered?;
-        remove_old_preview_images(&preview_directory, &image_path);
+        remove_old_preview_images(&preview_directory, std::path::Path::new(&output_path));
         let font_report = font_report(&self.fonts, styles, &workspace.segments);
         Ok(SubtitleStylePreview {
             output_path,
@@ -198,7 +198,10 @@ fn remove_old_preview_images(directory: &std::path::Path, current: &std::path::P
             && path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("subtitle-style-") && name.ends_with(".png"))
+                .is_some_and(|name| {
+                    name.starts_with("subtitle-style-")
+                        && (name.ends_with(".png") || name.ends_with(".jpg"))
+                })
     }) {
         let _ = fs::remove_file(path);
     }

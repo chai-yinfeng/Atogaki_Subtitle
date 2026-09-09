@@ -71,9 +71,37 @@ if ($LASTEXITCODE -ne 0 -or $filters -notmatch '(?m)^\s*\S+\s+ass\s+') {
     throw "Installed FFmpeg cannot report the libass filter"
 }
 $encoders = & $ffmpeg.FullName -hide_banner -encoders 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $encoders -notmatch '(?m)^\s*\S+\s+mpeg4\s+') {
-    throw "Installed FFmpeg cannot report the MPEG-4 encoder"
+if ($LASTEXITCODE -ne 0 -or
+    $encoders -notmatch '(?m)^\s*\S+\s+mpeg4\s+' -or
+    $encoders -notmatch '(?m)^\s*\S+\s+mjpeg\s+') {
+    throw "Installed FFmpeg cannot report the required MPEG-4 and MJPEG encoders"
 }
+
+$previewDirectory = Join-Path $env:RUNNER_TEMP "atogaki-subtitle-preview-smoke"
+New-Item -ItemType Directory -Path $previewDirectory -Force | Out-Null
+$previewAss = Join-Path $previewDirectory "preview.ass"
+$previewJpeg = Join-Path $previewDirectory "preview.jpg"
+$assText = @"
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 360
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,36,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,20,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Atogaki preview
+"@
+Set-Content -Path $previewAss -Value $assText -Encoding utf8
+$previewFilterPath = $previewAss.Replace('\', '/').Replace(':', '\:')
+$previewLog = & $ffmpeg.FullName -hide_banner -y -f lavfi -i "color=c=0x20242B:s=640x360:d=1" -vf "ass=filename='$previewFilterPath'" -frames:v 1 -an -c:v mjpeg -q:v 2 $previewJpeg 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $previewJpeg) -or (Get-Item $previewJpeg).Length -lt 1000) {
+    throw "Installed FFmpeg cannot render an actual libass subtitle preview:`n$previewLog"
+}
+Remove-Item -Path $previewDirectory -Recurse -Force
 & $ffprobe.FullName -version | Select-Object -First 1
 if ($LASTEXITCODE -ne 0) {
     throw "Installed ffprobe did not start"

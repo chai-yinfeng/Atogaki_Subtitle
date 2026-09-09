@@ -62,10 +62,19 @@ pub async fn render_ass_preview_frame(
     if !supports_filter(ffmpeg, "ass").await? {
         anyhow::bail!("the bundled FFmpeg sidecar does not provide the libass filter");
     }
+    let (image_encoder, actual_output) = if supports_encoder(ffmpeg, "png").await? {
+        ("png", output.to_path_buf())
+    } else if supports_encoder(ffmpeg, "mjpeg").await? {
+        ("mjpeg", output.with_extension("jpg"))
+    } else {
+        anyhow::bail!(
+            "the bundled FFmpeg sidecar provides neither the PNG nor MJPEG preview encoder"
+        );
+    };
     let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
     let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
     let mut command = sidecar_command(ffmpeg);
-    command.arg("-y");
+    command.args(["-hide_banner", "-y"]);
     if let Some(input) = input {
         if !input.is_file() {
             anyhow::bail!("preview media does not exist: {}", input.display());
@@ -80,14 +89,25 @@ pub async fn render_ass_preview_frame(
     } else {
         command.args(["-f", "lavfi", "-i", "color=c=0x20242B:s=1920x1080:d=2"]);
     }
-    command.args(["-vf", &filter, "-frames:v", "1", "-an", "-c:v", "png"]);
-    command.arg(output);
+    command.args([
+        "-vf",
+        &filter,
+        "-frames:v",
+        "1",
+        "-an",
+        "-c:v",
+        image_encoder,
+    ]);
+    if image_encoder == "mjpeg" {
+        command.args(["-q:v", "2"]);
+    }
+    command.arg(&actual_output);
     let result = command
         .output()
         .await
         .context("failed to launch FFmpeg subtitle preview")?;
     let stderr = String::from_utf8_lossy(&result.stderr);
-    if !result.status.success() || !output.is_file() {
+    if !result.status.success() || !actual_output.is_file() {
         anyhow::bail!(
             "FFmpeg subtitle preview failed: {}",
             summarize_render_error(&stderr)
@@ -109,7 +129,7 @@ pub async fn render_ass_preview_frame(
         }
     }
     Ok(SubtitlePreviewRender {
-        output_path: output.display().to_string(),
+        output_path: actual_output.display().to_string(),
         font_events,
     })
 }
@@ -855,11 +875,31 @@ fn summarize_render_error(message: &str) -> String {
         "Error while opening encoder",
         "Could not find tag for codec",
         "not currently supported in container",
+        "Unknown encoder",
+        "Encoder not found",
+        "No such file or directory",
+        "Invalid argument",
+        "Error",
+        "Failed",
     ];
     let line = preferred
         .iter()
-        .find_map(|pattern| message.lines().find(|line| line.contains(pattern)))
-        .or_else(|| message.lines().find(|line| !line.trim().is_empty()))
+        .find_map(|pattern| {
+            let pattern = pattern.to_ascii_lowercase();
+            message
+                .lines()
+                .find(|line| line.to_ascii_lowercase().contains(&pattern))
+        })
+        .or_else(|| {
+            message.lines().rev().find(|line| {
+                let line = line.trim();
+                !line.is_empty()
+                    && !line.starts_with("ffmpeg version")
+                    && !line.starts_with("built with")
+                    && !line.starts_with("configuration:")
+                    && !line.starts_with("libav")
+            })
+        })
         .unwrap_or("unknown ffmpeg error")
         .trim();
     line.chars().take(240).collect()
@@ -1051,7 +1091,7 @@ fn escape_filter_path(path: &Path) -> String {
 mod tests {
     use super::{
         AudioEncoder, HardSubtitleEncoder, audio_copy_failed, burn_args, paired_ffprobe_path,
-        render_ass_preview_frame, source_relative_target_bitrate,
+        render_ass_preview_frame, source_relative_target_bitrate, summarize_render_error,
     };
     use std::{fs, path::Path};
 
@@ -1127,6 +1167,15 @@ mod tests {
             "Could not find tag for codec pcm_s16le in stream #1"
         ));
         assert!(!audio_copy_failed("VideoToolbox session failed"));
+    }
+
+    #[test]
+    fn ffmpeg_error_summary_skips_the_version_banner() {
+        let stderr = "ffmpeg version 8.1.2\nbuilt with gcc\nconfiguration: --disable-autodetect\n[vost#0:0 @ 0001] Unknown encoder 'png'\nError opening output file preview.png";
+        assert_eq!(
+            summarize_render_error(stderr),
+            "[vost#0:0 @ 0001] Unknown encoder 'png'"
+        );
     }
 
     #[tokio::test]

@@ -160,7 +160,7 @@ if [[ $FFMPEG_LICENSE != *'GNU Lesser General Public'* ]]; then
   printf 'FFmpeg did not report an LGPL license.\n' >&2
   exit 1
 fi
-if [[ $FFMPEG_ENCODERS == *' libx264 '* || $FFMPEG_ENCODERS != *' mpeg4 '* ]]; then
+if [[ $FFMPEG_ENCODERS == *' libx264 '* || $FFMPEG_ENCODERS != *' mpeg4 '* || $FFMPEG_ENCODERS != *' mjpeg '* ]]; then
   printf 'FFmpeg encoder policy check failed.\n' >&2
   exit 1
 fi
