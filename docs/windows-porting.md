@@ -53,7 +53,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 `v0.1.0-alpha.6` 之后报告的悬浮字幕异常在不同设备上表现为点击无反应，或主窗口消失后找不到悬浮窗口与恢复入口、只能从任务管理器结束进程。非 macOS 路径仍使用 alpha.6 时的无边框普通 Tauri 窗口、`always_on_top`、`skip_taskbar` 与 WebView 内容，本轮按用户决定不修改。它不阻止其他 Windows 能力发布，但 Release 必须明确标注该功能不稳定且不建议使用；未经实测不得宣称悬浮字幕已经同步可用。
 
-当前源码同步、原生编译和不发布的 NSIS 候选已经完成。[Windows 临时候选流水线 34302977783](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34302977783)在提交 `f7e5651` 上重新构建并校验 Whisper、LGPL-only FFmpeg／ffprobe、目标许可证与对应源码，生成 current-user NSIS，完成 CI runner 上的安装、PE／sidecar／合规资源检查和卸载冒烟。安装包 Artifact 约 26.9 MiB，sidecar 审计包约 72.4 MiB，保留至 2026-09-23；由于没有传入 release tag，没有创建 tag 或 GitHub Release。下一步是跑实机增量矩阵，再决定新的 Windows tag；不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
+当前源码同步、原生编译和不发布的 NSIS 候选已经完成。[Windows 预览修复候选流水线 34308936563](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936563)在提交 `3af0728` 上重新构建并校验 Whisper、LGPL-only FFmpeg／ffprobe、目标许可证与对应源码，生成 current-user NSIS，并完成 CI runner 上的安装、PE／sidecar／合规资源检查、真实 DirectWrite/libass MJPEG 预览和卸载冒烟。安装包 Artifact 约 26.9 MiB，sidecar 审计包约 72.4 MiB，保留至 2026-09-23；由于没有传入 release tag，没有创建 tag 或 GitHub Release。下一步是跑实机增量矩阵，再决定新的 Windows tag；不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
 
 ## 实施顺序
 

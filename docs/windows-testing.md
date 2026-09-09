@@ -1,6 +1,6 @@
 # Windows 11 实机测试清单
 
-_当前公开基线：`v0.1.0-alpha.6` Windows x86_64 预发布；提交 `f7e5651` 的未发布候选已生成，正等待 alpha.6 后增量矩阵实测；未签名 alpha，仅供知情测试_
+_当前公开基线：`v0.1.0-alpha.6` Windows x86_64 预发布；提交 `3af0728` 的预览修复候选已生成，正等待 alpha.6 后增量矩阵实测；未签名 alpha，仅供知情测试_
 
 ## 测试边界
 
@@ -10,7 +10,7 @@ _当前公开基线：`v0.1.0-alpha.6` Windows x86_64 预发布；提交 `f7e565
 
 ## 0. 获取并校验候选
 
-1. 本轮测试从 [Windows 临时候选流水线 34302977783](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34302977783) 下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact；它对应提交 `f7e5651`，保留至 2026-09-23。公开旧基线仍可从 [`v0.1.0-alpha.6` GitHub Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6) 获取，但不要用旧包执行本轮增量矩阵。
+1. 本轮测试从 [Windows 预览修复候选流水线 34308936563](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936563) 下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact；它对应提交 `3af0728`，保留至 2026-09-23。公开旧基线仍可从 [`v0.1.0-alpha.6` GitHub Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6) 获取，但不要用旧包执行本轮增量矩阵。
 2. 在解压目录打开 PowerShell，校验安装器旁的 SHA-256：
 
 ```powershell
@@ -71,6 +71,8 @@ $actual -eq $expected
 悬浮字幕异常在本轮源码同步中暂缓，不作为其他 alpha.6 后功能进入 Windows 编译基线的阻塞项。当前实机反馈包括点击无反应，以及点击后主窗口消失、无法从界面唤回、只能通过任务管理器结束进程；在修复前，Windows Release 必须明确标注该功能不稳定且不建议使用。若后续候选仍要专门测试，则在 100%、125%、150% 和 200% 缩放下记录窗口是否创建、是否空白、首条字幕是否出现、播放跨段是否更新、置顶、拖动、缩放、关闭、Alt+Tab／任务栏、多显示器移动和主窗口退出行为；若决定隐藏入口，也必须确认快捷键和旧窗口状态不能绕过限制重新打开。
 
 ## 当前实机记录
+
+2026-09-09 在提交 `3af0728` 上完成[预览修复候选流水线 34308936563](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936563)。除既有配置、构建、许可证、PE、sidecar 与卸载门禁外，安装后的 Windows FFmpeg 已实际通过 DirectWrite/libass 把测试 ASS 渲染为 MJPEG 图片；约 26.9 MiB 的新安装包 Artifact 保留至 2026-09-23。发布 job 因未提供 release tag 按预期跳过。仍需在实机字体界面确认任务视频帧、CJK 字体选择与反复刷新。
 
 2026-09-09 对提交 `f7e5651` 的候选实测发现字幕样式／字体界面无法生成预览，错误摘要只显示 `ffmpeg version 8.1.2`。候选构建清单确认 Windows sidecar 在 `--disable-autodetect` 下没有 PNG 所需的 zlib，而预览固定请求 PNG；烧录使用 MPEG-4，不经过 PNG，因此最终视频仍可成功。修复让预览在 PNG 不可用时使用 FFmpeg 原生 MJPEG，并让错误摘要跳过版本 banner、展示实际错误；安装器门禁新增一次真实的 libass 图片渲染，不再只检查 `ass` filter 名称。该候选同时观察到 Windows 自带媒体播放器先报告编码不支持、随后仍可播放并显示烧录字幕；视频为预期的 MPEG-4 Part 2，但音频是否直通以及具体 stream 信息尚待从成品记录确认。
 
