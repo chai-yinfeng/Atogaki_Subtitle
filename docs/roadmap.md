@@ -1,6 +1,6 @@
 # 开发路线图
 
-_最后更新：2026-09-08_
+_最后更新：2026-09-09_
 
 路线图按用户价值排序；完成一个阶段前，不提前将后续阶段变成产品默认路径。已完成条目保留为能力与决策历史，当前行动以本页顶部的推进顺序和各阶段未完成项为准。
 
@@ -8,7 +8,7 @@ _最后更新：2026-09-08_
 
 1. 以真实收藏、查词和回看行为验证学习闭环，优先补影响使用频率的检索、筛选与多来源查看。
 2. 按真实字幕编辑频率小步补齐 A/B 循环、试听、lead-in／lead-out、多选平移和时间质量检查，不提前扩展复杂视频特效。
-3. macOS Apple Silicon 继续作为日常开发与发布质量基线；Windows 已恢复明确的 NSIS current-user／中英配置，把 alpha.6 后共享功能推进到同一源码基线并通过原生编译门禁。下一步由安装候选决策开始，再集中验证学习区、词典、字体样式、任务排序、可恢复翻译、局部重新识别、长视频 Range 播放和导出质量档；悬浮字幕异常暂缓且不得标记为可用。
+3. macOS Apple Silicon 继续作为日常开发与发布质量基线；Windows 已恢复明确的 NSIS current-user／中英配置，把 alpha.6 后共享功能推进到同一源码基线，并生成通过自动安装门禁的临时候选。下一步在 Windows 11 实机集中验证学习区、词典、字体样式、任务排序、可恢复翻译、局部重新识别、长视频 Range 播放和导出质量档，再决定发布；悬浮字幕异常暂缓且不得标记为可用。
 4. 窄版重新识别在出现真实模型／参数对照痛点时推进；实时辅助和多人字幕轨道保持远期阶段。
 
 ## 0. 处理核心稳固（已完成）
@@ -123,6 +123,8 @@ _最后更新：2026-09-08_
 2026-08-23 已发布 [Windows x86_64 预发布版 `v0.1.0-alpha.6`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6)。固定 tag 的[发布流水线 32622817441](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/32622817441) 从源码冷构建 Whisper、LGPL-only FFmpeg／libass 和 Tauri NSIS，重新生成目标许可证材料，通过 PE GUI、sidecar 能力、静默安装与卸载门禁后，自动发布约 27.6 MB 的安装包、SHA-256、对应源码包及其 SHA-256。该版本进入多人 Windows 设备扩测，代码签名、W3/W4 未记录矩阵和真实媒体覆盖仍是后续风险。
 
 2026-08-24 扩测报告 Windows 悬浮字幕存在显示异常；具体视觉表现、窗口状态和复现条件仍待补充。该问题登记为下一次 Windows 稳定候选前必须分诊的已知缺陷，本轮不立即修复，也不阻塞 macOS 学习区主线。
+
+2026-09-09 在提交 `f7e5651` 上完成 [Windows 临时 NSIS 候选流水线 34302977783](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34302977783)：Windows 配置断言、固定源码 sidecar、目标许可证、Tauri release／NSIS、安装后 PE 与 sidecar 能力检查、合规资源检查和静默卸载全部通过。约 26.9 MiB 的未签名安装包 Artifact 与约 72.4 MiB 的审计 sidecar Artifact 保留至 2026-09-23；本次未传入 release tag，因此没有发布。下一门禁是 Windows 11 实机增量矩阵，不把 CI 安装冒烟等同于 WebView2、Credential Manager、长视频音轨或真实媒体闭环验收。
 
 Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续以 macOS Apple Silicon 为质量基线，不为每个功能分支 push 生成 Windows 安装包。共享代码在 PR 或进入 `main` 时运行路径过滤后的 Windows 编译门禁；完整 sidecar、许可证和 NSIS 流水线只在 Windows 打包基础设施变化时自动验证，普通产品代码由选定的 Windows 稳定候选 commit 手动触发。平台继续共享同一业务代码，不维护长期 Windows 产品分支。详见决策记录 0031。
 

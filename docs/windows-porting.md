@@ -1,6 +1,6 @@
 # Windows x86_64 兼容计划
 
-_状态：alpha.6 后共享功能与 Windows 配置已同步到当前主线并通过原生编译门禁；是否生成安装候选等待下一步决定，悬浮字幕异常作为已知限制暂缓；最后更新：2026-09-08_
+_状态：alpha.6 后共享功能与 Windows 配置已同步，并已生成通过自动安装门禁的未发布 NSIS 候选；等待 Windows 11 实机增量回归，悬浮字幕异常作为已知限制暂缓；最后更新：2026-09-09_
 
 ## 目标与边界
 
@@ -53,7 +53,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 
 `v0.1.0-alpha.6` 报告的悬浮字幕显示异常尚无足够复现信息。非 macOS 路径仍使用 alpha.6 时的无边框普通 Tauri 窗口、`always_on_top`、`skip_taskbar` 与 WebView 内容，本轮按用户决定不修改。它不阻止其他 Windows 源码能力和编译基线追平，但在未来打包评估时必须明确选择：作为已知限制保留入口，或暂时在 Windows 隐藏入口；未经实测不得宣称悬浮字幕已经同步可用。
 
-当前源码同步和原生编译阶段已经完成。接下来如决定继续，应生成不发布的 NSIS Artifact 并跑增量矩阵，再决定新的 Windows tag。不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
+当前源码同步、原生编译和不发布的 NSIS 候选已经完成。[Windows 临时候选流水线 34302977783](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34302977783)在提交 `f7e5651` 上重新构建并校验 Whisper、LGPL-only FFmpeg／ffprobe、目标许可证与对应源码，生成 current-user NSIS，完成 CI runner 上的安装、PE／sidecar／合规资源检查和卸载冒烟。安装包 Artifact 约 26.9 MiB，sidecar 审计包约 72.4 MiB，保留至 2026-09-23；由于没有传入 release tag，没有创建 tag 或 GitHub Release。下一步是跑实机增量矩阵，再决定新的 Windows tag；不要把 macOS alpha.9 的同名 Release 事后补入未经实测的 Windows 资产。
 
 ## 实施顺序
 

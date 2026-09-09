@@ -1,6 +1,6 @@
 # Windows 11 实机测试清单
 
-_当前公开基线：`v0.1.0-alpha.6` Windows x86_64 预发布；下一候选还需完成 alpha.6 后增量矩阵；未签名 alpha，仅供知情测试_
+_当前公开基线：`v0.1.0-alpha.6` Windows x86_64 预发布；提交 `f7e5651` 的未发布候选已生成，正等待 alpha.6 后增量矩阵实测；未签名 alpha，仅供知情测试_
 
 ## 测试边界
 
@@ -10,7 +10,7 @@ _当前公开基线：`v0.1.0-alpha.6` Windows x86_64 预发布；下一候选�
 
 ## 0. 获取并校验候选
 
-1. 从 [`v0.1.0-alpha.6` GitHub Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6) 下载 `Atogaki-v0.1.0-alpha.6-windows-x86_64-setup.exe` 及相邻 `.sha256`。开发中的未发布候选才从对应 Actions 运行下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact。
+1. 本轮测试从 [Windows 临时候选流水线 34302977783](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34302977783) 下载 `Atogaki-windows-x86_64-unsigned-nsis` Artifact；它对应提交 `f7e5651`，保留至 2026-09-23。公开旧基线仍可从 [`v0.1.0-alpha.6` GitHub Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.6) 获取，但不要用旧包执行本轮增量矩阵。
 2. 在解压目录打开 PowerShell，校验安装器旁的 SHA-256：
 
 ```powershell
@@ -70,6 +70,8 @@ $actual -eq $expected
 悬浮字幕异常在本轮源码同步中暂缓，不作为其他 alpha.6 后功能进入 Windows 编译基线的阻塞项。若后续候选保留该入口，则必须作为明确已知限制，并单独在 100%、125%、150% 和 200% 缩放下记录窗口是否创建、是否空白、首条字幕是否出现、播放跨段是否更新、置顶、拖动、缩放、关闭、Alt+Tab／任务栏、多显示器移动和主窗口退出行为；若决定隐藏入口，也必须确认快捷键和旧窗口状态不能绕过限制重新打开。
 
 ## 当前实机记录
+
+2026-09-09 在提交 `f7e5651` 上手动运行[未发布 Windows 候选流水线 34302977783](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34302977783)。固定源码构建的 MSVC CPU Whisper、LGPL-only FFmpeg／ffprobe、Windows 配置断言、前端与 Rust 许可证、Tauri release 编译、current-user NSIS、安装后 PE／sidecar／合规资源检查及静默卸载全部通过。已上传约 26.9 MiB 的 `Atogaki-windows-x86_64-unsigned-nsis` 和约 72.4 MiB 的 `Atogaki-windows-x86_64-sidecars`，均保留至 2026-09-23；未提供 release tag，发布 job 按预期跳过。该记录只证明候选包可构建并在 CI runner 安装，不替代本页实机矩阵。
 
 2026-09-08 将 alpha.6 后共享功能和 Windows 配置同步到提交 `10df74d`；[Windows 原生编译门禁 34280369794](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34280369794)通过配置断言、前端构建、Rust 格式、共享核心测试和 Tauri 桌面壳编译。本轮刻意未生成安装包，也没有把悬浮字幕标记为已修复；后续实机结果从本页增量矩阵继续记录。
 
