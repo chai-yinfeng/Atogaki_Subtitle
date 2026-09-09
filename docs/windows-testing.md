@@ -72,6 +72,8 @@ $actual -eq $expected
 
 ## 当前实机记录
 
+2026-09-09 用户在 Windows 11 实机确认提交 `3af0728` 的修复候选可以正常显示字幕样式预览；当前测试范围内没有发现新的发布阻塞项，同意将后续文档提交固定为 `v0.1.0-alpha.10` 候选。悬浮字幕不纳入本轮修复，必须在发布说明中标注为不稳定且不建议使用；Windows 媒体播放器的 MPEG-4 提示继续作为非阻塞兼容性观察项。
+
 2026-09-09 在提交 `3af0728` 上完成[预览修复候选流水线 34308936563](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936563)。除既有配置、构建、许可证、PE、sidecar 与卸载门禁外，安装后的 Windows FFmpeg 已实际通过 DirectWrite/libass 把测试 ASS 渲染为 MJPEG 图片；约 26.9 MiB 的新安装包 Artifact 保留至 2026-09-23。发布 job 因未提供 release tag 按预期跳过。仍需在实机字体界面确认任务视频帧、CJK 字体选择与反复刷新。
 
 2026-09-09 对提交 `f7e5651` 的候选实测发现字幕样式／字体界面无法生成预览，错误摘要只显示 `ffmpeg version 8.1.2`。候选构建清单确认 Windows sidecar 在 `--disable-autodetect` 下没有 PNG 所需的 zlib，而预览固定请求 PNG；烧录使用 MPEG-4，不经过 PNG，因此最终视频仍可成功。修复让预览在 PNG 不可用时使用 FFmpeg 原生 MJPEG，并让错误摘要跳过版本 banner、展示实际错误；安装器门禁新增一次真实的 libass 图片渲染，不再只检查 `ass` filter 名称。该候选同时观察到 Windows 自带媒体播放器先报告编码不支持、随后仍可播放并显示烧录字幕；视频为预期的 MPEG-4 Part 2，但音频是否直通以及具体 stream 信息尚待从成品记录确认。

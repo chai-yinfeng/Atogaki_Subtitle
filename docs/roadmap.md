@@ -130,6 +130,8 @@ _最后更新：2026-09-09_
 
 同日提交 `3af0728` 通过 [Windows 原生编译门禁 34308936600](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936600)和[完整候选流水线 34308936563](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34308936563)。后者从冷构建 sidecar 到 NSIS 安装后，实际使用 DirectWrite/libass 与 MJPEG 生成字幕预览图片，再通过 PE、合规资源和静默卸载检查；新安装包 Artifact 已可用于实机复核字体预览。本次仍未创建 tag 或 Release。
 
+用户随后在 Windows 11 实机确认字体／样式预览恢复正常，并同意将本轮同步固定为 `v0.1.0-alpha.10` Windows 专项预发布候选。悬浮字幕仍按已知限制处理，不作为本轮修复范围；发布说明必须明确不建议使用。Windows 媒体播放器对 MPEG-4 成品的先提示后播放行为继续记录，不在缺少 stream 证据时改动当前可工作的 LGPL 编码通路。
+
 Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续以 macOS Apple Silicon 为质量基线，不为每个功能分支 push 生成 Windows 安装包。共享代码在 PR 或进入 `main` 时运行路径过滤后的 Windows 编译门禁；完整 sidecar、许可证和 NSIS 流水线只在 Windows 打包基础设施变化时自动验证，普通产品代码由选定的 Windows 稳定候选 commit 手动触发。平台继续共享同一业务代码，不维护长期 Windows 产品分支。详见决策记录 0031。
 
 2026-08-22 开始 W3 代码准备：字幕和烧录成品可调用 Windows Explorer 选中文件，界面按平台显示 Finder／Explorer，并把 Windows 首版 MPEG-4 记为正常软件编码基线，而不是伪装成 VideoToolbox 失败回退。相关 Windows 原生编译已通过，Explorer 窗口行为、中文／长路径和多显示器仍留给实机验证。
