@@ -9,7 +9,7 @@ use crate::{
         TranslationFuture, TranslationOptions, TranslationProvider, TranslationProviderStatus,
         TranslationRequest, TranslationResponse, TranslationResult, TranslationUsage,
     },
-    domain::{LanguagePair, TranscriptSegment},
+    domain::LanguagePair,
     infrastructure::network::NetworkClientConfig,
 };
 
@@ -135,21 +135,6 @@ struct DeepLResponse {
 #[derive(Debug, Deserialize)]
 struct DeepLTranslation {
     text: String,
-}
-
-pub async fn translate_segments(
-    auth_key: &str,
-    options: &TranslationOptions,
-    segments: &mut [TranscriptSegment],
-) -> Result<()> {
-    let texts: Vec<String> = segments.iter().map(|s| s.source_text.clone()).collect();
-    let translated = translate_texts(auth_key, options, &texts).await?;
-
-    for (segment, zh) in segments.iter_mut().zip(translated) {
-        segment.set_translation(Some(zh));
-    }
-
-    Ok(())
 }
 
 pub async fn translate_texts(

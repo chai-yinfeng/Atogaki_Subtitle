@@ -14,8 +14,8 @@ use tokio::sync::Mutex;
 use crate::{
     application::{
         TRANSLATION_GROUPING_STRATEGY, TranslationGroup, TranslationOptions, TranslationPlanner,
-        TranslationPlannerCue, TranslationProvider, TranslationRequest,
-        UnconfiguredTranslationProvider,
+        TranslationPlannerCue, TranslationProvider, UnconfiguredTranslationProvider,
+        execute_translation_group,
     },
     domain::{
         LanguageCode, TranscriptSegment,
@@ -753,22 +753,19 @@ impl LocalWorkspaceService {
                         .unwrap_or_default(),
                 })
                 .collect::<Vec<_>>();
-            let response = self
-                .translation_provider
-                .translate(TranslationRequest {
-                    options: options.clone(),
-                    before_context: group.before_context,
-                    targets: group.targets,
-                    after_context: group.after_context,
-                    style_instruction: None,
-                })
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to translate SQLite subtitle workspace with {}",
-                        provider.name
-                    )
-                })?;
+            let response = execute_translation_group(
+                self.translation_provider.as_ref(),
+                options.clone(),
+                group.clone(),
+                None,
+            )
+            .await
+            .map_err(|error| {
+                anyhow!(
+                    "failed to translate SQLite subtitle workspace with {}: {error:#}",
+                    provider.name
+                )
+            })?;
             let response_model = response.model.clone().or_else(|| provider.model.clone());
             let response_usage = response.usage.clone();
             let (updates, empty) =
@@ -826,23 +823,20 @@ impl LocalWorkspaceService {
                             .unwrap_or_default(),
                     })
                     .collect::<Vec<_>>();
-                let retry_response = self
-                    .translation_provider
-                    .translate(TranslationRequest {
-                        options: options.clone(),
-                        before_context: retry_group.before_context,
-                        targets: retry_group.targets,
-                        after_context: retry_group.after_context,
-                        style_instruction: Some(retry_style.to_string()),
-                    })
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "failed to retry {} empty subtitle translation(s) with {}",
-                            retry_batch.len(),
-                            provider.name
-                        )
-                    })?;
+                let retry_response = execute_translation_group(
+                    self.translation_provider.as_ref(),
+                    options.clone(),
+                    retry_group.clone(),
+                    Some(retry_style.to_string()),
+                )
+                .await
+                .map_err(|error| {
+                    anyhow!(
+                        "failed to retry {} empty subtitle translation(s) with {}: {error:#}",
+                        retry_batch.len(),
+                        provider.name
+                    )
+                })?;
                 let retry_model = retry_response
                     .model
                     .clone()

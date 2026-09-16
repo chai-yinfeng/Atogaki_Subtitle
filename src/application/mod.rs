@@ -19,6 +19,7 @@ pub mod transcription_options;
 pub mod translation_options;
 pub mod translation_planner;
 pub mod translation_provider;
+pub mod translation_use_case;
 
 pub use asr_provider::{
     AsrFuture, AsrInputScope, AsrProviderCapabilities, AsrProviderStatus, AsrRequest, AsrResponse,
@@ -63,3 +64,4 @@ pub use translation_provider::{
     TranslationProviderStatus, TranslationRequest, TranslationResponse, TranslationResult,
     TranslationTargetSegment, TranslationUsage, UnconfiguredTranslationProvider,
 };
+pub use translation_use_case::execute_translation_group;

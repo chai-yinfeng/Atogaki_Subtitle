@@ -31,7 +31,7 @@ _最后更新：2026-09-16_
   - [x] 以独立 provenance 表持久化 cue 来源、证据单元、source／translation revision 和 alignment；人工改写标记 alignment stale，旧任务迁移为明确的 legacy／unknown 状态。
   - [x] 翻译 group 在事务内冻结 context 依赖；上下文变化将目标译文标为 dependency stale，批量重译会纳入这些 cue，带译文导出和烧录会拒绝未处理的 stale 结果。
   - [x] 每次 provider 调用持久化 grouping strategy、provider/model、目标与上下文 revision、术语配置、实际上下文和风格指令；旧 translation run 保持可读。
-  - [ ] 统一 CLI 与桌面翻译入口。
+  - [x] CLI 与桌面共用 `TranslationPlanner`、`TranslationProvider` 和 stable cue ID 执行合同；CLI 不再直接调用 DeepL 批处理函数。
 - [ ] P3：由开发流程自动配置 llama.cpp／Hy-MT2 并验证质量与资源；再实现应用管理的模型／runtime 生命周期。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。
 - [ ] P5：录音流式回放、prefix 提交策略、真实采集／Live ASR；Gemini Live Translate 单列实验。
