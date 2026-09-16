@@ -37,6 +37,15 @@ pub enum AsrRunKind {
     SelectedRange,
 }
 
+impl AsrRunKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::SelectedRange => "selected_range",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsrInputScope {
     pub kind: AsrRunKind,

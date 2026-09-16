@@ -1,4 +1,5 @@
 pub mod asr_provider;
+pub mod asr_run;
 pub mod evaluation;
 pub mod job_manifest;
 pub mod job_runner;
@@ -21,6 +22,7 @@ pub use asr_provider::{
     AsrFuture, AsrInputScope, AsrProviderCapabilities, AsrProviderStatus, AsrRequest, AsrResponse,
     AsrRunKind, AsrTimingGranularity, OfflineAsrProvider, TimedUnit, TimedUnitKind, TimingSource,
 };
+pub use asr_run::{AsrRun, AsrRunStatus};
 pub use evaluation::{
     AsrEvaluationReport, EvaluationCue, EvaluationTranscript, ReferenceReviewStatus,
     evaluate_asr_files,

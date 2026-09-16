@@ -27,6 +27,7 @@ pub struct Job {
     pub status_json: PathBuf,
     pub recognition_options_json: PathBuf,
     pub whisper_prompt_txt: PathBuf,
+    pub asr_runs_dir: PathBuf,
 }
 
 impl Job {
@@ -130,6 +131,7 @@ impl Job {
             status_json: dir.join("status.json"),
             recognition_options_json: dir.join("recognition-options.json"),
             whisper_prompt_txt: dir.join("whisper-prompt.txt"),
+            asr_runs_dir: dir.join("asr-runs"),
             dir,
         }
     }

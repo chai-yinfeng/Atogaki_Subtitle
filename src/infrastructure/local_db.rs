@@ -11,7 +11,7 @@ use sqlx::{
 };
 
 use crate::{
-    application::job_snapshot::JobSnapshot,
+    application::{AsrRun, job_snapshot::JobSnapshot},
     domain::{TranscriptSegment, subtitle::SubtitleStyleSet},
 };
 
@@ -265,6 +265,27 @@ pub struct NewLocalTranslationRun {
     pub segment_count: i64,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
+pub struct LocalAsrRunRecord {
+    pub id: String,
+    pub job_id: String,
+    pub parent_run_id: Option<String>,
+    pub run_kind: String,
+    pub provider_id: String,
+    pub provider_name: String,
+    pub model_identity: String,
+    pub input_media_path: String,
+    pub scope_start_ms: i64,
+    pub scope_end_ms: Option<i64>,
+    pub config_json: String,
+    pub artifact_dir: String,
+    pub status: String,
+    pub created_at_unix: i64,
+    pub started_at_unix: Option<i64>,
+    pub completed_at_unix: Option<i64>,
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -577,6 +598,113 @@ impl LocalDatabase {
         .fetch_optional(&self.pool)
         .await
         .context("failed to read local task")
+    }
+
+    pub async fn record_asr_run(&self, run: &AsrRun, artifact_dir: &Path) -> Result<()> {
+        let config_json = serde_json::to_string(&run.config_snapshot)
+            .context("failed to encode ASR configuration snapshot")?;
+        sqlx::query(
+            "INSERT INTO local_asr_runs (
+                id, job_id, parent_run_id, run_kind, provider_id, provider_name,
+                model_identity, input_media_path, scope_start_ms, scope_end_ms,
+                config_json, artifact_dir, status, created_at_unix, started_at_unix,
+                completed_at_unix, error_message
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&run.id)
+        .bind(&run.job_id)
+        .bind(&run.parent_run_id)
+        .bind(run.scope.kind.as_str())
+        .bind(&run.provider_id)
+        .bind(&run.provider_name)
+        .bind(&run.model_identity)
+        .bind(run.input_media.display().to_string())
+        .bind(to_i64(run.scope.start_ms, "ASR scope start")?)
+        .bind(
+            run.scope
+                .end_ms
+                .map(|value| to_i64(value, "ASR scope end"))
+                .transpose()?,
+        )
+        .bind(config_json)
+        .bind(artifact_dir.display().to_string())
+        .bind(run.status.as_str())
+        .bind(to_i64(run.created_at_unix, "ASR run creation time")?)
+        .bind(
+            run.started_at_unix
+                .map(|value| to_i64(value, "ASR run start time"))
+                .transpose()?,
+        )
+        .bind(
+            run.completed_at_unix
+                .map(|value| to_i64(value, "ASR run completion time"))
+                .transpose()?,
+        )
+        .bind(&run.error)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to record ASR run {}", run.id))?;
+        Ok(())
+    }
+
+    pub async fn update_asr_run(&self, run: &AsrRun) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE local_asr_runs
+             SET status = ?, started_at_unix = ?, completed_at_unix = ?, error_message = ?
+             WHERE id = ? AND job_id = ?",
+        )
+        .bind(run.status.as_str())
+        .bind(
+            run.started_at_unix
+                .map(|value| to_i64(value, "ASR run start time"))
+                .transpose()?,
+        )
+        .bind(
+            run.completed_at_unix
+                .map(|value| to_i64(value, "ASR run completion time"))
+                .transpose()?,
+        )
+        .bind(&run.error)
+        .bind(&run.id)
+        .bind(&run.job_id)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("failed to update ASR run {}", run.id))?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!("ASR run does not exist: {}", run.id));
+        }
+        Ok(())
+    }
+
+    pub async fn list_asr_runs(&self, job_id: &str) -> Result<Vec<LocalAsrRunRecord>> {
+        sqlx::query_as(
+            "SELECT id, job_id, parent_run_id, run_kind, provider_id, provider_name,
+                    model_identity, input_media_path, scope_start_ms, scope_end_ms,
+                    config_json, artifact_dir, status, created_at_unix, started_at_unix,
+                    completed_at_unix, error_message
+             FROM local_asr_runs
+             WHERE job_id = ?
+             ORDER BY created_at_unix DESC, id DESC",
+        )
+        .bind(job_id)
+        .fetch_all(&self.pool)
+        .await
+        .with_context(|| format!("failed to list ASR runs for task {job_id}"))
+    }
+
+    pub async fn recover_interrupted_asr_runs(&self, error: &str) -> Result<u64> {
+        let now = chrono::Utc::now().timestamp();
+        let result = sqlx::query(
+            "UPDATE local_asr_runs
+             SET status = 'failed', completed_at_unix = ?, error_message = ?
+             WHERE status IN ('queued', 'running')",
+        )
+        .bind(now)
+        .bind(error)
+        .execute(&self.pool)
+        .await
+        .context("failed to recover interrupted ASR runs")?;
+        Ok(result.rows_affected())
     }
 
     pub async fn reorder_jobs(&self, job_ids: &[String]) -> Result<Vec<LocalJobRecord>> {
@@ -2652,11 +2780,70 @@ mod tests {
     };
     use crate::{
         application::{
-            job_manifest::JobManifest, job_snapshot::JobSnapshot, job_status::JobStatus,
+            AsrInputScope, AsrRun, AsrRunStatus, job_manifest::JobManifest,
+            job_snapshot::JobSnapshot, job_status::JobStatus,
         },
         domain::TranscriptSegment,
         infrastructure::job_store::Job,
     };
+
+    #[tokio::test]
+    async fn indexes_asr_run_lifecycle_and_recovers_interrupted_runs() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-asr-run-db-test-{}", uuid::Uuid::new_v4()));
+        let job = Job::create_in(&root).unwrap();
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest,
+                segments: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let mut run = AsrRun::new(
+            job.id(),
+            None,
+            "whisper.cpp",
+            "Whisper.cpp",
+            "model.bin",
+            "video.mp4".into(),
+            AsrInputScope::full(),
+            serde_json::json!({"max_context": 0}),
+        );
+        database
+            .record_asr_run(&run, &job.asr_runs_dir.join(&run.id))
+            .await
+            .unwrap();
+        run.start();
+        database.update_asr_run(&run).await.unwrap();
+        assert_eq!(
+            database.list_asr_runs(&job.id()).await.unwrap()[0].status,
+            "running"
+        );
+
+        assert_eq!(
+            database
+                .recover_interrupted_asr_runs("application stopped")
+                .await
+                .unwrap(),
+            1
+        );
+        let recovered = database.list_asr_runs(&job.id()).await.unwrap();
+        assert_eq!(recovered[0].status, AsrRunStatus::Failed.as_str());
+        assert_eq!(
+            recovered[0].error_message.as_deref(),
+            Some("application stopped")
+        );
+
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn language_migration_preserves_legacy_rows_and_track_meanings() {
