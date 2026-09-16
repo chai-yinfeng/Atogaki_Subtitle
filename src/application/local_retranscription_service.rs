@@ -89,7 +89,7 @@ impl LocalRetranscriptionService {
 
         let job = Job::open(PathBuf::from(&job_record.storage_dir))?;
         let mut options = job.read_recognition_options()?;
-        options.max_context = Some(0);
+        options.whisper.max_context = Some(0);
         let run_id = Uuid::new_v4().to_string();
         let temp_dir = std::env::temp_dir().join(format!("atogaki-retranscription-{run_id}"));
         fs::create_dir_all(&temp_dir)

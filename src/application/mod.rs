@@ -45,7 +45,7 @@ pub use subtitle_font_service::{
     SubtitleFontCoverage, SubtitleFontFamily, SubtitleFontReport, SubtitleFontService,
 };
 pub use subtitle_style_service::{SubtitleStylePreview, SubtitleStyleService, SubtitleStyleState};
-pub use transcription_options::TranscriptionOptions;
+pub use transcription_options::{TranscriptionOptions, WhisperTranscriptionConfig};
 pub use translation_options::TranslationOptions;
 pub use translation_provider::{
     MutableTranslationProvider, TranslationContextSegment, TranslationFuture, TranslationProvider,

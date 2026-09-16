@@ -462,22 +462,23 @@ impl LocalTaskService {
             bail!("source media no longer exists: {}", input.display());
         }
         let mut transcription = previous_job.read_recognition_options()?;
-        if !transcription.model.is_file() {
-            transcription.model = whisper_model_override
+        if !transcription.whisper.model.is_file() {
+            transcription.whisper.model = whisper_model_override
                 .filter(|path| path.is_file())
                 .ok_or_else(|| {
                     anyhow!(
                         "Whisper model no longer exists: {}; configure an available model before retrying",
-                        transcription.model.display()
+                        transcription.whisper.model.display()
                     )
                 })?;
         }
         if let Some(missing_vad_model) = transcription
+            .whisper
             .vad_model
             .as_ref()
             .filter(|path| !path.is_file())
         {
-            transcription.vad_model = Some(
+            transcription.whisper.vad_model = Some(
                 vad_model_override
                     .filter(|path| path.is_file())
                     .ok_or_else(|| {
@@ -869,7 +870,7 @@ mod tests {
 
         let vad_model = root.join("ggml-silero.bin");
         let mut transcription = TranscriptionOptions::japanese(root.join("model.bin"));
-        transcription.vad_model = Some(vad_model.clone());
+        transcription.whisper.vad_model = Some(vad_model.clone());
         let snapshot = service
             .submit_transcription_with_glossary(
                 TranscribeSpec {
@@ -905,10 +906,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            persisted_options.vad_model.as_deref(),
+            persisted_options.whisper.vad_model.as_deref(),
             Some(vad_model.as_path())
         );
-        assert_eq!(persisted_options.vad_max_speech_s, 8);
+        assert_eq!(persisted_options.whisper.vad_max_speech_s, 8);
         let prompt = fs::read_to_string(
             root.join("jobs")
                 .join(&snapshot.manifest.job_id)
@@ -1025,7 +1026,14 @@ mod tests {
             root.join("jobs").join(&retried.manifest.job_id),
         )
         .unwrap();
-        assert_eq!(retried_job.read_recognition_options().unwrap().model, model);
+        assert_eq!(
+            retried_job
+                .read_recognition_options()
+                .unwrap()
+                .whisper
+                .model,
+            model
+        );
         assert!(job.dir.is_dir());
 
         let replacement_model = root.join("ggml-medium.bin");
@@ -1040,7 +1048,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            retried_again_job.read_recognition_options().unwrap().model,
+            retried_again_job
+                .read_recognition_options()
+                .unwrap()
+                .whisper
+                .model,
             replacement_model
         );
 

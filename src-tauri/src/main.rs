@@ -1900,13 +1900,13 @@ fn desktop_transcription_options(
 ) -> Result<TranscriptionOptions, String> {
     let mut options =
         TranscriptionOptions::new(request.model_path.trim().into(), request.source_language);
-    options.vad_model = request
+    options.whisper.vad_model = request
         .vad_model_path
         .as_deref()
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from);
-    if let Some(path) = options.vad_model.as_deref()
+    if let Some(path) = options.whisper.vad_model.as_deref()
         && !path.is_file()
     {
         return Err(format!("VAD 模型不存在：{}", path.display()));
@@ -2241,7 +2241,7 @@ mod tests {
 
         let options = desktop_transcription_options(&request).unwrap();
 
-        assert!(options.vad_model.is_none());
+        assert!(options.whisper.vad_model.is_none());
     }
 
     #[test]
@@ -2265,7 +2265,10 @@ mod tests {
 
         let options = desktop_transcription_options(&request).unwrap();
 
-        assert_eq!(options.vad_model.as_deref(), Some(vad_model.as_path()));
+        assert_eq!(
+            options.whisper.vad_model.as_deref(),
+            Some(vad_model.as_path())
+        );
         assert_eq!(options.source_language, LanguageCode::English);
         fs::remove_dir_all(root).unwrap();
     }

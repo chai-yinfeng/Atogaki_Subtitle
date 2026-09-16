@@ -2,7 +2,10 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
-use crate::{application::TranscriptionOptions, domain::LanguageCode};
+use crate::{
+    application::{TranscriptionOptions, WhisperTranscriptionConfig},
+    domain::LanguageCode,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "atogaki")]
@@ -296,22 +299,24 @@ pub struct WhisperArgs {
 impl From<WhisperArgs> for TranscriptionOptions {
     fn from(args: WhisperArgs) -> Self {
         Self {
-            model: args.model,
             source_language: args.source_language,
             glossary: args.glossary,
             prompt: args.prompt,
-            vad_model: args.vad_model,
-            vad_threshold: args.vad_threshold,
-            vad_min_speech_ms: args.vad_min_speech_ms,
-            vad_min_silence_ms: args.vad_min_silence_ms,
-            vad_max_speech_s: args.vad_max_speech_s,
-            vad_speech_pad_ms: args.vad_speech_pad_ms,
-            max_len: args.max_len,
-            split_on_word: args.split_on_word,
-            no_speech_threshold: args.no_speech_threshold,
-            max_context: args.max_context,
-            output_json_full: args.output_json_full,
-            no_gpu: args.no_gpu,
+            whisper: WhisperTranscriptionConfig {
+                model: args.model,
+                vad_model: args.vad_model,
+                vad_threshold: args.vad_threshold,
+                vad_min_speech_ms: args.vad_min_speech_ms,
+                vad_min_silence_ms: args.vad_min_silence_ms,
+                vad_max_speech_s: args.vad_max_speech_s,
+                vad_speech_pad_ms: args.vad_speech_pad_ms,
+                max_len: args.max_len,
+                split_on_word: args.split_on_word,
+                no_speech_threshold: args.no_speech_threshold,
+                max_context: args.max_context,
+                output_json_full: args.output_json_full,
+                no_gpu: args.no_gpu,
+            },
         }
     }
 }

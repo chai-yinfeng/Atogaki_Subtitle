@@ -50,18 +50,19 @@ pub async fn transcribe_response(
     wav: &Path,
     output_prefix: &Path,
 ) -> Result<AsrResponse> {
-    let model = &options.model;
+    let config = &options.whisper;
+    let model = &config.model;
     if !model.exists() {
         anyhow::bail!("Whisper model does not exist: {}", model.display());
     }
-    if let Some(vad_model) = options.vad_model.as_deref()
+    if let Some(vad_model) = config.vad_model.as_deref()
         && !vad_model.exists()
     {
         anyhow::bail!("VAD model does not exist: {}", vad_model.display());
     }
     let prompt = glossary::build_whisper_prompt(options)?;
 
-    if !options.no_gpu {
+    if !config.no_gpu {
         eprintln!("whisper-cli: requesting GPU device 0 when supported by this build");
     }
 
@@ -71,12 +72,12 @@ pub async fn transcribe_response(
         wav,
         output_prefix,
         prompt.as_deref(),
-        options.no_gpu,
+        config.no_gpu,
     )
     .await;
 
     if let Err(error) = first {
-        if options.no_gpu || !error.looks_gpu_related() {
+        if config.no_gpu || !error.looks_gpu_related() {
             return Err(error.into());
         }
 
@@ -126,7 +127,7 @@ pub async fn transcribe_response(
     }
     Ok(AsrResponse {
         provider_id: "whisper.cpp".to_string(),
-        model_identity: options.model.display().to_string(),
+        model_identity: config.model.display().to_string(),
         raw_output_path: json_path,
         timed_units,
         legacy_segments,
@@ -170,26 +171,26 @@ fn build_args(
 ) -> Vec<OsString> {
     let mut args = vec![
         "-m".into(),
-        options.model.as_os_str().to_os_string(),
+        options.whisper.model.as_os_str().to_os_string(),
         "-l".into(),
         options.source_language.whisper_code().into(),
         "-sns".into(),
         "-nth".into(),
-        format!("{:.2}", options.no_speech_threshold).into(),
+        format!("{:.2}", options.whisper.no_speech_threshold).into(),
     ];
 
-    if options.max_len > 0 {
+    if options.whisper.max_len > 0 {
         args.push("-ml".into());
-        args.push(options.max_len.to_string().into());
+        args.push(options.whisper.max_len.to_string().into());
     }
-    if let Some(max_context) = options.max_context {
+    if let Some(max_context) = options.whisper.max_context {
         args.push("--max-context".into());
         args.push(max_context.to_string().into());
     }
-    if options.split_on_word {
+    if options.whisper.split_on_word {
         args.push("-sow".into());
     }
-    if options.output_json_full {
+    if options.whisper.output_json_full {
         args.push("-ojf".into());
     } else {
         args.push("-oj".into());
@@ -206,20 +207,20 @@ fn build_args(
     }
     args.push("-otxt".into());
 
-    if let Some(vad_model) = options.vad_model.as_deref() {
+    if let Some(vad_model) = options.whisper.vad_model.as_deref() {
         args.push("--vad".into());
         args.push("--vad-model".into());
         args.push(vad_model.as_os_str().to_os_string());
         args.push("--vad-threshold".into());
-        args.push(format!("{:.2}", options.vad_threshold).into());
+        args.push(format!("{:.2}", options.whisper.vad_threshold).into());
         args.push("--vad-min-speech-duration-ms".into());
-        args.push(options.vad_min_speech_ms.to_string().into());
+        args.push(options.whisper.vad_min_speech_ms.to_string().into());
         args.push("--vad-min-silence-duration-ms".into());
-        args.push(options.vad_min_silence_ms.to_string().into());
+        args.push(options.whisper.vad_min_silence_ms.to_string().into());
         args.push("--vad-max-speech-duration-s".into());
-        args.push(options.vad_max_speech_s.to_string().into());
+        args.push(options.whisper.vad_max_speech_s.to_string().into());
         args.push("--vad-speech-pad-ms".into());
-        args.push(options.vad_speech_pad_ms.to_string().into());
+        args.push(options.whisper.vad_speech_pad_ms.to_string().into());
     }
 
     args.push("-of".into());
@@ -365,7 +366,7 @@ mod tests {
     #[test]
     fn isolated_range_explicitly_disables_text_context() {
         let mut options = TranscriptionOptions::new("model.bin".into(), LanguageCode::Japanese);
-        options.max_context = Some(0);
+        options.whisper.max_context = Some(0);
         let args = build_args(
             &options,
             Path::new("selected.wav"),
