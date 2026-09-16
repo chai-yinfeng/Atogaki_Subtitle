@@ -750,12 +750,32 @@ async fn run_worker(
                 Ok(snapshot) => {
                     if let Err(error) = database.sync_snapshot(&snapshot).await {
                         eprintln!("[task-service] failed to sync local database: {error:#}");
+                    } else if let Err(error) = sync_initial_asr_provenance(database, &job_dir).await
+                    {
+                        eprintln!("[task-service] failed to sync ASR cue provenance: {error:#}");
                     }
                 }
                 Err(error) => eprintln!("[task-service] failed to load task state: {error:#}"),
             }
         }
     }
+}
+
+async fn sync_initial_asr_provenance(database: &LocalDatabase, job_dir: &Path) -> Result<()> {
+    let job = Job::open(job_dir.to_path_buf())?;
+    let Some(run) = database
+        .list_asr_runs(&job.id())
+        .await?
+        .into_iter()
+        .find(|run| run.run_kind == "full" && run.status == "succeeded")
+    else {
+        return Ok(());
+    };
+    let artifacts = AsrRunArtifacts::open(&job, &run.id)?;
+    let candidates = artifacts.read_candidate_cues()?;
+    database
+        .assign_asr_cue_provenance(&job.id(), &run.id, &candidates)
+        .await
 }
 
 async fn run_with_status_sync<T>(

@@ -235,6 +235,14 @@ impl LocalRetranscriptionService {
                 "retranscription preview belongs to a different task"
             ));
         }
+        let job_record = self
+            .database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        let job = Job::open(PathBuf::from(job_record.storage_dir))?;
+        let artifacts = AsrRunArtifacts::open(&job, preview_id)?;
+        let cue_set = artifacts.read_candidate_cues()?;
         let updated = self
             .database
             .replace_segment_range(
@@ -243,6 +251,7 @@ impl LocalRetranscriptionService {
                 preview.end_ms,
                 &preview.original_segments,
                 &preview.candidate_segments,
+                Some((preview_id, &cue_set)),
             )
             .await?;
         self.previews.lock().await.remove(preview_id);

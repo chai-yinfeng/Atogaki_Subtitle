@@ -28,7 +28,9 @@ _最后更新：2026-09-16_
   - [x] 字幕候选改为消费 `TimedUnit`；`candidate-cues.json` 记录 `legacy-v1` 策略及 cue→证据单元映射，真实 word/token 时间不走字符比例切分。
   - [x] 增加 `TranslationPlanner semantic-v1`，按连续性、句末、停顿和预算建立 group；稀疏目标不会被拼成一个语义组，provider 调用按完整 group 执行。
   - [x] 机器译文写回同时核对请求时的原文、旧译文和人工编辑状态，等待期间的人工译文不会被覆盖。
-  - [ ] 持久化 cue 来源／revision／alignment 和翻译计划依赖，完整处理上下文变化后的 dependency stale。
+  - [x] 以独立 provenance 表持久化 cue 来源、证据单元、source／translation revision 和 alignment；人工改写标记 alignment stale，旧任务迁移为明确的 legacy／unknown 状态。
+  - [x] 翻译 group 在事务内冻结 context 依赖；上下文变化将目标译文标为 dependency stale，批量重译会纳入这些 cue，带译文导出和烧录会拒绝未处理的 stale 结果。
+  - [ ] 将翻译计划的 provider/model、术语／风格和完整请求快照持久化，并统一 CLI 与桌面翻译入口。
 - [ ] P3：由开发流程自动配置 llama.cpp／Hy-MT2 并验证质量与资源；再实现应用管理的模型／runtime 生命周期。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。
 - [ ] P5：录音流式回放、prefix 提交策略、真实采集／Live ASR；Gemini Live Translate 单列实验。

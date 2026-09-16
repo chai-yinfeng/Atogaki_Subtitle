@@ -11,7 +11,7 @@ use sqlx::{
 };
 
 use crate::{
-    application::{AsrRun, job_snapshot::JobSnapshot},
+    application::{AsrRun, CandidateCueSet, job_snapshot::JobSnapshot},
     domain::{TranscriptSegment, subtitle::SubtitleStyleSet},
 };
 
@@ -107,6 +107,21 @@ pub struct LocalSubtitleSegmentRecord {
     pub translation_edited: bool,
     pub translation_stale: bool,
     pub timing_edited: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, FromRow, PartialEq, Eq)]
+pub struct LocalSubtitleProvenanceRecord {
+    pub segment_id: String,
+    pub job_id: String,
+    pub source_kind: String,
+    pub source_run_id: Option<String>,
+    pub timed_unit_ids_json: String,
+    pub timing_source: String,
+    pub alignment_status: String,
+    pub source_revision: i64,
+    pub translation_revision: i64,
+    pub translation_dependency_stale: bool,
+    pub updated_at_unix: i64,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
@@ -240,6 +255,13 @@ pub struct LocalMachineTranslation {
     pub expected_translated_text: Option<String>,
     pub expected_translation_edited: bool,
     pub translated_text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalTranslationDependency {
+    pub segment_id: String,
+    pub source_text: String,
+    pub expected_source_revision: i64,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
@@ -1741,6 +1763,16 @@ impl LocalDatabase {
         job_id: &str,
         translations: &[LocalMachineTranslation],
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        self.apply_machine_translation_group(job_id, translations, &[])
+            .await
+    }
+
+    pub async fn apply_machine_translation_group(
+        &self,
+        job_id: &str,
+        translations: &[LocalMachineTranslation],
+        dependencies: &[LocalTranslationDependency],
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         if translations.is_empty() {
             return self.list_segments(job_id).await;
         }
@@ -1749,6 +1781,30 @@ impl LocalDatabase {
             .begin()
             .await
             .context("failed to begin local translation transaction")?;
+
+        let mut dependency_stale = false;
+        let mut dependency_revisions = Vec::new();
+        for dependency in dependencies {
+            let current = sqlx::query_as::<_, (String, i64)>(
+                "SELECT s.source_text, p.source_revision
+                 FROM local_subtitle_segments s
+                 JOIN local_subtitle_provenance p ON p.segment_id = s.id
+                 WHERE s.job_id = ? AND s.id = ?",
+            )
+            .bind(job_id)
+            .bind(&dependency.segment_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("failed to verify translation context revision")?;
+            match current {
+                Some((source_text, revision)) => {
+                    dependency_stale |= source_text != dependency.source_text
+                        || revision != dependency.expected_source_revision;
+                    dependency_revisions.push((dependency.segment_id.as_str(), revision));
+                }
+                None => dependency_stale = true,
+            }
+        }
 
         for translation in translations {
             let translated_text = translation.translated_text.trim();
@@ -1779,6 +1835,34 @@ impl LocalDatabase {
                     translation.segment_id
                 ));
             }
+
+            for (context_segment_id, context_source_revision) in &dependency_revisions {
+                if *context_segment_id == translation.segment_id {
+                    continue;
+                }
+                sqlx::query(
+                    "INSERT INTO local_translation_dependency_edges (
+                        target_segment_id, context_segment_id, context_source_revision
+                     ) VALUES (?, ?, ?)",
+                )
+                .bind(&translation.segment_id)
+                .bind(context_segment_id)
+                .bind(context_source_revision)
+                .execute(&mut *tx)
+                .await
+                .context("failed to record translation context dependency")?;
+            }
+            sqlx::query(
+                "UPDATE local_subtitle_provenance
+                 SET translation_dependency_stale = ?,
+                     updated_at_unix = CAST(strftime('%s', 'now') AS INTEGER)
+                 WHERE segment_id = ?",
+            )
+            .bind(dependency_stale)
+            .bind(&translation.segment_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to update translation dependency state")?;
         }
 
         sqlx::query(
@@ -1795,6 +1879,41 @@ impl LocalDatabase {
             .await
             .context("failed to commit local translation transaction")?;
         self.list_segments(job_id).await
+    }
+
+    pub async fn list_subtitle_provenance(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<LocalSubtitleProvenanceRecord>> {
+        sqlx::query_as(
+            "SELECT segment_id, job_id, source_kind, source_run_id, timed_unit_ids_json,
+                    timing_source, alignment_status, source_revision, translation_revision,
+                    translation_dependency_stale, updated_at_unix
+             FROM local_subtitle_provenance
+             WHERE job_id = ?
+             ORDER BY segment_id",
+        )
+        .bind(job_id)
+        .fetch_all(&self.pool)
+        .await
+        .with_context(|| format!("failed to list subtitle provenance for task {job_id}"))
+    }
+
+    pub async fn assign_asr_cue_provenance(
+        &self,
+        job_id: &str,
+        run_id: &str,
+        candidates: &CandidateCueSet,
+    ) -> Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin ASR cue provenance transaction")?;
+        assign_asr_cue_provenance_in_transaction(&mut tx, job_id, run_id, candidates).await?;
+        tx.commit()
+            .await
+            .context("failed to commit ASR cue provenance transaction")
     }
 
     pub async fn record_translation_run(&self, run: &NewLocalTranslationRun) -> Result<()> {
@@ -2333,6 +2452,7 @@ impl LocalDatabase {
         end_ms: i64,
         expected_segments: &[LocalSubtitleSegmentRecord],
         candidates: &[TranscriptSegment],
+        asr_provenance: Option<(&str, &CandidateCueSet)>,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         if start_ms < 0 || end_ms <= start_ms {
             return Err(anyhow!("invalid retranscription range"));
@@ -2412,6 +2532,9 @@ impl LocalDatabase {
             ));
         }
         persist_structure_segments(&mut tx, job_id, &mut updated).await?;
+        if let Some((run_id, candidates)) = asr_provenance {
+            assign_asr_cue_provenance_in_transaction(&mut tx, job_id, run_id, candidates).await?;
+        }
         tx.commit()
             .await
             .context("failed to commit selected-range replacement")?;
@@ -2424,6 +2547,29 @@ impl LocalDatabase {
         job_id: &str,
         segments: &[TranscriptSegment],
     ) -> Result<()> {
+        let existing_provenance = sqlx::query_as::<_, LocalSubtitleProvenanceRecord>(
+            "SELECT segment_id, job_id, source_kind, source_run_id, timed_unit_ids_json,
+                    timing_source, alignment_status, source_revision, translation_revision,
+                    translation_dependency_stale, updated_at_unix
+             FROM local_subtitle_provenance WHERE job_id = ?",
+        )
+        .bind(job_id)
+        .fetch_all(&mut **tx)
+        .await
+        .context("failed to preserve subtitle provenance during snapshot sync")?
+        .into_iter()
+        .map(|item| (item.segment_id.clone(), item))
+        .collect::<HashMap<_, _>>();
+        let existing_dependencies = sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT e.target_segment_id, e.context_segment_id, e.context_source_revision
+             FROM local_translation_dependency_edges e
+             JOIN local_subtitle_segments s ON s.id = e.target_segment_id
+             WHERE s.job_id = ?",
+        )
+        .bind(job_id)
+        .fetch_all(&mut **tx)
+        .await
+        .context("failed to preserve translation dependencies during snapshot sync")?;
         let existing = sqlx::query_as::<_, LocalSubtitleSegmentRecord>(
             "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
                 source_edited, translation_edited, translation_stale, timing_edited
@@ -2495,10 +2641,87 @@ impl LocalDatabase {
                 timing_edited,
             )
             .await?;
+            if let Some(provenance) = existing_provenance.get(&segment.id) {
+                sqlx::query(
+                    "UPDATE local_subtitle_provenance
+                     SET source_kind = ?, source_run_id = ?, timed_unit_ids_json = ?,
+                         timing_source = ?, alignment_status = ?, source_revision = ?,
+                         translation_revision = ?, translation_dependency_stale = ?,
+                         updated_at_unix = ?
+                     WHERE segment_id = ?",
+                )
+                .bind(&provenance.source_kind)
+                .bind(&provenance.source_run_id)
+                .bind(&provenance.timed_unit_ids_json)
+                .bind(&provenance.timing_source)
+                .bind(&provenance.alignment_status)
+                .bind(provenance.source_revision)
+                .bind(provenance.translation_revision)
+                .bind(provenance.translation_dependency_stale)
+                .bind(provenance.updated_at_unix)
+                .bind(&segment.id)
+                .execute(&mut **tx)
+                .await
+                .context("failed to restore subtitle provenance during snapshot sync")?;
+            }
+        }
+        let retained_ids = segments
+            .iter()
+            .map(|segment| segment.id.as_str())
+            .collect::<HashSet<_>>();
+        for (target_id, context_id, revision) in existing_dependencies {
+            if retained_ids.contains(target_id.as_str())
+                && retained_ids.contains(context_id.as_str())
+            {
+                sqlx::query(
+                    "INSERT INTO local_translation_dependency_edges (
+                        target_segment_id, context_segment_id, context_source_revision
+                     ) VALUES (?, ?, ?)",
+                )
+                .bind(target_id)
+                .bind(context_id)
+                .bind(revision)
+                .execute(&mut **tx)
+                .await
+                .context("failed to restore translation dependency during snapshot sync")?;
+            }
         }
 
         Ok(())
     }
+}
+
+async fn assign_asr_cue_provenance_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    run_id: &str,
+    candidates: &CandidateCueSet,
+) -> Result<()> {
+    for candidate in &candidates.cues {
+        let timed_unit_ids_json = serde_json::to_string(&candidate.timed_unit_ids)
+            .context("failed to encode cue evidence ids")?;
+        let result = sqlx::query(
+            "UPDATE local_subtitle_provenance
+             SET source_kind = 'asr', source_run_id = ?, timed_unit_ids_json = ?,
+                 timing_source = 'model', alignment_status = 'current',
+                 updated_at_unix = CAST(strftime('%s', 'now') AS INTEGER)
+             WHERE job_id = ? AND segment_id = ?",
+        )
+        .bind(run_id)
+        .bind(timed_unit_ids_json)
+        .bind(job_id)
+        .bind(&candidate.cue.id)
+        .execute(&mut **tx)
+        .await
+        .context("failed to attach ASR cue provenance")?;
+        if result.rows_affected() != 1 {
+            return Err(anyhow!(
+                "ASR candidate cue is not in the current workspace: {}",
+                candidate.cue.id
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2589,6 +2812,29 @@ async fn persist_structure_segments(
     job_id: &str,
     segments: &mut [LocalSubtitleSegmentRecord],
 ) -> Result<()> {
+    let previous_provenance = sqlx::query_as::<_, LocalSubtitleProvenanceRecord>(
+        "SELECT segment_id, job_id, source_kind, source_run_id, timed_unit_ids_json,
+                timing_source, alignment_status, source_revision, translation_revision,
+                translation_dependency_stale, updated_at_unix
+         FROM local_subtitle_provenance WHERE job_id = ?",
+    )
+    .bind(job_id)
+    .fetch_all(&mut **tx)
+    .await
+    .context("failed to preserve subtitle provenance before a structure edit")?
+    .into_iter()
+    .map(|item| (item.segment_id.clone(), item))
+    .collect::<HashMap<_, _>>();
+    let previous_dependencies = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT e.target_segment_id, e.context_segment_id, e.context_source_revision
+         FROM local_translation_dependency_edges e
+         JOIN local_subtitle_segments s ON s.id = e.target_segment_id
+         WHERE s.job_id = ?",
+    )
+    .bind(job_id)
+    .fetch_all(&mut **tx)
+    .await
+    .context("failed to preserve translation dependencies before a structure edit")?;
     let mut ids = HashSet::new();
     for (index, segment) in segments.iter_mut().enumerate() {
         if segment.job_id != job_id {
@@ -2636,6 +2882,55 @@ async fn persist_structure_segments(
         .execute(&mut **tx)
         .await
         .context("failed to insert edited subtitle structure")?;
+        if let Some(previous) = previous_provenance.get(&segment.id) {
+            sqlx::query(
+                "UPDATE local_subtitle_provenance
+                 SET source_kind = ?, source_run_id = ?, timed_unit_ids_json = ?,
+                     timing_source = ?, alignment_status = ?, source_revision = ?,
+                     translation_revision = ?, translation_dependency_stale = ?,
+                     updated_at_unix = ?
+                 WHERE segment_id = ?",
+            )
+            .bind(&previous.source_kind)
+            .bind(&previous.source_run_id)
+            .bind(&previous.timed_unit_ids_json)
+            .bind(&previous.timing_source)
+            .bind(&previous.alignment_status)
+            .bind(previous.source_revision)
+            .bind(previous.translation_revision)
+            .bind(previous.translation_dependency_stale)
+            .bind(previous.updated_at_unix)
+            .bind(&segment.id)
+            .execute(&mut **tx)
+            .await
+            .context("failed to restore subtitle provenance after a structure edit")?;
+        } else {
+            sqlx::query(
+                "UPDATE local_subtitle_provenance
+                 SET source_kind = 'structural', alignment_status = 'stale',
+                     updated_at_unix = CAST(strftime('%s', 'now') AS INTEGER)
+                 WHERE segment_id = ?",
+            )
+            .bind(&segment.id)
+            .execute(&mut **tx)
+            .await
+            .context("failed to mark structural subtitle provenance")?;
+        }
+    }
+    for (target_id, context_id, revision) in previous_dependencies {
+        if ids.contains(&target_id) && ids.contains(&context_id) {
+            sqlx::query(
+                "INSERT INTO local_translation_dependency_edges (
+                    target_segment_id, context_segment_id, context_source_revision
+                 ) VALUES (?, ?, ?)",
+            )
+            .bind(target_id)
+            .bind(context_id)
+            .bind(revision)
+            .execute(&mut **tx)
+            .await
+            .context("failed to restore translation dependency after a structure edit")?;
+        }
     }
     sqlx::query(
         "UPDATE local_jobs
@@ -2781,7 +3076,8 @@ mod tests {
 
     use super::{
         LocalDatabase, LocalGlossaryTermInput, LocalLearningLookupSense, LocalMachineTranslation,
-        NewLocalLearningLookupResult, NewLocalLearningSelection, NewLocalRenderJob,
+        LocalTranslationDependency, NewLocalLearningLookupResult, NewLocalLearningSelection,
+        NewLocalRenderJob,
     };
     use crate::{
         application::{
@@ -3690,6 +3986,138 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cue_revisions_mark_context_dependent_translations_stale() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-cue-provenance-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let before = TranscriptSegment::new(0, 1_000, "前の文".to_string());
+        let target = TranscriptSegment::new(1_000, 2_000, "対象".to_string());
+        let after = TranscriptSegment::new(2_000, 3_000, "後の文".to_string());
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![before.clone(), target.clone(), after.clone()],
+            })
+            .await
+            .unwrap();
+
+        database
+            .apply_machine_translation_group(
+                &manifest.job_id,
+                &[LocalMachineTranslation {
+                    segment_id: target.id.clone(),
+                    source_text: target.source_text.clone(),
+                    expected_translated_text: None,
+                    expected_translation_edited: false,
+                    translated_text: "目标".to_string(),
+                }],
+                &[
+                    LocalTranslationDependency {
+                        segment_id: before.id.clone(),
+                        source_text: before.source_text.clone(),
+                        expected_source_revision: 0,
+                    },
+                    LocalTranslationDependency {
+                        segment_id: after.id.clone(),
+                        source_text: after.source_text.clone(),
+                        expected_source_revision: 0,
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        let provenance = database
+            .list_subtitle_provenance(&manifest.job_id)
+            .await
+            .unwrap();
+        let target_provenance = provenance
+            .iter()
+            .find(|item| item.segment_id == target.id)
+            .unwrap();
+        assert_eq!(target_provenance.translation_revision, 1);
+        assert!(!target_provenance.translation_dependency_stale);
+
+        database
+            .update_segment(
+                &manifest.job_id,
+                &before.id,
+                "修正した前の文".to_string(),
+                None,
+                0,
+                1_000,
+            )
+            .await
+            .unwrap();
+        let provenance = database
+            .list_subtitle_provenance(&manifest.job_id)
+            .await
+            .unwrap();
+        let before_provenance = provenance
+            .iter()
+            .find(|item| item.segment_id == before.id)
+            .unwrap();
+        let target_provenance = provenance
+            .iter()
+            .find(|item| item.segment_id == target.id)
+            .unwrap();
+        assert_eq!(before_provenance.source_revision, 1);
+        assert_eq!(before_provenance.source_kind, "manual");
+        assert_eq!(before_provenance.alignment_status, "stale");
+        assert!(target_provenance.translation_dependency_stale);
+
+        database
+            .update_segment(
+                &manifest.job_id,
+                &before.id,
+                before.source_text.clone(),
+                None,
+                0,
+                1_000,
+            )
+            .await
+            .unwrap();
+        database
+            .apply_machine_translation_group(
+                &manifest.job_id,
+                &[LocalMachineTranslation {
+                    segment_id: target.id.clone(),
+                    source_text: target.source_text.clone(),
+                    expected_translated_text: Some("目标".to_string()),
+                    expected_translation_edited: false,
+                    translated_text: "重新翻译".to_string(),
+                }],
+                &[LocalTranslationDependency {
+                    segment_id: before.id.clone(),
+                    source_text: before.source_text.clone(),
+                    expected_source_revision: 0,
+                }],
+            )
+            .await
+            .unwrap();
+        let provenance = database
+            .list_subtitle_provenance(&manifest.job_id)
+            .await
+            .unwrap();
+        assert!(
+            provenance
+                .iter()
+                .find(|item| item.segment_id == target.id)
+                .unwrap()
+                .translation_dependency_stale
+        );
+
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn built_in_glossary_import_deduplicates_grouped_terms() {
         let root = std::env::temp_dir().join(format!(
             "atogaki-builtin-glossary-test-{}",
@@ -3874,7 +4302,14 @@ mod tests {
         ];
 
         let updated = database
-            .replace_segment_range(job.id().as_str(), 1_000, 2_000, &affected, &candidates)
+            .replace_segment_range(
+                job.id().as_str(),
+                1_000,
+                2_000,
+                &affected,
+                &candidates,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(updated.len(), 4);
@@ -3885,7 +4320,14 @@ mod tests {
         assert!(updated[1].translated_text.is_none());
 
         let stale_preview = database
-            .replace_segment_range(job.id().as_str(), 1_000, 2_000, &affected, &candidates)
+            .replace_segment_range(
+                job.id().as_str(),
+                1_000,
+                2_000,
+                &affected,
+                &candidates,
+                None,
+            )
             .await
             .unwrap_err();
         assert!(stale_preview.to_string().contains("preview was open"));

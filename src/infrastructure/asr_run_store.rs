@@ -62,6 +62,13 @@ impl AsrRunArtifacts {
         write_json(&self.candidate_cues_json, cues)
     }
 
+    pub fn read_candidate_cues(&self) -> Result<CandidateCueSet> {
+        let data = fs::read(&self.candidate_cues_json)
+            .with_context(|| format!("failed to read {}", self.candidate_cues_json.display()))?;
+        serde_json::from_slice(&data)
+            .with_context(|| format!("failed to parse {}", self.candidate_cues_json.display()))
+    }
+
     fn paths(job: &Job, run_id: &str) -> Result<Self> {
         if run_id.is_empty()
             || run_id == "."

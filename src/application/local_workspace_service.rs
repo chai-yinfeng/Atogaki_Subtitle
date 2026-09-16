@@ -23,8 +23,9 @@ use crate::{
     infrastructure::{
         job_store::Job,
         local_db::{
-            LocalDatabase, LocalJobRecord, LocalMachineTranslation, LocalSubtitleSegmentRecord,
-            LocalTranslationRunRecord, NewLocalTranslationRun,
+            LocalDatabase, LocalJobRecord, LocalMachineTranslation, LocalSubtitleProvenanceRecord,
+            LocalSubtitleSegmentRecord, LocalTranslationDependency, LocalTranslationRunRecord,
+            NewLocalTranslationRun,
         },
         waveform::{self, WaveformWindow},
     },
@@ -43,6 +44,7 @@ const PLAYBACK_POSITION_PREFIX: &str = "listening.playback_position_ms.";
 pub struct LocalWorkspaceJob {
     pub job: LocalJobRecord,
     pub segments: Vec<LocalSubtitleSegmentRecord>,
+    pub cue_provenance: Vec<LocalSubtitleProvenanceRecord>,
     pub translation_runs: Vec<LocalTranslationRunRecord>,
     pub subtitle_styles: SubtitleStyleSet,
 }
@@ -196,11 +198,13 @@ impl LocalWorkspaceService {
             .await?
             .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
         let segments = self.database.list_segments(job_id).await?;
+        let cue_provenance = self.database.list_subtitle_provenance(job_id).await?;
         let translation_runs = self.database.list_translation_runs(job_id).await?;
         let subtitle_styles = self.database.get_subtitle_styles(job_id).await?;
         Ok(LocalWorkspaceJob {
             job,
             segments,
+            cue_provenance,
             translation_runs,
             subtitle_styles,
         })
@@ -340,6 +344,14 @@ impl LocalWorkspaceService {
         let translation_lock = self.translation_lock_for_job(job_id).await;
         let _guard = translation_lock.lock().await;
         let segments = self.database.list_segments(job_id).await?;
+        let dependency_stale_ids = self
+            .database
+            .list_subtitle_provenance(job_id)
+            .await?
+            .into_iter()
+            .filter(|item| item.translation_dependency_stale)
+            .map(|item| item.segment_id)
+            .collect::<HashSet<_>>();
         if segments.is_empty() {
             return Err(anyhow!(
                 "cannot translate a workspace without subtitle segments"
@@ -348,7 +360,8 @@ impl LocalWorkspaceService {
         let pending = segments
             .iter()
             .filter(|segment| {
-                segment.translation_stale
+                dependency_stale_ids.contains(&segment.id)
+                    || segment.translation_stale
                     || segment
                         .translated_text
                         .as_deref()
@@ -390,9 +403,15 @@ impl LocalWorkspaceService {
             .iter()
             .filter(|segment| segment.translation_stale)
             .count();
-        if stale_count > 0 {
+        let dependency_stale_count = workspace
+            .cue_provenance
+            .iter()
+            .filter(|item| item.translation_dependency_stale)
+            .count();
+        if stale_count > 0 || dependency_stale_count > 0 {
             return Err(anyhow!(
-                "{stale_count} subtitle translation(s) are stale; retranslate them before export"
+                "{} subtitle translation(s) are stale; retranslate them before export",
+                stale_count.max(dependency_stale_count)
             ));
         }
         if workspace.segments.is_empty() {
@@ -454,9 +473,15 @@ impl LocalWorkspaceService {
             .iter()
             .filter(|segment| segment.translation_stale)
             .count();
-        if stale_count > 0 {
+        let dependency_stale_count = workspace
+            .cue_provenance
+            .iter()
+            .filter(|item| item.translation_dependency_stale)
+            .count();
+        if stale_count > 0 || dependency_stale_count > 0 {
             return Err(anyhow!(
-                "{stale_count} subtitle translation(s) are stale; retranslate them before rendering"
+                "{} subtitle translation(s) are stale; retranslate them before rendering",
+                stale_count.max(dependency_stale_count)
             ));
         }
         if workspace.segments.is_empty() {
@@ -532,14 +557,20 @@ impl LocalWorkspaceService {
             .iter()
             .filter(|segment| segment.translation_stale)
             .count();
+        let dependency_stale_count = workspace
+            .cue_provenance
+            .iter()
+            .filter(|item| item.translation_dependency_stale)
+            .count();
         let missing_translation_count = workspace
             .segments
             .iter()
             .filter(|segment| segment.translated_text.as_deref().is_none_or(str::is_empty))
             .count();
-        if requires_translation && stale_count > 0 {
+        if requires_translation && (stale_count > 0 || dependency_stale_count > 0) {
             return Err(anyhow!(
-                "{stale_count} subtitle translation(s) are stale; retranslate them before exporting translated subtitles"
+                "{} subtitle translation(s) are stale; retranslate them before exporting translated subtitles",
+                stale_count.max(dependency_stale_count)
             ));
         }
         if requires_translation && missing_translation_count > 0 {
@@ -657,6 +688,13 @@ impl LocalWorkspaceService {
             .iter()
             .map(|segment| (segment.id.as_str(), segment))
             .collect::<HashMap<_, _>>();
+        let source_revisions = self
+            .database
+            .list_subtitle_provenance(job_id)
+            .await?
+            .into_iter()
+            .map(|item| (item.segment_id, item.source_revision))
+            .collect::<HashMap<_, _>>();
         let mut empty_segment_ids = Vec::new();
         for group in plan.groups {
             let batch = group
@@ -670,6 +708,19 @@ impl LocalWorkspaceService {
                         .ok_or_else(|| anyhow!("translation target disappeared from its plan"))
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let dependencies = group
+                .before_context
+                .iter()
+                .chain(&group.after_context)
+                .map(|context| LocalTranslationDependency {
+                    segment_id: context.segment_id.clone(),
+                    source_text: context.source_text.clone(),
+                    expected_source_revision: source_revisions
+                        .get(&context.segment_id)
+                        .copied()
+                        .unwrap_or_default(),
+                })
+                .collect::<Vec<_>>();
             let response = self
                 .translation_provider
                 .translate(TranslationRequest {
@@ -692,7 +743,7 @@ impl LocalWorkspaceService {
                 validated_translation_updates(&provider.name, &batch, response.translations)?;
             if !updates.is_empty() {
                 self.database
-                    .apply_machine_translations(job_id, &updates)
+                    .apply_machine_translation_group(job_id, &updates, &dependencies)
                     .await?;
             }
             self.record_translation_batch(
@@ -720,6 +771,19 @@ impl LocalWorkspaceService {
                             .ok_or_else(|| anyhow!("translation retry target disappeared"))
                     })
                     .collect::<Result<Vec<_>>>()?;
+                let retry_dependencies = retry_group
+                    .before_context
+                    .iter()
+                    .chain(&retry_group.after_context)
+                    .map(|context| LocalTranslationDependency {
+                        segment_id: context.segment_id.clone(),
+                        source_text: context.source_text.clone(),
+                        expected_source_revision: source_revisions
+                            .get(&context.segment_id)
+                            .copied()
+                            .unwrap_or_default(),
+                    })
+                    .collect::<Vec<_>>();
                 let retry_response = self
                     .translation_provider
                     .translate(TranslationRequest {
@@ -752,7 +816,11 @@ impl LocalWorkspaceService {
                 )?;
                 if !retry_updates.is_empty() {
                     self.database
-                        .apply_machine_translations(job_id, &retry_updates)
+                        .apply_machine_translation_group(
+                            job_id,
+                            &retry_updates,
+                            &retry_dependencies,
+                        )
                         .await?;
                 }
                 self.record_translation_batch(
