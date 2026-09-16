@@ -41,6 +41,7 @@ _最后更新：2026-09-16_
   - [x] 完成本地源码运行的应用集成：App 按需启动并回收只监听 loopback 的 `llama-server`，支持 Hy-MT2 下载／取消／续传／校验／卸载、1.8B／7B 当前模型切换和本地 provider 设置；真实 runtime 集成测试已验证翻译后无遗留服务。
   - [ ] 完成用户本机窗口验收、人工盲评、完整任务峰值内存和 ASR 并发竞争后，确定推荐档位。
   - [ ] 发布打包和 Windows runtime 构建／实测暂缓；本地验收完成前不把 `llama-server` 加入发行物。
+    - [x] 增加独立 macOS 本地验收打包配置，可生成包含 `llama-server` 的 ad-hoc signed App；不改变标准发行配置。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。
 - [ ] P5：录音流式回放、prefix 提交策略、真实采集／Live ASR；Gemini Live Translate 单列实验。
 

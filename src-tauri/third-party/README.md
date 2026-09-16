@@ -30,6 +30,7 @@ Atogaki bundles separately executable command-line sidecars. They communicate wi
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
 | whisper.cpp / `whisper-cli` | v1.8.6 | MIT | https://github.com/ggml-org/whisper.cpp/releases/tag/v1.8.6 |
+| llama.cpp / `llama-server` (P3 local test bundle) | v0.4.1 (`391fac1`) | MIT | https://github.com/ggml-org/llama.cpp/tree/391fac16460f15233a7740550d858ac96df3419d |
 | FFmpeg / `ffmpeg` / `ffprobe` | 8.1.2 | LGPL v2.1+ build | https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz |
 | libass | 0.17.5 | ISC | https://github.com/libass/libass/releases/tag/0.17.5 |
 | libunibreak | 7.0 | permissive; see bundled license | https://github.com/adah1972/libunibreak/releases/tag/libunibreak_7_0 |

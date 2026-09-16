@@ -79,4 +79,13 @@ ATOGAKI_LLAMA_SERVER="$PWD/src-tauri/binaries/llama-server-aarch64-apple-darwin"
 
 设置页会把该文件显示为“已下载”；点击“设为当前”，选择“Hy-MT2（本地）”并保存后即可测试。真实窗口验收、人工盲评和资源竞争尚未完成，因此 P3 停在本地候选检查点，不推进 P4。
 
+需要使用正式应用数据进行较长期测试时，可用独立覆盖生成包含 runtime 的本地 App：
+
+```console
+cd src-tauri
+cargo tauri build --bundles app --config tauri.local-hy-mt2.conf.json
+```
+
+输出位于 `src-tauri/target/release/bundle/macos/Atogaki.app`。该 App 使用与现有安装版相同的 bundle identifier 和应用数据目录；移动 App 不会移动模型或任务数据。测试前应退出其他 Atogaki 实例。
+
 官方资料：[Hy-MT2 模型卡](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF)、[llama.cpp server API](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)、[STQ PR #22836](https://github.com/ggml-org/llama.cpp/pull/22836)。

@@ -50,6 +50,8 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 当前直接使用 `cargo run` 时加载的是最近一次 `ui/dist`，所以修改前端后必须先运行前端构建。`tauri.conf.json` 刻意不配置 `devUrl`，避免普通 `cargo run` 在没有同时启动 Vite server 时显示白屏。开发窗口启动后，首页会显示实际的应用数据目录和 SQLite 任务列表。
 
+P3 本地真实使用候选通过 `tauri.local-hy-mt2.conf.json` 额外打包 `llama-server`。它仍使用正式 bundle identifier 和系统应用数据目录，App 或 DMG 放置位置不会改变模型目录；Hy-MT2 GGUF 继续按需下载到设置页显示的 `models/` 目录，不嵌入 App。该覆盖只用于本地 macOS 验收，不改变标准发行配置，也不表示已完成 Windows runtime 验收。
+
 打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。本地 ad-hoc 签名的 App Bundle 可用 `tauri build --bundles app` 生成，再从 `src-tauri/target/release/bundle/macos/Atogaki.app` 启动。配置声明最低 macOS 12.0，与 sidecar 的 deployment target 一致。
 
 本机结构冒烟可以使用 `CI=true tauri build --bundles dmg`，但 CI 模式会跳过 Finder 图标定位与背景美化，不能作为最终发布产物。最终候选必须在非 CI 环境运行 `cargo tauri build --bundles dmg`，并实际确认 App、Applications 链接和窗口布局；2026-08-11 的 macOS 26 构建已能正常完成该流程。若以后 Finder AppleScript 再次挂起，应中止并排查，不能用 CI 简化包替代发布门禁。ad-hoc 签名只保证 Bundle 完整性，不代表 Developer ID 身份，也没有经过 Apple 公证。

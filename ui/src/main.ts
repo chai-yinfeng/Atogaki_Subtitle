@@ -1991,8 +1991,15 @@ async function uninstallModel(modelId: string): Promise<void> {
 
 async function selectModel(modelId: string): Promise<void> {
   if (!modelId) return;
+  const model = availableModels.find((candidate) => candidate.id === modelId);
+  if (modelDownloadMessage) modelDownloadMessage.textContent = "正在校验并切换模型…";
   try {
     await invoke<ModelDownloadState>("select_model", { modelId });
+    if (model?.kind === "whisper" && settingsWhisperModel) {
+      settingsDirtyFields.delete(settingsWhisperModel.id);
+    } else if (model?.kind === "vad" && settingsVadModel) {
+      settingsDirtyFields.delete(settingsVadModel.id);
+    }
     modelDownloads = await invoke<ModelDownloadState[]>("model_download_states");
     await loadDesktopSettings(false);
     if (modelDownloadMessage) modelDownloadMessage.textContent = "模型已校验并设为当前使用。";

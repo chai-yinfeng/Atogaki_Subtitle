@@ -1,0 +1,6 @@
+target=aarch64-apple-darwin
+macos_minimum=12.0
+llama_cpp_version=v0.4.1
+llama_cpp_commit=391fac16460f15233a7740550d858ac96df3419d
+llama_cpp_source_sha256=82977400c28b7486f90126a5592c9ff585f9b2ae0a3be2c9ab77464e5eef78cc
+prebundle_llama_server_binary_sha256=d4792da84c356ebf51889dd1ee1de30d3477bd3da294b104565a7b3688248dff
