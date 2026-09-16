@@ -13,8 +13,9 @@ use tokio::sync::Mutex;
 
 use crate::{
     application::{
-        TranslationOptions, TranslationPlanner, TranslationPlannerCue, TranslationProvider,
-        TranslationRequest, UnconfiguredTranslationProvider,
+        TRANSLATION_GROUPING_STRATEGY, TranslationGroup, TranslationOptions, TranslationPlanner,
+        TranslationPlannerCue, TranslationProvider, TranslationRequest,
+        UnconfiguredTranslationProvider,
     },
     domain::{
         LanguageCode, TranscriptSegment,
@@ -66,6 +67,34 @@ pub struct LocalBatchTranslationResult {
     pub translated_count: usize,
     pub empty_segment_ids: Vec<String>,
     pub resumed: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TranslationPlanSnapshot {
+    schema_version: u32,
+    group_id: String,
+    grouping_strategy: String,
+    before_context: Vec<TranslationContextRevisionSnapshot>,
+    targets: Vec<TranslationTargetRevisionSnapshot>,
+    after_context: Vec<TranslationContextRevisionSnapshot>,
+    style_instruction: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TranslationContextRevisionSnapshot {
+    segment_id: String,
+    source_text: String,
+    source_revision: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct TranslationTargetRevisionSnapshot {
+    segment_id: String,
+    source_text: String,
+    source_revision: i64,
+    translation_revision: i64,
+    expected_translated_text: Option<String>,
+    expected_translation_edited: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -688,13 +717,15 @@ impl LocalWorkspaceService {
             .iter()
             .map(|segment| (segment.id.as_str(), segment))
             .collect::<HashMap<_, _>>();
-        let source_revisions = self
+        let provenance_by_id = self
             .database
             .list_subtitle_provenance(job_id)
             .await?
             .into_iter()
-            .map(|item| (item.segment_id, item.source_revision))
+            .map(|item| (item.segment_id.clone(), item))
             .collect::<HashMap<_, _>>();
+        let options_json =
+            serde_json::to_string(&options).context("failed to snapshot translation options")?;
         let mut empty_segment_ids = Vec::new();
         for group in plan.groups {
             let batch = group
@@ -708,6 +739,7 @@ impl LocalWorkspaceService {
                         .ok_or_else(|| anyhow!("translation target disappeared from its plan"))
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let plan_json = translation_plan_snapshot(&group, &batch, &provenance_by_id, None)?;
             let dependencies = group
                 .before_context
                 .iter()
@@ -715,9 +747,9 @@ impl LocalWorkspaceService {
                 .map(|context| LocalTranslationDependency {
                     segment_id: context.segment_id.clone(),
                     source_text: context.source_text.clone(),
-                    expected_source_revision: source_revisions
+                    expected_source_revision: provenance_by_id
                         .get(&context.segment_id)
-                        .copied()
+                        .map(|item| item.source_revision)
                         .unwrap_or_default(),
                 })
                 .collect::<Vec<_>>();
@@ -752,6 +784,9 @@ impl LocalWorkspaceService {
                 response_model,
                 batch.len(),
                 response_usage,
+                Some(TRANSLATION_GROUPING_STRATEGY.to_string()),
+                Some(options_json.clone()),
+                Some(plan_json),
             )
             .await?;
 
@@ -771,6 +806,13 @@ impl LocalWorkspaceService {
                             .ok_or_else(|| anyhow!("translation retry target disappeared"))
                     })
                     .collect::<Result<Vec<_>>>()?;
+                let retry_style = "Every target is a previously empty short fragment. Translate each one visibly using its context; punctuation alone is acceptable when that is the faithful subtitle.";
+                let retry_plan_json = translation_plan_snapshot(
+                    &retry_group,
+                    &retry_batch,
+                    &provenance_by_id,
+                    Some(retry_style),
+                )?;
                 let retry_dependencies = retry_group
                     .before_context
                     .iter()
@@ -778,9 +820,9 @@ impl LocalWorkspaceService {
                     .map(|context| LocalTranslationDependency {
                         segment_id: context.segment_id.clone(),
                         source_text: context.source_text.clone(),
-                        expected_source_revision: source_revisions
+                        expected_source_revision: provenance_by_id
                             .get(&context.segment_id)
-                            .copied()
+                            .map(|item| item.source_revision)
                             .unwrap_or_default(),
                     })
                     .collect::<Vec<_>>();
@@ -791,10 +833,7 @@ impl LocalWorkspaceService {
                         before_context: retry_group.before_context,
                         targets: retry_group.targets,
                         after_context: retry_group.after_context,
-                        style_instruction: Some(
-                            "Every target is a previously empty short fragment. Translate each one visibly using its context; punctuation alone is acceptable when that is the faithful subtitle."
-                                .to_string(),
-                        ),
+                        style_instruction: Some(retry_style.to_string()),
                     })
                     .await
                     .with_context(|| {
@@ -829,6 +868,9 @@ impl LocalWorkspaceService {
                     retry_model,
                     retry_batch.len(),
                     retry_usage,
+                    Some(TRANSLATION_GROUPING_STRATEGY.to_string()),
+                    Some(options_json.clone()),
+                    Some(retry_plan_json),
                 )
                 .await?;
                 empty_segment_ids.extend(still_empty);
@@ -847,6 +889,9 @@ impl LocalWorkspaceService {
         model: Option<String>,
         segment_count: usize,
         usage: crate::application::TranslationUsage,
+        grouping_strategy: Option<String>,
+        options_json: Option<String>,
+        plan_json: Option<String>,
     ) -> Result<()> {
         self.database
             .record_translation_run(&NewLocalTranslationRun {
@@ -856,6 +901,9 @@ impl LocalWorkspaceService {
                 provider_name: provider.name.clone(),
                 model,
                 endpoint_kind: provider.endpoint_kind.clone(),
+                grouping_strategy,
+                options_json,
+                plan_json,
                 segment_count: i64::try_from(segment_count)
                     .context("translation batch size exceeds SQLite i64")?,
                 input_tokens: usage.input_tokens,
@@ -863,6 +911,60 @@ impl LocalWorkspaceService {
             })
             .await
     }
+}
+
+fn translation_plan_snapshot(
+    group: &TranslationGroup,
+    targets: &[LocalSubtitleSegmentRecord],
+    provenance_by_id: &HashMap<String, LocalSubtitleProvenanceRecord>,
+    style_instruction: Option<&str>,
+) -> Result<String> {
+    let context_snapshot = |context: &crate::application::TranslationContextSegment| {
+        let provenance = provenance_by_id
+            .get(&context.segment_id)
+            .ok_or_else(|| anyhow!("translation context has no revision metadata"))?;
+        Ok(TranslationContextRevisionSnapshot {
+            segment_id: context.segment_id.clone(),
+            source_text: context.source_text.clone(),
+            source_revision: provenance.source_revision,
+        })
+    };
+    let before_context = group
+        .before_context
+        .iter()
+        .map(context_snapshot)
+        .collect::<Result<Vec<_>>>()?;
+    let after_context = group
+        .after_context
+        .iter()
+        .map(context_snapshot)
+        .collect::<Result<Vec<_>>>()?;
+    let targets = targets
+        .iter()
+        .map(|target| {
+            let provenance = provenance_by_id
+                .get(&target.id)
+                .ok_or_else(|| anyhow!("translation target has no revision metadata"))?;
+            Ok(TranslationTargetRevisionSnapshot {
+                segment_id: target.id.clone(),
+                source_text: target.source_text.clone(),
+                source_revision: provenance.source_revision,
+                translation_revision: provenance.translation_revision,
+                expected_translated_text: target.translated_text.clone(),
+                expected_translation_edited: target.translation_edited,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    serde_json::to_string(&TranslationPlanSnapshot {
+        schema_version: 1,
+        group_id: group.id.clone(),
+        grouping_strategy: TRANSLATION_GROUPING_STRATEGY.to_string(),
+        before_context,
+        targets,
+        after_context,
+        style_instruction: style_instruction.map(str::to_string),
+    })
+    .context("failed to snapshot translation plan")
 }
 
 fn validated_translation_updates(
@@ -1154,7 +1256,7 @@ mod tests {
 
     use super::{
         LocalSubtitleExportArtifact, LocalWorkspaceService, TRANSLATION_CONTEXT_MAX_CHARS,
-        translation_context,
+        TRANSLATION_GROUPING_STRATEGY, TranslationOptions, translation_context,
     };
     use crate::{
         application::{
@@ -1484,6 +1586,18 @@ mod tests {
         assert_eq!(runs[0].segment_count, 2);
         assert_eq!(runs[0].input_tokens, Some(42));
         assert_eq!(runs[0].output_tokens, Some(12));
+        assert_eq!(
+            runs[0].grouping_strategy.as_deref(),
+            Some(TRANSLATION_GROUPING_STRATEGY)
+        );
+        let options: TranslationOptions =
+            serde_json::from_str(runs[0].options_json.as_deref().unwrap()).unwrap();
+        assert_eq!(options.source_language, LanguageCode::English);
+        let plan: serde_json::Value =
+            serde_json::from_str(runs[0].plan_json.as_deref().unwrap()).unwrap();
+        assert_eq!(plan["grouping_strategy"], TRANSLATION_GROUPING_STRATEGY);
+        assert_eq!(plan["targets"][0]["source_revision"], 0);
+        assert_eq!(plan["targets"][0]["translation_revision"], 0);
 
         drop(service);
         database.close().await;

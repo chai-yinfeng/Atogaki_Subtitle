@@ -1,7 +1,8 @@
 use crate::domain::{LanguageCode, LanguagePair};
+use serde::{Deserialize, Serialize};
 
 /// Options for a translation run, independent from a particular user interface.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TranslationOptions {
     pub source_language: LanguageCode,
     pub target_language: LanguageCode,

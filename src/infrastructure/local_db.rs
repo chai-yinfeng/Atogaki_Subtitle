@@ -272,6 +272,9 @@ pub struct LocalTranslationRunRecord {
     pub provider_name: String,
     pub model: Option<String>,
     pub endpoint_kind: String,
+    pub grouping_strategy: Option<String>,
+    pub options_json: Option<String>,
+    pub plan_json: Option<String>,
     pub segment_count: i64,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -286,6 +289,9 @@ pub struct NewLocalTranslationRun {
     pub provider_name: String,
     pub model: Option<String>,
     pub endpoint_kind: String,
+    pub grouping_strategy: Option<String>,
+    pub options_json: Option<String>,
+    pub plan_json: Option<String>,
     pub segment_count: i64,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -1920,8 +1926,9 @@ impl LocalDatabase {
         sqlx::query(
             "INSERT INTO local_translation_runs (
                 id, job_id, provider_id, provider_name, model, endpoint_kind,
+                grouping_strategy, options_json, plan_json,
                 segment_count, input_tokens, output_tokens, completed_at_unix
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&run.id)
         .bind(&run.job_id)
@@ -1929,6 +1936,9 @@ impl LocalDatabase {
         .bind(&run.provider_name)
         .bind(&run.model)
         .bind(&run.endpoint_kind)
+        .bind(&run.grouping_strategy)
+        .bind(&run.options_json)
+        .bind(&run.plan_json)
         .bind(run.segment_count)
         .bind(run.input_tokens)
         .bind(run.output_tokens)
@@ -1945,6 +1955,7 @@ impl LocalDatabase {
     ) -> Result<Vec<LocalTranslationRunRecord>> {
         sqlx::query_as(
             "SELECT id, job_id, provider_id, provider_name, model, endpoint_kind,
+                    grouping_strategy, options_json, plan_json,
                     segment_count, input_tokens, output_tokens, completed_at_unix
              FROM local_translation_runs
              WHERE job_id = ?
