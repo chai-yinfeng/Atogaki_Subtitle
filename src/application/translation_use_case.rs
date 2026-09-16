@@ -1,11 +1,101 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
+use serde::Serialize;
 
 use crate::application::{
-    TranslationGroup, TranslationOptions, TranslationProvider, TranslationRequest,
-    TranslationResponse, TranslationResult,
+    TRANSLATION_GROUPING_STRATEGY, TranslationGroup, TranslationOptions, TranslationPlanner,
+    TranslationPlannerCue, TranslationProvider, TranslationRequest, TranslationResponse,
+    TranslationResult,
 };
+use crate::domain::TranscriptSegment;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TranslationExecutionSummary {
+    pub grouping_strategy: String,
+    pub provider_id: String,
+    pub provider_name: String,
+    pub model: Option<String>,
+    pub group_count: usize,
+    pub segment_count: usize,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+}
+
+/// Translates a complete in-memory cue timeline without partially mutating it
+/// when a later semantic group fails. Used by the CLI and quality harness.
+pub async fn translate_transcript(
+    provider: &dyn TranslationProvider,
+    options: &TranslationOptions,
+    segments: &mut [TranscriptSegment],
+) -> Result<TranslationExecutionSummary> {
+    let timeline = segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            Ok(TranslationPlannerCue {
+                segment_id: segment.id.clone(),
+                segment_index: i64::try_from(index)
+                    .context("subtitle index exceeds translation planner range")?,
+                start_ms: i64::try_from(segment.start_ms)
+                    .context("subtitle start time exceeds translation planner range")?,
+                end_ms: i64::try_from(segment.end_ms)
+                    .context("subtitle end time exceeds translation planner range")?,
+                source_text: segment.source_text.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let target_ids = timeline
+        .iter()
+        .map(|cue| cue.segment_id.clone())
+        .collect::<HashSet<_>>();
+    let plan = TranslationPlanner::default().plan(&timeline, &target_ids)?;
+    let status = provider.status();
+    let group_count = plan.groups.len();
+    let mut translated_by_id = HashMap::with_capacity(segments.len());
+    let mut response_model = status.model.clone();
+    let mut input_tokens = None;
+    let mut output_tokens = None;
+    for group in plan.groups {
+        let response = execute_translation_group(provider, options.clone(), group, None)
+            .await
+            .with_context(|| format!("failed to translate subtitle group with {}", status.name))?;
+        response_model = response.model.or(response_model);
+        accumulate_optional(&mut input_tokens, response.usage.input_tokens);
+        accumulate_optional(&mut output_tokens, response.usage.output_tokens);
+        translated_by_id.extend(
+            response
+                .translations
+                .into_iter()
+                .map(|translation| (translation.segment_id, translation.translated_text)),
+        );
+    }
+    for segment in segments.iter_mut() {
+        let translated = translated_by_id.remove(&segment.id).ok_or_else(|| {
+            anyhow!(
+                "translation plan did not produce a result for subtitle {}",
+                segment.id
+            )
+        })?;
+        segment.set_translation(Some(translated));
+    }
+    Ok(TranslationExecutionSummary {
+        grouping_strategy: TRANSLATION_GROUPING_STRATEGY.to_string(),
+        provider_id: status.id,
+        provider_name: status.name,
+        model: response_model,
+        group_count,
+        segment_count: segments.len(),
+        input_tokens,
+        output_tokens,
+    })
+}
+
+fn accumulate_optional(total: &mut Option<i64>, value: Option<i64>) {
+    if let Some(value) = value {
+        *total = Some(total.unwrap_or_default().saturating_add(value));
+    }
+}
 
 /// Executes one semantic translation group through the configured provider and
 /// enforces the stable cue-ID contract shared by CLI and desktop workflows.
@@ -93,13 +183,13 @@ fn validate_translation_results(
 
 #[cfg(test)]
 mod tests {
-    use super::execute_translation_group;
+    use super::{execute_translation_group, translate_transcript};
     use crate::application::{
         TranslationFuture, TranslationGroup, TranslationOptions, TranslationProvider,
         TranslationProviderStatus, TranslationResponse, TranslationResult,
         TranslationTargetSegment, TranslationUsage,
     };
-    use crate::domain::LanguageCode;
+    use crate::domain::{LanguageCode, TranscriptSegment};
 
     #[derive(Debug)]
     struct FixedProvider {
@@ -200,5 +290,28 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("duplicate subtitle IDs"));
+    }
+
+    #[tokio::test]
+    async fn complete_timeline_waits_for_all_groups_before_mutating_cues() {
+        let provider = FixedProvider {
+            translations: vec![TranslationResult {
+                segment_id: "unexpected".to_string(),
+                translated_text: "错误".to_string(),
+            }],
+        };
+        let mut segments = vec![TranscriptSegment::new(0, 1_000, "第一句。".into())];
+        let original = segments[0].translated_text.clone();
+
+        assert!(
+            translate_transcript(
+                &provider,
+                &TranslationOptions::new(LanguageCode::Japanese, LanguageCode::SimplifiedChinese),
+                &mut segments,
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(segments[0].translated_text, original);
     }
 }

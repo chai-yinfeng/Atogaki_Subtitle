@@ -6,16 +6,24 @@ use atogaki_subtitle::{
             ApplyGlossarySpec, ExportSpec, ProcessSpec, RenderSpec, RerenderSpec, TranscribeSpec,
             TranslateSpec,
         },
+        translate_transcript,
     },
+    domain::TranscriptSegment,
     domain::render::RenderOptions,
-    infrastructure::{config::AppConfig, media},
+    infrastructure::{
+        config::AppConfig,
+        media,
+        network::NetworkClientConfig,
+        openai_compatible::OpenAiGenerationConfig,
+        openai_compatible::{OpenAiCompatibleConfig, OpenAiCompatibleTranslationProvider},
+    },
     interface::{
         self,
         cli::{Cli, Command, RenderArgsCommon},
     },
 };
 use clap::Parser;
-use std::fs;
+use std::{fs, time::Instant};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -44,6 +52,57 @@ async fn main() -> Result<()> {
                 fs::write(&output, format!("{json}\n"))?;
             }
             println!("{json}");
+            Ok(())
+        }
+        Command::EvaluateTranslation(args) => {
+            let data = fs::read(&args.input)?;
+            let mut segments: Vec<TranscriptSegment> = serde_json::from_slice(&data)?;
+            for segment in &mut segments {
+                segment.ensure_id();
+                segment.set_translation(None);
+            }
+            let provider = OpenAiCompatibleTranslationProvider::with_network_config(
+                OpenAiCompatibleConfig {
+                    provider_id: "translation-evaluation".to_string(),
+                    provider_name: args.provider_name,
+                    api_key: Some(args.api_key),
+                    base_url: args.base_url,
+                    model: args.model,
+                    style_instruction: args.style_instruction,
+                    disable_deepseek_thinking: false,
+                    generation: OpenAiGenerationConfig {
+                        temperature: Some(0.7),
+                        top_p: Some(0.6),
+                        top_k: Some(20),
+                        repetition_penalty: Some(1.05),
+                        max_tokens: Some(2_048),
+                        strict_json_schema: true,
+                    },
+                },
+                &NetworkClientConfig::new("direct", None)?,
+            )?;
+            let options = TranslationOptions::new(args.source_language, args.target_language)
+                .with_protected_terms(args.protected_terms);
+            let started = Instant::now();
+            let summary = translate_transcript(&provider, &options, &mut segments).await?;
+            let output = serde_json::json!({
+                "schema_version": 1,
+                "elapsed_ms": i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
+                "summary": summary,
+                "options": options,
+                "segments": segments,
+            });
+            if let Some(parent) = args.output.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(
+                &args.output,
+                format!("{}\n", serde_json::to_string_pretty(&output)?),
+            )?;
+            println!(
+                "Translation evaluation written to {}",
+                args.output.display()
+            );
             Ok(())
         }
         Command::Record(args) => media::record_audio(&config.ffmpeg, &args).await,

@@ -260,6 +260,7 @@ impl DeferredOpenAiCompatibleTranslationProvider {
                 model: self.model.clone(),
                 style_instruction: self.style_instruction.clone(),
                 disable_deepseek_thinking: self.disable_deepseek_thinking,
+                generation: Default::default(),
             },
             &self.network,
         )
@@ -1014,6 +1015,7 @@ fn validate_llm_settings(
             model: model.unwrap_or(DEFAULT_DEEPSEEK_MODEL).to_string(),
             style_instruction: style_instruction.to_string(),
             disable_deepseek_thinking: true,
+            generation: Default::default(),
         }),
         OPENAI_COMPATIBLE_PROVIDER_ID => Some(OpenAiCompatibleConfig {
             provider_id: provider_id.to_string(),
@@ -1023,6 +1025,7 @@ fn validate_llm_settings(
             model: model.unwrap_or_default().to_string(),
             style_instruction: style_instruction.to_string(),
             disable_deepseek_thinking: false,
+            generation: Default::default(),
         }),
         _ => None,
     };

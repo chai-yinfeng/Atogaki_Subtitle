@@ -37,6 +37,7 @@ _最后更新：2026-09-16_
   - [x] 在 Apple M4 24 GB 上跑通 1.8B Metal 链路：stable cue ID／JSON／术语占位符合同通过，约 60 output tokens/s，短请求后 RSS 约 1.67 GiB；详见 [Hy-MT2 验证记录](hy-mt2-validation.md)。
   - [x] 同机跑通 7B Metal 合同：约 21 output tokens/s，短请求后 RSS 约 5.44 GiB；两档均保持候选，尚未作质量推荐。
   - [ ] 用固定真实 source cues 对比 1.8B、7B 与现有云端基线，记录首次加载、完整任务峰值内存、ASR 并发竞争和人工盲评。
+    - [x] 共用产品 `TranslationPlanner` 和 provider 合同完成《湖吉の庭 Vol.1》60 cue／31 group 全量运行；1.8B 为 83.6 s，7B 为 441.4 s，两档均通过结构门禁。生成了与历史云端 previous-output 的匿名评审材料；人工评分、完整任务峰值内存和 ASR 并发竞争仍待完成。
   - [ ] 将可通过质量门禁的档位接入应用管理的 `llama-server` sidecar、模型下载／取消／续传／校验／卸载和 provider 设置；补齐 Windows runtime 构建与实测。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。
 - [ ] P5：录音流式回放、prefix 提交策略、真实采集／Live ASR；Gemini Live Translate 单列实验。

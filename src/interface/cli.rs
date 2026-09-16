@@ -29,6 +29,7 @@ pub enum Command {
     ApplyGlossary(ApplyGlossaryArgs),
     Devices,
     EvaluateAsr(EvaluateAsrArgs),
+    EvaluateTranslation(EvaluateTranslationArgs),
     Record(RecordArgs),
     Rerender(RerenderArgs),
     Serve(ServeArgs),
@@ -37,6 +38,39 @@ pub enum Command {
     Export(ExportArgs),
     Render(RenderArgs),
     Process(ProcessArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EvaluateTranslationArgs {
+    #[arg(long, help = "Atogaki segments.json used as frozen source cues")]
+    pub input: PathBuf,
+
+    #[arg(long, help = "Git-ignored JSON output path for this provider run")]
+    pub output: PathBuf,
+
+    #[arg(long, default_value = "http://127.0.0.1:18080/v1")]
+    pub base_url: String,
+
+    #[arg(long, hide_env_values = true, env = "ATOGAKI_TRANSLATION_EVAL_API_KEY")]
+    pub api_key: String,
+
+    #[arg(long)]
+    pub model: String,
+
+    #[arg(long, default_value = "Local translation evaluation")]
+    pub provider_name: String,
+
+    #[arg(long, default_value = "ja")]
+    pub source_language: LanguageCode,
+
+    #[arg(long, default_value = "zh")]
+    pub target_language: LanguageCode,
+
+    #[arg(long = "protected-term")]
+    pub protected_terms: Vec<String>,
+
+    #[arg(long, default_value = "准确、自然、简洁的中文口语字幕")]
+    pub style_instruction: String,
 }
 
 #[derive(Debug, Args)]

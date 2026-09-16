@@ -27,6 +27,7 @@ pub struct OpenAiCompatibleTranslationProvider {
     model: String,
     style_instruction: String,
     disable_deepseek_thinking: bool,
+    generation: OpenAiGenerationConfig,
     network_failure_guidance: String,
     client: Client,
 }
@@ -40,6 +41,17 @@ pub struct OpenAiCompatibleConfig {
     pub model: String,
     pub style_instruction: String,
     pub disable_deepseek_thinking: bool,
+    pub generation: OpenAiGenerationConfig,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OpenAiGenerationConfig {
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<i32>,
+    pub repetition_penalty: Option<f32>,
+    pub max_tokens: Option<u32>,
+    pub strict_json_schema: bool,
 }
 
 impl OpenAiCompatibleTranslationProvider {
@@ -64,6 +76,7 @@ impl OpenAiCompatibleTranslationProvider {
             model,
             style_instruction: config.style_instruction.trim().to_string(),
             disable_deepseek_thinking: config.disable_deepseek_thinking,
+            generation: config.generation,
             network_failure_guidance: network.failure_guidance(),
             client,
         })
@@ -166,11 +179,30 @@ impl OpenAiCompatibleTranslationProvider {
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": format!("Translate the target_segments in this JSON input:\n{}", user_payload)},
             ],
-            "response_format": {"type": "json_object"},
             "stream": false,
         });
+        body["response_format"] = if self.generation.strict_json_schema {
+            structured_response_format(prepared)
+        } else {
+            json!({"type": "json_object"})
+        };
         if self.disable_deepseek_thinking {
             body["thinking"] = json!({"type": "disabled"});
+        }
+        if let Some(value) = self.generation.temperature {
+            body["temperature"] = json!(value);
+        }
+        if let Some(value) = self.generation.top_p {
+            body["top_p"] = json!(value);
+        }
+        if let Some(value) = self.generation.top_k {
+            body["top_k"] = json!(value);
+        }
+        if let Some(value) = self.generation.repetition_penalty {
+            body["repeat_penalty"] = json!(value);
+        }
+        if let Some(value) = self.generation.max_tokens {
+            body["max_tokens"] = json!(value);
         }
         body
     }
@@ -244,6 +276,41 @@ impl OpenAiCompatibleTranslationProvider {
             },
         })
     }
+}
+
+fn structured_response_format(prepared: &[(String, ProtectedText)]) -> serde_json::Value {
+    let segment_ids = prepared
+        .iter()
+        .map(|(segment_id, _)| segment_id)
+        .collect::<Vec<_>>();
+    json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "subtitle_translations",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "translations": {
+                        "type": "array",
+                        "minItems": prepared.len(),
+                        "maxItems": prepared.len(),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "segment_id": {"type": "string", "enum": segment_ids},
+                                "translated_text": {"type": "string"}
+                            },
+                            "required": ["segment_id", "translated_text"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["translations"],
+                "additionalProperties": false
+            }
+        }
+    })
 }
 
 impl fmt::Debug for OpenAiCompatibleTranslationProvider {
@@ -407,8 +474,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        OpenAiCompatibleConfig, OpenAiCompatibleTranslationProvider, protect_terms, restore_terms,
-        retry_once, validate_openai_base_url,
+        OpenAiCompatibleConfig, OpenAiCompatibleTranslationProvider, OpenAiGenerationConfig,
+        protect_terms, restore_terms, retry_once, validate_openai_base_url,
     };
     use crate::{
         application::{TranslationRequest, TranslationTargetSegment},
@@ -467,6 +534,7 @@ mod tests {
                 model: "deepseek-v4-flash".to_string(),
                 style_instruction: "自然口语".to_string(),
                 disable_deepseek_thinking: true,
+                generation: OpenAiGenerationConfig::default(),
             },
             &NetworkClientConfig::new("direct", None).unwrap(),
         )
@@ -556,5 +624,72 @@ mod tests {
                 .to_string()
                 .contains("returned 0 translations for 1 subtitle segments")
         );
+    }
+
+    #[test]
+    fn builds_strict_local_generation_contract() {
+        let provider = OpenAiCompatibleTranslationProvider::with_network_config(
+            OpenAiCompatibleConfig {
+                provider_id: "hy-mt2".to_string(),
+                provider_name: "Hy-MT2".to_string(),
+                api_key: Some("secret".to_string()),
+                base_url: "http://127.0.0.1:18080/v1".to_string(),
+                model: "Hy-MT2-1.8B-Q4_K_M".to_string(),
+                style_instruction: String::new(),
+                disable_deepseek_thinking: false,
+                generation: OpenAiGenerationConfig {
+                    temperature: Some(0.7),
+                    top_p: Some(0.6),
+                    top_k: Some(20),
+                    repetition_penalty: Some(1.05),
+                    max_tokens: Some(2_048),
+                    strict_json_schema: true,
+                },
+            },
+            &NetworkClientConfig::new("direct", None).unwrap(),
+        )
+        .unwrap();
+        let request = TranslationRequest {
+            options: crate::application::TranslationOptions::default(),
+            before_context: Vec::new(),
+            targets: vec![
+                TranslationTargetSegment {
+                    segment_id: "s1".to_string(),
+                    source_text: "一つ目".to_string(),
+                },
+                TranslationTargetSegment {
+                    segment_id: "s2".to_string(),
+                    source_text: "二つ目".to_string(),
+                },
+            ],
+            after_context: Vec::new(),
+            style_instruction: None,
+        };
+        let prepared = request
+            .targets
+            .iter()
+            .map(|target| {
+                (
+                    target.segment_id.clone(),
+                    protect_terms(&target.source_text, &[]),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let body = provider.build_request_body(&request, &prepared);
+
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        let schema = &body["response_format"]["json_schema"]["schema"];
+        assert_eq!(schema["properties"]["translations"]["minItems"], 2);
+        assert_eq!(schema["properties"]["translations"]["maxItems"], 2);
+        assert_eq!(
+            schema["properties"]["translations"]["items"]["properties"]["segment_id"]["enum"],
+            json!(["s1", "s2"])
+        );
+        assert!((body["temperature"].as_f64().unwrap() - 0.7).abs() < 0.000_001);
+        assert!((body["top_p"].as_f64().unwrap() - 0.6).abs() < 0.000_001);
+        assert_eq!(body["top_k"], 20);
+        assert!((body["repeat_penalty"].as_f64().unwrap() - 1.05).abs() < 0.000_001);
+        assert_eq!(body["max_tokens"], 2_048);
     }
 }

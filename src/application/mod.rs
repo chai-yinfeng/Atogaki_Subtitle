@@ -64,4 +64,6 @@ pub use translation_provider::{
     TranslationProviderStatus, TranslationRequest, TranslationResponse, TranslationResult,
     TranslationTargetSegment, TranslationUsage, UnconfiguredTranslationProvider,
 };
-pub use translation_use_case::execute_translation_group;
+pub use translation_use_case::{
+    TranslationExecutionSummary, execute_translation_group, translate_transcript,
+};

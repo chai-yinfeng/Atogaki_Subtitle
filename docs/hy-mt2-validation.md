@@ -47,4 +47,15 @@
 
 两档在当前 24 GB Apple Silicon 机器上都能运行，1.8B 的资源和速度优势明显。7B 是否带来足够的真实字幕质量提升仍未验证，因此两者继续保持候选状态。
 
+## 固定真实 cues 首轮结果
+
+使用《湖吉の庭 Vol.1》冻结的 60 条日语 source cues，经 `TranslationPlanner semantic-v1` 分成 31 个 group。两档均使用相同原文、上下文、stable cue ID、术语保护、官方采样参数和严格 JSON schema；只有全部 group 成功后才写出运行文件。
+
+- 1.8B 完成 60/60 cue，总耗时 83.6 s，累计 28,801 input tokens、2,739 output tokens。完整运行没有缺 ID、重复 ID、空译文或术语占位符错误。
+- 7B 完成 60/60 cue，总耗时 441.4 s，累计 33,307 input tokens、3,095 output tokens；在同机同任务上约为 1.8B 耗时的 5.3 倍。
+- 1.8B 在连续的第 10–15 cue 出现明显语义错配，说明结构合法不代表 cue 内容对齐正确。7B 在该区间保持了原文语义，也更准确地处理了后段“感到害怕但并不讨厌”的跨 cue 表达。
+- 两档都会忠实翻译已经错误的 ASR 原文。例如第 59 cue 的识别文本带来不合理的“跳舞”译文；这类问题必须由 ASR review/run 工作流解决，不能计为翻译 provider 能修复的内容。
+
+本地 ignored workspace 已生成 1.8B、7B 与历史云端 previous-output 的逐 cue 匿名评审文件和独立 answer key。上述观察用于定位风险，没有冒充盲评结果。人工评分完成前，1.8B 与 7B 仍都保持候选，应用设置不得标记任何一档为推荐。
+
 官方资料：[Hy-MT2 模型卡](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF)、[llama.cpp server API](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)、[STQ PR #22836](https://github.com/ggml-org/llama.cpp/pull/22836)。

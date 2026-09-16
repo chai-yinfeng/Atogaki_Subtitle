@@ -1,16 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 use anyhow::{Context, Result, anyhow};
 
 use crate::{
     application::{
         AsrInputScope, AsrRequest, AsrRun, OfflineAsrProvider, TranscriptionOptions,
-        TranslationOptions, TranslationPlanner, TranslationPlannerCue, TranslationProvider,
-        execute_translation_group,
         job_manifest::JobManifest,
         job_snapshot::JobSnapshot,
         job_spec::{
@@ -18,7 +12,7 @@ use crate::{
             TranslateSpec,
         },
         job_status::JobStatus,
-        segment_timed_units,
+        segment_timed_units, translate_transcript,
     },
     domain::{LanguageCode, LanguagePair, glossary, subtitle},
     infrastructure::{
@@ -128,8 +122,7 @@ impl JobRunner {
             if let Some(key) = spec.deepl_auth_key.or(self.config.deepl_auth_key.clone()) {
                 self.mark(&job, &mut manifest, JobStatus::Translating)?;
                 let provider = DeepLTranslationProvider::new(Some(key));
-                self.translate_segments(&provider, &spec.translation, &mut segments)
-                    .await?;
+                translate_transcript(&provider, &spec.translation, &mut segments).await?;
 
                 self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
                 self.write_translated_outputs(&job, &segments)?;
@@ -175,8 +168,7 @@ impl JobRunner {
 
             self.mark(&job, &mut manifest, JobStatus::Translating)?;
             let provider = DeepLTranslationProvider::new(Some(key));
-            self.translate_segments(&provider, &spec.translation, &mut segments)
-                .await?;
+            translate_transcript(&provider, &spec.translation, &mut segments).await?;
             job.write_segments(&segments)?;
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
@@ -324,62 +316,6 @@ impl JobRunner {
         Ok(())
     }
 
-    async fn translate_segments(
-        &self,
-        provider: &dyn TranslationProvider,
-        options: &TranslationOptions,
-        segments: &mut [crate::domain::TranscriptSegment],
-    ) -> Result<()> {
-        let timeline = segments
-            .iter()
-            .enumerate()
-            .map(|(index, segment)| {
-                Ok(TranslationPlannerCue {
-                    segment_id: segment.id.clone(),
-                    segment_index: i64::try_from(index)
-                        .context("subtitle index exceeds translation planner range")?,
-                    start_ms: i64::try_from(segment.start_ms)
-                        .context("subtitle start time exceeds translation planner range")?,
-                    end_ms: i64::try_from(segment.end_ms)
-                        .context("subtitle end time exceeds translation planner range")?,
-                    source_text: segment.source_text.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let target_ids = timeline
-            .iter()
-            .map(|cue| cue.segment_id.clone())
-            .collect::<HashSet<_>>();
-        let plan = TranslationPlanner::default().plan(&timeline, &target_ids)?;
-        let mut translated_by_id = HashMap::with_capacity(segments.len());
-        for group in plan.groups {
-            let response = execute_translation_group(provider, options.clone(), group, None)
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to translate subtitle group with {}",
-                        provider.status().name
-                    )
-                })?;
-            translated_by_id.extend(
-                response
-                    .translations
-                    .into_iter()
-                    .map(|translation| (translation.segment_id, translation.translated_text)),
-            );
-        }
-        for segment in segments {
-            let translated = translated_by_id.remove(&segment.id).ok_or_else(|| {
-                anyhow!(
-                    "translation plan did not produce a result for subtitle {}",
-                    segment.id
-                )
-            })?;
-            segment.set_translation(Some(translated));
-        }
-        Ok(())
-    }
-
     async fn run_initial_asr(
         &self,
         job: &Job,
@@ -517,7 +453,7 @@ mod tests {
             AsrTimingGranularity, OfflineAsrProvider, TimedUnit, TimedUnitKind, TimingSource,
             TranscriptionOptions, TranslationFuture, TranslationOptions, TranslationProvider,
             TranslationProviderStatus, TranslationRequest, TranslationResponse, TranslationResult,
-            TranslationUsage,
+            TranslationUsage, translate_transcript,
         },
         domain::{LanguageCode, TranscriptSegment},
         infrastructure::{config::AppConfig, job_store::Job},
@@ -639,24 +575,18 @@ mod tests {
 
     #[tokio::test]
     async fn cli_translation_uses_semantic_groups_and_stable_ids() -> Result<()> {
-        let runner = JobRunner::new(AppConfig {
-            ffmpeg: "ffmpeg".into(),
-            whisper_cli: "whisper-cli".into(),
-            deepl_auth_key: None,
-        });
         let provider = RecordingTranslationProvider::default();
         let mut segments = vec![
             TranscriptSegment::new(0, 1_000, "第一句。".into()),
             TranscriptSegment::new(1_000, 2_000, "第二句".into()),
         ];
 
-        runner
-            .translate_segments(
-                &provider,
-                &TranslationOptions::new(LanguageCode::Japanese, LanguageCode::SimplifiedChinese),
-                &mut segments,
-            )
-            .await?;
+        translate_transcript(
+            &provider,
+            &TranslationOptions::new(LanguageCode::Japanese, LanguageCode::SimplifiedChinese),
+            &mut segments,
+        )
+        .await?;
 
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);

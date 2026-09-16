@@ -33,4 +33,32 @@ cargo run -- evaluate-asr \
 
 翻译比较必须使用同一份已校对 source cues，避免把 ASR 差异算作翻译差异。逐组记录遗漏、专名／占位符、指代、跨 cue 连贯、自然度和人工修改量。旧字幕和旧烧录输出标记为 `previous_output`；未经人工复核不提升为 gold。
 
+`evaluate-translation` 使用与桌面端相同的 `TranslationPlanner`、stable cue ID 和 provider 合同运行冻结的 source cues。命令只在所有 semantic groups 均通过结构校验后写出结果，后组失败不会留下可误认为完整运行的部分译文。以下示例使用本机 loopback OpenAI-compatible endpoint；API key 通过参数或 `ATOGAKI_TRANSLATION_EVAL_API_KEY` 提供：
+
+```sh
+cargo run -- evaluate-translation \
+  --input local-artifacts/evaluation/source/segments.json \
+  --output local-artifacts/evaluation/runs/provider-a.json \
+  --base-url http://127.0.0.1:18080/v1 \
+  --api-key "$ATOGAKI_TRANSLATION_EVAL_API_KEY" \
+  --model model-name \
+  --provider-name "Provider A" \
+  --protected-term example-name
+```
+
+本地 Hy-MT2 评估固定使用官方采样参数、每组 2,048 output token 上限和严格 JSON schema。输出保存 grouping strategy、provider/model、token usage、总耗时和完整 cues；它是本地运行产物，不提交 Git。
+
+多个 provider 使用相同 source timeline 完成后，用独立 answer key 生成匿名材料：
+
+```sh
+scripts/prepare-translation-blind-review.py \
+  --candidate previous-output=local-artifacts/evaluation/runs/previous.json \
+  --candidate local-small=local-artifacts/evaluation/runs/local-small.json \
+  --candidate local-large=local-artifacts/evaluation/runs/local-large.json \
+  --output local-artifacts/evaluation/reviews/review.json \
+  --answer-key local-artifacts/evaluation/reviews/answer-key.json
+```
+
+脚本会先核对 cue ID、时间和原文完全一致，再按 cue 以固定 seed 打乱候选。review 文件预留遗漏／增译、专名、指代、跨 cue 连贯、自然度和修改量字段；完成评分前不要打开 answer key。
+
 manifest 中保存媒体 SHA-256、范围、角色、参考状态、历史任务目录、模型和参数快照。路径只出现在本机 manifest；提交前使用示例文件检查字段，不复制真实值。
