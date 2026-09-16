@@ -35,6 +35,7 @@ _最后更新：2026-09-16_
 - [ ] P3：由开发流程自动配置 llama.cpp／Hy-MT2 并验证质量与资源；再实现应用管理的模型／runtime 生命周期。
   - [x] 固定 llama.cpp `v0.4.1` 与官方 Hy-MT2 1.8B／7B `Q4_K_M` revision、文件大小和 SHA-256；提供一条命令完成源码／模型校验、runtime 构建、loopback 启动、合同检查和进程回收。
   - [x] 在 Apple M4 24 GB 上跑通 1.8B Metal 链路：stable cue ID／JSON／术语占位符合同通过，约 60 output tokens/s，短请求后 RSS 约 1.67 GiB；详见 [Hy-MT2 验证记录](hy-mt2-validation.md)。
+  - [x] 同机跑通 7B Metal 合同：约 21 output tokens/s，短请求后 RSS 约 5.44 GiB；两档均保持候选，尚未作质量推荐。
   - [ ] 用固定真实 source cues 对比 1.8B、7B 与现有云端基线，记录首次加载、完整任务峰值内存、ASR 并发竞争和人工盲评。
   - [ ] 将可通过质量门禁的档位接入应用管理的 `llama-server` sidecar、模型下载／取消／续传／校验／卸载和 provider 设置；补齐 Windows runtime 构建与实测。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。

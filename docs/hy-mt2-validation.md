@@ -37,4 +37,14 @@
 
 合同输出中的中文可以读懂，但单条合成测试不足以评价字幕自然度或与 DeepL／DeepSeek 的相对质量。下一步仍需使用固定 source cues 跑真实节目样本并盲评。
 
+## 7B macOS 首轮结果
+
+同一机器与 runtime 随后完成 7B 合同验证：
+
+- 两个 cue、JSON 与术语占位符合同均通过；本次合成输入的译文为“加入 `[[ATOGAKI_TERM_0]]` 之后，／每一天都特别开心。”
+- 123 prompt tokens 为 165.41 tokens/s，44 output tokens 为 21.05 tokens/s，请求总耗时 2.79 s；约为本次 1.8B output throughput 的 35%。
+- runtime 日志中的模型加载时间约 2.85 s；一次短翻译后的 RSS 约 5.44 GiB。
+
+两档在当前 24 GB Apple Silicon 机器上都能运行，1.8B 的资源和速度优势明显。7B 是否带来足够的真实字幕质量提升仍未验证，因此两者继续保持候选状态。
+
 官方资料：[Hy-MT2 模型卡](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF)、[llama.cpp server API](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)、[STQ PR #22836](https://github.com/ggml-org/llama.cpp/pull/22836)。

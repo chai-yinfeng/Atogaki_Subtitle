@@ -76,7 +76,7 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
   tar -xzf "$ARCHIVE" -C "$EXPERIMENT_ROOT"
 fi
 
-cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" \
+GIT_CEILING_DIRECTORIES="$REPO_ROOT" cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=OFF \
   -DGGML_NATIVE=OFF \
