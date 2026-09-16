@@ -297,12 +297,15 @@ type DesktopSettings = {
   whisperModelReady: boolean;
   vadModelPath: string | null;
   vadModelReady: boolean;
-  translationProviderId: "none" | "deepl" | "deepseek" | "openai-compatible";
+  hyMt2ModelPath: string | null;
+  hyMt2ModelReady: boolean;
+  localTranslationRuntimeReady: boolean;
+  translationProviderId: "none" | "deepl" | "deepseek" | "openai-compatible" | "hy-mt2-local";
   translationModel: string | null;
   translationBaseUrl: string | null;
   translationStyleInstruction: string;
   translationApiKeyConfigured: boolean;
-  translationApiKeySource: "system" | "environment" | "saved" | "deferred" | null;
+  translationApiKeySource: "system" | "environment" | "saved" | "deferred" | "local" | null;
   credentialStore: string;
   credentialError: string | null;
   modelsDirectory: string;
@@ -321,7 +324,7 @@ type TranslationCredentialCheck = {
 
 type ModelCatalogItem = {
   id: string;
-  kind: "whisper" | "vad";
+  kind: "whisper" | "vad" | "hy-mt2";
   name: string;
   fileName: string;
   sizeLabel: string;
@@ -331,7 +334,7 @@ type ModelCatalogItem = {
 
 type ModelDownloadState = {
   modelId: string;
-  status: "queued" | "downloading" | "done" | "failed";
+  status: "queued" | "downloading" | "cancelling" | "cancelled" | "done" | "failed";
   downloadedBytes: number;
   totalBytes: number | null;
   path: string | null;
@@ -1002,7 +1005,7 @@ app.innerHTML = `
           <div><p class="eyebrow">FIRST RUN & SETTINGS</p><h2>启动配置</h2></div>
           <button id="close-settings" type="button" class="secondary">稍后再说</button>
         </div>
-        <p class="dialog-help">媒体和模型保留在本机；只有启用翻译 provider 后，原文字幕才会发送到对应云端。</p>
+        <p class="dialog-help">媒体和模型默认保留在本机；选择云端翻译 provider 时，只有原文字幕和上下文会发送到对应服务。</p>
         <section class="settings-section">
           <div class="settings-section-heading"><div><strong>1. 本地识别模型</strong><span id="models-directory"></span></div><span id="model-readiness"></span></div>
           <div class="settings-path-row">
@@ -1037,9 +1040,10 @@ app.innerHTML = `
           <p id="model-download-message" class="settings-message" role="status"></p>
         </section>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>3. 云端翻译（可选）</strong><span>不配置也可以完成本地转写、编辑和原文字幕导出。</span></div><span id="credential-store-label"></span></div>
+          <div class="settings-section-heading"><div><strong>3. 翻译 provider（可选）</strong><span>Hy-MT2 完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
           <label>翻译 provider
             <select id="settings-provider">
+              <option value="hy-mt2-local">Hy-MT2（本地实验）</option>
               <option value="deepl">DeepL（传统翻译 API）</option>
               <option value="deepseek">DeepSeek（LLM API）</option>
               <option value="openai-compatible">OpenAI-compatible（高级）</option>
@@ -1514,14 +1518,15 @@ function formatBytes(bytes: number): string {
 
 function syncProviderSettings(): void {
   const provider = settingsProvider?.value ?? "none";
-  const enabled = provider !== "none";
-  const llmEnabled = provider === "deepseek" || provider === "openai-compatible";
+  const cloudEnabled = provider !== "none" && provider !== "hy-mt2-local";
+  const llmEnabled = provider === "deepseek" || provider === "openai-compatible" || provider === "hy-mt2-local";
   const customEndpoint = provider === "openai-compatible";
-  document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !enabled);
-  settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !enabled);
-  checkApiKeyButton?.closest("div")?.classList.toggle("hidden", !enabled);
+  document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !cloudEnabled);
+  settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !cloudEnabled);
+  checkApiKeyButton?.closest("div")?.classList.toggle("hidden", !cloudEnabled);
   document.querySelector<HTMLElement>("#llm-provider-fields")?.classList.toggle("hidden", !llmEnabled);
   document.querySelector<HTMLElement>("#provider-base-url-field")?.classList.toggle("hidden", !customEndpoint);
+  if (settingsProviderModel) settingsProviderModel.disabled = provider === "hy-mt2-local";
   const providerLabel = provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
   const apiKeyLabel = document.querySelector<HTMLSpanElement>("#api-key-label");
   const clearApiKeyLabel = document.querySelector<HTMLSpanElement>("#clear-api-key-label");
@@ -1530,7 +1535,7 @@ function syncProviderSettings(): void {
 }
 
 async function checkSelectedApiKey(): Promise<void> {
-  if (!settingsProvider || !checkApiKeyButton || !apiKeyStatus || settingsProvider.value === "none") return;
+  if (!settingsProvider || !checkApiKeyButton || !apiKeyStatus || settingsProvider.value === "none" || settingsProvider.value === "hy-mt2-local") return;
   checkApiKeyButton.disabled = true;
   apiKeyStatus.textContent = `正在检查 ${settingsProvider.value} 的系统凭据；${credentialCheckHint}…`;
   apiKeyStatus.classList.remove("warning");
@@ -1579,9 +1584,13 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   overwriteSettingsField(settingsClearApiKey, false);
   if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
   if (modelReadiness) {
-    modelReadiness.textContent = settings.whisperModelReady
+    const recognition = settings.whisperModelReady
       ? settings.vadModelReady ? "Whisper 与 VAD 已就绪" : "Whisper 已就绪 · VAD 可选"
       : "需要配置 Whisper 模型";
+    const localTranslation = settings.hyMt2ModelReady
+      ? settings.localTranslationRuntimeReady ? " · Hy-MT2 已就绪" : " · Hy-MT2 runtime 缺失"
+      : "";
+    modelReadiness.textContent = `${recognition}${localTranslation}`;
     modelReadiness.classList.toggle("warning", !settings.whisperModelReady);
   }
   if (credentialStoreLabel) credentialStoreLabel.textContent = settings.credentialStore;
@@ -1594,7 +1603,11 @@ function renderDesktopSettings(settings: DesktopSettings): void {
           ? `已保存至 ${settings.credentialStore}；启动时不读取，首次翻译时验证`
         : settings.translationApiKeySource === "deferred"
           ? `尚未在本 App 中保存 Key；启动时不会读取 ${settings.credentialStore}`
-        : "尚未配置；Key 不会写入 SQLite 或任务目录";
+        : settings.translationApiKeySource === "local"
+          ? settings.hyMt2ModelReady && settings.localTranslationRuntimeReady
+            ? "本地 runtime 与模型已就绪；翻译文本不会离开设备"
+            : "本地翻译尚未就绪；请确认当前 App 包含 runtime 并下载 Hy-MT2 模型"
+          : "尚未配置；Key 不会写入 SQLite 或任务目录";
     apiKeyStatus.textContent = settings.credentialError
       ? `${source}。系统凭据库提示：${settings.credentialError}`
       : source;
@@ -1610,7 +1623,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
 function renderModelCatalog(): void {
   if (!modelCatalogHost) return;
   const activeDownload = modelDownloads.find((download) =>
-    download.status === "queued" || download.status === "downloading"
+    download.status === "queued" || download.status === "downloading" || download.status === "cancelling"
   );
   modelCatalogHost.innerHTML = availableModels.map((model) => {
     const download = modelDownloads.find((item) => item.modelId === model.id);
@@ -1622,17 +1635,35 @@ function renderModelCatalog(): void {
       ? `已下载并设为默认${source}`
       : download?.status === "failed"
         ? `失败：${download.error ?? "未知错误"}${source}`
-        : download?.status === "downloading"
-          ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}${source}`
-          : download?.status === "queued" ? `等待下载${source}` : "";
+        : download?.status === "cancelled"
+          ? `已取消；保留临时文件供续传${source}`
+          : download?.status === "cancelling"
+            ? `正在取消…${source}`
+            : download?.status === "downloading"
+              ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}${source}`
+              : download?.status === "queued" ? `等待下载${source}` : "";
+    const action = download?.status === "done" ? "uninstall"
+      : download && ["queued", "downloading", "cancelling"].includes(download.status) ? "cancel"
+        : "download";
+    const buttonLabel = action === "uninstall" ? "卸载"
+      : action === "cancel" ? download?.status === "cancelling" ? "正在取消" : "取消"
+        : download?.status === "failed" || download?.status === "cancelled" ? "继续下载" : "下载";
+    const disabled = action === "cancel"
+      ? download?.status === "cancelling"
+      : Boolean(activeDownload);
     return `<article class="model-card">
       <div><strong>${escapeHtml(model.name)}</strong><span>${escapeHtml(model.sizeLabel)} · ${escapeHtml(model.recommendedFor)}</span></div>
       ${progress === null ? "" : `<progress max="1" value="${progress}"></progress>`}
-      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span><button type="button" class="secondary" data-download-model="${escapeHtml(model.id)}" ${activeDownload ? "disabled" : ""}>${download?.status === "failed" ? "重试下载" : "下载"}</button></div>
+      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span><button type="button" class="secondary" data-model-action="${action}" data-model-id="${escapeHtml(model.id)}" ${disabled ? "disabled" : ""}>${buttonLabel}</button></div>
     </article>`;
   }).join("");
-  modelCatalogHost.querySelectorAll<HTMLButtonElement>("[data-download-model]").forEach((button) => {
-    button.addEventListener("click", () => void startModelDownload(button.dataset.downloadModel ?? ""));
+  modelCatalogHost.querySelectorAll<HTMLButtonElement>("[data-model-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const modelId = button.dataset.modelId ?? "";
+      if (button.dataset.modelAction === "cancel") void cancelModelDownload(modelId);
+      else if (button.dataset.modelAction === "uninstall") void uninstallModel(modelId);
+      else void startModelDownload(modelId);
+    });
   });
 }
 
@@ -1913,7 +1944,7 @@ async function refreshModelDownloads(): Promise<void> {
     modelDownloads = await invoke<ModelDownloadState[]>("model_download_states");
     renderModelCatalog();
     const active = modelDownloads.some((download) =>
-      download.status === "queued" || download.status === "downloading"
+      download.status === "queued" || download.status === "downloading" || download.status === "cancelling"
     );
     if (!active) {
       if (modelDownloadPoll !== null) window.clearInterval(modelDownloadPoll);
@@ -1929,6 +1960,30 @@ async function refreshModelDownloads(): Promise<void> {
     }
   } catch (error) {
     if (modelDownloadMessage) modelDownloadMessage.textContent = `无法读取下载状态：${String(error)}`;
+  }
+}
+
+async function cancelModelDownload(modelId: string): Promise<void> {
+  if (!modelId) return;
+  try {
+    const state = await invoke<ModelDownloadState>("cancel_model_download", { modelId });
+    modelDownloads = modelDownloads.filter((download) => download.modelId !== modelId);
+    modelDownloads.push(state);
+    renderModelCatalog();
+  } catch (error) {
+    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法取消下载：${String(error)}`;
+  }
+}
+
+async function uninstallModel(modelId: string): Promise<void> {
+  if (!modelId) return;
+  try {
+    await invoke<void>("uninstall_model", { modelId });
+    modelDownloads = modelDownloads.filter((download) => download.modelId !== modelId);
+    await loadDesktopSettings(false);
+    if (modelDownloadMessage) modelDownloadMessage.textContent = "模型及其未完成下载已删除。";
+  } catch (error) {
+    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法卸载模型：${String(error)}`;
   }
 }
 

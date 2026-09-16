@@ -1,7 +1,10 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -68,6 +71,7 @@ pub struct ModelDownloadService {
     models_directory: PathBuf,
     settings: DesktopSettingsService,
     states: Arc<Mutex<HashMap<String, ModelDownloadState>>>,
+    cancellations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 impl ModelDownloadService {
@@ -82,6 +86,7 @@ impl ModelDownloadService {
             models_directory,
             settings,
             states: Arc::new(Mutex::new(HashMap::new())),
+            cancellations: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -90,7 +95,28 @@ impl ModelDownloadService {
     }
 
     pub async fn states(&self) -> Vec<ModelDownloadState> {
-        self.states.lock().await.values().cloned().collect()
+        let mut states = self.states.lock().await.clone();
+        for model in model_catalog() {
+            let path = self.models_directory.join(model.file_name);
+            if path.is_file() {
+                states
+                    .entry(model.id.to_string())
+                    .or_insert_with(|| ModelDownloadState {
+                        model_id: model.id.to_string(),
+                        status: "done".to_string(),
+                        downloaded_bytes: std::fs::metadata(&path)
+                            .map(|metadata| metadata.len())
+                            .unwrap_or_default(),
+                        total_bytes: None,
+                        path: Some(path.display().to_string()),
+                        error: None,
+                        source: Some("本地已安装".to_string()),
+                    });
+            }
+        }
+        let mut states = states.into_values().collect::<Vec<_>>();
+        states.sort_by(|left, right| left.model_id.cmp(&right.model_id));
+        states
     }
 
     pub async fn start(&self, model_id: &str) -> Result<ModelDownloadState> {
@@ -102,7 +128,12 @@ impl ModelDownloadService {
         let mut states = self.states.lock().await;
         if states
             .values()
-            .any(|state| matches!(state.status.as_str(), "queued" | "downloading"))
+            .any(|state| {
+                matches!(
+                    state.status.as_str(),
+                    "queued" | "downloading" | "cancelling"
+                )
+            })
         {
             bail!("another model download is already running");
         }
@@ -121,19 +152,74 @@ impl ModelDownloadService {
         };
         states.insert(model.id.to_string(), state.clone());
         drop(states);
+        self.cancellations
+            .lock()
+            .await
+            .insert(model.id.to_string(), Arc::new(AtomicBool::new(false)));
 
         let service = self.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(error) = service.download(model.clone()).await {
+                let cancelled = service.is_cancelled(model.id).await;
                 service
                     .update_state(model.id, |state| {
-                        state.status = "failed".to_string();
-                        state.error = Some(format!("{error:#}"));
+                        state.status = if cancelled { "cancelled" } else { "failed" }.to_string();
+                        state.error = (!cancelled).then(|| format!("{error:#}"));
                     })
                     .await;
             }
+            service.cancellations.lock().await.remove(model.id);
         });
         Ok(state)
+    }
+
+    pub async fn cancel(&self, model_id: &str) -> Result<ModelDownloadState> {
+        let cancellation = self
+            .cancellations
+            .lock()
+            .await
+            .get(model_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("model download is not active: {model_id}"))?;
+        cancellation.store(true, Ordering::SeqCst);
+        self.update_state(model_id, |state| {
+            state.status = "cancelling".to_string();
+            state.error = None;
+        })
+        .await;
+        self.states
+            .lock()
+            .await
+            .get(model_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("model download state disappeared: {model_id}"))
+    }
+
+    pub async fn uninstall(&self, model_id: &str) -> Result<()> {
+        if self.cancellations.lock().await.contains_key(model_id) {
+            bail!("cancel the active download before uninstalling {model_id}");
+        }
+        let model = model_catalog()
+            .iter()
+            .find(|model| model.id == model_id)
+            .ok_or_else(|| anyhow!("unknown model: {model_id}"))?;
+        let output_path = self.models_directory.join(model.file_name);
+        let partial_path = self.partial_path(model);
+        if output_path.is_file() {
+            fs::remove_file(&output_path)
+                .await
+                .with_context(|| format!("failed to uninstall {}", output_path.display()))?;
+        }
+        if partial_path.is_file() {
+            fs::remove_file(&partial_path)
+                .await
+                .with_context(|| format!("failed to remove {}", partial_path.display()))?;
+        }
+        self.settings
+            .clear_downloaded_model(model.kind, &output_path)
+            .await?;
+        self.states.lock().await.remove(model_id);
+        Ok(())
     }
 
     async fn download(&self, model: ModelCatalogItem) -> Result<()> {
@@ -165,6 +251,7 @@ impl ModelDownloadService {
         .await;
         let mut failures = Vec::new();
         for source in sources {
+            self.ensure_not_cancelled(model.id).await?;
             self.update_state(model.id, |state| {
                 state.source = Some(source.label.to_string());
                 state.total_bytes = None;
@@ -264,6 +351,7 @@ impl ModelDownloadService {
             update_sha256_from_file(&part_path, &mut hasher).await?;
         }
         while let Some(chunk) = stream.next().await {
+            self.ensure_not_cancelled(model.id).await?;
             let chunk = chunk.context("model download was interrupted")?;
             output
                 .write_all(&chunk)
@@ -292,6 +380,7 @@ impl ModelDownloadService {
             })?;
             bail!("SHA-256 校验失败，期望 {}，实际 {actual}", model.sha256);
         }
+        self.ensure_not_cancelled(model.id).await?;
         self.install_verified_download(model, &part_path, output_path).await
     }
 
@@ -326,6 +415,21 @@ impl ModelDownloadService {
     fn partial_path(&self, model: &ModelCatalogItem) -> PathBuf {
         self.models_directory
             .join(format!("{}.part", model.file_name))
+    }
+
+    async fn is_cancelled(&self, model_id: &str) -> bool {
+        self.cancellations
+            .lock()
+            .await
+            .get(model_id)
+            .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
+    }
+
+    async fn ensure_not_cancelled(&self, model_id: &str) -> Result<()> {
+        if self.is_cancelled(model_id).await {
+            bail!("model download was cancelled");
+        }
+        Ok(())
     }
 }
 
@@ -538,14 +642,50 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
             download_path: "ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
             sha256: "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
         },
+        ModelCatalogItem {
+            id: "hy-mt2-1.8b-q4-k-m",
+            kind: "hy-mt2",
+            name: "Hy-MT2 1.8B Q4_K_M（本地翻译候选）",
+            file_name: "Hy-MT2-1.8B-Q4_K_M.gguf",
+            size_label: "约 1.06 GiB",
+            recommended_for: "速度与内存占用较低；真实盲评完成前不标记为推荐。",
+            source_url: "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF",
+            download_path: "tencent/Hy-MT2-1.8B-GGUF/resolve/a0c709d9fac510f2c807aa3af52872340dc37a4a/Hy-MT2-1.8B-Q4_K_M.gguf",
+            sha256: "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
+        },
+        ModelCatalogItem {
+            id: "hy-mt2-7b-q4-k-m",
+            kind: "hy-mt2",
+            name: "Hy-MT2 7B Q4_K_M（本地翻译候选）",
+            file_name: "Hy-MT2-7B-Q4_K_M.gguf",
+            size_label: "约 4.31 GiB",
+            recommended_for: "质量候选，当前 Apple Silicon 实测约比 1.8B 慢 5.3 倍。",
+            source_url: "https://huggingface.co/tencent/Hy-MT2-7B-GGUF",
+            download_path: "tencent/Hy-MT2-7B-GGUF/resolve/ab8472660ac61fac25f1af43fac2599d52a8a775/Hy-MT2-7B-Q4_K_M.gguf",
+            sha256: "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b",
+        },
     ]
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        fs,
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use atogaki_subtitle::{
+        application::{MutableTranslationProvider, UnconfiguredTranslationProvider},
+        infrastructure::local_db::LocalDatabase,
+    };
     use reqwest::header::{CONTENT_RANGE, HeaderMap, HeaderValue};
 
-    use super::{content_range_total, download_sources, model_catalog, validate_content_range};
+    use super::{
+        ModelDownloadService, content_range_total, download_sources, model_catalog,
+        validate_content_range,
+    };
+    use crate::desktop_settings::DesktopSettingsService;
 
     #[test]
     fn catalog_uses_unique_ids_and_https_downloads() {
@@ -589,6 +729,28 @@ mod tests {
     }
 
     #[test]
+    fn hy_mt2_catalog_uses_the_validated_revisions_and_hashes() {
+        let models = model_catalog()
+            .iter()
+            .filter(|model| model.kind == "hy-mt2")
+            .collect::<Vec<_>>();
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "hy-mt2-1.8b-q4-k-m");
+        assert!(models[0].download_path.contains("a0c709d9fac510f2c807aa3af52872340dc37a4a"));
+        assert_eq!(
+            models[0].sha256,
+            "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699"
+        );
+        assert_eq!(models[1].id, "hy-mt2-7b-q4-k-m");
+        assert!(models[1].download_path.contains("ab8472660ac61fac25f1af43fac2599d52a8a775"));
+        assert_eq!(
+            models[1].sha256,
+            "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b"
+        );
+    }
+
+    #[test]
     fn custom_mirror_precedes_the_canonical_hugging_face_source() {
         let model = &model_catalog()[0];
         let sources = download_sources(model, Some("https://mirror.example/hf"));
@@ -606,5 +768,59 @@ mod tests {
         validate_content_range(&headers, 1024).unwrap();
         assert_eq!(content_range_total(&headers), Some(4096));
         assert!(validate_content_range(&headers, 512).is_err());
+    }
+
+    #[tokio::test]
+    async fn uninstall_removes_a_managed_model_and_its_active_setting() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-model-uninstall-test-{nonce}"));
+        let models = root.join("models");
+        fs::create_dir_all(&models).unwrap();
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let settings = DesktopSettingsService::new(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            models.clone(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let model_path = models.join("Hy-MT2-1.8B-Q4_K_M.gguf");
+        fs::write(&model_path, b"verified model placeholder").unwrap();
+        settings
+            .set_downloaded_model("hy-mt2", &model_path)
+            .await
+            .unwrap();
+        let service = ModelDownloadService::new(models, settings).unwrap();
+
+        assert!(
+            service
+                .states()
+                .await
+                .iter()
+                .any(|state| state.model_id == "hy-mt2-1.8b-q4-k-m")
+        );
+        service
+            .uninstall("hy-mt2-1.8b-q4-k-m")
+            .await
+            .unwrap();
+
+        assert!(!model_path.exists());
+        assert!(
+            database
+                .get_setting("translation.hy_mt2_model_path")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(service.states().await.is_empty());
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -3,7 +3,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
@@ -59,7 +59,7 @@ impl LocalLlamaConfig {
 
 struct LocalLlamaRuntime {
     config: LocalLlamaConfig,
-    address: SocketAddr,
+    address: OnceLock<SocketAddr>,
     api_key: String,
     client: reqwest::Client,
     child: Mutex<Option<Child>>,
@@ -71,16 +71,16 @@ impl fmt::Debug for LocalLlamaRuntime {
             .debug_struct("LocalLlamaRuntime")
             .field("runtime_path", &self.config.runtime_path)
             .field("model_path", &self.config.model_path)
-            .field("address", &self.address)
+            .field("address", &self.address.get())
             .finish_non_exhaustive()
     }
 }
 
 impl LocalLlamaRuntime {
-    fn new(config: LocalLlamaConfig, address: SocketAddr) -> Result<Self> {
+    fn new(config: LocalLlamaConfig) -> Result<Self> {
         Ok(Self {
             config,
-            address,
+            address: OnceLock::new(),
             api_key: Uuid::new_v4().to_string(),
             client: reqwest::Client::builder()
                 .no_proxy()
@@ -92,8 +92,13 @@ impl LocalLlamaRuntime {
         })
     }
 
-    fn base_url(&self) -> String {
-        format!("http://{}/v1", self.address)
+    fn base_url(&self) -> Result<String> {
+        Ok(format!(
+            "http://{}/v1",
+            self.address
+                .get()
+                .ok_or_else(|| anyhow!("local llama runtime has not reserved an address"))?
+        ))
     }
 
     async fn ensure_started(&self) -> Result<()> {
@@ -101,6 +106,13 @@ impl LocalLlamaRuntime {
         validate_runtime_file(&self.config.model_path, "Hy-MT2 model")?;
 
         let mut child_guard = self.child.lock().await;
+        let address = if let Some(address) = self.address.get() {
+            *address
+        } else {
+            let address = reserve_loopback_address()?;
+            let _ = self.address.set(address);
+            address
+        };
         if let Some(child) = child_guard.as_mut() {
             match child.try_wait().context("failed to inspect llama-server")? {
                 None if self.health_ready().await => return Ok(()),
@@ -118,9 +130,9 @@ impl LocalLlamaRuntime {
         let mut command = sidecar_command(&self.config.runtime_path);
         command
             .arg("--host")
-            .arg(self.address.ip().to_string())
+            .arg(address.ip().to_string())
             .arg("--port")
-            .arg(self.address.port().to_string())
+            .arg(address.port().to_string())
             .arg("--model")
             .arg(&self.config.model_path)
             .arg("--ctx-size")
@@ -168,7 +180,12 @@ impl LocalLlamaRuntime {
 
     async fn health_ready(&self) -> bool {
         self.client
-            .get(format!("http://{}/health", self.address))
+            .get(format!(
+                "http://{}/health",
+                self.address
+                    .get()
+                    .expect("health check requires a reserved address")
+            ))
             .bearer_auth(&self.api_key)
             .send()
             .await
@@ -190,24 +207,36 @@ impl LocalLlamaRuntime {
 #[derive(Clone)]
 pub struct LocalLlamaTranslationProvider {
     runtime: Arc<LocalLlamaRuntime>,
-    provider: OpenAiCompatibleTranslationProvider,
 }
 
 impl LocalLlamaTranslationProvider {
     pub fn new(config: LocalLlamaConfig) -> Result<Self> {
-        Self::with_address(config, reserve_loopback_address()?)
+        Ok(Self {
+            runtime: Arc::new(LocalLlamaRuntime::new(config)?),
+        })
     }
 
+    #[cfg(test)]
     fn with_address(config: LocalLlamaConfig, address: SocketAddr) -> Result<Self> {
-        let runtime = Arc::new(LocalLlamaRuntime::new(config, address)?);
-        let provider = OpenAiCompatibleTranslationProvider::with_network_config(
+        let runtime = LocalLlamaRuntime::new(config)?;
+        runtime
+            .address
+            .set(address)
+            .map_err(|_| anyhow!("local llama address was already assigned"))?;
+        Ok(Self {
+            runtime: Arc::new(runtime),
+        })
+    }
+
+    fn request_provider(&self) -> Result<OpenAiCompatibleTranslationProvider> {
+        OpenAiCompatibleTranslationProvider::with_network_config(
             OpenAiCompatibleConfig {
                 provider_id: "hy-mt2-local".to_string(),
-                provider_name: runtime.config.provider_name.clone(),
-                api_key: Some(runtime.api_key.clone()),
-                base_url: runtime.base_url(),
-                model: runtime.config.model_id.clone(),
-                style_instruction: runtime.config.style_instruction.clone(),
+                provider_name: self.runtime.config.provider_name.clone(),
+                api_key: Some(self.runtime.api_key.clone()),
+                base_url: self.runtime.base_url()?,
+                model: self.runtime.config.model_id.clone(),
+                style_instruction: self.runtime.config.style_instruction.clone(),
                 disable_deepseek_thinking: false,
                 generation: OpenAiGenerationConfig {
                     temperature: Some(0.7),
@@ -219,8 +248,7 @@ impl LocalLlamaTranslationProvider {
                 },
             },
             &NetworkClientConfig::new("direct", None)?,
-        )?;
-        Ok(Self { runtime, provider })
+        )
     }
 
     pub async fn shutdown(&self) -> Result<()> {
@@ -260,7 +288,7 @@ impl TranslationProvider for LocalLlamaTranslationProvider {
     fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
         Box::pin(async move {
             self.runtime.ensure_started().await?;
-            self.provider.translate(request).await
+            self.request_provider()?.translate(request).await
         })
     }
 }

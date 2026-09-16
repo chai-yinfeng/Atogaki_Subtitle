@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -12,7 +12,9 @@ use atogaki_subtitle::{
         TranslationProviderStatus, TranslationRequest, UnconfiguredTranslationProvider,
     },
     infrastructure::{
+        config::desktop_llama_server_path,
         deepl::DeepLTranslationProvider,
+        local_llama::{LocalLlamaConfig, LocalLlamaTranslationProvider},
         local_db::LocalDatabase,
         network::{NetworkClientConfig, normalize_https_endpoint},
         openai_compatible::{
@@ -27,6 +29,7 @@ use crate::credential_store::{CredentialStore, SystemCredentialStore};
 const ONBOARDING_COMPLETED: &str = "desktop.onboarding_completed";
 const WHISPER_MODEL_PATH: &str = "recognition.whisper_model_path";
 const VAD_MODEL_PATH: &str = "recognition.vad_model_path";
+const HY_MT2_MODEL_PATH: &str = "translation.hy_mt2_model_path";
 const TRANSLATION_PROVIDER: &str = "translation.provider";
 const DEEPL_KEY_SAVED: &str = "translation.deepl_key_saved";
 const DEEPSEEK_KEY_SAVED: &str = "translation.deepseek_key_saved";
@@ -44,6 +47,7 @@ const MODEL_MIRROR_URL: &str = "network.model_mirror_url";
 const DEEPL_PROVIDER_ID: &str = "deepl";
 const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 const OPENAI_COMPATIBLE_PROVIDER_ID: &str = "openai-compatible";
+const HY_MT2_LOCAL_PROVIDER_ID: &str = "hy-mt2-local";
 const DEFAULT_DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
 const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -58,6 +62,9 @@ pub struct DesktopSettings {
     pub whisper_model_ready: bool,
     pub vad_model_path: Option<String>,
     pub vad_model_ready: bool,
+    pub hy_mt2_model_path: Option<String>,
+    pub hy_mt2_model_ready: bool,
+    pub local_translation_runtime_ready: bool,
     pub translation_provider_id: String,
     pub translation_model: Option<String>,
     pub translation_base_url: Option<String>,
@@ -135,6 +142,7 @@ pub struct DesktopSettingsService {
     environment_deepseek_key: Option<String>,
     environment_whisper_model: Option<PathBuf>,
     environment_vad_model: Option<PathBuf>,
+    llama_server_path: PathBuf,
     credential_cache: Arc<Mutex<HashMap<String, CredentialCache>>>,
 }
 
@@ -320,6 +328,7 @@ impl DesktopSettingsService {
             environment_deepseek_key: normalized_secret(environment_deepseek_key),
             environment_whisper_model: existing_file(environment_whisper_model),
             environment_vad_model: existing_file(environment_vad_model),
+            llama_server_path: desktop_llama_server_path(),
             credential_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -340,6 +349,7 @@ impl DesktopSettingsService {
             environment_deepseek_key: None,
             environment_whisper_model: None,
             environment_vad_model: None,
+            llama_server_path: desktop_llama_server_path(),
             credential_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -357,7 +367,8 @@ impl DesktopSettingsService {
             settings.translation_model.as_deref(),
             settings.translation_base_url.as_deref(),
             &settings.translation_style_instruction,
-        )?;
+        )
+        .await?;
         Ok(settings)
     }
 
@@ -382,6 +393,12 @@ impl DesktopSettingsService {
             .map(PathBuf::from)
             .filter(|path| path.is_file())
             .or_else(|| self.environment_vad_model.clone());
+        let hy_mt2_model = self
+            .database
+            .get_setting(HY_MT2_MODEL_PATH)
+            .await?
+            .map(PathBuf::from)
+            .filter(|path| path.is_file());
         let translation_provider_id = self
             .database
             .get_setting(TRANSLATION_PROVIDER)
@@ -393,6 +410,7 @@ impl DesktopSettingsService {
                         | DEEPL_PROVIDER_ID
                         | DEEPSEEK_PROVIDER_ID
                         | OPENAI_COMPATIBLE_PROVIDER_ID
+                        | HY_MT2_LOCAL_PROVIDER_ID
                 )
             })
             .unwrap_or_else(|| "none".to_string());
@@ -404,6 +422,11 @@ impl DesktopSettingsService {
                     .unwrap_or_else(|| DEFAULT_DEEPSEEK_MODEL.to_string()),
             ),
             OPENAI_COMPATIBLE_PROVIDER_ID => self.database.get_setting(OPENAI_MODEL).await?,
+            HY_MT2_LOCAL_PROVIDER_ID => hy_mt2_model
+                .as_ref()
+                .and_then(|path| path.file_stem())
+                .and_then(|name| name.to_str())
+                .map(str::to_string),
             _ => None,
         };
         let translation_base_url = match translation_provider_id.as_str() {
@@ -414,6 +437,7 @@ impl DesktopSettingsService {
                     .await?
                     .unwrap_or_else(|| DEFAULT_OPENAI_BASE_URL.to_string()),
             ),
+            HY_MT2_LOCAL_PROVIDER_ID => None,
             _ => None,
         };
         let translation_style_instruction = self
@@ -433,7 +457,10 @@ impl DesktopSettingsService {
             DEEPSEEK_PROVIDER_ID => self.environment_deepseek_key.as_ref(),
             _ => None,
         };
-        let (translation_api_key_configured, translation_api_key_source) = if stored_key.is_some() {
+        let (translation_api_key_configured, translation_api_key_source) =
+            if translation_provider_id == HY_MT2_LOCAL_PROVIDER_ID {
+                (true, Some("local".to_string()))
+            } else if stored_key.is_some() {
             (true, Some("system".to_string()))
         } else if environment_key.is_some() {
             (true, Some("environment".to_string()))
@@ -441,9 +468,9 @@ impl DesktopSettingsService {
             (true, Some("saved".to_string()))
         } else if translation_provider_id != "none" && !credential_loaded {
             (false, Some("deferred".to_string()))
-        } else {
-            (false, None)
-        };
+            } else {
+                (false, None)
+            };
         let whisper_model_ready = whisper_model.as_ref().is_some_and(|path| path.is_file());
         let vad_model_ready = vad_model.as_ref().is_some_and(|path| path.is_file());
         let download_network = self.download_network_settings().await?;
@@ -455,6 +482,9 @@ impl DesktopSettingsService {
             whisper_model_ready,
             vad_model_path: display_path(vad_model.as_ref()),
             vad_model_ready,
+            hy_mt2_model_path: display_path(hy_mt2_model.as_ref()),
+            hy_mt2_model_ready: hy_mt2_model.as_ref().is_some_and(|path| path.is_file()),
+            local_translation_runtime_ready: self.llama_server_path.is_file(),
             translation_provider_id,
             translation_model,
             translation_base_url,
@@ -560,7 +590,12 @@ impl DesktopSettingsService {
         self.persist_download_network_settings(&network, model_mirror_url.as_deref())
             .await?;
 
-        if request.clear_api_key && request.translation_provider_id != "none" {
+        if request.clear_api_key
+            && !matches!(
+                request.translation_provider_id.as_str(),
+                "none" | HY_MT2_LOCAL_PROVIDER_ID
+            )
+        {
             self.credentials.delete(&request.translation_provider_id)?;
             self.replace_cached_provider_key(&request.translation_provider_id, None, None);
             if let Some(key) = key_saved_setting(&request.translation_provider_id) {
@@ -568,8 +603,11 @@ impl DesktopSettingsService {
             }
         }
         if let Some(secret) = normalized_secret(request.api_key) {
-            if request.translation_provider_id == "none" {
-                bail!("cannot save an API key while translation is disabled");
+            if matches!(
+                request.translation_provider_id.as_str(),
+                "none" | HY_MT2_LOCAL_PROVIDER_ID
+            ) {
+                bail!("cannot save an API key for this translation provider");
             }
             self.credentials
                 .set(&request.translation_provider_id, &secret)?;
@@ -589,7 +627,8 @@ impl DesktopSettingsService {
             translation_model.as_deref(),
             translation_base_url.as_deref(),
             &translation_style_instruction,
-        )?;
+        )
+        .await?;
         self.load().await
     }
 
@@ -601,7 +640,7 @@ impl DesktopSettingsService {
         provider_id: &str,
     ) -> Result<TranslationCredentialCheck> {
         validate_provider_id(provider_id)?;
-        if provider_id == "none" {
+        if matches!(provider_id, "none" | HY_MT2_LOCAL_PROVIDER_ID) {
             bail!("select a translation provider before checking its API key");
         }
         let secret = match self.credentials.get(provider_id) {
@@ -810,14 +849,41 @@ impl DesktopSettingsService {
         let key = match kind {
             "whisper" => WHISPER_MODEL_PATH,
             "vad" => VAD_MODEL_PATH,
+            "hy-mt2" => HY_MT2_MODEL_PATH,
             _ => bail!("unsupported model kind: {kind}"),
         };
         self.database
             .set_setting(key, &path.display().to_string())
-            .await
+            .await?;
+        if kind == "hy-mt2" {
+            self.refresh_active_provider().await?;
+        }
+        Ok(())
     }
 
-    fn replace_provider(
+    pub async fn clear_downloaded_model(&self, kind: &str, path: &Path) -> Result<()> {
+        let key = match kind {
+            "whisper" => WHISPER_MODEL_PATH,
+            "vad" => VAD_MODEL_PATH,
+            "hy-mt2" => HY_MT2_MODEL_PATH,
+            _ => bail!("unsupported model kind: {kind}"),
+        };
+        if self
+            .database
+            .get_setting(key)
+            .await?
+            .as_deref()
+            .is_some_and(|saved| Path::new(saved) == path)
+        {
+            self.database.delete_setting(key).await?;
+        }
+        if kind == "hy-mt2" {
+            self.refresh_active_provider().await?;
+        }
+        Ok(())
+    }
+
+    async fn replace_provider(
         &self,
         provider_id: &str,
         network: &NetworkClientConfig,
@@ -861,10 +927,39 @@ impl DesktopSettingsService {
                     disable_deepseek_thinking: false,
                 })
             }
+            HY_MT2_LOCAL_PROVIDER_ID => {
+                let model_path = self
+                    .database
+                    .get_setting(HY_MT2_MODEL_PATH)
+                    .await?
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| self.models_directory.join("missing-hy-mt2-model.gguf"));
+                Arc::new(LocalLlamaTranslationProvider::new(LocalLlamaConfig::hy_mt2(
+                    self.llama_server_path.clone(),
+                    model_path,
+                    style_instruction.to_string(),
+                ))?)
+            }
             _ => return Err(anyhow!("unsupported translation provider: {provider_id}")),
         };
         self.provider.replace(provider);
         Ok(())
+    }
+
+    async fn refresh_active_provider(&self) -> Result<()> {
+        let settings = self.load().await?;
+        let network = NetworkClientConfig::new(
+            &settings.network_proxy_mode,
+            settings.network_proxy_url.clone(),
+        )?;
+        self.replace_provider(
+            &settings.translation_provider_id,
+            &network,
+            settings.translation_model.as_deref(),
+            settings.translation_base_url.as_deref(),
+            &settings.translation_style_instruction,
+        )
+        .await
     }
 
     async fn persist_download_network_settings(
@@ -952,7 +1047,11 @@ fn credential_cache_loaded(
 fn validate_provider_id(provider_id: &str) -> Result<()> {
     if matches!(
         provider_id,
-        "none" | DEEPL_PROVIDER_ID | DEEPSEEK_PROVIDER_ID | OPENAI_COMPATIBLE_PROVIDER_ID
+        "none"
+            | DEEPL_PROVIDER_ID
+            | DEEPSEEK_PROVIDER_ID
+            | OPENAI_COMPATIBLE_PROVIDER_ID
+            | HY_MT2_LOCAL_PROVIDER_ID
     ) {
         Ok(())
     } else {
@@ -974,6 +1073,7 @@ fn provider_display_name(provider_id: &str) -> &'static str {
         DEEPL_PROVIDER_ID => "DeepL",
         DEEPSEEK_PROVIDER_ID => "DeepSeek",
         OPENAI_COMPATIBLE_PROVIDER_ID => "OpenAI-compatible",
+        HY_MT2_LOCAL_PROVIDER_ID => "Hy-MT2（本地）",
         _ => "翻译服务",
     }
 }
@@ -1027,6 +1127,7 @@ fn validate_llm_settings(
             disable_deepseek_thinking: false,
             generation: Default::default(),
         }),
+        HY_MT2_LOCAL_PROVIDER_ID => None,
         _ => None,
     };
     if let Some(config) = config {
@@ -1229,6 +1330,64 @@ mod tests {
             Some("true")
         );
         assert!(database.get_setting("deepl").await.unwrap().is_none());
+
+        drop(service);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn local_translation_uses_the_managed_model_without_credentials() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("atogaki-local-translation-test-{nonce}"));
+        let models = root.join("models");
+        fs::create_dir_all(&models).unwrap();
+        let model = models.join("Hy-MT2-1.8B-Q4_K_M.gguf");
+        fs::write(&model, b"model placeholder").unwrap();
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let provider = MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider));
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            provider.clone(),
+            models,
+            credentials.clone(),
+        );
+        service.set_downloaded_model("hy-mt2", &model).await.unwrap();
+
+        let saved = service
+            .save(SaveDesktopSettingsRequest {
+                whisper_model_path: None,
+                vad_model_path: None,
+                translation_provider_id: "hy-mt2-local".to_string(),
+                translation_model: None,
+                translation_base_url: None,
+                translation_style_instruction: Some("自然字幕".to_string()),
+                api_key: None,
+                network_proxy_mode: "direct".to_string(),
+                network_proxy_url: None,
+                model_mirror_url: None,
+                clear_api_key: false,
+                onboarding_completed: false,
+            })
+            .await
+            .unwrap();
+
+        assert!(saved.hy_mt2_model_ready);
+        assert_eq!(saved.hy_mt2_model_path.as_deref(), Some(model.to_str().unwrap()));
+        assert_eq!(saved.translation_api_key_source.as_deref(), Some("local"));
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+        assert_eq!(provider.status().id, "hy-mt2-local");
+        assert_eq!(
+            provider.status().model.as_deref(),
+            Some("Hy-MT2-1.8B-Q4_K_M")
+        );
+        assert!(!provider.status().configured);
 
         drop(service);
         drop(database);

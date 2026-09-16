@@ -1601,6 +1601,30 @@ async fn model_download_states(
 }
 
 #[tauri::command]
+async fn cancel_model_download(
+    state: State<'_, DesktopState>,
+    model_id: String,
+) -> Result<ModelDownloadState, String> {
+    state
+        .model_download_service
+        .cancel(&model_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn uninstall_model(
+    state: State<'_, DesktopState>,
+    model_id: String,
+) -> Result<(), String> {
+    state
+        .model_download_service
+        .uninstall(&model_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn dictionary_catalog(state: State<'_, DesktopState>) -> Vec<DictionaryCatalogItem> {
     state.dictionary_download_service.catalog()
 }
@@ -2083,6 +2107,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            cancel_model_download,
             check_dictionary_credential,
             check_translation_api_key,
             data_directory,
@@ -2148,6 +2173,7 @@ fn main() {
             open_subtitle_overlay,
             cancel_video_render,
             translate_all_subtitles,
+            uninstall_model,
             translate_subtitle,
             translation_status,
             update_subtitle_overlay,
