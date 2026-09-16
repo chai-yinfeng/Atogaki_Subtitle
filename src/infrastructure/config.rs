@@ -48,6 +48,16 @@ pub fn desktop_whisper_cli_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("whisper-cli"))
 }
 
+pub fn desktop_llama_server_path() -> PathBuf {
+    if let Some(configured) = env::var_os("ATOGAKI_LLAMA_SERVER").filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(configured);
+    }
+
+    sibling_executable(platform_executable_name("llama-server"))
+        .unwrap_or_else(|| PathBuf::from("llama-server"))
+}
+
 fn sibling_executable(file_name: impl AsRef<std::path::Path>) -> Option<PathBuf> {
     let executable = env::current_exe().ok()?;
     executable
@@ -106,6 +116,12 @@ mod tests {
             assert_eq!(name, "whisper-cli.exe");
         } else {
             assert_eq!(name, "whisper-cli");
+        }
+        let llama_name = platform_executable_name("llama-server");
+        if cfg!(target_os = "windows") {
+            assert_eq!(llama_name, "llama-server.exe");
+        } else {
+            assert_eq!(llama_name, "llama-server");
         }
     }
 }

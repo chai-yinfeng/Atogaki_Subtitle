@@ -5,6 +5,7 @@ pub mod db;
 pub mod deepl;
 pub mod job_store;
 pub mod local_db;
+pub mod local_llama;
 pub mod media;
 pub mod network;
 pub mod openai_compatible;
