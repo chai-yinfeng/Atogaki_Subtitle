@@ -237,6 +237,8 @@ struct LocalLearningSourceRow {
 pub struct LocalMachineTranslation {
     pub segment_id: String,
     pub source_text: String,
+    pub expected_translated_text: Option<String>,
+    pub expected_translation_edited: bool,
     pub translated_text: String,
 }
 
@@ -1759,12 +1761,15 @@ impl LocalDatabase {
             let result = sqlx::query(
                 "UPDATE local_subtitle_segments
                  SET translated_text = ?, translation_edited = 0, translation_stale = 0
-                 WHERE job_id = ? AND id = ? AND source_text = ?",
+                 WHERE job_id = ? AND id = ? AND source_text = ?
+                   AND translated_text IS ? AND translation_edited = ?",
             )
             .bind(translated_text)
             .bind(job_id)
             .bind(&translation.segment_id)
             .bind(&translation.source_text)
+            .bind(&translation.expected_translated_text)
+            .bind(translation.expected_translation_edited)
             .execute(&mut *tx)
             .await
             .context("failed to store local machine translation")?;
@@ -3587,11 +3592,15 @@ mod tests {
                     LocalMachineTranslation {
                         segment_id: first.id.clone(),
                         source_text: first.source_text.clone(),
+                        expected_translated_text: None,
+                        expected_translation_edited: false,
                         translated_text: "第一句话".to_string(),
                     },
                     LocalMachineTranslation {
                         segment_id: second.id.clone(),
                         source_text: second.source_text.clone(),
+                        expected_translated_text: None,
+                        expected_translation_edited: false,
                         translated_text: "下一句话".to_string(),
                     },
                 ],
@@ -3613,6 +3622,38 @@ mod tests {
         let preserved = database.list_segments(&manifest.job_id).await.unwrap();
         assert_eq!(preserved[0].translated_text.as_deref(), Some("第一句话"));
 
+        database
+            .update_segment(
+                &manifest.job_id,
+                &second.id,
+                second.source_text.clone(),
+                Some("人工修改".to_string()),
+                second.start_ms as i64,
+                second.end_ms as i64,
+            )
+            .await
+            .unwrap();
+        let overwrite_error = database
+            .apply_machine_translations(
+                &manifest.job_id,
+                &[LocalMachineTranslation {
+                    segment_id: second.id.clone(),
+                    source_text: second.source_text.clone(),
+                    expected_translated_text: Some("下一句话".to_string()),
+                    expected_translation_edited: false,
+                    translated_text: "迟到的机器结果".to_string(),
+                }],
+            )
+            .await
+            .unwrap_err();
+        assert!(overwrite_error.to_string().contains("changed while"));
+        assert_eq!(
+            database.list_segments(&manifest.job_id).await.unwrap()[1]
+                .translated_text
+                .as_deref(),
+            Some("人工修改")
+        );
+
         let mut changed = first.clone();
         changed.source_text = "変更された文".to_string();
         database
@@ -3632,6 +3673,8 @@ mod tests {
                 &[LocalMachineTranslation {
                     segment_id: first.id,
                     source_text: "已经过时的日文".to_string(),
+                    expected_translated_text: Some("第一句话".to_string()),
+                    expected_translation_edited: false,
                     translated_text: "不应写入".to_string(),
                 }],
             )

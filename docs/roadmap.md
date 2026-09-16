@@ -22,8 +22,13 @@ _最后更新：2026-09-16_
 - [ ] P1：ASR provider、run／artifact／TimedUnit 与旧任务兼容迁移；保持 Whisper 当前处理行为。
   - [x] 抽出对象安全的 `OfflineAsrProvider` 和 Whisper adapter；将 provider 配置从通用字段中拆出，同时保持旧 `recognition-options.json` 兼容。
   - [x] 增加任务内 `AsrRun` 生命周期、SQLite migration 和 `asr-runs/<run-id>/` 产物合同；新任务首轮识别经 provider 执行并保存原始输出、`TimedUnit` 和候选 cues。
-  - [ ] 将局部重识别改成持久 run，并补齐 run 查询／采用接口和旧任务兼容验收。
+  - [x] 将局部重识别改成持久 `selected_range` run，保留确认前的工作区隔离、原子采用和 run 查询接口；旧任务不伪造历史 run。
+  - [ ] 增加任务内完整候选重跑／采用入口，并用固定样本完成重构前后文本和 cue 时间验收。
 - [ ] P2：cue 来源与 revision、翻译语义分组和上下文依赖、并发编辑保护；CLI／桌面统一 provider 用例。
+  - [x] 字幕候选改为消费 `TimedUnit`；`candidate-cues.json` 记录 `legacy-v1` 策略及 cue→证据单元映射，真实 word/token 时间不走字符比例切分。
+  - [x] 增加 `TranslationPlanner semantic-v1`，按连续性、句末、停顿和预算建立 group；稀疏目标不会被拼成一个语义组，provider 调用按完整 group 执行。
+  - [x] 机器译文写回同时核对请求时的原文、旧译文和人工编辑状态，等待期间的人工译文不会被覆盖。
+  - [ ] 持久化 cue 来源／revision／alignment 和翻译计划依赖，完整处理上下文变化后的 dependency stale。
 - [ ] P3：由开发流程自动配置 llama.cpp／Hy-MT2 并验证质量与资源；再实现应用管理的模型／runtime 生命周期。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。
 - [ ] P5：录音流式回放、prefix 提交策略、真实采集／Live ASR；Gemini Live Translate 单列实验。

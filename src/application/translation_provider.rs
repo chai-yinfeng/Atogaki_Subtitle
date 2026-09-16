@@ -23,13 +23,13 @@ pub struct TranslationProviderStatus {
     pub configuration_hint: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TranslationContextSegment {
     pub segment_id: String,
     pub source_text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TranslationTargetSegment {
     pub segment_id: String,
     pub source_text: String,

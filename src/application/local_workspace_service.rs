@@ -13,8 +13,8 @@ use tokio::sync::Mutex;
 
 use crate::{
     application::{
-        TranslationContextSegment, TranslationOptions, TranslationProvider, TranslationRequest,
-        TranslationTargetSegment, UnconfiguredTranslationProvider,
+        TranslationOptions, TranslationPlanner, TranslationPlannerCue, TranslationProvider,
+        TranslationRequest, UnconfiguredTranslationProvider,
     },
     domain::{
         LanguageCode, TranscriptSegment,
@@ -30,8 +30,12 @@ use crate::{
     },
 };
 
-const TRANSLATION_BATCH_SIZE: usize = 12;
+#[cfg(test)]
+use crate::application::TranslationContextSegment;
+
+#[cfg(test)]
 const TRANSLATION_CONTEXT_WINDOW_MS: i64 = 30_000;
+#[cfg(test)]
 const TRANSLATION_CONTEXT_MAX_CHARS: usize = 2_000;
 const PLAYBACK_POSITION_PREFIX: &str = "listening.playback_position_ms.";
 
@@ -633,23 +637,46 @@ impl LocalWorkspaceService {
             LanguageCode::from_str(&job.target_language).map_err(anyhow::Error::msg)?,
         )
         .with_protected_terms(protected_terms);
+        let timeline = context_segments
+            .iter()
+            .map(|segment| TranslationPlannerCue {
+                segment_id: segment.id.clone(),
+                segment_index: segment.segment_index,
+                start_ms: segment.start_ms,
+                end_ms: segment.end_ms,
+                source_text: segment.source_text.clone(),
+            })
+            .collect::<Vec<_>>();
+        let target_ids = segments_to_translate
+            .iter()
+            .map(|segment| segment.id.clone())
+            .collect::<HashSet<_>>();
+        let planner = TranslationPlanner::default();
+        let plan = planner.plan(&timeline, &target_ids)?;
+        let records_by_id = context_segments
+            .iter()
+            .map(|segment| (segment.id.as_str(), segment))
+            .collect::<HashMap<_, _>>();
         let mut empty_segment_ids = Vec::new();
-        for batch in segments_to_translate.chunks(TRANSLATION_BATCH_SIZE) {
-            let targets = batch
+        for group in plan.groups {
+            let batch = group
+                .targets
                 .iter()
-                .map(|segment| TranslationTargetSegment {
-                    segment_id: segment.id.clone(),
-                    source_text: segment.source_text.clone(),
+                .map(|target| {
+                    records_by_id
+                        .get(target.segment_id.as_str())
+                        .copied()
+                        .cloned()
+                        .ok_or_else(|| anyhow!("translation target disappeared from its plan"))
                 })
-                .collect::<Vec<_>>();
-            let (before_context, after_context) = translation_context(context_segments, batch);
+                .collect::<Result<Vec<_>>>()?;
             let response = self
                 .translation_provider
                 .translate(TranslationRequest {
                     options: options.clone(),
-                    before_context,
-                    targets,
-                    after_context,
+                    before_context: group.before_context,
+                    targets: group.targets,
+                    after_context: group.after_context,
                     style_instruction: None,
                 })
                 .await
@@ -662,7 +689,7 @@ impl LocalWorkspaceService {
             let response_model = response.model.clone().or_else(|| provider.model.clone());
             let response_usage = response.usage.clone();
             let (updates, empty) =
-                validated_translation_updates(&provider.name, batch, response.translations)?;
+                validated_translation_updates(&provider.name, &batch, response.translations)?;
             if !updates.is_empty() {
                 self.database
                     .apply_machine_translations(job_id, &updates)
@@ -681,63 +708,63 @@ impl LocalWorkspaceService {
                 continue;
             }
             let empty_ids = empty.iter().cloned().collect::<HashSet<_>>();
-            let retry_batch = batch
-                .iter()
-                .filter(|segment| empty_ids.contains(&segment.id))
-                .cloned()
-                .collect::<Vec<_>>();
-            let retry_targets = retry_batch
-                .iter()
-                .map(|segment| TranslationTargetSegment {
-                    segment_id: segment.id.clone(),
-                    source_text: segment.source_text.clone(),
-                })
-                .collect::<Vec<_>>();
-            let (retry_before, retry_after) = translation_context(context_segments, &retry_batch);
-            let retry_response = self
-                .translation_provider
-                .translate(TranslationRequest {
-                    options: options.clone(),
-                    before_context: retry_before,
-                    targets: retry_targets,
-                    after_context: retry_after,
-                    style_instruction: Some(
-                        "Every target is a previously empty short fragment. Translate each one visibly using its context; punctuation alone is acceptable when that is the faithful subtitle."
-                            .to_string(),
-                    ),
-                })
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to retry {} empty subtitle translation(s) with {}",
-                        retry_batch.len(),
-                        provider.name
-                    )
-                })?;
-            let retry_model = retry_response
-                .model
-                .clone()
-                .or_else(|| provider.model.clone());
-            let retry_usage = retry_response.usage.clone();
-            let (retry_updates, still_empty) = validated_translation_updates(
-                &provider.name,
-                &retry_batch,
-                retry_response.translations,
-            )?;
-            if !retry_updates.is_empty() {
-                self.database
-                    .apply_machine_translations(job_id, &retry_updates)
-                    .await?;
+            for retry_group in planner.plan(&timeline, &empty_ids)?.groups {
+                let retry_batch = retry_group
+                    .targets
+                    .iter()
+                    .map(|target| {
+                        records_by_id
+                            .get(target.segment_id.as_str())
+                            .copied()
+                            .cloned()
+                            .ok_or_else(|| anyhow!("translation retry target disappeared"))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let retry_response = self
+                    .translation_provider
+                    .translate(TranslationRequest {
+                        options: options.clone(),
+                        before_context: retry_group.before_context,
+                        targets: retry_group.targets,
+                        after_context: retry_group.after_context,
+                        style_instruction: Some(
+                            "Every target is a previously empty short fragment. Translate each one visibly using its context; punctuation alone is acceptable when that is the faithful subtitle."
+                                .to_string(),
+                        ),
+                    })
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to retry {} empty subtitle translation(s) with {}",
+                            retry_batch.len(),
+                            provider.name
+                        )
+                    })?;
+                let retry_model = retry_response
+                    .model
+                    .clone()
+                    .or_else(|| provider.model.clone());
+                let retry_usage = retry_response.usage.clone();
+                let (retry_updates, still_empty) = validated_translation_updates(
+                    &provider.name,
+                    &retry_batch,
+                    retry_response.translations,
+                )?;
+                if !retry_updates.is_empty() {
+                    self.database
+                        .apply_machine_translations(job_id, &retry_updates)
+                        .await?;
+                }
+                self.record_translation_batch(
+                    job_id,
+                    &provider,
+                    retry_model,
+                    retry_batch.len(),
+                    retry_usage,
+                )
+                .await?;
+                empty_segment_ids.extend(still_empty);
             }
-            self.record_translation_batch(
-                job_id,
-                &provider,
-                retry_model,
-                retry_batch.len(),
-                retry_usage,
-            )
-            .await?;
-            empty_segment_ids.extend(still_empty);
         }
         Ok((
             self.database.list_segments(job_id).await?,
@@ -806,6 +833,8 @@ fn validated_translation_updates(
             updates.push(LocalMachineTranslation {
                 segment_id: segment.id.clone(),
                 source_text: segment.source_text.clone(),
+                expected_translated_text: segment.translated_text.clone(),
+                expected_translation_edited: segment.translation_edited,
                 translated_text: translation.translated_text,
             });
         }
@@ -937,6 +966,7 @@ fn copy_export_file(
     Ok(())
 }
 
+#[cfg(test)]
 fn translation_context(
     all_segments: &[LocalSubtitleSegmentRecord],
     batch: &[LocalSubtitleSegmentRecord],
@@ -1651,7 +1681,7 @@ mod tests {
         );
 
         let result = service.translate_all(&manifest.job_id).await.unwrap();
-        assert_eq!(requests.lock().unwrap().len(), 2);
+        assert_eq!(requests.lock().unwrap().len(), 3);
         assert_eq!(result.translated_count, 2);
         assert_eq!(result.empty_segment_ids.len(), 1);
         assert_eq!(

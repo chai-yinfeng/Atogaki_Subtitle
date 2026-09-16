@@ -17,6 +17,7 @@ pub mod subtitle_segmentation;
 pub mod subtitle_style_service;
 pub mod transcription_options;
 pub mod translation_options;
+pub mod translation_planner;
 pub mod translation_provider;
 
 pub use asr_provider::{
@@ -53,6 +54,10 @@ pub use subtitle_segmentation::{
 pub use subtitle_style_service::{SubtitleStylePreview, SubtitleStyleService, SubtitleStyleState};
 pub use transcription_options::{TranscriptionOptions, WhisperTranscriptionConfig};
 pub use translation_options::TranslationOptions;
+pub use translation_planner::{
+    TRANSLATION_GROUPING_STRATEGY, TranslationGroup, TranslationPlan, TranslationPlanner,
+    TranslationPlannerCue,
+};
 pub use translation_provider::{
     MutableTranslationProvider, TranslationContextSegment, TranslationFuture, TranslationProvider,
     TranslationProviderStatus, TranslationRequest, TranslationResponse, TranslationResult,
