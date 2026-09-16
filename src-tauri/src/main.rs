@@ -34,8 +34,8 @@ use atogaki_subtitle::{
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
-            LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord, LocalJobRecord,
-            LocalJobTranslationStats, LocalLearningItemDetail, LocalRenderJobRecord,
+            LocalAsrRunRecord, LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord,
+            LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail, LocalRenderJobRecord,
             LocalSubtitleSegmentRecord, LocalTranslationRunRecord, NewLocalLearningSelection,
         },
         media::MediaCapabilities,
@@ -663,6 +663,18 @@ async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopJobSumma
             DesktopJobSummary::new(job, job_stats)
         })
         .collect())
+}
+
+#[tauri::command]
+async fn list_asr_runs(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Vec<LocalAsrRunRecord>, String> {
+    state
+        .task_service
+        .list_persisted_asr_runs(&job_id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2092,6 +2104,7 @@ fn main() {
             preview_retranscription,
             confirm_retranscription,
             list_glossaries,
+            list_asr_runs,
             list_jobs,
             list_learning_items,
             list_subtitle_fonts,

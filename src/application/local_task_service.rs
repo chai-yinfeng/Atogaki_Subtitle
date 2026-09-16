@@ -261,6 +261,21 @@ impl LocalTaskService {
         database.list_job_translation_stats().await
     }
 
+    pub async fn list_persisted_asr_runs(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<crate::infrastructure::local_db::LocalAsrRunRecord>> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("ASR run history requires SQLite persistence"))?;
+        database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        database.list_asr_runs(job_id).await
+    }
+
     pub async fn rename_persisted_job(
         &self,
         job_id: &str,

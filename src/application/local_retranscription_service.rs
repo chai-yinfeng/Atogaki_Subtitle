@@ -3,14 +3,16 @@ use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 use crate::{
+    application::{AsrInputScope, AsrRequest, AsrRun, OfflineAsrProvider},
     domain::{TranscriptSegment, glossary, segment},
     infrastructure::{
+        asr_run_store::AsrRunArtifacts,
         job_store::Job,
         local_db::{LocalDatabase, LocalSubtitleSegmentRecord},
-        media, whisper,
+        media,
+        whisper_asr::WhisperAsrProvider,
     },
 };
 
@@ -37,7 +39,7 @@ struct StoredPreview {
 #[derive(Debug, Clone)]
 pub struct LocalRetranscriptionService {
     ffmpeg: PathBuf,
-    whisper_cli: PathBuf,
+    asr_provider: Arc<dyn OfflineAsrProvider>,
     database: LocalDatabase,
     previews: Arc<Mutex<HashMap<String, StoredPreview>>>,
     recognition_lock: Arc<Mutex<()>>,
@@ -47,11 +49,16 @@ impl LocalRetranscriptionService {
     pub fn new(ffmpeg: PathBuf, whisper_cli: PathBuf, database: LocalDatabase) -> Self {
         Self {
             ffmpeg,
-            whisper_cli,
+            asr_provider: Arc::new(WhisperAsrProvider::new(whisper_cli)),
             database,
             previews: Arc::new(Mutex::new(HashMap::new())),
             recognition_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    pub fn with_asr_provider(mut self, provider: Arc<dyn OfflineAsrProvider>) -> Self {
+        self.asr_provider = provider;
+        self
     }
 
     pub async fn preview(
@@ -90,29 +97,78 @@ impl LocalRetranscriptionService {
         let job = Job::open(PathBuf::from(&job_record.storage_dir))?;
         let mut options = job.read_recognition_options()?;
         options.whisper.max_context = Some(0);
-        let run_id = Uuid::new_v4().to_string();
+        let parent_run_id = self
+            .database
+            .list_asr_runs(job_id)
+            .await?
+            .into_iter()
+            .find(|run| run.status == "succeeded")
+            .map(|run| run.id);
+        let provider = self.asr_provider.status();
+        let scope = AsrInputScope::selected_range(start_ms as u64, end_ms as u64)?;
+        let mut run = AsrRun::new(
+            job_id,
+            parent_run_id,
+            provider.id,
+            provider.name,
+            options.whisper.model.display().to_string(),
+            job_record
+                .input_path
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| job.audio_wav.clone()),
+            scope.clone(),
+            serde_json::to_value(&options).context("failed to snapshot recognition options")?,
+        );
+        let artifacts = AsrRunArtifacts::create(&job, &run)?;
+        self.database.record_asr_run(&run, &artifacts.dir).await?;
+
+        let run_id = run.id.clone();
         let temp_dir = std::env::temp_dir().join(format!("atogaki-retranscription-{run_id}"));
         fs::create_dir_all(&temp_dir)
             .with_context(|| format!("failed to create {}", temp_dir.display()))?;
         let _cleanup = TempDirectory(temp_dir.clone());
         let selected_wav = temp_dir.join("selected.wav");
-        let output_prefix = temp_dir.join("whisper");
 
         let _recognition = self.recognition_lock.lock().await;
-        media::extract_wav_range(
-            &self.ffmpeg,
-            &job.audio_wav,
-            &selected_wav,
-            start_ms as u64,
-            end_ms as u64,
-        )
-        .await?;
-        let raw =
-            whisper::transcribe(&self.whisper_cli, &options, &selected_wav, &output_prefix).await?;
-        let mut candidate_segments = segment::refine(
-            glossary::apply_to_segments(&options, raw)?,
-            options.source_language,
-        );
+        run.start();
+        artifacts.write_run(&run)?;
+        self.database.update_asr_run(&run).await?;
+        let recognition: Result<(Vec<TranscriptSegment>, Vec<crate::application::TimedUnit>)> =
+            async {
+                media::extract_wav_range(
+                    &self.ffmpeg,
+                    &job.audio_wav,
+                    &selected_wav,
+                    start_ms as u64,
+                    end_ms as u64,
+                )
+                .await?;
+                let response = self
+                    .asr_provider
+                    .transcribe(AsrRequest {
+                        audio_path: selected_wav,
+                        output_prefix: artifacts.provider_output_prefix.clone(),
+                        scope,
+                        transcription: options.clone(),
+                    })
+                    .await?;
+                let candidates = segment::refine(
+                    glossary::apply_to_segments(&options, response.legacy_segments)?,
+                    options.source_language,
+                );
+                Ok((candidates, response.timed_units))
+            }
+            .await;
+        let (mut candidate_segments, mut timed_units) = match recognition {
+            Ok(result) => result,
+            Err(error) => {
+                run.fail(format!("{error:#}"));
+                let _ = artifacts.write_run(&run);
+                let _ = self.database.update_asr_run(&run).await;
+                return Err(error);
+            }
+        };
         for candidate in &mut candidate_segments {
             candidate.start_ms = candidate.start_ms.saturating_add(start_ms as u64);
             candidate.end_ms = candidate.end_ms.saturating_add(start_ms as u64);
@@ -120,6 +176,28 @@ impl LocalRetranscriptionService {
             candidate.end_ms = candidate.end_ms.min(end_ms as u64);
         }
         candidate_segments.retain(|candidate| candidate.end_ms > candidate.start_ms);
+        for unit in &mut timed_units {
+            unit.start_ms = unit
+                .start_ms
+                .map(|value| value.saturating_add(start_ms as u64));
+            unit.end_ms = unit
+                .end_ms
+                .map(|value| value.saturating_add(start_ms as u64));
+        }
+        let completion: Result<()> = async {
+            artifacts.write_timed_units(&timed_units)?;
+            artifacts.write_candidate_cues(&candidate_segments)?;
+            run.succeed();
+            artifacts.write_run(&run)?;
+            self.database.update_asr_run(&run).await
+        }
+        .await;
+        if let Err(error) = completion {
+            run.fail(format!("{error:#}"));
+            let _ = artifacts.write_run(&run);
+            let _ = self.database.update_asr_run(&run).await;
+            return Err(error);
+        }
 
         let stored = StoredPreview {
             job_id: job_id.to_string(),
