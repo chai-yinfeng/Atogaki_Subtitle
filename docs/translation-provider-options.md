@@ -4,6 +4,12 @@ _调研日期：2026-08-11；产品选择与实现状态更新：2026-08-22。�
 
 Atogaki 的场景不是一般的短句查词，而是把较长的日语、英语或韩语口语节目分段翻译为简体中文。候选服务除了价格，还必须比较口语自然度、长任务限流、术语保护、数据处理条款和注册复杂度。
 
+## 2026-09-16 路线更新
+
+以下价格表和原推荐顺序保留为历史调研，未在本次逐项复核；近期执行顺序以 [管线演进计划](pipeline-evolution.md) 为准。现有 DeepL／DeepSeek／自定义兼容 provider 继续可用，新增重点是 [Hy-MT2](https://github.com/Tencent-Hunyuan/Hy-MT2) 本地翻译：先固定并验证 llama.cpp／模型组合，再纳入应用管理的下载与进程生命周期，不要求普通用户自行编译或维护服务。GGUF 兼容性、结构化 cue 输出、术语遵循和日语口语质量需分别实测。
+
+第一阶段保持源／译 cue 对应，以 translation group 提供完整上下文；网络 batch 不再承担语义边界。Gemini Transcribe 属于另一侧的 ASR 扩展，Muse Voice Transcribe 是流式 ASR 研究对象；Gemini Live Translate 仅为独立 E2E 实验，不替代两段式正式资料。
+
 ## 当前可用选项
 
 | 方案 | 官方免费额度 | 注册与账单 | 适合程度 |

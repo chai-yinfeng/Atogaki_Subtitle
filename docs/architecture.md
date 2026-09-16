@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-08-25_
+_最后更新：2026-09-16_
 
 ## 仓库组织
 
@@ -86,3 +86,11 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 - 外部工具和 API 是可替换基础设施：ASR、翻译和媒体处理分别通过应用层选项接入。CLI 默认日语识别、简中翻译，但不将该默认值写死到应用层或 DeepL 适配器。
 - macOS 本地长任务采用硬件优先、显式回退：Whisper 请求 GPU device 0，GPU/Metal 失败才重试 CPU；硬字幕要求 libass，并优先用 VideoToolbox H.264 编码，失败后记录原因并回退 FFmpeg 原生 LGPL MPEG-4 软件编码；两层均失败才让任务失败并保留 ASS 快照。libass 字幕合成仍在 CPU 执行。
 - 收听区和任务工作区可按需打开独立的悬浮字幕 WebView 窗口。它由 Rust 主进程创建为无边框、置顶、可缩放的正常窗口，当前播放工作区按字幕段切换发送原文与译文；窗口本身不读取 SQLite、媒体或密钥。为维持公开 Tauri 配置，它不使用 macOS 私有 API，因此当前不支持透明背景和鼠标穿透。收听区同时承担学习采集的全文阅读器：文本选择与独立时间码跳转分离，学习区通过来源记录回到同一播放器，不复制第三套预览或播放器。
+
+## 下一阶段架构（已决策，尚未实现）
+
+上述章节描述当前实现。[决策 0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md) 确定下一阶段将 acoustic chunks、word/token timeline、subtitle cues 和 translation groups 分离，以任务内独立 ASR runs 保存机器证据，保持一个当前编辑工作区和第一阶段源／译 cue 对应。
+
+现有 SQLite 字幕、人工编辑、学习来源、样式和导出继续作为迁移兼容边界。新增 run／artifact／cue 来源与翻译依赖版本，不以重新识别结果直接重建工作区；持久候选采用仍执行范围和 revision 校验。`JobRunner`、局部识别和桌面入口逐步共享 provider 用例，Whisper 专用参数留在 adapter 配置内。
+
+实时 session 与离线 run 分开，E2E 仅为实验路线。接口草案、模型部署、评估样本与分阶段验收见 [管线演进计划](pipeline-evolution.md)。
