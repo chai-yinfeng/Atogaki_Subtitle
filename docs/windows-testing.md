@@ -57,7 +57,7 @@ $actual -eq $expected
 
 - 从 alpha.6 覆盖安装，确认学习收藏、词典、字幕样式和任务排序 migration 不丢失原任务、字幕、词表、provider 设置或人工修改。
 - 收藏词／语法／整句并从学习区返回来源播放；分别测试日语、英语分册和无词典包时的降级行为。
-- 下载一个离线词典包并重启查询；ECDICT 需记录首次索引耗时、峰值内存体感和索引文件大小。Collins／Merriam-Webster 只验证各自 Credential Manager 项目，不复制或记录 Key。
+- 下载一个离线词典包并重启查询；ECDICT 需记录首次索引耗时、峰值内存体感和索引文件大小。Merriam-Webster 只验证其独立 Credential Manager 项目，不复制或记录 Key。
 - 浏览 Windows 系统字体，检查不存在字体、fallback 和缺字提示；用同一任务比较 libass 预览、ASS 文件及 MPEG-4 烧录成品。
 - 用实体鼠标拖动任务卡、键盘调整顺序并重启；高 DPI 或触控板结果单独记录。
 - 中断一次模型下载后续传，并测试不支持 Range 的源回退为完整重下，不留下误判为可用的临时文件。

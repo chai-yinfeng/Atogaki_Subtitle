@@ -34,7 +34,6 @@ const TRANSLATION_PROVIDER: &str = "translation.provider";
 const DEEPL_KEY_SAVED: &str = "translation.deepl_key_saved";
 const DEEPSEEK_KEY_SAVED: &str = "translation.deepseek_key_saved";
 const OPENAI_COMPATIBLE_KEY_SAVED: &str = "translation.openai_compatible_key_saved";
-const COLLINS_DICTIONARY_KEY_SAVED: &str = "dictionary.collins_key_saved";
 const MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED: &str = "dictionary.merriam_webster_key_saved";
 const MERRIAM_WEBSTER_REFERENCE: &str = "dictionary.merriam_webster_reference";
 const DEEPSEEK_MODEL: &str = "translation.deepseek_model";
@@ -112,6 +111,7 @@ pub struct SaveDictionaryCredentialRequest {
 pub struct SaveDesktopSettingsRequest {
     pub whisper_model_path: Option<String>,
     pub vad_model_path: Option<String>,
+    pub hy_mt2_model_path: Option<String>,
     pub translation_provider_id: String,
     pub translation_model: Option<String>,
     pub translation_base_url: Option<String>,
@@ -507,8 +507,10 @@ impl DesktopSettingsService {
         validate_provider_id(&request.translation_provider_id)?;
         let whisper_model = normalized_optional_path(request.whisper_model_path);
         let vad_model = normalized_optional_path(request.vad_model_path);
+        let hy_mt2_model = normalized_optional_path(request.hy_mt2_model_path);
         validate_optional_model(&whisper_model, "Whisper")?;
         validate_optional_model(&vad_model, "VAD")?;
+        validate_optional_model(&hy_mt2_model, "Hy-MT2")?;
         let network = NetworkClientConfig::new(
             &request.network_proxy_mode,
             request.network_proxy_url.clone(),
@@ -543,6 +545,7 @@ impl DesktopSettingsService {
 
         save_optional_path(&self.database, WHISPER_MODEL_PATH, whisper_model.as_ref()).await?;
         save_optional_path(&self.database, VAD_MODEL_PATH, vad_model.as_ref()).await?;
+        save_optional_path(&self.database, HY_MT2_MODEL_PATH, hy_mt2_model.as_ref()).await?;
         self.database
             .set_setting(TRANSLATION_PROVIDER, &request.translation_provider_id)
             .await?;
@@ -675,7 +678,7 @@ impl DesktopSettingsService {
     /// Lists only non-secret saved markers. Opening settings must not trigger a Keychain prompt.
     pub async fn dictionary_credential_statuses(&self) -> Result<Vec<DictionaryCredentialStatus>> {
         let mut statuses = Vec::new();
-        for provider_id in ["collins", "merriam-webster"] {
+        for provider_id in ["merriam-webster"] {
             let configured = self
                 .database
                 .get_setting(dictionary_key_saved_setting(provider_id)?)
@@ -1090,7 +1093,6 @@ fn provider_display_name(provider_id: &str) -> &'static str {
 
 fn dictionary_key_saved_setting(provider_id: &str) -> Result<&'static str> {
     match provider_id {
-        "collins" => Ok(COLLINS_DICTIONARY_KEY_SAVED),
         "merriam-webster" => Ok(MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED),
         _ => bail!("unsupported dictionary provider: {provider_id}"),
     }
@@ -1103,7 +1105,6 @@ fn dictionary_credential_id(provider_id: &str) -> Result<String> {
 
 fn dictionary_provider_display_name(provider_id: &str) -> Result<&'static str> {
     match provider_id {
-        "collins" => Ok("Collins Dictionary"),
         "merriam-webster" => Ok("Merriam-Webster"),
         _ => bail!("unsupported dictionary provider: {provider_id}"),
     }
@@ -1291,6 +1292,7 @@ mod tests {
             .save(SaveDesktopSettingsRequest {
                 whisper_model_path: Some(model.display().to_string()),
                 vad_model_path: None,
+                hy_mt2_model_path: None,
                 translation_provider_id: "deepl".to_string(),
                 translation_model: None,
                 translation_base_url: None,
@@ -1374,6 +1376,7 @@ mod tests {
             .save(SaveDesktopSettingsRequest {
                 whisper_model_path: None,
                 vad_model_path: None,
+                hy_mt2_model_path: Some(model.display().to_string()),
                 translation_provider_id: "hy-mt2-local".to_string(),
                 translation_model: None,
                 translation_base_url: None,
@@ -1473,6 +1476,7 @@ mod tests {
             .save(SaveDesktopSettingsRequest {
                 whisper_model_path: None,
                 vad_model_path: None,
+                hy_mt2_model_path: None,
                 translation_provider_id: "deepseek".to_string(),
                 translation_model: Some("deepseek-v4-flash".to_string()),
                 translation_base_url: Some("https://ignored.example/v1".to_string()),
@@ -1652,7 +1656,17 @@ mod tests {
                 .unwrap()
                 .configured
         );
-        assert_eq!(statuses.len(), 2);
+        assert_eq!(statuses.len(), 1);
+        assert!(
+            service
+                .save_dictionary_credential(super::SaveDictionaryCredentialRequest {
+                    provider_id: "collins".to_string(),
+                    api_key: Some("unused-secret".to_string()),
+                    clear: false,
+                })
+                .await
+                .is_err()
+        );
 
         service
             .save_dictionary_credential(super::SaveDictionaryCredentialRequest {

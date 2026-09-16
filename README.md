@@ -32,7 +32,7 @@ macOS 测试版没有 Developer ID 签名或公证。核对下载来源与 SHA-2
 2. **网络。** 选择跟随启动环境、强制直连或自定义 HTTP/HTTPS 代理；也可以填写 HTTPS 模型镜像。连接测试使用当前输入；点击下载会自动保存当前网络草稿。
 3. **云端翻译。** 可选择 DeepL、DeepSeek 或高级 OpenAI-compatible 入口。不配置仍可完成本地识别、编辑和原文字幕导出；启动时不访问 Keychain，首次翻译才读取当前 provider 的已有 Key。LLM 入口还可配置模型与口语风格。
 
-学习词典与字幕翻译相互独立。JMdict、Tomoshi 和 ECDICT 由用户在设置页明确下载到 `dictionaries/`；Merriam-Webster Key 单独保存到系统凭据库。Collins 目前只有配置边界而没有可用查询 adapter，Cambridge 因官方确认 API 不可用已从产品路径移除。
+学习词典与字幕翻译相互独立。JMdict、Tomoshi 和 ECDICT 由用户在设置页明确下载到 `dictionaries/`；Merriam-Webster Key 单独保存到系统凭据库。Collins 未取得可测试的 API 账户，Cambridge API 当前不可用，两者均不出现在产品路径中。
 
 Whisper 模型建议：
 

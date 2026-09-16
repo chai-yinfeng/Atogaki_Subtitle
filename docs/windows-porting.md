@@ -33,7 +33,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 | 能力 | 当前共享实现 | Windows 下一候选需要验证 |
 | --- | --- | --- |
 | 学习收藏与来源回听 | 收藏词／语法／整句、日英韩分册、从来源时间继续播放已经进入共享 UI、服务和 SQLite | WebView2 文本选区、播放跳转、升级旧数据库和删除来源后的快照 |
-| 学习词典 | JMdict、Tomoshi、ECDICT 包下载／索引及 Collins、Merriam-Webster 凭据入口已经共享 | Windows Credential Manager、下载目录权限、压缩包解码、ECDICT 首次索引耗时与文件锁 |
+| 学习词典 | JMdict、Tomoshi、ECDICT 包下载／索引及 Merriam-Webster 凭据入口已经共享 | Windows Credential Manager、下载目录权限、压缩包解码、ECDICT 首次索引耗时与文件锁 |
 | 字幕样式与字体 | 任务级双轨样式、系统字体浏览、字形覆盖、libass 实际预览和烧录共用一套实现 | Windows 字体 family／fallback、中文日文韩文字形、FFmpeg/libass 预览与最终成品一致性 |
 | 工作台排序 | 拖动、键盘排序和 SQLite 持久化已经共享 | WebView2 下实体鼠标、触控板、高 DPI 命中和重启顺序 |
 | 模型续传 | HTTP Range、临时文件恢复和完整 SHA-256 校验已经共享 | Windows 文件占用、暂停后续传、镜像不支持 Range 时安全重下 |

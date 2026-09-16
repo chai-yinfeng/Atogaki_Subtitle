@@ -367,7 +367,7 @@ type DictionaryDownloadState = {
 };
 
 type DictionaryCredentialStatus = {
-  providerId: "collins" | "merriam-webster";
+  providerId: "merriam-webster";
   providerName: string;
   configured: boolean;
   credentialStore: string;
@@ -1008,7 +1008,7 @@ app.innerHTML = `
         </div>
         <p class="dialog-help">媒体和模型默认保留在本机；选择云端翻译 provider 时，只有原文字幕和上下文会发送到对应服务。</p>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>1. 本地识别模型</strong><span id="models-directory"></span></div><span id="model-readiness"></span></div>
+          <div class="settings-section-heading"><div><strong>1. 本地模型</strong><span id="models-directory"></span></div><span id="model-readiness"></span></div>
           <div class="settings-path-row">
             <label>Whisper 模型<input id="settings-whisper-model" placeholder="选择已有 ggml-*.bin，或从下方下载" /></label>
             <button id="settings-choose-whisper" type="button" class="secondary">选择文件</button>
@@ -1016,6 +1016,10 @@ app.innerHTML = `
           <div class="settings-path-row">
             <label>Silero VAD 模型（推荐）<input id="settings-vad-model" placeholder="选择已有 ggml-silero-*.bin，或从下方下载" /></label>
             <button id="settings-choose-vad" type="button" class="secondary">选择文件</button>
+          </div>
+          <div class="settings-path-row">
+            <label>Hy-MT2 模型<input id="settings-hy-mt2-model" placeholder="选择已有 Hy-MT2 *.gguf，或从下方下载" /></label>
+            <button id="settings-choose-hy-mt2" type="button" class="secondary">选择文件</button>
           </div>
         </section>
         <section class="settings-section">
@@ -1055,7 +1059,7 @@ app.innerHTML = `
             <label id="provider-base-url-field">OpenAI-compatible Base URL
               <input id="settings-provider-base-url" type="url" placeholder="https://api.openai.com/v1" />
             </label>
-            <label>模型
+            <label id="provider-model-field">模型
               <input id="settings-provider-model" type="text" placeholder="模型 ID" />
             </label>
             <label class="settings-span">翻译风格
@@ -1083,7 +1087,6 @@ app.innerHTML = `
           </div>
           <div id="dictionary-credentials" class="dictionary-credentials">
             ${[
-              ["collins", "Collins Dictionary", "可提供英中结果；额度与展示要求以账户协议为准。"],
               ["merriam-webster", "Merriam-Webster", "保留英英来源标签页；正式展示需满足 Logo 与署名要求。"],
             ].map(([id, name, hint]) => `<article class="dictionary-credential-card" data-dictionary-provider="${id}">
               <div><strong>${name}</strong><span>${hint}</span></div>
@@ -1270,6 +1273,7 @@ const settingsDialog = document.querySelector<HTMLDialogElement>("#settings-dial
 const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
 const settingsWhisperModel = document.querySelector<HTMLInputElement>("#settings-whisper-model");
 const settingsVadModel = document.querySelector<HTMLInputElement>("#settings-vad-model");
+const settingsHyMt2Model = document.querySelector<HTMLInputElement>("#settings-hy-mt2-model");
 const settingsProxyMode = document.querySelector<HTMLSelectElement>("#settings-proxy-mode");
 const settingsProxyUrl = document.querySelector<HTMLInputElement>("#settings-proxy-url");
 const settingsModelMirror = document.querySelector<HTMLInputElement>("#settings-model-mirror");
@@ -1527,6 +1531,7 @@ function syncProviderSettings(): void {
   checkApiKeyButton?.closest("div")?.classList.toggle("hidden", !cloudEnabled);
   document.querySelector<HTMLElement>("#llm-provider-fields")?.classList.toggle("hidden", !llmEnabled);
   document.querySelector<HTMLElement>("#provider-base-url-field")?.classList.toggle("hidden", !customEndpoint);
+  document.querySelector<HTMLElement>("#provider-model-field")?.classList.toggle("hidden", provider === "hy-mt2-local");
   if (settingsProviderModel) settingsProviderModel.disabled = provider === "hy-mt2-local";
   const providerLabel = provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
   const apiKeyLabel = document.querySelector<HTMLSpanElement>("#api-key-label");
@@ -1574,6 +1579,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
   overwriteSettingsField(settingsWhisperModel, settings.whisperModelPath ?? "");
   overwriteSettingsField(settingsVadModel, settings.vadModelPath ?? "");
+  overwriteSettingsField(settingsHyMt2Model, settings.hyMt2ModelPath ?? "");
   overwriteSettingsField(settingsProxyMode, settings.networkProxyMode);
   overwriteSettingsField(settingsProxyUrl, settings.networkProxyUrl ?? "");
   overwriteSettingsField(settingsModelMirror, settings.modelMirrorUrl ?? "");
@@ -1841,7 +1847,7 @@ async function refreshTranslationStatus(): Promise<void> {
 }
 
 async function saveSettings(finishOnboarding: boolean): Promise<void> {
-  if (!settingsWhisperModel || !settingsVadModel || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !settingsProviderModel || !settingsProviderBaseUrl || !settingsTranslationStyle) return;
+  if (!settingsWhisperModel || !settingsVadModel || !settingsHyMt2Model || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !settingsProviderModel || !settingsProviderBaseUrl || !settingsTranslationStyle) return;
   if (finishOnboarding && !settingsWhisperModel.value.trim()) {
     if (settingsMessage) settingsMessage.textContent = "请先选择或下载一个 Whisper 模型。";
     settingsWhisperModel.focus();
@@ -1853,6 +1859,7 @@ async function saveSettings(finishOnboarding: boolean): Promise<void> {
       request: {
         whisperModelPath: settingsWhisperModel.value.trim() || null,
         vadModelPath: settingsVadModel.value.trim() || null,
+        hyMt2ModelPath: settingsHyMt2Model.value.trim() || null,
         translationProviderId: settingsProvider.value,
         translationModel: settingsProviderModel.value.trim() || null,
         translationBaseUrl: settingsProviderBaseUrl.value.trim() || null,
@@ -1900,11 +1907,15 @@ async function testNetworkConnection(): Promise<void> {
   }
 }
 
-async function chooseSettingsModel(kind: "whisper" | "vad"): Promise<void> {
-  const command = kind === "whisper" ? "pick_model_file" : "pick_vad_model_file";
+async function chooseSettingsModel(kind: "whisper" | "vad" | "hy-mt2"): Promise<void> {
+  const command = kind === "whisper"
+    ? "pick_model_file"
+    : kind === "vad" ? "pick_vad_model_file" : "pick_hy_mt2_model_file";
   try {
     const path = await invoke<string | null>(command);
-    const input = kind === "whisper" ? settingsWhisperModel : settingsVadModel;
+    const input = kind === "whisper"
+      ? settingsWhisperModel
+      : kind === "vad" ? settingsVadModel : settingsHyMt2Model;
     if (path && input) {
       input.value = path;
       settingsDirtyFields.add(input.id);
@@ -1999,6 +2010,8 @@ async function selectModel(modelId: string): Promise<void> {
       settingsDirtyFields.delete(settingsWhisperModel.id);
     } else if (model?.kind === "vad" && settingsVadModel) {
       settingsDirtyFields.delete(settingsVadModel.id);
+    } else if (model?.kind === "hy-mt2" && settingsHyMt2Model) {
+      settingsDirtyFields.delete(settingsHyMt2Model.id);
     }
     modelDownloads = await invoke<ModelDownloadState[]>("model_download_states");
     await loadDesktopSettings(false);
@@ -2955,7 +2968,6 @@ function learningProviderOptions(detail: LearningItemDetail): LearningProviderOp
   if (detail.item.source_language === "en") {
     providers.push(
       { id: "ecdict", name: "ECDICT 英中", kind: "offline" },
-      { id: "collins", name: "Collins", kind: "api" },
       { id: "merriam-webster", name: "Merriam-Webster", kind: "api" },
     );
   } else if (detail.item.source_language === "ja") {
@@ -3031,13 +3043,12 @@ function renderLearningDictionary(): void {
   const provider = providers.find((candidate) => candidate.id === activeLearningProviderId);
   const result = detail.lookup_results.find((candidate) => candidate.provider_id === activeLearningProviderId);
   if (!provider || !result) {
-    const supported = provider && provider.id !== "collins";
     const message = dictionaryProviderEmptyMessage(provider);
     learningProviderPanel.innerHTML = `<div class="learning-provider-empty">
       <span>${provider?.kind === "offline" ? "LOCAL DICTIONARY PACK" : "DICTIONARY API"}</span>
       <h3>${escapeHtml(provider?.name ?? activeLearningProviderId)}</h3>
       <p>${escapeHtml(message)}</p>
-      ${supported ? `<button type="button" data-lookup-learning-provider="${escapeHtml(provider.id)}" ${learningLookupBusy ? "disabled" : ""}>${learningLookupBusy ? "正在查询…" : "查询这个来源"}</button>` : ""}
+      ${provider ? `<button type="button" data-lookup-learning-provider="${escapeHtml(provider.id)}" ${learningLookupBusy ? "disabled" : ""}>${learningLookupBusy ? "正在查询…" : "查询这个来源"}</button>` : ""}
     </div>`;
     learningProviderPanel.querySelector<HTMLButtonElement>("[data-lookup-learning-provider]")?.addEventListener("click", () => {
       void lookupLearningDictionary(provider?.id ?? "");
@@ -3082,13 +3093,11 @@ function learningProviderStatus(provider: LearningProviderOption): string {
         : "ecdict-eng-zho";
     return dictionaryDownloads.some((item) => item.dictionaryId === packageId && item.status === "done") ? "可查询" : "未下载";
   }
-  if (provider.id === "collins") return "待接入";
   return dictionaryCredentials.some((item) => item.providerId === provider.id && item.configured) ? "可查询" : "未配置";
 }
 
 function dictionaryProviderEmptyMessage(provider: LearningProviderOption | undefined): string {
   if (!provider) return "词典来源不可用。";
-  if (provider.id === "collins") return `${provider.name} 目前只保留独立 API 配置边界，尚未接入正式查询协议。`;
   const status = learningProviderStatus(provider);
   if (status === "未下载") return `${provider.name} 的离线包尚未安装。请先到设置 → 学习词典下载；包会保存在正式应用数据目录。`;
   if (status === "未配置") return `${provider.name} API Key 尚未配置。请先到设置 → 学习词典保存并检查该来源的 Key。`;
@@ -6020,6 +6029,7 @@ settingsForm?.addEventListener("change", (event) => {
 });
 document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
+document.querySelector<HTMLButtonElement>("#settings-choose-hy-mt2")?.addEventListener("click", () => void chooseSettingsModel("hy-mt2"));
 settingsProvider?.addEventListener("change", () => {
   if (settingsProvider.value === "deepseek") {
     if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.deepseek.com";
@@ -6027,6 +6037,8 @@ settingsProvider?.addEventListener("change", () => {
   } else if (settingsProvider.value === "openai-compatible") {
     if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.openai.com/v1";
     if (settingsProviderModel) settingsProviderModel.value = "";
+  } else if (settingsProviderModel) {
+    settingsProviderModel.value = "";
   }
   if ((settingsProvider.value === "deepseek" || settingsProvider.value === "openai-compatible") && settingsTranslationStyle && !settingsTranslationStyle.value.trim()) {
     settingsTranslationStyle.value = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";

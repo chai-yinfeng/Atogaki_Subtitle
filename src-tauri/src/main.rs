@@ -1350,6 +1350,18 @@ async fn pick_vad_model_file(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+async fn pick_hy_mt2_model_file(app: AppHandle) -> Result<Option<String>, String> {
+    pick_local_file(
+        &app,
+        "选择 Hy-MT2 GGUF 模型",
+        "Hy-MT2 模型",
+        &["gguf"],
+        model_picker_directory(&app),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn pick_subtitle_export_directory(
     app: AppHandle,
     initial_directory: Option<String>,
@@ -2156,6 +2168,7 @@ fn main() {
             media_capabilities,
             pick_media_file,
             pick_model_file,
+            pick_hy_mt2_model_file,
             pick_subtitle_export_directory,
             pick_video_output_file,
             pick_vad_model_file,
