@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::{
-    application::TranscriptionOptions,
+    application::{AsrResponse, TimedUnit, TimedUnitKind, TimingSource, TranscriptionOptions},
     domain::{TranscriptSegment, glossary},
     infrastructure::child_process::sidecar_command,
 };
@@ -37,6 +37,19 @@ pub async fn transcribe(
     wav: &Path,
     output_prefix: &Path,
 ) -> Result<Vec<TranscriptSegment>> {
+    Ok(
+        transcribe_response(whisper_cli, options, wav, output_prefix)
+            .await?
+            .legacy_segments,
+    )
+}
+
+pub async fn transcribe_response(
+    whisper_cli: &Path,
+    options: &TranscriptionOptions,
+    wav: &Path,
+    output_prefix: &Path,
+) -> Result<AsrResponse> {
     let model = &options.model;
     if !model.exists() {
         anyhow::bail!("Whisper model does not exist: {}", model.display());
@@ -89,21 +102,35 @@ pub async fn transcribe(
     let decoded: WhisperJson =
         serde_json::from_slice(&data).context("failed to parse whisper json")?;
 
-    Ok(decoded
-        .transcription
-        .into_iter()
-        .filter_map(|item| {
-            let text = item.text.trim().to_string();
-            if text.is_empty() {
-                return None;
-            }
-            Some(TranscriptSegment::new(
-                item.offsets.from,
-                item.offsets.to,
-                text,
-            ))
-        })
-        .collect())
+    let mut timed_units = Vec::new();
+    let mut legacy_segments = Vec::new();
+    for item in decoded.transcription {
+        let text = item.text.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        timed_units.push(TimedUnit {
+            id: uuid::Uuid::new_v4().to_string(),
+            text: text.clone(),
+            kind: TimedUnitKind::ProviderSegment,
+            start_ms: Some(item.offsets.from),
+            end_ms: Some(item.offsets.to),
+            timing_source: TimingSource::Model,
+            provider_confidence: None,
+        });
+        legacy_segments.push(TranscriptSegment::new(
+            item.offsets.from,
+            item.offsets.to,
+            text,
+        ));
+    }
+    Ok(AsrResponse {
+        provider_id: "whisper.cpp".to_string(),
+        model_identity: options.model.display().to_string(),
+        raw_output_path: json_path,
+        timed_units,
+        legacy_segments,
+    })
 }
 
 async fn run_whisper(

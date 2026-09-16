@@ -1,3 +1,4 @@
+pub mod asr_provider;
 pub mod evaluation;
 pub mod job_manifest;
 pub mod job_runner;
@@ -16,6 +17,10 @@ pub mod transcription_options;
 pub mod translation_options;
 pub mod translation_provider;
 
+pub use asr_provider::{
+    AsrFuture, AsrInputScope, AsrProviderCapabilities, AsrProviderStatus, AsrRequest, AsrResponse,
+    AsrRunKind, AsrTimingGranularity, OfflineAsrProvider, TimedUnit, TimedUnitKind, TimingSource,
+};
 pub use evaluation::{
     AsrEvaluationReport, EvaluationCue, EvaluationTranscript, ReferenceReviewStatus,
     evaluate_asr_files,
