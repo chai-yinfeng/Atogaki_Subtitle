@@ -90,6 +90,7 @@ dependencies = [
  "tokio",
  "tower-http",
  "ttf-parser",
+ "unicode-normalization",
  "urlencoding",
  "uuid",
 ]

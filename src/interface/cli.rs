@@ -25,6 +25,7 @@ pub struct Cli {
 pub enum Command {
     ApplyGlossary(ApplyGlossaryArgs),
     Devices,
+    EvaluateAsr(EvaluateAsrArgs),
     Record(RecordArgs),
     Rerender(RerenderArgs),
     Serve(ServeArgs),
@@ -33,6 +34,24 @@ pub enum Command {
     Export(ExportArgs),
     Render(RenderArgs),
     Process(ProcessArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EvaluateAsrArgs {
+    #[arg(long, help = "Versioned, human-reviewed evaluation transcript JSON")]
+    pub reference: PathBuf,
+
+    #[arg(
+        long,
+        help = "Atogaki segments.json or another evaluation transcript JSON"
+    )]
+    pub hypothesis: PathBuf,
+
+    #[arg(
+        long,
+        help = "Optional path for the JSON report; stdout is always written"
+    )]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

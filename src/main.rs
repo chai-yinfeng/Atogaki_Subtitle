@@ -15,6 +15,7 @@ use atogaki_subtitle::{
     },
 };
 use clap::Parser;
+use std::fs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -33,6 +34,18 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Devices => media::list_capture_devices(&config.ffmpeg).await,
+        Command::EvaluateAsr(args) => {
+            let report = atogaki_subtitle::application::evaluate_asr_files(
+                &args.reference,
+                &args.hypothesis,
+            )?;
+            let json = serde_json::to_string_pretty(&report)?;
+            if let Some(output) = args.output {
+                fs::write(&output, format!("{json}\n"))?;
+            }
+            println!("{json}");
+            Ok(())
+        }
         Command::Record(args) => media::record_audio(&config.ffmpeg, &args).await,
         Command::Rerender(args) => {
             let output = args.output.clone();

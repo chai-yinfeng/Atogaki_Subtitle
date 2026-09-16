@@ -1,3 +1,4 @@
+pub mod evaluation;
 pub mod job_manifest;
 pub mod job_runner;
 pub mod job_snapshot;
@@ -15,6 +16,10 @@ pub mod transcription_options;
 pub mod translation_options;
 pub mod translation_provider;
 
+pub use evaluation::{
+    AsrEvaluationReport, EvaluationCue, EvaluationTranscript, ReferenceReviewStatus,
+    evaluate_asr_files,
+};
 pub use job_runner::JobRunner;
 pub use job_snapshot::JobSnapshot;
 pub use local_glossary_service::{
