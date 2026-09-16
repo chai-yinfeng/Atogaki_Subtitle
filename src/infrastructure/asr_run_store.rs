@@ -3,8 +3,7 @@ use std::{fs, path::PathBuf};
 use anyhow::{Context, Result, anyhow};
 
 use crate::{
-    application::{AsrRun, TimedUnit},
-    domain::TranscriptSegment,
+    application::{AsrRun, CandidateCueSet, TimedUnit},
     infrastructure::job_store::Job,
 };
 
@@ -59,7 +58,7 @@ impl AsrRunArtifacts {
         write_json(&self.timed_units_json, units)
     }
 
-    pub fn write_candidate_cues(&self, cues: &[TranscriptSegment]) -> Result<()> {
+    pub fn write_candidate_cues(&self, cues: &CandidateCueSet) -> Result<()> {
         write_json(&self.candidate_cues_json, cues)
     }
 
@@ -127,7 +126,13 @@ mod tests {
                 provider_confidence: None,
             }])
             .unwrap();
-        artifacts.write_candidate_cues(&[]).unwrap();
+        artifacts
+            .write_candidate_cues(&crate::application::CandidateCueSet {
+                schema_version: 1,
+                segmentation_policy: "legacy-v1".into(),
+                cues: Vec::new(),
+            })
+            .unwrap();
 
         assert!(artifacts.run_json.is_file());
         assert!(artifacts.timed_units_json.is_file());

@@ -13,6 +13,7 @@ pub mod local_retranscription_service;
 pub mod local_task_service;
 pub mod local_workspace_service;
 pub mod subtitle_font_service;
+pub mod subtitle_segmentation;
 pub mod subtitle_style_service;
 pub mod transcription_options;
 pub mod translation_options;
@@ -45,6 +46,9 @@ pub use local_workspace_service::{
 };
 pub use subtitle_font_service::{
     SubtitleFontCoverage, SubtitleFontFamily, SubtitleFontReport, SubtitleFontService,
+};
+pub use subtitle_segmentation::{
+    CandidateCue, CandidateCueSet, LEGACY_SEGMENTATION_POLICY, segment_timed_units,
 };
 pub use subtitle_style_service::{SubtitleStylePreview, SubtitleStyleService, SubtitleStyleState};
 pub use transcription_options::{TranscriptionOptions, WhisperTranscriptionConfig};

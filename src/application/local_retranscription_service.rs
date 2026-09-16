@@ -5,8 +5,11 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 
 use crate::{
-    application::{AsrInputScope, AsrRequest, AsrRun, OfflineAsrProvider},
-    domain::{TranscriptSegment, glossary, segment},
+    application::{
+        AsrInputScope, AsrRequest, AsrRun, CandidateCueSet, OfflineAsrProvider, TimedUnit,
+        segment_timed_units,
+    },
+    domain::{TranscriptSegment, glossary},
     infrastructure::{
         asr_run_store::AsrRunArtifacts,
         job_store::Job,
@@ -134,33 +137,44 @@ impl LocalRetranscriptionService {
         run.start();
         artifacts.write_run(&run)?;
         self.database.update_asr_run(&run).await?;
-        let recognition: Result<(Vec<TranscriptSegment>, Vec<crate::application::TimedUnit>)> =
-            async {
-                media::extract_wav_range(
-                    &self.ffmpeg,
-                    &job.audio_wav,
-                    &selected_wav,
-                    start_ms as u64,
-                    end_ms as u64,
-                )
+        let recognition: Result<(CandidateCueSet, Vec<TimedUnit>)> = async {
+            media::extract_wav_range(
+                &self.ffmpeg,
+                &job.audio_wav,
+                &selected_wav,
+                start_ms as u64,
+                end_ms as u64,
+            )
+            .await?;
+            let response = self
+                .asr_provider
+                .transcribe(AsrRequest {
+                    audio_path: selected_wav,
+                    output_prefix: artifacts.provider_output_prefix.clone(),
+                    scope,
+                    transcription: options.clone(),
+                })
                 .await?;
-                let response = self
-                    .asr_provider
-                    .transcribe(AsrRequest {
-                        audio_path: selected_wav,
-                        output_prefix: artifacts.provider_output_prefix.clone(),
-                        scope,
-                        transcription: options.clone(),
-                    })
-                    .await?;
-                let candidates = segment::refine(
-                    glossary::apply_to_segments(&options, response.legacy_segments)?,
-                    options.source_language,
-                );
-                Ok((candidates, response.timed_units))
+            let mut timed_units = response.timed_units;
+            for unit in &mut timed_units {
+                unit.start_ms = unit
+                    .start_ms
+                    .map(|value| value.saturating_add(start_ms as u64).max(start_ms as u64));
+                unit.end_ms = unit
+                    .end_ms
+                    .map(|value| value.saturating_add(start_ms as u64).min(end_ms as u64));
             }
-            .await;
-        let (mut candidate_segments, mut timed_units) = match recognition {
+            timed_units.retain(|unit| match (unit.start_ms, unit.end_ms) {
+                (Some(start), Some(end)) => end > start,
+                _ => true,
+            });
+            let mut cue_set = segment_timed_units(&timed_units, options.source_language)?;
+            let candidates = glossary::apply_to_segments(&options, cue_set.transcript_segments())?;
+            cue_set.replace_transcript_segments(candidates)?;
+            Ok((cue_set, timed_units))
+        }
+        .await;
+        let (cue_set, timed_units) = match recognition {
             Ok(result) => result,
             Err(error) => {
                 run.fail(format!("{error:#}"));
@@ -169,24 +183,10 @@ impl LocalRetranscriptionService {
                 return Err(error);
             }
         };
-        for candidate in &mut candidate_segments {
-            candidate.start_ms = candidate.start_ms.saturating_add(start_ms as u64);
-            candidate.end_ms = candidate.end_ms.saturating_add(start_ms as u64);
-            candidate.start_ms = candidate.start_ms.max(start_ms as u64);
-            candidate.end_ms = candidate.end_ms.min(end_ms as u64);
-        }
-        candidate_segments.retain(|candidate| candidate.end_ms > candidate.start_ms);
-        for unit in &mut timed_units {
-            unit.start_ms = unit
-                .start_ms
-                .map(|value| value.saturating_add(start_ms as u64));
-            unit.end_ms = unit
-                .end_ms
-                .map(|value| value.saturating_add(start_ms as u64));
-        }
+        let candidate_segments = cue_set.transcript_segments();
         let completion: Result<()> = async {
             artifacts.write_timed_units(&timed_units)?;
-            artifacts.write_candidate_cues(&candidate_segments)?;
+            artifacts.write_candidate_cues(&cue_set)?;
             run.succeed();
             artifacts.write_run(&run)?;
             self.database.update_asr_run(&run).await

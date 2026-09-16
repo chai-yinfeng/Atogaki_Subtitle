@@ -12,8 +12,9 @@ use crate::{
             TranslateSpec,
         },
         job_status::JobStatus,
+        segment_timed_units,
     },
-    domain::{LanguageCode, LanguagePair, glossary, segment, subtitle},
+    domain::{LanguageCode, LanguagePair, glossary, subtitle},
     infrastructure::{
         asr_run_store::AsrRunArtifacts, config::AppConfig, deepl, job_store::Job,
         local_db::LocalDatabase, media, whisper_asr::WhisperAsrProvider,
@@ -356,12 +357,11 @@ impl JobRunner {
 
         let completion: Result<Vec<crate::domain::TranscriptSegment>> = async {
             let response = response?;
-            let candidates = segment::refine(
-                glossary::apply_to_segments(options, response.legacy_segments)?,
-                options.source_language,
-            );
+            let mut cue_set = segment_timed_units(&response.timed_units, options.source_language)?;
+            let candidates = glossary::apply_to_segments(options, cue_set.transcript_segments())?;
+            cue_set.replace_transcript_segments(candidates.clone())?;
             artifacts.write_timed_units(&response.timed_units)?;
-            artifacts.write_candidate_cues(&candidates)?;
+            artifacts.write_candidate_cues(&cue_set)?;
             run.succeed();
             artifacts.write_run(&run)?;
             if let Some(database) = &self.database {
