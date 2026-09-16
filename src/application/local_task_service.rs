@@ -19,7 +19,9 @@ use crate::{
         local_glossary_service::glossary_for_task,
     },
     domain::{LanguageCode, LanguagePair},
-    infrastructure::{config::AppConfig, job_store::Job, local_db::LocalDatabase},
+    infrastructure::{
+        asr_run_store::AsrRunArtifacts, config::AppConfig, job_store::Job, local_db::LocalDatabase,
+    },
 };
 
 const DEFAULT_QUEUE_CAPACITY: usize = 8;
@@ -338,8 +340,32 @@ impl LocalTaskService {
             .database
             .as_ref()
             .ok_or_else(|| anyhow!("task recovery requires SQLite persistence"))?;
+        let records = database.list_jobs().await?;
+        let asr_error = "Atogaki 上次退出时该识别 run 尚未完成；已保留已有产物，可重新运行。";
+        for record in &records {
+            for run_record in database.list_asr_runs(&record.job_id).await? {
+                if !matches!(run_record.status.as_str(), "queued" | "running") {
+                    continue;
+                }
+                let file_result = (|| -> Result<()> {
+                    let job = Job::open(PathBuf::from(&record.storage_dir))?;
+                    let artifacts = AsrRunArtifacts::open(&job, &run_record.id)?;
+                    let mut run = artifacts.read_run()?;
+                    run.fail(asr_error);
+                    artifacts.write_run(&run)
+                })();
+                if let Err(error) = file_result {
+                    eprintln!(
+                        "[task-service] cannot recover ASR run file {}: {error:#}",
+                        run_record.id
+                    );
+                }
+            }
+        }
+        database.recover_interrupted_asr_runs(asr_error).await?;
+
         let mut recovered = 0;
-        for record in database.list_jobs().await? {
+        for record in records {
             if matches!(record.status.as_str(), "done" | "failed") {
                 continue;
             }
@@ -668,7 +694,10 @@ async fn run_worker(
     receiver: Arc<Mutex<mpsc::Receiver<QueuedTask>>>,
     database: Option<LocalDatabase>,
 ) {
-    let runner = JobRunner::new(config);
+    let mut runner = JobRunner::new(config);
+    if let Some(database) = &database {
+        runner = runner.with_database(database.clone());
+    }
 
     loop {
         let task = {

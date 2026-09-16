@@ -17,7 +17,12 @@ _最后更新：2026-09-16_
 - [x] 明确四层表示、两段式主路线、第一阶段 cue 对应和同任务独立 ASR runs；记录 [0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
 - [x] 只读盘点用户提供的原视频并读取时长，确认有 13 个原始 MP4；候选与参考策略见管线计划。尚未听审、冻结片段或建立 gold 文本。
 - [ ] P0：固定短片段和完整长节目清单、旧版结果、人工参考及未用于调参的样本。
+  - [x] 建立 Git 忽略的本地 evaluation workspace、可移植 manifest／reference schema、日语 CER／英文 WER 命令，并冻结首批媒体摘要、旧任务产物和循环问题区间。
+  - [ ] 完成约 10 分钟人工听审参考并锁定未用于调参的 holdout 文本。
 - [ ] P1：ASR provider、run／artifact／TimedUnit 与旧任务兼容迁移；保持 Whisper 当前处理行为。
+  - [x] 抽出对象安全的 `OfflineAsrProvider` 和 Whisper adapter；将 provider 配置从通用字段中拆出，同时保持旧 `recognition-options.json` 兼容。
+  - [x] 增加任务内 `AsrRun` 生命周期、SQLite migration 和 `asr-runs/<run-id>/` 产物合同；新任务首轮识别经 provider 执行并保存原始输出、`TimedUnit` 和候选 cues。
+  - [ ] 将局部重识别改成持久 run，并补齐 run 查询／采用接口和旧任务兼容验收。
 - [ ] P2：cue 来源与 revision、翻译语义分组和上下文依赖、并发编辑保护；CLI／桌面统一 provider 用例。
 - [ ] P3：由开发流程自动配置 llama.cpp／Hy-MT2 并验证质量与资源；再实现应用管理的模型／runtime 生命周期。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。

@@ -1,7 +1,10 @@
-use anyhow::{Result, anyhow};
+use std::{path::Path, sync::Arc};
+
+use anyhow::{Context, Result, anyhow};
 
 use crate::{
     application::{
+        AsrInputScope, AsrRequest, AsrRun, OfflineAsrProvider, TranscriptionOptions,
         job_manifest::JobManifest,
         job_snapshot::JobSnapshot,
         job_spec::{
@@ -11,16 +14,36 @@ use crate::{
         job_status::JobStatus,
     },
     domain::{LanguageCode, LanguagePair, glossary, segment, subtitle},
-    infrastructure::{config::AppConfig, deepl, job_store::Job, media, whisper},
+    infrastructure::{
+        asr_run_store::AsrRunArtifacts, config::AppConfig, deepl, job_store::Job,
+        local_db::LocalDatabase, media, whisper_asr::WhisperAsrProvider,
+    },
 };
 
 pub struct JobRunner {
     config: AppConfig,
+    asr_provider: Arc<dyn OfflineAsrProvider>,
+    database: Option<LocalDatabase>,
 }
 
 impl JobRunner {
     pub fn new(config: AppConfig) -> Self {
-        Self { config }
+        let asr_provider = Arc::new(WhisperAsrProvider::new(config.whisper_cli.clone()));
+        Self {
+            config,
+            asr_provider,
+            database: None,
+        }
+    }
+
+    pub fn with_database(mut self, database: LocalDatabase) -> Self {
+        self.database = Some(database);
+        self
+    }
+
+    pub fn with_asr_provider(mut self, provider: Arc<dyn OfflineAsrProvider>) -> Self {
+        self.asr_provider = provider;
+        self
     }
 
     /// Reads the durable state of a task without invoking any media tooling.
@@ -44,19 +67,10 @@ impl JobRunner {
             let wav = media::extract_wav(&self.config.ffmpeg, &spec.input, &job.audio_wav).await?;
 
             self.mark(&job, &mut manifest, JobStatus::Transcribing)?;
-            let raw = whisper::transcribe(
-                &self.config.whisper_cli,
-                &spec.transcription,
-                &wav,
-                &job.prefix,
-            )
-            .await?;
-
+            let refined = self
+                .run_initial_asr(&job, &spec.input, &wav, &spec.transcription)
+                .await?;
             self.mark(&job, &mut manifest, JobStatus::RefiningSegments)?;
-            let refined = segment::refine(
-                glossary::apply_to_segments(&spec.transcription, raw)?,
-                spec.transcription.source_language,
-            );
             job.write_segments(&refined)?;
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
@@ -96,19 +110,10 @@ impl JobRunner {
             let wav = media::extract_wav(&self.config.ffmpeg, &spec.input, &job.audio_wav).await?;
 
             self.mark(&job, &mut manifest, JobStatus::Transcribing)?;
-            let raw = whisper::transcribe(
-                &self.config.whisper_cli,
-                &spec.transcription,
-                &wav,
-                &job.prefix,
-            )
-            .await?;
-
+            let mut segments = self
+                .run_initial_asr(&job, &spec.input, &wav, &spec.transcription)
+                .await?;
             self.mark(&job, &mut manifest, JobStatus::RefiningSegments)?;
-            let mut segments = segment::refine(
-                glossary::apply_to_segments(&spec.transcription, raw)?,
-                spec.transcription.source_language,
-            );
 
             self.mark(&job, &mut manifest, JobStatus::ExportingSubtitles)?;
             subtitle::write_srt(&job.source_srt, &segments, subtitle::SubtitleTrack::Source)?;
@@ -308,6 +313,85 @@ impl JobRunner {
         Ok(())
     }
 
+    async fn run_initial_asr(
+        &self,
+        job: &Job,
+        input_media: &Path,
+        audio_path: &Path,
+        options: &TranscriptionOptions,
+    ) -> Result<Vec<crate::domain::TranscriptSegment>> {
+        let provider = self.asr_provider.status();
+        let config_snapshot = serde_json::to_value(options)
+            .context("failed to snapshot recognition configuration")?;
+        let mut run = AsrRun::new(
+            job.id(),
+            None,
+            provider.id,
+            provider.name,
+            options.whisper.model.display().to_string(),
+            input_media.to_path_buf(),
+            AsrInputScope::full(),
+            config_snapshot,
+        );
+        let artifacts = AsrRunArtifacts::create(job, &run)?;
+        if let Some(database) = &self.database {
+            database.record_asr_run(&run, &artifacts.dir).await?;
+        }
+
+        run.start();
+        artifacts.write_run(&run)?;
+        if let Some(database) = &self.database {
+            database.update_asr_run(&run).await?;
+        }
+
+        let response = self
+            .asr_provider
+            .transcribe(AsrRequest {
+                audio_path: audio_path.to_path_buf(),
+                output_prefix: artifacts.provider_output_prefix.clone(),
+                scope: AsrInputScope::full(),
+                transcription: options.clone(),
+            })
+            .await;
+
+        let completion: Result<Vec<crate::domain::TranscriptSegment>> = async {
+            let response = response?;
+            let candidates = segment::refine(
+                glossary::apply_to_segments(options, response.legacy_segments)?,
+                options.source_language,
+            );
+            artifacts.write_timed_units(&response.timed_units)?;
+            artifacts.write_candidate_cues(&candidates)?;
+            run.succeed();
+            artifacts.write_run(&run)?;
+            if let Some(database) = &self.database {
+                database.update_asr_run(&run).await?;
+            }
+            Ok(candidates)
+        }
+        .await;
+
+        match completion {
+            Ok(candidates) => Ok(candidates),
+            Err(error) => {
+                run.fail(format!("{error:#}"));
+                let file_result = artifacts.write_run(&run);
+                let database_result = if let Some(database) = &self.database {
+                    database.update_asr_run(&run).await
+                } else {
+                    Ok(())
+                };
+                if let Err(persistence_error) = file_result.and(database_result) {
+                    eprintln!(
+                        "[job] failed to persist ASR run failure {}: {persistence_error:#}",
+                        run.id
+                    );
+                }
+                Err(error)
+            }
+        }
+    }
+
     fn report(&self, status: JobStatus) {
         eprintln!("[job] {}", status.label());
     }
@@ -349,5 +433,100 @@ impl JobRunner {
                 Err(error)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, sync::Arc};
+
+    use anyhow::Result;
+
+    use crate::{
+        application::{
+            AsrFuture, AsrProviderCapabilities, AsrProviderStatus, AsrRequest, AsrResponse,
+            AsrTimingGranularity, OfflineAsrProvider, TimedUnit, TimedUnitKind, TimingSource,
+            TranscriptionOptions,
+        },
+        domain::{LanguageCode, TranscriptSegment},
+        infrastructure::{config::AppConfig, job_store::Job},
+    };
+
+    use super::JobRunner;
+
+    #[derive(Debug)]
+    struct FakeAsrProvider;
+
+    impl OfflineAsrProvider for FakeAsrProvider {
+        fn status(&self) -> AsrProviderStatus {
+            AsrProviderStatus {
+                id: "fake-asr".into(),
+                name: "Fake ASR".into(),
+                capabilities: AsrProviderCapabilities {
+                    timing_granularities: vec![AsrTimingGranularity::Word],
+                    vocabulary_biasing: false,
+                    diarization: false,
+                    streaming: false,
+                },
+            }
+        }
+
+        fn transcribe<'a>(&'a self, request: AsrRequest) -> AsrFuture<'a> {
+            Box::pin(async move {
+                let raw_output_path = request.output_prefix.with_extension("json");
+                fs::write(&raw_output_path, br#"{"provider":"fake"}"#)?;
+                Ok(AsrResponse {
+                    provider_id: "fake-asr".into(),
+                    model_identity: "fake-model".into(),
+                    raw_output_path,
+                    timed_units: vec![TimedUnit {
+                        id: "word-1".into(),
+                        text: "テスト".into(),
+                        kind: TimedUnitKind::Word,
+                        start_ms: Some(0),
+                        end_ms: Some(900),
+                        timing_source: TimingSource::Model,
+                        provider_confidence: Some(0.9),
+                    }],
+                    legacy_segments: vec![TranscriptSegment::new(0, 900, "テスト".into())],
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn completed_candidate_run_does_not_mutate_the_workspace() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-runner-test-{}", uuid::Uuid::new_v4()));
+        let job = Job::create_in(&root)?;
+        let existing = TranscriptSegment::new(0, 500, "人工编辑".into());
+        job.write_segments(std::slice::from_ref(&existing))?;
+        let input = job.dir.join("input.mp4");
+        let audio = job.dir.join("audio.wav");
+        fs::write(&input, [])?;
+        fs::write(&audio, [])?;
+        let runner = JobRunner::new(AppConfig {
+            ffmpeg: "ffmpeg".into(),
+            whisper_cli: "whisper-cli".into(),
+            deepl_auth_key: None,
+        })
+        .with_asr_provider(Arc::new(FakeAsrProvider));
+        let options = TranscriptionOptions::new("model.bin".into(), LanguageCode::Japanese);
+
+        let candidates = runner
+            .run_initial_asr(&job, &input, &audio, &options)
+            .await?;
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(job.read_segments()?[0].source_text, existing.source_text);
+        let run_dirs = fs::read_dir(&job.asr_runs_dir)?.collect::<std::io::Result<Vec<_>>>()?;
+        assert_eq!(run_dirs.len(), 1);
+        let run_dir = run_dirs[0].path();
+        assert!(run_dir.join("provider-output.json").is_file());
+        assert!(run_dir.join("timed-units.json").is_file());
+        assert!(run_dir.join("candidate-cues.json").is_file());
+
+        fs::remove_dir_all(root)?;
+        Ok(())
     }
 }

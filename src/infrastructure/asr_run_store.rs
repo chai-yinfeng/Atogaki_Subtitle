@@ -48,6 +48,13 @@ impl AsrRunArtifacts {
         write_json(&self.run_json, run)
     }
 
+    pub fn read_run(&self) -> Result<AsrRun> {
+        let data = fs::read(&self.run_json)
+            .with_context(|| format!("failed to read {}", self.run_json.display()))?;
+        serde_json::from_slice(&data)
+            .with_context(|| format!("failed to parse {}", self.run_json.display()))
+    }
+
     pub fn write_timed_units(&self, units: &[TimedUnit]) -> Result<()> {
         write_json(&self.timed_units_json, units)
     }
