@@ -1597,7 +1597,11 @@ async fn start_model_download(
 async fn model_download_states(
     state: State<'_, DesktopState>,
 ) -> Result<Vec<ModelDownloadState>, String> {
-    Ok(state.model_download_service.states().await)
+    state
+        .model_download_service
+        .states()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1620,6 +1624,18 @@ async fn uninstall_model(
     state
         .model_download_service
         .uninstall(&model_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn select_model(
+    state: State<'_, DesktopState>,
+    model_id: String,
+) -> Result<ModelDownloadState, String> {
+    state
+        .model_download_service
+        .select(&model_id)
         .await
         .map_err(|error| error.to_string())
 }
@@ -2164,6 +2180,7 @@ fn main() {
             save_learning_selection,
             save_playback_position,
             save_subtitle_styles,
+            select_model,
             submit_transcription,
             start_model_download,
             start_dictionary_download,

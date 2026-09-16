@@ -58,4 +58,25 @@
 
 本地 ignored workspace 已生成 1.8B、7B 与历史云端 previous-output 的逐 cue 匿名评审文件和独立 answer key。上述观察用于定位风险，没有冒充盲评结果。人工评分完成前，1.8B 与 7B 仍都保持候选，应用设置不得标记任何一档为推荐。
 
+## 桌面端本地验收状态
+
+源码运行的桌面端已经接入受管 Hy-MT2 provider。`llama-server` 只在第一次本地翻译时分配 loopback 端口并启动，使用进程内随机 API key；App 退出或 provider 被替换时回收子进程。模型目录支持下载、取消、断点续传、SHA-256 校验、卸载，并允许在已安装的 1.8B／7B 之间显式选择当前模型。
+
+本机使用固定 1.8B 模型执行了 ignored 集成测试：真实启动 `src-tauri/binaries/llama-server-aarch64-apple-darwin`、完成一组结构化翻译并确认 server 退出。该二进制和模型都在 Git 忽略目录中，只供当前源码验收；`tauri.conf.json` 尚未把 runtime 纳入发行物。
+
+已有验证缓存时，可避免再次下载数 GiB 模型，用隔离数据目录进行真实窗口测试：
+
+```console
+test_root="$PWD/local-artifacts/desktop-hy-mt2-test"
+mkdir -p "$test_root/models"
+ln -sfn "$PWD/local-artifacts/hy-mt2/models/Hy-MT2-1.8B-Q4_K_M.gguf" \
+  "$test_root/models/Hy-MT2-1.8B-Q4_K_M.gguf"
+npm --prefix ui run build
+ATOGAKI_DATA_DIR="$test_root" \
+ATOGAKI_LLAMA_SERVER="$PWD/src-tauri/binaries/llama-server-aarch64-apple-darwin" \
+  cargo run --manifest-path src-tauri/Cargo.toml
+```
+
+设置页会把该文件显示为“已下载”；点击“设为当前”，选择“Hy-MT2（本地）”并保存后即可测试。真实窗口验收、人工盲评和资源竞争尚未完成，因此 P3 停在本地候选检查点，不推进 P4。
+
 官方资料：[Hy-MT2 模型卡](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF)、[llama.cpp server API](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)、[STQ PR #22836](https://github.com/ggml-org/llama.cpp/pull/22836)。

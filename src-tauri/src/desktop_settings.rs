@@ -861,6 +861,16 @@ impl DesktopSettingsService {
         Ok(())
     }
 
+    pub async fn downloaded_model_path(&self, kind: &str) -> Result<Option<PathBuf>> {
+        let key = match kind {
+            "whisper" => WHISPER_MODEL_PATH,
+            "vad" => VAD_MODEL_PATH,
+            "hy-mt2" => HY_MT2_MODEL_PATH,
+            _ => bail!("unsupported model kind: {kind}"),
+        };
+        Ok(self.database.get_setting(key).await?.map(PathBuf::from))
+    }
+
     pub async fn clear_downloaded_model(&self, kind: &str, path: &Path) -> Result<()> {
         let key = match kind {
             "whisper" => WHISPER_MODEL_PATH,

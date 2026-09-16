@@ -340,6 +340,7 @@ type ModelDownloadState = {
   path: string | null;
   error: string | null;
   source: string | null;
+  active: boolean;
 };
 
 type DictionaryCatalogItem = {
@@ -1632,7 +1633,7 @@ function renderModelCatalog(): void {
       : null;
     const source = download?.source ? ` · ${download.source}` : "";
     const state = download?.status === "done"
-      ? `已下载并设为默认${source}`
+      ? `${download.active ? "已下载 · 当前使用" : "已下载"}${source}`
       : download?.status === "failed"
         ? `失败：${download.error ?? "未知错误"}${source}`
         : download?.status === "cancelled"
@@ -1642,19 +1643,19 @@ function renderModelCatalog(): void {
             : download?.status === "downloading"
               ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}${source}`
               : download?.status === "queued" ? `等待下载${source}` : "";
-    const action = download?.status === "done" ? "uninstall"
-      : download && ["queued", "downloading", "cancelling"].includes(download.status) ? "cancel"
-        : "download";
-    const buttonLabel = action === "uninstall" ? "卸载"
-      : action === "cancel" ? download?.status === "cancelling" ? "正在取消" : "取消"
-        : download?.status === "failed" || download?.status === "cancelled" ? "继续下载" : "下载";
+    const action = download && ["queued", "downloading", "cancelling"].includes(download.status) ? "cancel" : "download";
+    const buttonLabel = action === "cancel" ? download?.status === "cancelling" ? "正在取消" : "取消"
+      : download?.status === "failed" || download?.status === "cancelled" ? "继续下载" : "下载";
     const disabled = action === "cancel"
       ? download?.status === "cancelling"
       : Boolean(activeDownload);
+    const actions = download?.status === "done"
+      ? `<div>${download.active ? "" : `<button type="button" data-model-action="select" data-model-id="${escapeHtml(model.id)}">设为当前</button>`}<button type="button" class="secondary" data-model-action="uninstall" data-model-id="${escapeHtml(model.id)}">卸载</button></div>`
+      : `<button type="button" class="secondary" data-model-action="${action}" data-model-id="${escapeHtml(model.id)}" ${disabled ? "disabled" : ""}>${buttonLabel}</button>`;
     return `<article class="model-card">
       <div><strong>${escapeHtml(model.name)}</strong><span>${escapeHtml(model.sizeLabel)} · ${escapeHtml(model.recommendedFor)}</span></div>
       ${progress === null ? "" : `<progress max="1" value="${progress}"></progress>`}
-      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span><button type="button" class="secondary" data-model-action="${action}" data-model-id="${escapeHtml(model.id)}" ${disabled ? "disabled" : ""}>${buttonLabel}</button></div>
+      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span>${actions}</div>
     </article>`;
   }).join("");
   modelCatalogHost.querySelectorAll<HTMLButtonElement>("[data-model-action]").forEach((button) => {
@@ -1662,6 +1663,7 @@ function renderModelCatalog(): void {
       const modelId = button.dataset.modelId ?? "";
       if (button.dataset.modelAction === "cancel") void cancelModelDownload(modelId);
       else if (button.dataset.modelAction === "uninstall") void uninstallModel(modelId);
+      else if (button.dataset.modelAction === "select") void selectModel(modelId);
       else void startModelDownload(modelId);
     });
   });
@@ -1984,6 +1986,18 @@ async function uninstallModel(modelId: string): Promise<void> {
     if (modelDownloadMessage) modelDownloadMessage.textContent = "模型及其未完成下载已删除。";
   } catch (error) {
     if (modelDownloadMessage) modelDownloadMessage.textContent = `无法卸载模型：${String(error)}`;
+  }
+}
+
+async function selectModel(modelId: string): Promise<void> {
+  if (!modelId) return;
+  try {
+    await invoke<ModelDownloadState>("select_model", { modelId });
+    modelDownloads = await invoke<ModelDownloadState[]>("model_download_states");
+    await loadDesktopSettings(false);
+    if (modelDownloadMessage) modelDownloadMessage.textContent = "模型已校验并设为当前使用。";
+  } catch (error) {
+    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法选择模型：${String(error)}`;
   }
 }
 

@@ -364,6 +364,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .model-card span.warning { color: #a54632; }
 .model-card progress { width: 100%; height: 7px; accent-color: #2e5d52; }
 .model-card-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.model-card-action > div { display: flex; gap: 6px; }
 .model-card-action button { align-self: auto; padding: 7px 10px; font-size: 11px; white-space: nowrap; }
 .settings-subheading { color: #30332d; font-size: 13px; }
 .dictionary-credentials { display: grid; gap: 9px; }

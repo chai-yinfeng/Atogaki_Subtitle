@@ -47,6 +47,7 @@ pub struct ModelDownloadState {
     pub path: Option<String>,
     pub error: Option<String>,
     pub source: Option<String>,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,12 +95,18 @@ impl ModelDownloadService {
         model_catalog().to_vec()
     }
 
-    pub async fn states(&self) -> Vec<ModelDownloadState> {
+    pub async fn states(&self) -> Result<Vec<ModelDownloadState>> {
         let mut states = self.states.lock().await.clone();
         for model in model_catalog() {
             let path = self.models_directory.join(model.file_name);
+            let active = self
+                .settings
+                .downloaded_model_path(model.kind)
+                .await?
+                .as_deref()
+                == Some(path.as_path());
             if path.is_file() {
-                states
+                let state = states
                     .entry(model.id.to_string())
                     .or_insert_with(|| ModelDownloadState {
                         model_id: model.id.to_string(),
@@ -111,12 +118,14 @@ impl ModelDownloadService {
                         path: Some(path.display().to_string()),
                         error: None,
                         source: Some("本地已安装".to_string()),
+                        active,
                     });
+                state.active = active;
             }
         }
         let mut states = states.into_values().collect::<Vec<_>>();
         states.sort_by(|left, right| left.model_id.cmp(&right.model_id));
-        states
+        Ok(states)
     }
 
     pub async fn start(&self, model_id: &str) -> Result<ModelDownloadState> {
@@ -149,6 +158,7 @@ impl ModelDownloadService {
             path: None,
             error: None,
             source: None,
+            active: false,
         };
         states.insert(model.id.to_string(), state.clone());
         drop(states);
@@ -222,6 +232,32 @@ impl ModelDownloadService {
         Ok(())
     }
 
+    pub async fn select(&self, model_id: &str) -> Result<ModelDownloadState> {
+        let model = model_catalog()
+            .iter()
+            .find(|model| model.id == model_id)
+            .ok_or_else(|| anyhow!("unknown model: {model_id}"))?;
+        let output_path = self.models_directory.join(model.file_name);
+        if !output_path.is_file() {
+            bail!("model is not installed: {}", output_path.display());
+        }
+        let actual = sha256_file(&output_path).await?;
+        if actual != model.sha256 {
+            bail!(
+                "模型 SHA-256 校验失败，期望 {}，实际 {actual}",
+                model.sha256
+            );
+        }
+        self.settings
+            .set_downloaded_model(model.kind, &output_path)
+            .await?;
+        self.states()
+            .await?
+            .into_iter()
+            .find(|state| state.model_id == model_id)
+            .ok_or_else(|| anyhow!("selected model state disappeared: {model_id}"))
+    }
+
     async fn download(&self, model: ModelCatalogItem) -> Result<()> {
         let output_path = self.models_directory.join(model.file_name);
         if output_path.is_file() {
@@ -233,6 +269,7 @@ impl ModelDownloadService {
                     state.status = "done".to_string();
                     state.path = Some(output_path.display().to_string());
                     state.source = Some("本地已校验文件".to_string());
+                    state.active = true;
                 })
                 .await;
                 return Ok(());
@@ -401,6 +438,7 @@ impl ModelDownloadService {
             state.status = "done".to_string();
             state.downloaded_bytes = downloaded_bytes;
             state.path = Some(output_path.display().to_string());
+            state.active = true;
         })
         .await;
         Ok(())
@@ -799,13 +837,14 @@ mod tests {
             .unwrap();
         let service = ModelDownloadService::new(models, settings).unwrap();
 
-        assert!(
-            service
-                .states()
-                .await
-                .iter()
-                .any(|state| state.model_id == "hy-mt2-1.8b-q4-k-m")
-        );
+        let installed = service
+            .states()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|state| state.model_id == "hy-mt2-1.8b-q4-k-m")
+            .unwrap();
+        assert!(installed.active);
         service
             .uninstall("hy-mt2-1.8b-q4-k-m")
             .await
@@ -819,7 +858,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(service.states().await.is_empty());
+        assert!(service.states().await.unwrap().is_empty());
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
