@@ -70,6 +70,24 @@ impl LocalRetranscriptionService {
         start_ms: i64,
         end_ms: i64,
     ) -> Result<LocalRetranscriptionPreview> {
+        self.preview_with_provider(
+            job_id,
+            start_ms,
+            end_ms,
+            Arc::clone(&self.asr_provider),
+            false,
+        )
+        .await
+    }
+
+    pub async fn preview_with_provider(
+        &self,
+        job_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+        asr_provider: Arc<dyn AsrProvider>,
+        cloud_audio_upload_authorized: bool,
+    ) -> Result<LocalRetranscriptionPreview> {
         if start_ms < 0 || end_ms <= start_ms {
             return Err(anyhow!("selected range end must be after its start"));
         }
@@ -107,21 +125,37 @@ impl LocalRetranscriptionService {
             .into_iter()
             .find(|run| run.status == "succeeded")
             .map(|run| run.id);
-        let provider = self.asr_provider.status();
+        let provider = asr_provider.status();
+        let model_identity = if provider.id == "whisper.cpp" {
+            options.whisper.model.display().to_string()
+        } else {
+            provider.name.clone()
+        };
         let scope = AsrInputScope::selected_range(start_ms as u64, end_ms as u64)?;
+        let config_snapshot = if provider.id == "gemini-transcribe" {
+            serde_json::json!({
+                "language": options.source_language,
+                "mode": "verbatim",
+                "word_timestamps": true,
+                "speaker_diarization": false,
+                "cloud_audio_upload_authorized": cloud_audio_upload_authorized,
+            })
+        } else {
+            serde_json::to_value(&options).context("failed to snapshot recognition options")?
+        };
         let mut run = AsrRun::new(
             job_id,
             parent_run_id,
             provider.id,
             provider.name,
-            options.whisper.model.display().to_string(),
+            model_identity,
             job_record
                 .input_path
                 .as_deref()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| job.audio_wav.clone()),
             scope.clone(),
-            serde_json::to_value(&options).context("failed to snapshot recognition options")?,
+            config_snapshot,
         );
         let artifacts = AsrRunArtifacts::create(&job, &run)?;
         self.database.record_asr_run(&run, &artifacts.dir).await?;
@@ -146,13 +180,12 @@ impl LocalRetranscriptionService {
                 end_ms as u64,
             )
             .await?;
-            let response = self
-                .asr_provider
+            let response = asr_provider
                 .transcribe(AsrRequest {
                     audio_path: selected_wav,
                     output_prefix: artifacts.provider_output_prefix.clone(),
                     scope,
-                    cloud_audio_upload_authorized: false,
+                    cloud_audio_upload_authorized,
                     transcription: options.clone(),
                 })
                 .await?;

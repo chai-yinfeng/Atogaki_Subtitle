@@ -49,8 +49,9 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::{
     desktop_settings::{
-        DesktopSettings, DesktopSettingsService, DictionaryCredentialStatus,
-        SaveDesktopSettingsRequest, SaveDictionaryCredentialRequest, TranslationCredentialCheck,
+        AsrCredentialStatus, DesktopSettings, DesktopSettingsService, DictionaryCredentialStatus,
+        SaveAsrCredentialRequest, SaveDesktopSettingsRequest, SaveDictionaryCredentialRequest,
+        TranslationCredentialCheck,
     },
     dictionary_download::{
         DictionaryCatalogItem, DictionaryDownloadService, DictionaryDownloadState,
@@ -502,6 +503,14 @@ struct PreviewRetranscriptionRequest {
     job_id: String,
     start_ms: i64,
     end_ms: i64,
+    #[serde(default = "default_whisper_provider")]
+    provider_id: String,
+    #[serde(default)]
+    authorize_cloud_audio_upload: bool,
+}
+
+fn default_whisper_provider() -> String {
+    "whisper.cpp".into()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1208,11 +1217,34 @@ async fn preview_retranscription(
     state: State<'_, DesktopState>,
     request: PreviewRetranscriptionRequest,
 ) -> Result<LocalRetranscriptionPreview, String> {
-    state
-        .retranscription_service
-        .preview(&request.job_id, request.start_ms, request.end_ms)
-        .await
-        .map_err(|error| format!("{error:#}"))
+    let provider = match request.provider_id.as_str() {
+        "whisper.cpp" => None,
+        "gemini-transcribe" => Some(Arc::new(
+            state
+                .settings_service
+                .gemini_asr_provider()
+                .map_err(|error| format!("{error:#}"))?,
+        ) as Arc<dyn atogaki_subtitle::application::AsrProvider>),
+        provider => return Err(format!("unsupported ASR provider: {provider}")),
+    };
+    if let Some(provider) = provider {
+        state
+            .retranscription_service
+            .preview_with_provider(
+                &request.job_id,
+                request.start_ms,
+                request.end_ms,
+                provider,
+                request.authorize_cloud_audio_upload,
+            )
+            .await
+    } else {
+        state
+            .retranscription_service
+            .preview(&request.job_id, request.start_ms, request.end_ms)
+            .await
+    }
+    .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -1508,6 +1540,40 @@ async fn check_translation_api_key(
     state
         .settings_service
         .check_translation_api_key(&provider_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn asr_credential_status(
+    state: State<'_, DesktopState>,
+) -> Result<AsrCredentialStatus, String> {
+    state
+        .settings_service
+        .asr_credential_status()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_asr_credential(
+    state: State<'_, DesktopState>,
+    request: SaveAsrCredentialRequest,
+) -> Result<AsrCredentialStatus, String> {
+    state
+        .settings_service
+        .save_asr_credential(request)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn check_asr_credential(
+    state: State<'_, DesktopState>,
+) -> Result<AsrCredentialStatus, String> {
+    state
+        .settings_service
+        .check_asr_credential()
         .await
         .map_err(|error| error.to_string())
 }
@@ -2135,7 +2201,9 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            asr_credential_status,
             cancel_model_download,
+            check_asr_credential,
             check_dictionary_credential,
             check_translation_api_key,
             data_directory,
@@ -2187,6 +2255,7 @@ fn main() {
             reorder_jobs,
             retry_job,
             save_download_network_settings,
+            save_asr_credential,
             save_dictionary_credential,
             save_desktop_settings,
             save_glossary,

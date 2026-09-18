@@ -14,6 +14,7 @@ use atogaki_subtitle::{
     infrastructure::{
         config::desktop_llama_server_path,
         deepl::DeepLTranslationProvider,
+        gemini_asr::{GeminiAsrConfig, GeminiAsrProvider},
         local_llama::{LocalLlamaConfig, LocalLlamaTranslationProvider},
         local_db::LocalDatabase,
         network::{NetworkClientConfig, normalize_https_endpoint},
@@ -36,6 +37,8 @@ const DEEPSEEK_KEY_SAVED: &str = "translation.deepseek_key_saved";
 const OPENAI_COMPATIBLE_KEY_SAVED: &str = "translation.openai_compatible_key_saved";
 const MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED: &str = "dictionary.merriam_webster_key_saved";
 const MERRIAM_WEBSTER_REFERENCE: &str = "dictionary.merriam_webster_reference";
+const GEMINI_ASR_KEY_SAVED: &str = "recognition.gemini_key_saved";
+const GEMINI_ASR_CREDENTIAL_ID: &str = "asr.gemini-transcribe";
 const DEEPSEEK_MODEL: &str = "translation.deepseek_model";
 const OPENAI_BASE_URL: &str = "translation.openai_base_url";
 const OPENAI_MODEL: &str = "translation.openai_model";
@@ -101,6 +104,23 @@ pub struct DictionaryCredentialStatus {
 #[serde(rename_all = "camelCase")]
 pub struct SaveDictionaryCredentialRequest {
     pub provider_id: String,
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub clear: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrCredentialStatus {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub configured: bool,
+    pub credential_store: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAsrCredentialRequest {
     pub api_key: Option<String>,
     #[serde(default)]
     pub clear: bool,
@@ -310,6 +330,75 @@ impl TranslationProvider for DeferredOpenAiCompatibleTranslationProvider {
 }
 
 impl DesktopSettingsService {
+    pub async fn asr_credential_status(&self) -> Result<AsrCredentialStatus> {
+        Ok(AsrCredentialStatus {
+            provider_id: "gemini-transcribe".into(),
+            provider_name: "Gemini 3.5 Transcribe".into(),
+            configured: self
+                .database
+                .get_setting(GEMINI_ASR_KEY_SAVED)
+                .await?
+                .as_deref()
+                == Some("true"),
+            credential_store: self.credentials.backend_name().to_string(),
+        })
+    }
+
+    pub async fn save_asr_credential(
+        &self,
+        request: SaveAsrCredentialRequest,
+    ) -> Result<AsrCredentialStatus> {
+        let secret = normalized_secret(request.api_key);
+        if request.clear && secret.is_some() {
+            bail!("cannot save and clear the Gemini credential at the same time");
+        }
+        if request.clear {
+            self.credentials.delete(GEMINI_ASR_CREDENTIAL_ID)?;
+            self.replace_cached_provider_key(GEMINI_ASR_CREDENTIAL_ID, None, None);
+            self.database.delete_setting(GEMINI_ASR_KEY_SAVED).await?;
+        } else if let Some(secret) = secret {
+            self.credentials.set(GEMINI_ASR_CREDENTIAL_ID, &secret)?;
+            self.replace_cached_provider_key(
+                GEMINI_ASR_CREDENTIAL_ID,
+                Some(secret),
+                None,
+            );
+            self.database.set_setting(GEMINI_ASR_KEY_SAVED, "true").await?;
+        } else {
+            bail!("Gemini API key cannot be empty");
+        }
+        self.asr_credential_status().await
+    }
+
+    pub async fn check_asr_credential(&self) -> Result<AsrCredentialStatus> {
+        let configured = normalized_secret(self.credentials.get(GEMINI_ASR_CREDENTIAL_ID)?).is_some();
+        if configured {
+            self.database.set_setting(GEMINI_ASR_KEY_SAVED, "true").await?;
+        } else {
+            self.database.delete_setting(GEMINI_ASR_KEY_SAVED).await?;
+        }
+        Ok(AsrCredentialStatus {
+            provider_id: "gemini-transcribe".into(),
+            provider_name: "Gemini 3.5 Transcribe".into(),
+            configured,
+            credential_store: self.credentials.backend_name().to_string(),
+        })
+    }
+
+    pub fn gemini_asr_provider(&self) -> Result<GeminiAsrProvider> {
+        let (secret, error) = cached_provider_key(
+            GEMINI_ASR_CREDENTIAL_ID,
+            self.credentials.as_ref(),
+            self.credential_cache.as_ref(),
+        );
+        if let Some(error) = error {
+            bail!("无法读取 Gemini API Key：{error}");
+        }
+        GeminiAsrProvider::new(GeminiAsrConfig::new(
+            secret.ok_or_else(|| anyhow!("请先在设置中配置 Gemini API Key。"))?,
+        ))
+    }
+
     pub fn new(
         database: LocalDatabase,
         provider: MutableTranslationProvider,

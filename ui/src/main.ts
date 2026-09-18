@@ -322,6 +322,13 @@ type TranslationCredentialCheck = {
   credentialStore: string;
 };
 
+type AsrCredentialStatus = {
+  providerId: "gemini-transcribe";
+  providerName: string;
+  configured: boolean;
+  credentialStore: string;
+};
+
 type ModelCatalogItem = {
   id: string;
   kind: "whisper" | "vad" | "hy-mt2";
@@ -703,6 +710,8 @@ app.innerHTML = `
               <div><p class="eyebrow">RECOGNIZE SELECTED RANGE</p><h4 id="retranscription-heading">局部重新识别</h4><p>只识别明确填写的范围，并隔离前文识别上下文。生成候选后不会自动覆盖字幕。</p></div>
               <label>开始<input id="retranscription-start" inputmode="decimal" placeholder="00:49:00.000" /></label>
               <label>结束<input id="retranscription-end" inputmode="decimal" placeholder="00:55:00.000" /></label>
+              <label>识别 provider<select id="retranscription-provider"><option value="whisper.cpp">Whisper.cpp（本地）</option><option value="gemini-transcribe">Gemini 3.5 Transcribe（云端）</option></select></label>
+              <label id="gemini-upload-consent" class="clear-secret hidden"><input id="authorize-gemini-upload" type="checkbox" /><span>允许将这次所选范围的音频上传给 Google；免费层数据可能用于改进产品</span></label>
               <div class="retranscription-actions"><button id="retranscription-use-window" type="button" class="secondary">使用当前可视范围</button><button id="retranscription-expand-segments" type="button" class="secondary">扩展到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
               <p id="retranscription-message" class="media-message">范围边界不能切穿已有字幕块；需要时请显式扩展。</p>
             </div>
@@ -1045,7 +1054,14 @@ app.innerHTML = `
           <p id="model-download-message" class="settings-message" role="status"></p>
         </section>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>3. 翻译 provider（可选）</strong><span>Hy-MT2 完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
+          <div class="settings-section-heading"><div><strong>3. 云端 ASR（可选）</strong><span>Gemini Key 只存入系统凭据库。配置 Key 不会授权上传；每次运行仍需单独确认音频范围。</span></div><span id="asr-credential-store-label"></span></div>
+          <label>Gemini API Key<input id="settings-gemini-api-key" type="password" autocomplete="off" placeholder="从 Google AI Studio 创建；保存后立即清空" /></label>
+          <div class="credential-check-row"><button id="save-gemini-api-key" type="button">保存 Key</button><button id="check-gemini-api-key" type="button" class="secondary">检查</button><button id="clear-gemini-api-key" type="button" class="secondary">删除</button></div>
+          <p id="gemini-api-key-status" class="settings-message">尚未读取配置。</p>
+          <p class="settings-message">Atogaki 上传提取后的 WAV，并在转录请求完成后调用 Files API 删除上传文件。免费层价格为 $0，但存在项目级 rate limits，且免费层数据会用于改进 Google 产品。</p>
+        </section>
+        <section class="settings-section">
+          <div class="settings-section-heading"><div><strong>4. 翻译 provider（可选）</strong><span>Hy-MT2 完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
           <label>翻译 provider
             <select id="settings-provider">
               <option value="hy-mt2-local">Hy-MT2（本地实验）</option>
@@ -1074,7 +1090,7 @@ app.innerHTML = `
           <p id="api-key-status" class="settings-message"></p>
         </section>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>4. 学习词典</strong><span>离线包由你明确点击后下载到正式应用数据目录；商业词典的 Key 分来源保存。</span></div><span id="dictionary-directory"></span></div>
+          <div class="settings-section-heading"><div><strong>5. 学习词典</strong><span>离线包由你明确点击后下载到正式应用数据目录；商业词典的 Key 分来源保存。</span></div><span id="dictionary-directory"></span></div>
           <div>
             <strong class="settings-subheading">离线词典包</strong>
             <p class="settings-message">JMdict 与 Tomoshi 用于日语；ECDICT 基础数据用于英语。ECDICT 属于社区汇总数据，下载会复用上方代理设置并校验固定版本摘要。</p>
@@ -1143,6 +1159,8 @@ const karaokeJoinSegmentButton = document.querySelector<HTMLButtonElement>("#kar
 const karaokeTimingMessage = document.querySelector<HTMLParagraphElement>("#karaoke-timing-message");
 const retranscriptionStartInput = document.querySelector<HTMLInputElement>("#retranscription-start");
 const retranscriptionEndInput = document.querySelector<HTMLInputElement>("#retranscription-end");
+const retranscriptionProvider = document.querySelector<HTMLSelectElement>("#retranscription-provider");
+const authorizeGeminiUpload = document.querySelector<HTMLInputElement>("#authorize-gemini-upload");
 const retranscriptionUseWindowButton = document.querySelector<HTMLButtonElement>("#retranscription-use-window");
 const retranscriptionExpandSegmentsButton = document.querySelector<HTMLButtonElement>("#retranscription-expand-segments");
 const previewRetranscriptionButton = document.querySelector<HTMLButtonElement>("#preview-retranscription");
@@ -1289,6 +1307,12 @@ const checkApiKeyButton = document.querySelector<HTMLButtonElement>("#check-api-
 const settingsMessage = document.querySelector<HTMLSpanElement>("#settings-message");
 const apiKeyStatus = document.querySelector<HTMLParagraphElement>("#api-key-status");
 const credentialStoreLabel = document.querySelector<HTMLSpanElement>("#credential-store-label");
+const asrCredentialStoreLabel = document.querySelector<HTMLSpanElement>("#asr-credential-store-label");
+const settingsGeminiApiKey = document.querySelector<HTMLInputElement>("#settings-gemini-api-key");
+const saveGeminiApiKeyButton = document.querySelector<HTMLButtonElement>("#save-gemini-api-key");
+const checkGeminiApiKeyButton = document.querySelector<HTMLButtonElement>("#check-gemini-api-key");
+const clearGeminiApiKeyButton = document.querySelector<HTMLButtonElement>("#clear-gemini-api-key");
+const geminiApiKeyStatus = document.querySelector<HTMLParagraphElement>("#gemini-api-key-status");
 const modelCatalogHost = document.querySelector<HTMLDivElement>("#model-catalog");
 const modelDownloadMessage = document.querySelector<HTMLParagraphElement>("#model-download-message");
 const modelsDirectory = document.querySelector<HTMLSpanElement>("#models-directory");
@@ -1737,6 +1761,56 @@ async function loadDictionarySettings(): Promise<void> {
   }
 }
 
+function renderAsrCredentialStatus(status: AsrCredentialStatus): void {
+  if (asrCredentialStoreLabel) asrCredentialStoreLabel.textContent = status.credentialStore;
+  if (geminiApiKeyStatus) {
+    geminiApiKeyStatus.textContent = status.configured
+      ? `Gemini Key 已保存至 ${status.credentialStore}；内容不会回显。`
+      : `${status.credentialStore} 中尚未配置 Gemini Key。`;
+    geminiApiKeyStatus.classList.toggle("warning", !status.configured);
+  }
+  if (settingsGeminiApiKey) settingsGeminiApiKey.value = "";
+}
+
+async function loadAsrCredentialStatus(): Promise<void> {
+  try {
+    renderAsrCredentialStatus(await invoke<AsrCredentialStatus>("asr_credential_status"));
+  } catch (error) {
+    if (geminiApiKeyStatus) geminiApiKeyStatus.textContent = `无法读取 Gemini 配置：${String(error)}`;
+  }
+}
+
+async function saveGeminiCredential(clear: boolean): Promise<void> {
+  if (!settingsGeminiApiKey || !geminiApiKeyStatus) return;
+  const apiKey = settingsGeminiApiKey.value.trim();
+  if (!clear && !apiKey) {
+    geminiApiKeyStatus.textContent = "请输入 Gemini API Key。";
+    geminiApiKeyStatus.classList.add("warning");
+    return;
+  }
+  geminiApiKeyStatus.textContent = clear ? "正在删除 Gemini Key…" : "正在保存 Gemini Key…";
+  try {
+    const status = await invoke<AsrCredentialStatus>("save_asr_credential", {
+      request: { apiKey: clear ? null : apiKey, clear },
+    });
+    renderAsrCredentialStatus(status);
+  } catch (error) {
+    geminiApiKeyStatus.textContent = `操作失败：${String(error)}`;
+    geminiApiKeyStatus.classList.add("warning");
+  }
+}
+
+async function checkGeminiCredential(): Promise<void> {
+  if (!geminiApiKeyStatus) return;
+  geminiApiKeyStatus.textContent = `正在检查系统凭据；${credentialCheckHint}…`;
+  try {
+    renderAsrCredentialStatus(await invoke<AsrCredentialStatus>("check_asr_credential"));
+  } catch (error) {
+    geminiApiKeyStatus.textContent = `检查失败：${String(error)}`;
+    geminiApiKeyStatus.classList.add("warning");
+  }
+}
+
 async function startDictionaryDownload(dictionaryId: string): Promise<void> {
   if (!dictionaryId || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return;
   if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = "正在保存当前网络配置并获取词典发布信息…";
@@ -1830,7 +1904,7 @@ async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
     availableModels = catalog;
     modelDownloads = downloads;
     renderDesktopSettings(settings);
-    await loadDictionarySettings();
+    await Promise.all([loadDictionarySettings(), loadAsrCredentialStatus()]);
     if (openWhenNeeded && settings.needsOnboarding && !settingsDialog?.open) settingsDialog?.showModal();
   } catch (error) {
     if (settingsMessage) settingsMessage.textContent = `无法读取启动配置：${String(error)}`;
@@ -3332,15 +3406,25 @@ async function previewSelectedRange(): Promise<void> {
   }
   const range = retranscriptionRange();
   if (!range) return;
+  const providerId = retranscriptionProvider?.value ?? "whisper.cpp";
+  const authorizeCloudAudioUpload = authorizeGeminiUpload?.checked ?? false;
+  if (providerId === "gemini-transcribe" && !authorizeCloudAudioUpload) {
+    setRetranscriptionMessage("使用 Gemini 前，请确认只上传当前所选范围并勾选音频上传授权。", true);
+    return;
+  }
   retranscriptionBusy = true;
   if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = true;
-  setRetranscriptionMessage("正在提取所选音频并用当前任务的模型和词表重新识别…");
+  setRetranscriptionMessage(providerId === "gemini-transcribe"
+    ? "正在提取所选范围、上传至 Gemini 并请求 word timestamps…"
+    : "正在提取所选音频并用当前任务的模型和词表重新识别…");
   try {
     const preview = await invoke<RetranscriptionPreview>("preview_retranscription", {
       request: {
         jobId: activeDetail.job.job_id,
         startMs: range.startMs,
         endMs: range.endMs,
+        providerId,
+        authorizeCloudAudioUpload,
       },
     });
     if (!activeDetail || preview.job_id !== activeDetail.job.job_id) return;
@@ -6291,10 +6375,18 @@ karaokeCutSegmentButton?.addEventListener("click", () => void cutKaraokeSegmentA
 karaokeJoinSegmentButton?.addEventListener("click", () => void joinKaraokeSegmentWithNext());
 retranscriptionUseWindowButton?.addEventListener("click", useVisibleWindowForRetranscription);
 retranscriptionExpandSegmentsButton?.addEventListener("click", expandRetranscriptionRangeToSegments);
+retranscriptionProvider?.addEventListener("change", () => {
+  const cloud = retranscriptionProvider.value === "gemini-transcribe";
+  document.querySelector<HTMLElement>("#gemini-upload-consent")?.classList.toggle("hidden", !cloud);
+  if (!cloud && authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
+});
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
 document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());
 document.querySelector<HTMLButtonElement>("#cancel-retranscription")?.addEventListener("click", () => retranscriptionDialog?.close());
 confirmRetranscriptionButton?.addEventListener("click", () => void confirmSelectedRangeReplacement());
+saveGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(false));
+clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(true));
+checkGeminiApiKeyButton?.addEventListener("click", () => void checkGeminiCredential());
 karaokeCurrentSource?.addEventListener("input", markKaraokeTextDirty);
 karaokeCurrentTranslation?.addEventListener("input", markKaraokeTextDirty);
 karaokeSaveTextButton?.addEventListener("click", () => void saveKaraokeTextDraft());

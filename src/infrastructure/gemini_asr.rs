@@ -17,7 +17,7 @@ use crate::{
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 const MODEL: &str = "gemini-3.5-transcribe";
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GeminiAsrConfig {
     pub api_key: String,
     pub word_timestamps: bool,
@@ -36,10 +36,22 @@ impl GeminiAsrConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GeminiAsrProvider {
     client: Client,
     config: GeminiAsrConfig,
+}
+
+impl std::fmt::Debug for GeminiAsrProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GeminiAsrProvider")
+            .field("model", &MODEL)
+            .field("word_timestamps", &self.config.word_timestamps)
+            .field("speaker_diarization", &self.config.speaker_diarization)
+            .field("configured", &true)
+            .finish()
+    }
 }
 
 impl GeminiAsrProvider {
