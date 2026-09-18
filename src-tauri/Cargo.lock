@@ -279,6 +279,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tokio",
  "urlencoding",
+ "uuid",
  "zstd",
 ]
 

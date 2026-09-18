@@ -329,6 +329,19 @@ type AsrCredentialStatus = {
   credentialStore: string;
 };
 
+type AsrQualitySignal = {
+  id: string;
+  job_id: string;
+  run_id: string;
+  signal_kind: "repeated_loop" | "boundary_repetition" | "abnormal_speech_rate" | "speech_during_silence" | "manual_concern";
+  severity: "info" | "warning" | "critical";
+  start_ms: number | null;
+  end_ms: number | null;
+  message: string;
+  latest_decision: "confirmed_problem" | "false_positive" | "resolved" | null;
+  latest_decision_note: string | null;
+};
+
 type ModelCatalogItem = {
   id: string;
   kind: "whisper" | "vad" | "hy-mt2";
@@ -714,6 +727,7 @@ app.innerHTML = `
               <label id="gemini-upload-consent" class="clear-secret hidden"><input id="authorize-gemini-upload" type="checkbox" /><span>允许将这次所选范围的音频上传给 Google；免费层数据可能用于改进产品</span></label>
               <div class="retranscription-actions"><button id="retranscription-use-window" type="button" class="secondary">使用当前可视范围</button><button id="retranscription-expand-segments" type="button" class="secondary">扩展到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
               <p id="retranscription-message" class="media-message">范围边界不能切穿已有字幕块；需要时请显式扩展。</p>
+              <div id="asr-quality-signals" class="asr-quality-signals"></div>
             </div>
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
@@ -1165,6 +1179,7 @@ const retranscriptionUseWindowButton = document.querySelector<HTMLButtonElement>
 const retranscriptionExpandSegmentsButton = document.querySelector<HTMLButtonElement>("#retranscription-expand-segments");
 const previewRetranscriptionButton = document.querySelector<HTMLButtonElement>("#preview-retranscription");
 const retranscriptionMessage = document.querySelector<HTMLParagraphElement>("#retranscription-message");
+const asrQualitySignalsHost = document.querySelector<HTMLDivElement>("#asr-quality-signals");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
 const sourceLanguage = document.querySelector<HTMLSelectElement>("#source-language");
@@ -1401,6 +1416,7 @@ let karaokeTextDraftSegmentId: string | null = null;
 let karaokeTextDraftDirty = false;
 let activeRetranscriptionPreview: RetranscriptionPreview | null = null;
 let retranscriptionBusy = false;
+let activeRepairSignalId: string | null = null;
 let currentWorkspaceSection: WorkspaceSection = "translation";
 type SubtitleFollowState = { userScrollingUntil: number; autoScrollingUntil: number; resumeTimer: number | null };
 const subtitleFollowStates = new WeakMap<HTMLElement, SubtitleFollowState>();
@@ -3296,6 +3312,7 @@ async function openKaraokeJob(jobId: string): Promise<void> {
   karaokeViewStartMs = 0;
   karaokeFollowPlayhead = true;
   activeRetranscriptionPreview = null;
+  activeRepairSignalId = null;
   if (retranscriptionStartInput) retranscriptionStartInput.value = "";
   if (retranscriptionEndInput) retranscriptionEndInput.value = "";
   syncKaraokeFollowButton();
@@ -3315,10 +3332,51 @@ async function openKaraokeJob(jobId: string): Promise<void> {
     setSubtitleEditAction("拖动字幕块可整体移动，拖动左右边缘可单独修剪；按 10 ms 吸附，空白合法，同轨不能重叠。");
     await loadKaraokeWaveform(karaokeResumeMs, true);
     useVisibleWindowForRetranscription();
+    await loadAsrQualitySignals(jobId);
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
     karaokeMediaMessage.textContent = `无法打开字幕编辑任务：${String(error)}`;
     if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "波形不可用。";
+  }
+}
+
+async function saveAsrReviewDecision(
+  signalId: string,
+  decision: "confirmed_problem" | "false_positive" | "resolved",
+): Promise<void> {
+  if (!activeDetail) return;
+  try {
+    await invoke<void>("save_asr_review_decision", {
+      request: { signalId, decision, note: null },
+    });
+    await loadAsrQualitySignals(activeDetail.job.job_id);
+  } catch (error) {
+    setRetranscriptionMessage(`保存审查结论失败：${String(error)}`, true);
+  }
+}
+
+async function loadAsrQualitySignals(jobId: string): Promise<void> {
+  if (!asrQualitySignalsHost) return;
+  try {
+    const signals = await invoke<AsrQualitySignal[]>("list_asr_quality_signals", { jobId });
+    if (signals.length === 0) {
+      asrQualitySignalsHost.innerHTML = '<p class="media-message">当前 run 没有自动可疑信号；仍可按听审结果手动选择范围重跑。</p>';
+      return;
+    }
+    asrQualitySignalsHost.innerHTML = signals.map((signal) => {
+      const range = signal.start_ms === null || signal.end_ms === null
+        ? "未指定范围"
+        : `${formatPreciseTime(signal.start_ms)} → ${formatPreciseTime(signal.end_ms)}`;
+      const review = signal.latest_decision === "confirmed_problem" ? "已确认问题"
+        : signal.latest_decision === "false_positive" ? "已标记误报"
+          : signal.latest_decision === "resolved" ? "已修复" : "待审查";
+      return `<article class="asr-quality-signal" data-severity="${signal.severity}">
+        <div><p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signal.signal_kind)} · ${review}</span></div>
+        <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">按此范围重跑</button>`}</div>
+      </article>`;
+    }).join("");
+  } catch (error) {
+    asrQualitySignalsHost.innerHTML = `<p class="media-message warning">无法读取 ASR 审查信号：${escapeHtml(String(error))}</p>`;
   }
 }
 
@@ -3425,6 +3483,7 @@ async function previewSelectedRange(): Promise<void> {
         endMs: range.endMs,
         providerId,
         authorizeCloudAudioUpload,
+        qualitySignalId: activeRepairSignalId,
       },
     });
     if (!activeDetail || preview.job_id !== activeDetail.job.job_id) return;
@@ -3441,6 +3500,7 @@ async function previewSelectedRange(): Promise<void> {
 async function confirmSelectedRangeReplacement(): Promise<void> {
   if (!activeDetail || !activeRetranscriptionPreview || retranscriptionBusy) return;
   const preview = activeRetranscriptionPreview;
+  const repairSignalId = activeRepairSignalId;
   const before = cloneSubtitleSegments(activeDetail.segments);
   retranscriptionBusy = true;
   if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = true;
@@ -3453,6 +3513,8 @@ async function confirmSelectedRangeReplacement(): Promise<void> {
     applySubtitleStructure(after, preview.candidate_segments[0]?.id);
     retranscriptionDialog?.close();
     activeRetranscriptionPreview = null;
+    activeRepairSignalId = null;
+    if (repairSignalId) await saveAsrReviewDecision(repairSignalId, "resolved");
     setSubtitleEditAction(`已替换所选范围为 ${preview.candidate_segments.length} 段新识别字幕；新段需要重新翻译，可用会话撤销恢复。`);
   } catch (error) {
     if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = `替换失败：${String(error)}`;
@@ -6379,6 +6441,26 @@ retranscriptionProvider?.addEventListener("change", () => {
   const cloud = retranscriptionProvider.value === "gemini-transcribe";
   document.querySelector<HTMLElement>("#gemini-upload-consent")?.classList.toggle("hidden", !cloud);
   if (!cloud && authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
+});
+asrQualitySignalsHost?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) return;
+  const signalId = target.dataset.signalId ?? target.dataset.repairSignal;
+  if (!signalId) return;
+  if (target.dataset.asrReview) {
+    void saveAsrReviewDecision(
+      signalId,
+      target.dataset.asrReview as "confirmed_problem" | "false_positive" | "resolved",
+    );
+    return;
+  }
+  const startMs = Number(target.dataset.startMs);
+  const endMs = Number(target.dataset.endMs);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || !retranscriptionStartInput || !retranscriptionEndInput) return;
+  activeRepairSignalId = signalId;
+  retranscriptionStartInput.value = formatPreciseTime(startMs);
+  retranscriptionEndInput.value = formatPreciseTime(endMs);
+  setRetranscriptionMessage("已载入可疑范围；可选择 Whisper 或 Gemini 生成独立候选 run。", false);
 });
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
 document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());

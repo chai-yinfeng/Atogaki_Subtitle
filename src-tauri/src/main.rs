@@ -23,7 +23,8 @@ use atogaki_subtitle::{
         LocalRenderService, LocalRetranscriptionPreview, LocalRetranscriptionService,
         LocalSubtitleExport, LocalSubtitleExportArtifact,
         LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
-        MutableTranslationProvider, SubtitleFontFamily, SubtitleFontService, SubtitleStylePreview,
+        MutableTranslationProvider, RepairAttempt, RepairAttemptStatus, ReviewDecision,
+        ReviewDecisionKind, SubtitleFontFamily, SubtitleFontService, SubtitleStylePreview,
         SubtitleStyleService, SubtitleStyleState, TranscriptionOptions,
         UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
     },
@@ -34,7 +35,8 @@ use atogaki_subtitle::{
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
-            LocalAsrRunRecord, LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord,
+            LocalAsrQualitySignalRecord, LocalAsrRunRecord, LocalDatabase, LocalGlossaryDetail,
+            LocalGlossaryRecord,
             LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail, LocalRenderJobRecord,
             LocalSubtitleSegmentRecord, LocalTranslationRunRecord, NewLocalLearningSelection,
         },
@@ -507,6 +509,7 @@ struct PreviewRetranscriptionRequest {
     provider_id: String,
     #[serde(default)]
     authorize_cloud_audio_upload: bool,
+    quality_signal_id: Option<String>,
 }
 
 fn default_whisper_provider() -> String {
@@ -518,6 +521,14 @@ fn default_whisper_provider() -> String {
 struct ConfirmRetranscriptionRequest {
     job_id: String,
     preview_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveAsrReviewDecisionRequest {
+    signal_id: String,
+    decision: ReviewDecisionKind,
+    note: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -682,6 +693,43 @@ async fn list_asr_runs(
     state
         .task_service
         .list_persisted_asr_runs(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_asr_quality_signals(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Vec<LocalAsrQualitySignalRecord>, String> {
+    state
+        .task_service
+        .list_persisted_asr_quality_signals(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_asr_review_decision(
+    state: State<'_, DesktopState>,
+    request: SaveAsrReviewDecisionRequest,
+) -> Result<(), String> {
+    let note = request.note.and_then(|note| {
+        let note = note.trim().to_string();
+        (!note.is_empty()).then_some(note)
+    });
+    state
+        .task_service
+        .record_asr_review_decision(&ReviewDecision {
+            id: uuid::Uuid::new_v4().to_string(),
+            signal_id: request.signal_id,
+            decision: request.decision,
+            note,
+            created_at_unix: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or_default(),
+        })
         .await
         .map_err(|error| error.to_string())
 }
@@ -1223,11 +1271,12 @@ async fn preview_retranscription(
             state
                 .settings_service
                 .gemini_asr_provider()
+                .await
                 .map_err(|error| format!("{error:#}"))?,
         ) as Arc<dyn atogaki_subtitle::application::AsrProvider>),
         provider => return Err(format!("unsupported ASR provider: {provider}")),
     };
-    if let Some(provider) = provider {
+    let preview = if let Some(provider) = provider {
         state
             .retranscription_service
             .preview_with_provider(
@@ -1244,7 +1293,26 @@ async fn preview_retranscription(
             .preview(&request.job_id, request.start_ms, request.end_ms)
             .await
     }
-    .map_err(|error| format!("{error:#}"))
+    .map_err(|error| format!("{error:#}"))?;
+    if let Some(signal_id) = request.quality_signal_id {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default();
+        state
+            .task_service
+            .record_asr_repair_attempt(&RepairAttempt {
+                id: uuid::Uuid::new_v4().to_string(),
+                signal_id,
+                candidate_run_id: preview.preview_id.clone(),
+                status: RepairAttemptStatus::Candidate,
+                created_at_unix: now,
+                updated_at_unix: now,
+            })
+            .await
+            .map_err(|error| format!("{error:#}"))?;
+    }
+    Ok(preview)
 }
 
 #[tauri::command]
@@ -2225,6 +2293,7 @@ fn main() {
             preview_retranscription,
             confirm_retranscription,
             list_glossaries,
+            list_asr_quality_signals,
             list_asr_runs,
             list_jobs,
             list_learning_items,
@@ -2260,6 +2329,7 @@ fn main() {
             save_desktop_settings,
             save_glossary,
             save_learning_selection,
+            save_asr_review_decision,
             save_playback_position,
             save_subtitle_styles,
             select_model,

@@ -872,6 +872,21 @@ impl LocalDatabase {
     }
 
     pub async fn record_asr_repair_attempt(&self, attempt: &RepairAttempt) -> Result<()> {
+        let same_job: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM local_asr_quality_signals s
+                JOIN local_asr_runs r ON r.id = ?
+                WHERE s.id = ? AND s.job_id = r.job_id
+             )",
+        )
+        .bind(&attempt.candidate_run_id)
+        .bind(&attempt.signal_id)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to validate ASR repair attempt")?;
+        if !same_job {
+            return Err(anyhow!("ASR repair attempt crosses task boundaries"));
+        }
         sqlx::query(
             "INSERT INTO local_asr_repair_attempts
                 (id, signal_id, candidate_run_id, status, created_at_unix, updated_at_unix)
@@ -895,6 +910,25 @@ impl LocalDatabase {
         .await
         .context("failed to record ASR repair attempt")?;
         Ok(())
+    }
+
+    pub async fn mark_asr_repair_attempts_for_run(
+        &self,
+        candidate_run_id: &str,
+        status: crate::application::RepairAttemptStatus,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE local_asr_repair_attempts
+             SET status = ?, updated_at_unix = ?
+             WHERE candidate_run_id = ?",
+        )
+        .bind(status.as_str())
+        .bind(chrono::Utc::now().timestamp())
+        .bind(candidate_run_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to update ASR repair attempt")?;
+        Ok(result.rows_affected())
     }
 
     pub async fn list_asr_repair_attempts(

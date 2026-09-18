@@ -209,6 +209,13 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .retranscription-actions button { padding: 7px 10px; font-size: 10px; }
 .retranscription-range > .media-message { grid-column: 1 / -1; color: #74776f; font-size: 10px; }
 .retranscription-range > .media-message.warning { color: #b34b36; }
+.asr-quality-signals { grid-column: 1 / -1; display: grid; gap: 7px; }
+.asr-quality-signal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; align-items: center; border: 1px solid #ded7c9; border-radius: 8px; padding: 9px; background: #fffdf7; }
+.asr-quality-signal[data-severity="critical"] { border-color: #c77b67; }
+.asr-quality-signal p { margin: 0; color: #30332d; font-size: 11px; line-height: 1.5; }
+.asr-quality-signal span { color: #74776f; font-size: 9px; }
+.asr-quality-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.asr-quality-actions button { padding: 5px 8px; font-size: 9px; }
 .karaoke-current-segment { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .4fr); align-items: start; gap: 16px; border: 1px solid #d8d0c1; border-radius: 12px; padding: 14px; background: #f8f5ec; }
 .karaoke-current-segment > div { min-width: 0; display: grid; gap: 6px; }
 .karaoke-current-segment span { color: #8c4d3e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }

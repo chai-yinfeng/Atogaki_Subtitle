@@ -12,6 +12,7 @@ use crate::{
         AsrRequest, AsrResponse, AsrTimingGranularity, TimedUnit, TimedUnitKind, TimingSource,
     },
     domain::{LanguageCode, TranscriptSegment},
+    infrastructure::network::NetworkClientConfig,
 };
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com";
@@ -23,6 +24,7 @@ pub struct GeminiAsrConfig {
     pub word_timestamps: bool,
     pub speaker_diarization: bool,
     pub base_url: String,
+    pub network: NetworkClientConfig,
 }
 
 impl GeminiAsrConfig {
@@ -32,6 +34,7 @@ impl GeminiAsrConfig {
             word_timestamps: true,
             speaker_diarization: false,
             base_url: DEFAULT_BASE_URL.into(),
+            network: NetworkClientConfig::environment(),
         }
     }
 }
@@ -50,6 +53,7 @@ impl std::fmt::Debug for GeminiAsrProvider {
             .field("word_timestamps", &self.config.word_timestamps)
             .field("speaker_diarization", &self.config.speaker_diarization)
             .field("configured", &true)
+            .field("proxy_mode", &self.config.network.proxy_mode().as_str())
             .finish()
     }
 }
@@ -61,8 +65,9 @@ impl GeminiAsrProvider {
         }
         validate_base_url(&config.base_url)?;
         Ok(Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(60 * 30))
+            client: config
+                .network
+                .apply(Client::builder().timeout(Duration::from_secs(60 * 30)))?
                 .build()
                 .context("failed to build Gemini ASR client")?,
             config,

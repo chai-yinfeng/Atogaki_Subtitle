@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 
 use crate::{
     application::{
-        AsrInputScope, AsrProvider, AsrRequest, AsrRun, CandidateCueSet, TimedUnit,
-        detect_quality_signals, segment_timed_units,
+        AsrInputScope, AsrProvider, AsrRequest, AsrRun, CandidateCueSet, RepairAttemptStatus,
+        TimedUnit, detect_quality_signals, segment_timed_units,
     },
     domain::{TranscriptSegment, glossary},
     infrastructure::{
@@ -292,6 +292,9 @@ impl LocalRetranscriptionService {
                 &preview.candidate_segments,
                 Some((preview_id, &cue_set)),
             )
+            .await?;
+        self.database
+            .mark_asr_repair_attempts_for_run(preview_id, RepairAttemptStatus::Adopted)
             .await?;
         self.previews.lock().await.remove(preview_id);
         Ok(updated)

@@ -276,6 +276,43 @@ impl LocalTaskService {
         database.list_asr_runs(job_id).await
     }
 
+    pub async fn list_persisted_asr_quality_signals(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<crate::infrastructure::local_db::LocalAsrQualitySignalRecord>> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("ASR quality review requires SQLite persistence"))?;
+        database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("local task not found: {job_id}"))?;
+        database.list_asr_quality_signals(job_id).await
+    }
+
+    pub async fn record_asr_review_decision(
+        &self,
+        decision: &crate::application::ReviewDecision,
+    ) -> Result<()> {
+        self.database
+            .as_ref()
+            .ok_or_else(|| anyhow!("ASR quality review requires SQLite persistence"))?
+            .record_asr_review_decision(decision)
+            .await
+    }
+
+    pub async fn record_asr_repair_attempt(
+        &self,
+        attempt: &crate::application::RepairAttempt,
+    ) -> Result<()> {
+        self.database
+            .as_ref()
+            .ok_or_else(|| anyhow!("ASR repair history requires SQLite persistence"))?
+            .record_asr_repair_attempt(attempt)
+            .await
+    }
+
     pub async fn rename_persisted_job(
         &self,
         job_id: &str,
