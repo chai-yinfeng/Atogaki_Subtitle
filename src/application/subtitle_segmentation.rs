@@ -196,6 +196,7 @@ mod tests {
             end_ms: Some(end_ms),
             timing_source: TimingSource::Model,
             provider_confidence: None,
+            speaker: None,
         }
     }
 

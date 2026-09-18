@@ -23,8 +23,9 @@ pub mod translation_provider;
 pub mod translation_use_case;
 
 pub use asr_provider::{
-    AsrFuture, AsrInputScope, AsrProviderCapabilities, AsrProviderStatus, AsrRequest, AsrResponse,
-    AsrRunKind, AsrTimingGranularity, OfflineAsrProvider, TimedUnit, TimedUnitKind, TimingSource,
+    AsrDataLocality, AsrFuture, AsrInputScope, AsrProvider, AsrProviderCapabilities,
+    AsrProviderStatus, AsrRequest, AsrResponse, AsrRunKind, AsrTimingGranularity, TimedUnit,
+    TimedUnitKind, TimingSource,
 };
 pub use asr_quality::{
     ASR_QUALITY_DETECTOR_VERSION, QualitySignal, QualitySignalKind, QualitySignalSeverity,

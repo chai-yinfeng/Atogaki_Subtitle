@@ -118,6 +118,7 @@ pub async fn transcribe_response(
             end_ms: Some(item.offsets.to),
             timing_source: TimingSource::Model,
             provider_confidence: None,
+            speaker: None,
         });
         legacy_segments.push(TranscriptSegment::new(
             item.offsets.from,

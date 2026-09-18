@@ -15,12 +15,20 @@ pub enum AsrTimingGranularity {
     Word,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AsrDataLocality {
+    Local,
+    CloudAudioUpload,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AsrProviderCapabilities {
     pub timing_granularities: Vec<AsrTimingGranularity>,
     pub vocabulary_biasing: bool,
     pub diarization: bool,
     pub streaming: bool,
+    pub data_locality: AsrDataLocality,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -79,6 +87,9 @@ pub struct AsrRequest {
     pub audio_path: PathBuf,
     pub output_prefix: PathBuf,
     pub scope: AsrInputScope,
+    /// Must be set for each cloud invocation after the user has reviewed the
+    /// provider and exact audio range being uploaded.
+    pub cloud_audio_upload_authorized: bool,
     /// Compatibility input for the first provider extraction milestone.
     /// The next milestone separates generic run input from Whisper config while
     /// retaining the legacy JSON shape through serde flattening.
@@ -112,6 +123,8 @@ pub struct TimedUnit {
     pub timing_source: TimingSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,7 +137,7 @@ pub struct AsrResponse {
     pub legacy_segments: Vec<TranscriptSegment>,
 }
 
-pub trait OfflineAsrProvider: Debug + Send + Sync {
+pub trait AsrProvider: Debug + Send + Sync {
     fn status(&self) -> AsrProviderStatus;
     fn transcribe<'a>(&'a self, request: AsrRequest) -> AsrFuture<'a>;
 }

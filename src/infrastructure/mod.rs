@@ -3,6 +3,7 @@ mod child_process;
 pub mod config;
 pub mod db;
 pub mod deepl;
+pub mod gemini_asr;
 pub mod job_store;
 pub mod local_db;
 pub mod local_llama;

@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     application::{
-        AsrInputScope, AsrRequest, AsrRun, CandidateCueSet, OfflineAsrProvider, TimedUnit,
+        AsrInputScope, AsrProvider, AsrRequest, AsrRun, CandidateCueSet, TimedUnit,
         detect_quality_signals, segment_timed_units,
     },
     domain::{TranscriptSegment, glossary},
@@ -42,7 +42,7 @@ struct StoredPreview {
 #[derive(Debug, Clone)]
 pub struct LocalRetranscriptionService {
     ffmpeg: PathBuf,
-    asr_provider: Arc<dyn OfflineAsrProvider>,
+    asr_provider: Arc<dyn AsrProvider>,
     database: LocalDatabase,
     previews: Arc<Mutex<HashMap<String, StoredPreview>>>,
     recognition_lock: Arc<Mutex<()>>,
@@ -59,7 +59,7 @@ impl LocalRetranscriptionService {
         }
     }
 
-    pub fn with_asr_provider(mut self, provider: Arc<dyn OfflineAsrProvider>) -> Self {
+    pub fn with_asr_provider(mut self, provider: Arc<dyn AsrProvider>) -> Self {
         self.asr_provider = provider;
         self
     }
@@ -152,6 +152,7 @@ impl LocalRetranscriptionService {
                     audio_path: selected_wav,
                     output_prefix: artifacts.provider_output_prefix.clone(),
                     scope,
+                    cloud_audio_upload_authorized: false,
                     transcription: options.clone(),
                 })
                 .await?;

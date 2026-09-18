@@ -137,6 +137,7 @@ mod tests {
                 end_ms: Some(1000),
                 timing_source: TimingSource::Model,
                 provider_confidence: None,
+                speaker: None,
             }])
             .unwrap();
         artifacts

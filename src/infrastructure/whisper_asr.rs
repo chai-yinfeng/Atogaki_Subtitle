@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::application::{
-    AsrFuture, AsrProviderCapabilities, AsrProviderStatus, AsrRequest, AsrTimingGranularity,
-    OfflineAsrProvider,
+    AsrDataLocality, AsrFuture, AsrProvider, AsrProviderCapabilities, AsrProviderStatus,
+    AsrRequest, AsrTimingGranularity,
 };
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ impl WhisperAsrProvider {
     }
 }
 
-impl OfflineAsrProvider for WhisperAsrProvider {
+impl AsrProvider for WhisperAsrProvider {
     fn status(&self) -> AsrProviderStatus {
         AsrProviderStatus {
             id: "whisper.cpp".to_string(),
@@ -28,6 +28,7 @@ impl OfflineAsrProvider for WhisperAsrProvider {
                 vocabulary_biasing: true,
                 diarization: false,
                 streaming: false,
+                data_locality: AsrDataLocality::Local,
             },
         }
     }
@@ -47,7 +48,7 @@ impl OfflineAsrProvider for WhisperAsrProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::application::{AsrTimingGranularity, OfflineAsrProvider};
+    use crate::application::{AsrProvider, AsrTimingGranularity};
 
     use super::WhisperAsrProvider;
 

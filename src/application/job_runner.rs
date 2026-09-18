@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::{
     application::{
-        AsrInputScope, AsrRequest, AsrRun, OfflineAsrProvider, TranscriptionOptions,
+        AsrInputScope, AsrProvider, AsrRequest, AsrRun, TranscriptionOptions,
         detect_quality_signals,
         job_manifest::JobManifest,
         job_snapshot::JobSnapshot,
@@ -24,7 +24,7 @@ use crate::{
 
 pub struct JobRunner {
     config: AppConfig,
-    asr_provider: Arc<dyn OfflineAsrProvider>,
+    asr_provider: Arc<dyn AsrProvider>,
     database: Option<LocalDatabase>,
 }
 
@@ -43,7 +43,7 @@ impl JobRunner {
         self
     }
 
-    pub fn with_asr_provider(mut self, provider: Arc<dyn OfflineAsrProvider>) -> Self {
+    pub fn with_asr_provider(mut self, provider: Arc<dyn AsrProvider>) -> Self {
         self.asr_provider = provider;
         self
     }
@@ -354,6 +354,7 @@ impl JobRunner {
                 audio_path: audio_path.to_path_buf(),
                 output_prefix: artifacts.provider_output_prefix.clone(),
                 scope: AsrInputScope::full(),
+                cloud_audio_upload_authorized: false,
                 transcription: options.clone(),
             })
             .await;
@@ -458,8 +459,8 @@ mod tests {
 
     use crate::{
         application::{
-            AsrFuture, AsrProviderCapabilities, AsrProviderStatus, AsrRequest, AsrResponse,
-            AsrTimingGranularity, OfflineAsrProvider, TimedUnit, TimedUnitKind, TimingSource,
+            AsrDataLocality, AsrFuture, AsrProvider, AsrProviderCapabilities, AsrProviderStatus,
+            AsrRequest, AsrResponse, AsrTimingGranularity, TimedUnit, TimedUnitKind, TimingSource,
             TranscriptionOptions, TranslationFuture, TranslationOptions, TranslationProvider,
             TranslationProviderStatus, TranslationRequest, TranslationResponse, TranslationResult,
             TranslationUsage, translate_transcript,
@@ -509,7 +510,7 @@ mod tests {
         }
     }
 
-    impl OfflineAsrProvider for FakeAsrProvider {
+    impl AsrProvider for FakeAsrProvider {
         fn status(&self) -> AsrProviderStatus {
             AsrProviderStatus {
                 id: "fake-asr".into(),
@@ -519,6 +520,7 @@ mod tests {
                     vocabulary_biasing: false,
                     diarization: false,
                     streaming: false,
+                    data_locality: AsrDataLocality::Local,
                 },
             }
         }
@@ -539,6 +541,7 @@ mod tests {
                         end_ms: Some(900),
                         timing_source: TimingSource::Model,
                         provider_confidence: Some(0.9),
+                        speaker: None,
                     }],
                     legacy_segments: vec![TranscriptSegment::new(0, 900, "テスト".into())],
                 })
