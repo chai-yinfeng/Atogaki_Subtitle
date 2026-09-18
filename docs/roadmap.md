@@ -1,10 +1,12 @@
 # 开发路线图
 
-_最后更新：2026-09-17_
+_最后更新：2026-09-18_
 
 路线图按用户价值排序；完成一个阶段前，不提前将后续阶段变成产品默认路径。已完成条目保留为能力与决策历史，当前行动以本页顶部的推进顺序和各阶段未完成项为准。
 
 当前推进顺序（2026-09-16 调整）：
+
+桌面 App 的能力范围已按 [稳定能力矩阵](app-capability-matrix.md) 冻结。下列尚未完成的模型、全任务云端 ASR、实时和 pipeline 研究默认在 CLI／evaluation harness 推进；通过质量与工作流门禁后再单独决定是否晋升桌面，见 [决策 0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。
 
 1. 以已有原视频建立代表性片段、完整长节目和少量人工参考，固定识别／翻译质量基线；不要求先收集大量完整标准字幕。
 2. 按 [管线演进计划](pipeline-evolution.md) 抽出 ASR run／artifact／细粒度时间数据，增量迁移并保护现有编辑、学习来源与导出。
@@ -40,8 +42,7 @@ _最后更新：2026-09-17_
     - [x] 共用产品 `TranslationPlanner` 和 provider 合同完成《湖吉の庭 Vol.1》60 cue／31 group 全量运行；1.8B 为 83.6 s，7B 为 441.4 s，两档均通过结构门禁。生成了与历史云端 previous-output 的匿名评审材料；人工评分、完整任务峰值内存和 ASR 并发竞争仍待完成。
   - [x] 完成本地源码运行的应用集成：App 按需启动并回收只监听 loopback 的 `llama-server`，支持 Hy-MT2 下载／取消／续传／校验／卸载、1.8B／7B 当前模型切换和本地 provider 设置；真实 runtime 集成测试已验证翻译后无遗留服务。
   - [ ] 完成用户本机窗口验收、人工盲评、完整任务峰值内存和 ASR 并发竞争后，确定推荐档位。
-  - [ ] 发布打包和 Windows runtime 构建／实测暂缓；本地验收完成前不把 `llama-server` 加入发行物。
-    - [x] 增加独立 macOS 本地验收打包配置，可生成包含 `llama-server` 的 ad-hoc signed App；不改变标准发行配置。
+  - [ ] Windows runtime 构建／实测暂缓；macOS 当前正式本地 App 固定包含 `llama-server`，公开发布仍需单独完成许可证与发行门禁。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。
   - [x] 增加 versioned `QualitySignal` 自动检测、追加式 `ReviewDecision` 和 `RepairAttempt`，将循环、边界重复与异常字速写入 run artifact 和 SQLite；provider confidence 保持原始语义。
   - [x] 字幕编辑器显示可疑范围，支持确认问题／误报、从信号范围创建独立 Whisper 或 Gemini candidate run，并在采用时记录 repair adopted；工作区 revision 冲突仍拒绝写回。

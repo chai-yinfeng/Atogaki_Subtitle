@@ -43,7 +43,7 @@ Windows 首版让普通用户在不安装 Rust、Node、FFmpeg、Whisper 或开�
 | 长视频播放 | 受令牌保护的自定义媒体协议与 Range 响应显式包含 Windows URL 形式 | 必须用 WebView2 实测有声长视频、随机 seek、任务切换和 `audio.wav` 回退；编译门禁不能证明音轨正常 |
 | 视频导出质量档 | 省空间／均衡／高质量、原分辨率、目标码率和大小估算已经共享 | Windows MPEG-4 软件编码下三档实际大小／画质、音频复制或重编码和 Explorer 定位 |
 
-以下内容不属于 Windows 产品功能同步：macOS ICNS／DMG Finder 布局、ad-hoc 签名，以及只清理本机 macOS 测试 DMG 的脚本。
+以下内容不属于 Windows 产品功能同步：macOS ICNS／DMG Finder 布局、ad-hoc 签名，以及只覆盖本机 `/Applications/Atogaki.app` 的安装脚本。
 
 2026-09-08 已完成不含悬浮字幕修复的源码同步准备：
 

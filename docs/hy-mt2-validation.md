@@ -83,7 +83,7 @@ ATOGAKI_LLAMA_SERVER="$PWD/src-tauri/binaries/llama-server-aarch64-apple-darwin"
 
 ```console
 cd src-tauri
-cargo tauri build --bundles app --config tauri.local-hy-mt2.conf.json
+cargo tauri build --bundles app --config tauri.macos-complete.conf.json
 ```
 
 输出位于 `src-tauri/target/release/bundle/macos/Atogaki.app`。该 App 使用与现有安装版相同的 bundle identifier 和应用数据目录；移动 App 不会移动模型或任务数据。测试前应退出其他 Atogaki 实例。

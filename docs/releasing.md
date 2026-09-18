@@ -1,6 +1,6 @@
 # 发布说明
 
-_最后更新：2026-09-09_
+_最后更新：2026-09-18_
 
 macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 已建立未签名预发布基线，按选定稳定候选集中构建和实机回归；两个平台共享产品代码，但不要求每次 macOS 开发提交都同步生成 Windows 安装包。
 
@@ -10,7 +10,7 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后，把 DMG 作为 GitHub Release asset 上传。这样仓库保持轻量，Release 页面仍能为测试者提供固定版本下载。
 
-日常 macOS 可测试里程碑即使不创建公开 Release，也必须在完成提交与回归后运行 `./scripts/package-local-macos-test.sh`。脚本只接受干净工作区，执行非 CI 的 ad-hoc DMG 构建与 `hdiutil verify`，再把带 commit 短哈希的 DMG 和 SHA-256 固定复制到仓库根目录 `local-artifacts/`。该目录被 Git 忽略；每次交付时直接提供其中产物的可点击绝对路径，不再让测试者到 `/private/tmp` 或 Tauri 深层 target 目录寻找。打包后的 App 还必须在 `Contents/Resources/` 包含 ICNS，且 `Info.plist` 的 `CFBundleIconFile` 指向该文件；缺少图标元数据会降低 Finder、LaunchServices 和 macOS Tahoe“Apps”启动器的发现可靠性。
+日常开发不再为每个提交生成 Test App 或测试 DMG。桌面范围内的稳定改动完成提交与回归后，按需运行 `./scripts/install-current-macos-app.sh`，以包含 FFmpeg、FFprobe、whisper.cpp 和 `llama-server` 的完整配置覆盖 `/Applications/Atogaki.app`。模型和 pipeline 实验先在 CLI／evaluation harness 验证，不触发桌面打包。公开候选仍必须按下述流程生成、校验和实测 DMG；本机覆盖安装不能替代发行门禁。
 
 当前 Apple Silicon 预发布资产约定为：
 

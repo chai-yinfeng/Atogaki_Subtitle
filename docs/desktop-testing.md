@@ -50,9 +50,9 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 当前直接使用 `cargo run` 时加载的是最近一次 `ui/dist`，所以修改前端后必须先运行前端构建。`tauri.conf.json` 刻意不配置 `devUrl`，避免普通 `cargo run` 在没有同时启动 Vite server 时显示白屏。开发窗口启动后，首页会显示实际的应用数据目录和 SQLite 任务列表。
 
-P3 本地真实使用候选通过 `tauri.local-hy-mt2.conf.json` 额外打包 `llama-server`。它仍使用正式 bundle identifier 和系统应用数据目录，App 或 DMG 放置位置不会改变模型目录；Hy-MT2 GGUF 继续按需下载到设置页显示的 `models/` 目录，不嵌入 App。该覆盖只用于本地 macOS 验收，不改变标准发行配置，也不表示已完成 Windows runtime 验收。
+当前 macOS 完整桌面配置为 `tauri.macos-complete.conf.json`，在 FFmpeg、FFprobe 和 whisper.cpp 之外打包 `llama-server`。它使用正式 bundle identifier 和系统应用数据目录；Hy-MT2 GGUF 继续按需下载到设置页显示的 `models/` 目录，不嵌入 App。完成稳定桌面改动后运行 `./scripts/install-current-macos-app.sh`，只覆盖 `/Applications/Atogaki.app`，不生成 Test App 或日常测试 DMG。Windows runtime 仍需独立构建与实测。
 
-打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。本地 ad-hoc 签名的 App Bundle 可用 `tauri build --bundles app` 生成，再从 `src-tauri/target/release/bundle/macos/Atogaki.app` 启动。配置声明最低 macOS 12.0，与 sidecar 的 deployment target 一致。
+打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。正式本地 App 由 `install-current-macos-app.sh` 使用完整 macOS 配置构建、核对四个 sidecar 与签名后替换 `/Applications/Atogaki.app`。配置声明最低 macOS 12.0，与 sidecar 的 deployment target 一致。
 
 本机结构冒烟可以使用 `CI=true tauri build --bundles dmg`，但 CI 模式会跳过 Finder 图标定位与背景美化，不能作为最终发布产物。最终候选必须在非 CI 环境运行 `cargo tauri build --bundles dmg`，并实际确认 App、Applications 链接和窗口布局；2026-08-11 的 macOS 26 构建已能正常完成该流程。若以后 Finder AppleScript 再次挂起，应中止并排查，不能用 CI 简化包替代发布门禁。ad-hoc 签名只保证 Bundle 完整性，不代表 Developer ID 身份，也没有经过 Apple 公证。
 
@@ -82,7 +82,7 @@ P3 本地真实使用候选通过 `tauri.local-hy-mt2.conf.json` 额外打包 `l
 1. 使用全新隔离数据目录启动；首次配置窗口应自动出现，显示系统凭据后端和应用管理的模型目录。没有 Whisper 模型时应明确阻止完成引导。
 2. 网络配置分别测试“跟随启动环境”“直连”和本机 HTTP 代理；填写镜像时测试结果应同时列出镜像与官方源。保存后下载 VAD，期间应显示字节进度与实际来源，完成后路径和就绪状态自动更新，且目录中不留下 `.part`。下载较大 Whisper 模型到一部分后退出 App，再次打开并下载同一模型：支持 Range 的服务器应从现有字节边界续传；忽略 Range 或返回错误 Content-Range 的测试端点应从零安全重启，不能重复拼接。将镜像指向返回错误内容的测试端点时，应因状态或 SHA-256 失败回退官方源，损坏 `.part` 不得安装。
 3. 将翻译切换为“关闭”并保存，工作区翻译按钮应立即反映未配置状态，无需重启。分别切换 DeepL（传统翻译 API）、DeepSeek（LLM API）和 OpenAI-compatible（高级），确认模型／Base URL／风格字段按 provider 显示；Key 输入框不得回显既有值，SQLite 和任务目录中不得出现 Key。点击“检查所选 Key”时只读取当前 provider 的系统凭据条目，不调用翻译 API；存在、不存在和拒绝访问都要给出明确结果，同一进程后续翻译不得再次读取。真实 Key 写入测试只在明确允许修改本机系统凭据时执行。
-   Hy-MT2 本地候选使用 `ATOGAKI_LLAMA_SERVER` 指向开发 runtime。安装 1.8B 与 7B 后应只有一个显示“当前使用”；点击另一档“设为当前”时必须先完成 SHA-256 校验，设置摘要和实际翻译使用的模型名随之更新。第一次翻译前不应出现 `llama-server` 进程；开始翻译后只监听 loopback，切走 provider 或退出 App 后不应遗留进程。当前只做源码运行验收，发行物打包暂缓。
+   正式 macOS 本地 App 已包含 `llama-server`。安装 1.8B 与 7B 后应只有一个显示“当前使用”；点击另一档“设为当前”时必须先完成 SHA-256 校验，设置摘要和实际翻译使用的模型名随之更新。第一次翻译前不应出现 `llama-server` 进程；开始翻译后只监听 loopback，切走 provider 或退出 App 后不应遗留进程。
 4. 运行中关闭 App 后再次启动；旧任务应显示因上次退出而失败。点击重试应创建新 UUID，保留旧目录；若旧模型路径已失效，应使用设置页当前有效模型。
 
 核心工作区回归：

@@ -1,6 +1,6 @@
 # 产品方向：多语言音视频理解工作台
 
-_最后更新：2026-09-16_
+_最后更新：2026-09-18_
 
 ## 项目起点与泛化方向
 
@@ -71,6 +71,8 @@ ASR 可疑信号、人工／自动审查和修复尝试进入正式数据模型�
 本地／云端 ASR 与本地／云端翻译独立组合：Whisper 保留本地识别基线，Hy-MT2 是待验证的本地翻译路线，Gemini Transcribe 是待接入的云端识别路线。本地模型的下载和 runtime 生命周期最终由应用管理，普通用户不需要手动编译或维护 llama.cpp。Muse Voice Transcribe、SeamlessStreaming 和 SimulStreaming 作为分别研究的线索；Gemini Live Translate 仅设 E2E experimental 路线，不改变正式资料的两段式结构。
 
 实时 candidate、stable、committed 与离线精修结果分开。模型、算法、部署细节和质量结论按阶段验证，不因记录方向而视为已经实现。详见 [管线演进计划](pipeline-evolution.md) 与 [决策 0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
+
+桌面产品范围从 2026-09-18 起按 [能力矩阵](app-capability-matrix.md) 冻结。后续模型、prompt、分段、translation grouping、实时协议和 commit policy 优先在 CLI／evaluation harness 中验证，不再为每轮实验增加桌面入口或独立 Test App。可复用实现继续进入 core/application，只有通过固定质量基线、失败恢复和隐私边界验收，并经过单独产品确认的能力才晋升到桌面 UI；详见 [决策 0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。
 
 ## 当前核心闭环
 
