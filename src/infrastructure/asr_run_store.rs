@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use anyhow::{Context, Result, anyhow};
 
 use crate::{
-    application::{AsrRun, CandidateCueSet, TimedUnit},
+    application::{AsrRun, CandidateCueSet, QualitySignal, TimedUnit},
     infrastructure::job_store::Job,
 };
 
@@ -14,6 +14,7 @@ pub struct AsrRunArtifacts {
     pub provider_output_prefix: PathBuf,
     pub timed_units_json: PathBuf,
     pub candidate_cues_json: PathBuf,
+    pub quality_signals_json: PathBuf,
 }
 
 impl AsrRunArtifacts {
@@ -69,6 +70,10 @@ impl AsrRunArtifacts {
             .with_context(|| format!("failed to parse {}", self.candidate_cues_json.display()))
     }
 
+    pub fn write_quality_signals(&self, signals: &[QualitySignal]) -> Result<()> {
+        write_json(&self.quality_signals_json, signals)
+    }
+
     fn paths(job: &Job, run_id: &str) -> Result<Self> {
         if run_id.is_empty()
             || run_id == "."
@@ -84,6 +89,7 @@ impl AsrRunArtifacts {
             provider_output_prefix: dir.join("provider-output"),
             timed_units_json: dir.join("timed-units.json"),
             candidate_cues_json: dir.join("candidate-cues.json"),
+            quality_signals_json: dir.join("quality-signals.json"),
             dir,
         })
     }

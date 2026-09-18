@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use crate::{
     application::{
         AsrInputScope, AsrRequest, AsrRun, CandidateCueSet, OfflineAsrProvider, TimedUnit,
-        segment_timed_units,
+        detect_quality_signals, segment_timed_units,
     },
     domain::{TranscriptSegment, glossary},
     infrastructure::{
@@ -187,6 +187,11 @@ impl LocalRetranscriptionService {
         let completion: Result<()> = async {
             artifacts.write_timed_units(&timed_units)?;
             artifacts.write_candidate_cues(&cue_set)?;
+            let signals = detect_quality_signals(job_id, &run.id, &cue_set, run.created_at_unix);
+            artifacts.write_quality_signals(&signals)?;
+            self.database
+                .replace_asr_quality_signals(&run.id, &signals)
+                .await?;
             run.succeed();
             artifacts.write_run(&run)?;
             self.database.update_asr_run(&run).await

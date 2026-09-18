@@ -11,7 +11,10 @@ use sqlx::{
 };
 
 use crate::{
-    application::{AsrRun, CandidateCueSet, job_snapshot::JobSnapshot},
+    application::{
+        AsrRun, CandidateCueSet, QualitySignal, RepairAttempt, ReviewDecision,
+        job_snapshot::JobSnapshot,
+    },
     domain::{TranscriptSegment, subtitle::SubtitleStyleSet},
 };
 
@@ -316,6 +319,34 @@ pub struct LocalAsrRunRecord {
     pub started_at_unix: Option<i64>,
     pub completed_at_unix: Option<i64>,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
+pub struct LocalAsrQualitySignalRecord {
+    pub id: String,
+    pub job_id: String,
+    pub run_id: String,
+    pub signal_kind: String,
+    pub severity: String,
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
+    pub cue_ids_json: String,
+    pub detector_version: String,
+    pub message: String,
+    pub evidence_json: String,
+    pub created_at_unix: i64,
+    pub latest_decision: Option<String>,
+    pub latest_decision_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow, PartialEq, Eq)]
+pub struct LocalAsrRepairAttemptRecord {
+    pub id: String,
+    pub signal_id: String,
+    pub candidate_run_id: String,
+    pub status: String,
+    pub created_at_unix: i64,
+    pub updated_at_unix: i64,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -735,6 +766,150 @@ impl LocalDatabase {
         .await
         .context("failed to recover interrupted ASR runs")?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn replace_asr_quality_signals(
+        &self,
+        run_id: &str,
+        signals: &[QualitySignal],
+    ) -> Result<()> {
+        if signals.iter().any(|signal| signal.run_id != run_id) {
+            return Err(anyhow!("ASR quality signal belongs to a different run"));
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin ASR quality transaction")?;
+        sqlx::query("DELETE FROM local_asr_quality_signals WHERE run_id = ?")
+            .bind(run_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to replace ASR quality signals")?;
+        for signal in signals {
+            sqlx::query(
+                "INSERT INTO local_asr_quality_signals (
+                    id, job_id, run_id, signal_kind, severity, start_ms, end_ms,
+                    cue_ids_json, detector_version, message, evidence_json, created_at_unix
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&signal.id)
+            .bind(&signal.job_id)
+            .bind(&signal.run_id)
+            .bind(signal.kind.as_str())
+            .bind(signal.severity.as_str())
+            .bind(
+                signal
+                    .start_ms
+                    .map(|value| to_i64(value, "quality signal start"))
+                    .transpose()?,
+            )
+            .bind(
+                signal
+                    .end_ms
+                    .map(|value| to_i64(value, "quality signal end"))
+                    .transpose()?,
+            )
+            .bind(serde_json::to_string(&signal.cue_ids)?)
+            .bind(&signal.detector_version)
+            .bind(&signal.message)
+            .bind(serde_json::to_string(&signal.evidence)?)
+            .bind(to_i64(
+                signal.created_at_unix,
+                "quality signal creation time",
+            )?)
+            .execute(&mut *tx)
+            .await
+            .context("failed to insert ASR quality signal")?;
+        }
+        tx.commit()
+            .await
+            .context("failed to commit ASR quality signals")
+    }
+
+    pub async fn list_asr_quality_signals(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<LocalAsrQualitySignalRecord>> {
+        sqlx::query_as(
+            "SELECT s.id, s.job_id, s.run_id, s.signal_kind, s.severity,
+                    s.start_ms, s.end_ms, s.cue_ids_json, s.detector_version,
+                    s.message, s.evidence_json, s.created_at_unix,
+                    (SELECT d.decision FROM local_asr_review_decisions d
+                     WHERE d.signal_id = s.id
+                     ORDER BY d.created_at_unix DESC, d.id DESC LIMIT 1) AS latest_decision,
+                    (SELECT d.note FROM local_asr_review_decisions d
+                     WHERE d.signal_id = s.id
+                     ORDER BY d.created_at_unix DESC, d.id DESC LIMIT 1) AS latest_decision_note
+             FROM local_asr_quality_signals s
+             WHERE s.job_id = ?
+             ORDER BY COALESCE(s.start_ms, 0), s.created_at_unix, s.id",
+        )
+        .bind(job_id)
+        .fetch_all(&self.pool)
+        .await
+        .with_context(|| format!("failed to list ASR quality signals for task {job_id}"))
+    }
+
+    pub async fn record_asr_review_decision(&self, decision: &ReviewDecision) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO local_asr_review_decisions
+                (id, signal_id, decision, note, created_at_unix)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&decision.id)
+        .bind(&decision.signal_id)
+        .bind(decision.decision.as_str())
+        .bind(&decision.note)
+        .bind(to_i64(
+            decision.created_at_unix,
+            "review decision creation time",
+        )?)
+        .execute(&self.pool)
+        .await
+        .context("failed to record ASR review decision")?;
+        Ok(())
+    }
+
+    pub async fn record_asr_repair_attempt(&self, attempt: &RepairAttempt) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO local_asr_repair_attempts
+                (id, signal_id, candidate_run_id, status, created_at_unix, updated_at_unix)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(signal_id, candidate_run_id) DO UPDATE SET
+                status = excluded.status, updated_at_unix = excluded.updated_at_unix",
+        )
+        .bind(&attempt.id)
+        .bind(&attempt.signal_id)
+        .bind(&attempt.candidate_run_id)
+        .bind(attempt.status.as_str())
+        .bind(to_i64(
+            attempt.created_at_unix,
+            "repair attempt creation time",
+        )?)
+        .bind(to_i64(
+            attempt.updated_at_unix,
+            "repair attempt update time",
+        )?)
+        .execute(&self.pool)
+        .await
+        .context("failed to record ASR repair attempt")?;
+        Ok(())
+    }
+
+    pub async fn list_asr_repair_attempts(
+        &self,
+        signal_id: &str,
+    ) -> Result<Vec<LocalAsrRepairAttemptRecord>> {
+        sqlx::query_as(
+            "SELECT id, signal_id, candidate_run_id, status, created_at_unix, updated_at_unix
+             FROM local_asr_repair_attempts WHERE signal_id = ?
+             ORDER BY created_at_unix DESC, id DESC",
+        )
+        .bind(signal_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list ASR repair attempts")
     }
 
     pub async fn reorder_jobs(&self, job_ids: &[String]) -> Result<Vec<LocalJobRecord>> {
@@ -3150,6 +3325,106 @@ mod tests {
         assert_eq!(
             recovered[0].error_message.as_deref(),
             Some("application stopped")
+        );
+
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stores_quality_reviews_and_repair_attempts_as_run_metadata() {
+        use crate::application::{
+            QualitySignal, QualitySignalKind, QualitySignalSeverity, RepairAttempt,
+            RepairAttemptStatus, ReviewDecision, ReviewDecisionKind,
+        };
+
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-asr-quality-db-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest,
+                segments: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let run = AsrRun::new(
+            job.id(),
+            None,
+            "whisper.cpp",
+            "Whisper.cpp",
+            "model.bin",
+            "video.mp4".into(),
+            AsrInputScope::full(),
+            serde_json::json!({}),
+        );
+        database
+            .record_asr_run(&run, &job.asr_runs_dir.join(&run.id))
+            .await
+            .unwrap();
+        let signal = QualitySignal {
+            schema_version: 1,
+            id: "signal-1".into(),
+            job_id: job.id(),
+            run_id: run.id.clone(),
+            kind: QualitySignalKind::RepeatedLoop,
+            severity: QualitySignalSeverity::Critical,
+            start_ms: Some(100),
+            end_ms: Some(300),
+            cue_ids: vec!["cue-1".into()],
+            detector_version: "test".into(),
+            message: "loop".into(),
+            evidence: serde_json::json!({"count": 2}),
+            created_at_unix: 10,
+        };
+        database
+            .replace_asr_quality_signals(&run.id, std::slice::from_ref(&signal))
+            .await
+            .unwrap();
+        database
+            .record_asr_review_decision(&ReviewDecision {
+                id: "decision-1".into(),
+                signal_id: signal.id.clone(),
+                decision: ReviewDecisionKind::ConfirmedProblem,
+                note: Some("heard repetition".into()),
+                created_at_unix: 11,
+            })
+            .await
+            .unwrap();
+        database
+            .record_asr_repair_attempt(&RepairAttempt {
+                id: "repair-1".into(),
+                signal_id: signal.id.clone(),
+                candidate_run_id: run.id.clone(),
+                status: RepairAttemptStatus::Candidate,
+                created_at_unix: 12,
+                updated_at_unix: 12,
+            })
+            .await
+            .unwrap();
+
+        let signals = database.list_asr_quality_signals(&job.id()).await.unwrap();
+        assert_eq!(signals.len(), 1);
+        assert_eq!(
+            signals[0].latest_decision.as_deref(),
+            Some("confirmed_problem")
+        );
+        assert_eq!(
+            signals[0].latest_decision_note.as_deref(),
+            Some("heard repetition")
+        );
+        assert_eq!(
+            database.list_asr_repair_attempts(&signal.id).await.unwrap()[0].status,
+            "candidate"
         );
 
         database.close().await;

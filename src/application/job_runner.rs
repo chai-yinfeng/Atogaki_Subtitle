@@ -5,6 +5,7 @@ use anyhow::{Context, Result, anyhow};
 use crate::{
     application::{
         AsrInputScope, AsrRequest, AsrRun, OfflineAsrProvider, TranscriptionOptions,
+        detect_quality_signals,
         job_manifest::JobManifest,
         job_snapshot::JobSnapshot,
         job_spec::{
@@ -364,6 +365,14 @@ impl JobRunner {
             cue_set.replace_transcript_segments(candidates.clone())?;
             artifacts.write_timed_units(&response.timed_units)?;
             artifacts.write_candidate_cues(&cue_set)?;
+            let signals =
+                detect_quality_signals(job.id().as_str(), &run.id, &cue_set, run.created_at_unix);
+            artifacts.write_quality_signals(&signals)?;
+            if let Some(database) = &self.database {
+                database
+                    .replace_asr_quality_signals(&run.id, &signals)
+                    .await?;
+            }
             run.succeed();
             artifacts.write_run(&run)?;
             if let Some(database) = &self.database {
