@@ -1,6 +1,6 @@
 # 开发路线图
 
-_最后更新：2026-09-16_
+_最后更新：2026-09-17_
 
 路线图按用户价值排序；完成一个阶段前，不提前将后续阶段变成产品默认路径。已完成条目保留为能力与决策历史，当前行动以本页顶部的推进顺序和各阶段未完成项为准。
 
@@ -43,6 +43,12 @@ _最后更新：2026-09-16_
   - [ ] 发布打包和 Windows runtime 构建／实测暂缓；本地验收完成前不把 `llama-server` 加入发行物。
     - [x] 增加独立 macOS 本地验收打包配置，可生成包含 `llama-server` 的 ad-hoc signed App；不改变标准发行配置。
 - [ ] P4：结构化质量审查、持久候选和任务内 run 比较；接入明确音频上传边界的 Gemini 文件转录。
+  - [x] 增加 versioned `QualitySignal` 自动检测、追加式 `ReviewDecision` 和 `RepairAttempt`，将循环、边界重复与异常字速写入 run artifact 和 SQLite；provider confidence 保持原始语义。
+  - [x] 字幕编辑器显示可疑范围，支持确认问题／误报、从信号范围创建独立 Whisper 或 Gemini candidate run，并在采用时记录 repair adopted；工作区 revision 冲突仍拒绝写回。
+  - [x] 实现 Gemini 3.5 Transcribe Files + Interactions API provider，保存真实 word timestamps 和 speaker；缺失时间戳拒绝结果，上传后主动删除文件。
+  - [x] Gemini Key 独立存入系统凭据库；保存 Key 不授予上传权限，每次 selected-range run 都必须确认 provider、范围和免费层数据使用说明，本地失败不自动切换云端。
+  - [ ] 使用用户自己的 Gemini Key 完成日语／英语真实网络闭环、上传删除与 rate-limit 错误验收；把 VAD 区间接入“静音出字”检测，并补任务级完整候选 run 对照。
+  - [x] 完成 [Gemini 注册与验证说明](gemini-transcribe.md) 和 [Muse Voice Transcribe 流式机制研究](muse-voice-transcribe-research.md)；Muse 保持 P5 research provider，待官方协议与数据条款核实。
 - [ ] P5：录音流式回放、prefix 提交策略、真实采集／Live ASR；Gemini Live Translate 单列实验。
 
 具体接口、依赖、迁移与逐阶段完成条件以 [管线演进计划](pipeline-evolution.md) 为准；上列未完成项不能计入当前发行能力。

@@ -385,7 +385,7 @@ impl DesktopSettingsService {
         })
     }
 
-    pub fn gemini_asr_provider(&self) -> Result<GeminiAsrProvider> {
+    pub async fn gemini_asr_provider(&self) -> Result<GeminiAsrProvider> {
         let (secret, error) = cached_provider_key(
             GEMINI_ASR_CREDENTIAL_ID,
             self.credentials.as_ref(),
@@ -394,9 +394,11 @@ impl DesktopSettingsService {
         if let Some(error) = error {
             bail!("无法读取 Gemini API Key：{error}");
         }
-        GeminiAsrProvider::new(GeminiAsrConfig::new(
+        let mut config = GeminiAsrConfig::new(
             secret.ok_or_else(|| anyhow!("请先在设置中配置 Gemini API Key。"))?,
-        ))
+        );
+        config.network = self.download_network_settings().await?.client;
+        GeminiAsrProvider::new(config)
     }
 
     pub fn new(
