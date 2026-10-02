@@ -1,6 +1,6 @@
 # 开发路线图
 
-_最后更新：2026-09-18_
+_最后更新：2026-10-02_
 
 路线图按用户价值排序；完成一个阶段前，不提前将后续阶段变成产品默认路径。已完成条目保留为能力与决策历史，当前行动以本页顶部的推进顺序和各阶段未完成项为准。
 
@@ -264,11 +264,17 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 
 ## 3. 实时辅助
 
+2026-10-02 确认独立 online 路线：Hy-MT2 翻译，先比较 Whisper-Streaming 与 SimulStreaming。Session／调度／未来 GUI 与 offline 分离；全文 offline 精修另建 run。见 [0045](decisions/0045-independent-online-experiments.md) 和 [CLI 实验说明](../experiments/online/README.md)。
+
+- [x] 建立上游回放 runner、版本化输出适配、Hy-MT2 串行翻译策略重放与基础回归。
+- [ ] 安装并锁定上游 runtime／模型，在固定真实日语样本上完成 LocalAgreement／AlignAtt 对比；Apple Silicon SimulStreaming 兼容性尚未验证。
+- [ ] 媒体时钟驱动的并发翻译、过期响应、背压、取消、gap 与 EOF 回归；当前串行重放不能作为实时性能结论。
+
 实施顺序见本轮 P5：先录音流式回放与提交策略，再接入采集。candidate／stable／committed 和离线精修 revision 分开；Muse Voice Transcribe、SeamlessStreaming、SimulStreaming 分别研究。
 
 - [ ] macOS 录音与系统音频采集方案。
 - [ ] 分段录制与低延迟粗转写。
-- [ ] 会话结束后自动排入离线精修。
+- [ ] 会话结束后独立运行全文 offline 精修；自动调度方式待定。
 - [ ] 清晰区分临时结果和最终结果。
 
 ## 4. 仅在真实需求出现时考虑

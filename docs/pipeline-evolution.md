@@ -85,6 +85,8 @@ Muse 指 **Meta Muse Voice Transcribe**，不是 MUSE 词向量项目，也不�
 
 ## 实时边界
 
+2026-10-02 用户确认 online 与 offline 工作流分离，首轮使用 Whisper-Streaming／SimulStreaming + Hy-MT2。Online session、调度与未来 GUI 不依赖 offline cue planner／SQLite 工作区；共享 runtime／媒体等基础设施，全文 offline 精修为独立 run。详见 [0045](decisions/0045-independent-online-experiments.md)。
+
 先以录音模拟流式输入，再接入真实采集。维护 candidate → stable → committed；稳定策略可替换，provider finalized 是输入信号，不等于离线正确性。原文与译文分别维护提交边界。离线精修创建新 run／revision，不覆写实时证据。
 
 SimulStreaming 的 LocalAgreement 采用连续输出公共前缀，AlignAtt 使用 attention 信号；只在后端提供所需信号时采用，第一阶段不锁定算法。会话须保存媒体时钟与音频，处理背压、重连、重放去重、gap 和结束 flush；音频缺口不能伪装成完整录制。Gemini Live Transcribe 可作为实时 ASR 候选；Gemini Live Translate 单列 experimental，E2E 结果不替代两段式正式资料。
