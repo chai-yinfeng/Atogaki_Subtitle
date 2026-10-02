@@ -11,6 +11,14 @@ import wave
 from harness import SCHEMA, normalize, write_events
 
 
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend', choices=['whisper-streaming', 'simulstreaming'], required=True)
@@ -20,6 +28,7 @@ def main():
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--language', default='ja')
     parser.add_argument('--model', default='large-v3')
+    parser.add_argument('--mlx-model-dir', type=Path, help='local MLX model snapshot; overrides model lookup')
     parser.add_argument('--chunk-seconds', type=float, default=1)
     args = parser.parse_args()
     if not 0 < args.chunk_seconds <= 60:
@@ -32,21 +41,34 @@ def main():
     checkout = args.checkout.resolve()
     commit = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
     dirty = subprocess.check_output(['git', '-C', str(checkout), 'status', '--porcelain'], text=True).strip()
+    dirty = '\n'.join(line for line in dirty.splitlines() if '__pycache__/' not in line and not line.endswith('.pyc'))
     if dirty:
         parser.error('upstream checkout must be clean for reproducibility')
     entry = 'whisper_online.py' if args.backend == 'whisper-streaming' else 'simulstreaming_whisper.py'
-    command = [str(args.python.resolve()), str(checkout / entry), str(audio),
+    command = [str(args.python.absolute()), str(checkout / entry), str(audio),
                '--language', args.language, '--task', 'transcribe',
                '--min-chunk-size', str(args.chunk_seconds)]
     if args.backend == 'whisper-streaming':
         command += ['--backend', 'mlx-whisper', '--model', args.model]
+        if args.mlx_model_dir:
+            command += ['--model_dir', str(args.mlx_model_dir.resolve())]
     else:
-        command += ['--model_path', args.model]
+        command += ['--model_path', str(Path(args.model).resolve()) if Path(args.model).is_file() else args.model]
+    lock = Path(__file__).parent / 'envs' / args.backend / 'uv.lock'
+    model_files = ([args.mlx_model_dir / 'weights.npz', args.mlx_model_dir / 'config.json']
+                   if args.mlx_model_dir else [Path(args.model)])
+    model_hashes = {p.name: file_sha256(p) for p in model_files if p.is_file()}
+    installed = subprocess.check_output([
+        str(args.python.absolute()), '-c',
+        'import importlib.metadata,json; print(json.dumps(sorted((d.metadata["Name"],d.version) for d in importlib.metadata.distributions())))'
+    ], text=True)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     metadata = dict(schema=SCHEMA, backend=args.backend, upstream_commit=commit,
-                    audio_sha256=hashlib.sha256(audio.read_bytes()).hexdigest(),
+                    audio_sha256=file_sha256(audio), model_sha256=model_hashes,
                     audio_duration_s=duration, command=command, status='running',
-                    timing_mode='computationally-aware', vad=False)
+                    timing_mode='computationally-aware', vad=False,
+                    environment_packages=json.loads(installed),
+                    uv_lock_sha256=hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else None)
     metadata_path = args.output_dir / 'run.json'
     metadata_path.write_text(json.dumps(metadata, indent=2) + '\n')
     started = time.monotonic()

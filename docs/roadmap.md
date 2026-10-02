@@ -267,7 +267,8 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 2026-10-02 确认独立 online 路线：Hy-MT2 翻译，先比较 Whisper-Streaming 与 SimulStreaming。Session／调度／未来 GUI 与 offline 分离；全文 offline 精修另建 run。见 [0045](decisions/0045-independent-online-experiments.md) 和 [CLI 实验说明](../experiments/online/README.md)。
 
 - [x] 建立上游回放 runner、版本化输出适配、Hy-MT2 串行翻译策略重放与基础回归。
-- [ ] 安装并锁定上游 runtime／模型，在固定真实日语样本上完成 LocalAgreement／AlignAtt 对比；Apple Silicon SimulStreaming 兼容性尚未验证。
+- [x] uv 管理两套独立 Python 3.11.16 环境并提交 lock；固定上游 commits，完成同一 12 秒日语片段的 tiny 模型真实回放冒烟。
+- [ ] 正式模型与固定日语样本的 LocalAgreement／AlignAtt 对比；SimulStreaming 当前上游在 Mac 默认 CPU，MPS 适配与并发性能尚未验证。
 - [ ] 媒体时钟驱动的并发翻译、过期响应、背压、取消、gap 与 EOF 回归；当前串行重放不能作为实时性能结论。
 
 实施顺序见本轮 P5：先录音流式回放与提交策略，再接入采集。candidate／stable／committed 和离线精修 revision 分开；Muse Voice Transcribe、SeamlessStreaming、SimulStreaming 分别研究。
