@@ -46,3 +46,9 @@
 3. 随后加入真实媒体时钟驱动的并发翻译、过期响应、背压与资源测量。
 
 Gemini 3.5 Transcribe 后续作为独立 `model_reference`，与实际音频范围和来源绑定，供分歧听审。用户本轮明确选择先跑本地实验；没有调用 Gemini 或读取系统凭据。未经听审的模型参考不提升为 gold。
+
+## 单段 Gemini 翻译候选（追加）
+
+2026-10-02 用户明确授权调用一次 Gemini 翻译，并计划简单校对。选取上述 SimulStreaming 结果中的一个完整活动组，用 Gemini 3.5 Flash 对候选文本执行一次翻译；未上传音频，未调用 Transcribe，未重试。Key 仅从现有系统凭据库读取到进程内，不写入请求 artifact。
+
+Gemini 对历史经历否定的表达更贴近候选 source；ASR 中与旅行／本次相关的同音用字仍需回听。请求、响应、模型版本和三方校对材料保存到 Git 忽略的 `local-artifacts/online/gemini-paragraph-review/`，原文与译文仍标为 unreviewed。此次候选不能证明 Gemini 的 ASR 正确性，也未提升为 gold。
