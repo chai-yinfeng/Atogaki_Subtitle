@@ -268,7 +268,8 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 
 - [x] 建立上游回放 runner、版本化输出适配、Hy-MT2 串行翻译策略重放与基础回归。
 - [x] uv 管理两套独立 Python 3.11.16 环境并提交 lock；固定上游 commits，完成同一 12 秒日语片段的 tiny 模型真实回放冒烟。
-- [ ] 正式模型与固定日语样本的 LocalAgreement／AlignAtt 对比；SimulStreaming 当前上游在 Mac 默认 CPU，MPS 适配与并发性能尚未验证。
+- [x] 第一轮正式 large-v3 实验：同一 60 秒开发样本完成 WS／MLX 与 SS／CPU 顺序回放及 Hy-MT2 1.8B 四组翻译策略重放；见 [验证记录](online-large-v3-validation.md)，无人工 gold，不作准确率结论。
+- [ ] 完整短节目、自然句末与长样本回归；MPS 适配、时钟漂移、分组差异、Hy-MT2 否定与截断句处理仍待验证。
 - [ ] 媒体时钟驱动的并发翻译、过期响应、背压、取消、gap 与 EOF 回归；当前串行重放不能作为实时性能结论。
 
 实施顺序见本轮 P5：先录音流式回放与提交策略，再接入采集。candidate／stable／committed 和离线精修 revision 分开；Muse Voice Transcribe、SeamlessStreaming、SimulStreaming 分别研究。

@@ -1,6 +1,6 @@
 # 识别与翻译质量基线
 
-_最后更新：2026-09-16_
+_最后更新：2026-10-02_
 
 评估使用用户有权处理的本机媒体。媒体、裁剪、人工参考和运行结果放在 Git 忽略的 `local-artifacts/evaluation/`，仓库不保存私人绝对路径或媒体内容。公开的格式示例见 [`evaluation-manifest.example.json`](evaluation-manifest.example.json) 和 [`evaluation-reference.example.json`](evaluation-reference.example.json)。
 
@@ -70,3 +70,5 @@ manifest 中保存媒体 SHA-256、范围、角色、参考状态、历史任务
 粉丝字幕可作为 `external_candidate_reference` 辅助核对，记录媒体版本、来源与是否逐字；删减、释义、润色和字幕合并不直接作为 CER gold。只有回听确认后的原文片段提升为 verified。中文译文用于辅助审查，允许多个合理表达，不把字符匹配率当作翻译准确率。
 
 翻译先固定已校对日语原文，分别检查信息完整性、否定／程度、专名、指代和自然度，再评估端到端结果，区分 ASR 错误传播。领域专名可单独分组报告；粉丝向样本本身符合当前个人场景，但不能据此宣称泛化能力。实时中间译文按当时已到达的上下文评审，不用尚未说出的信息惩罚模型；最终结果按完整上下文评审。
+
+Gemini 3.5 Transcribe 可作为独立 `model_reference` 辅助基线，保留相同音频范围、模型／参数与未经人工复核的状态。与本地 ASR 的分歧是听审优先级，不是自动纠错依据；只有听审后的片段成为 verified。2026-10-02 用户选择先完成本地实验，Gemini 参考稍后补充；本轮不上传音频或调用 Gemini。

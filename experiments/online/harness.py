@@ -100,14 +100,14 @@ def replay(events, translator, policy, interval, max_chars, clock=time.monotonic
     text, revision, group, last_update = '', 0, 1, -math.inf
     source_end = 0.0
 
-    def update(final, event_time):
+    def update(final, event_time, completion_reason=None):
         before = clock()
         result = translator.translate(text)
         duration = clock() - before
         return dict(schema=SCHEMA, kind='translation_replace', group_id=group,
                     source_revision=revision, text=result, source_text=text,
                     source_end_s=source_end, upstream_emission_s=event_time,
-                    translation_compute_s=duration, final=final,
+                    translation_compute_s=duration, final=final, completion_reason=completion_reason,
                     timing_mode='serial-policy-replay')
 
     last_emission = 0.0
@@ -128,15 +128,18 @@ def replay(events, translator, policy, interval, max_chars, clock=time.monotonic
                 raise ValueError('audio end precedes start')
             text += chunk
             revision += 1
-            boundary = text.rstrip().endswith(('。', '！', '？', '.', '!', '?')) or len(text) >= max_chars
+            completion_reason = ('sentence_end' if text.rstrip().endswith(('。', '！', '？', '.', '!', '?'))
+                                 else 'character_budget' if len(text) >= max_chars else None)
+            boundary = completion_reason is not None
         elif kind == 'source_boundary':
             boundary = True
+            completion_reason = 'provider_voice_boundary'
         else:
             raise ValueError(f'unsupported event kind: {kind}')
         if not text:
             continue
         if boundary:
-            yield update(True, event_time)
+            yield update(True, event_time, completion_reason)
             text, revision = '', 0
             group += 1
             last_update = -math.inf
@@ -145,7 +148,7 @@ def replay(events, translator, policy, interval, max_chars, clock=time.monotonic
             last_update = event_time
     # EOF flush is an explicit policy decision, not an upstream final signal.
     if text:
-        yield update(True, last_emission)
+        yield update(True, last_emission, 'input_eof')
 
 
 def percentile(values, fraction):

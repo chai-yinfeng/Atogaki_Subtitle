@@ -28,6 +28,7 @@ class OnlineTests(unittest.TestCase):
         self.assertEqual([e['source_revision'] for e in updates], [1, 2, 2])
         self.assertEqual([e['final'] for e in updates], [False, False, True])
         self.assertEqual(report(updates)['replacement_updates'], 2)
+        self.assertEqual(updates[-1]['completion_reason'], 'input_eof')
 
     def test_boundary_policy_and_empty_boundary(self):
         events = list(normalize(['{"emission_time":0,"is_final":true}',
@@ -36,6 +37,7 @@ class OnlineTests(unittest.TestCase):
         updates = list(replay(events, Translator(), 'boundary', 5, 240))
         self.assertEqual([e['group_id'] for e in updates], [1, 2])
         self.assertTrue(all(e['final'] for e in updates))
+        self.assertEqual([e['completion_reason'] for e in updates], ['sentence_end', 'input_eof'])
 
     def test_english_word_separator_is_preserved(self):
         events = list(normalize(['1000 0 500  hello', '2000 500 1000  world'], 'whisper-streaming'))
@@ -55,6 +57,31 @@ class OnlineTests(unittest.TestCase):
     def test_unknown_schema_rejected(self):
         with self.assertRaises(ValueError):
             list(replay([dict(schema='offline', emission_s=0)], Translator(), 'boundary', 5, 240))
+
+
+class ComparisonTests(unittest.TestCase):
+    def metadata(self, digest='same'):
+        return dict(audio_sha256=digest, audio_duration_s=60,
+                    timing_mode='computationally-aware', backend='test',
+                    model_sha256={}, upstream_commit='test', wall_time_s=65)
+
+    def test_comparison_rejects_different_inputs(self):
+        from compare_runs import compare
+        with self.assertRaises(ValueError):
+            compare([(self.metadata(), []), (self.metadata('different'), [])])
+
+    def test_comparison_never_claims_absolute_accuracy(self):
+        from compare_runs import compare
+        result = compare([(self.metadata(), [])])
+        self.assertEqual(result['reference_status'], 'no_verified_reference')
+        self.assertNotIn('cer', result['runs'][0]['observed_metrics'])
+
+    def test_comparison_rejects_simulation_without_compute_time(self):
+        from compare_runs import compare
+        metadata = self.metadata()
+        metadata['timing_mode'] = 'computationally-unaware'
+        with self.assertRaises(ValueError):
+            compare([(metadata, [])])
 
 
 if __name__ == '__main__':

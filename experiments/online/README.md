@@ -43,7 +43,7 @@ python3 experiments/online/harness.py report \
           local-artifacts/online/ws-run/revisable.jsonl
 ```
 
-`boundary` 等到标点、上游 voice boundary、字符预算或 EOF 后翻译；`revisable` 额外按上游输出时间间隔重译活动组。`translation_replace` 引用 group ID 和 source revision；final 仅表示本次实验策略冻结显示，不保证离线正确性。当前不带跨组上下文／词表，且不会重新解码 ASR committed 文本。标点规则是基线 heuristic；未针对小数、缩写和日语引语优化。
+`boundary` 等到标点、上游 voice boundary、字符预算或 EOF 后翻译；`revisable` 额外按上游输出时间间隔重译活动组。`translation_replace` 引用 group ID 和 source revision，`completion_reason` 区分句末／字符预算／provider voice boundary／input EOF；final 仅表示本次实验策略冻结显示，不保证离线正确性。当前不带跨组上下文／词表，且不会重新解码 ASR committed 文本。标点规则是基线 heuristic；未针对小数、缩写和日语引语优化。
 
 上游只输出已确认文本：Whisper-Streaming 的三列毫秒文本转为 `source_append`；SimulStreaming JSONL 的 `is_final` 保留为 voice boundary，不将其解释成全文正确性。Whisper 文本格式缺少 voice boundary，因此目前 boundary 对比会包含 endpoint 信号差异，需要在正式算法比较前统一策略或单独报告。
 
@@ -64,3 +64,29 @@ python3 -m unittest discover -s experiments/online -v
 Runner 调用上游 `simulstreaming_whisper.py`，其内部导入仓库自带的修改版 Python Whisper；我们没有在现有 offline whisper.cpp 中移植 AlignAtt。固定源码中，`PaddedAlignAttWhisper` 给 decoder cross-attention 安装 hooks，收集 attention score 并做 softmax；给 key/value 安装 hooks 管理 KV cache；取 alignment heads，经标准化、median filter 和 head 聚合，逐 token 检查最关注 frame 与音频末端的距离。修改版 `model.py` 默认禁用 SDPA，并为缓存增加 `cache_id`。侵入性位于独立上游 runtime 内，不能用普通 ASR 最终文字接口替代。
 
 2026-10-02：两个上游 CLI import/help 与模型加载通过。同一开发节目开头 12 秒 PCM16 WAV、tiny／1 秒 chunk／无 VAD 的实际 computationally-aware 回放均完成；WS 使用 MLX，SS 使用默认 CPU。WS 出现明显音乐段重复，SS 输出音乐标记和问候。只有 3／2 个输出事件，且 runtime、精度和处理策略不同，这只是调用链冒烟，不能推断模型质量或正式性能胜负。原始证据保存在本地 `ws-tiny-smoke/`、`ss-tiny-smoke/`。
+
+## 正式模型开发样本
+
+使用既有 evaluation manifest 的开发集，`prepare_case.py` 会校验完整媒体 SHA-256、范围和 role，拒绝将 holdout 用于本轮实验：
+
+```sh
+python3 experiments/online/prepare_case.py \
+  --manifest /path/to/evaluation/manifest.json \
+  --case-id ja-kokichi-vol1-development --start-ms 15000 --end-ms 75000 \
+  --output-dir local-artifacts/online/cases/vol1-15-75
+```
+
+两个 `run_asr.py` 必须使用该目录的同一 `audio.wav`。Whisper-Streaming 使用 MLX large-v3 本地快照，SimulStreaming 使用官方 `large-v3.pt`；分别记录模型文件摘要与转换快照 revision。正式性能回放顺序运行，翻译服务在 ASR 比较期间不启动。初轮仅覆盖 60 秒开发样本，不代表长节目、holdout 或泛化验收。
+
+```sh
+python3 experiments/online/compare_runs.py \
+  --runs local-artifacts/online/ws-large-v3-vol1-15-75 \
+         local-artifacts/online/ss-large-v3-vol1-15-75 \
+  --output local-artifacts/online/large-v3-comparison.json
+```
+
+比较工具拒绝不同音频和不含计算耗时的模拟；输出最终原文、观测指标和限制。不将模型文本标记为 verified，不自动生成 CER/WER。
+
+Gemini 3.5 Transcribe 可后续作为 `model_reference` 记录，需与相同音频范围对应，并保留模型、参数、时间戳与来源。模型参考用于定位分歧和缩短听审成本，未经听审不能成为 gold，也不能用相对于它的差异率描述绝对准确率。本轮只跑本地实验，不调用云端。
+
+第一轮 large-v3／Hy-MT2 1.8B 的实际结果和限制见 [验证记录](../../docs/online-large-v3-validation.md)。

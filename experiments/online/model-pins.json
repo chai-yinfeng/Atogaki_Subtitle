@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "large-v3": {
+    "architecture": "Whisper large-v3",
+    "torch": {
+      "url": "https://openaipublic.azureedge.net/main/whisper/models/e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb/large-v3.pt",
+      "sha256": "e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb"
+    },
+    "mlx": {
+      "repository": "mlx-community/whisper-large-v3-mlx",
+      "revision": "49e6aa286ad60c14352c404340ded53710378a11",
+      "weights_sha256": "05ff791ce3630fae47e7c51004e9666204d786246ec07cac6110af768099b40d",
+      "config_sha256": "34982ce6ae286095000f82ae9583b3431639e8b092bf60c961f203745e6500e3"
+    }
+  }
+}
