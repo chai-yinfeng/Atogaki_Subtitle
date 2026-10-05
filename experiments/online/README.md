@@ -158,3 +158,5 @@ Cached VAD 为控制实验；live VAD 在独立的 SS uv CPU worker 中逐帧运
 `controlled_metrics.py` 只把人工明确核验的文字／语义及声学时间用于有效延迟；模型文字、provider 时间保持 diagnostic。未输出／多处匹配进入缺失或歧义分母；窗口重复不事后修正。`summarize_controlled.py` 另外检查3次完整回放、长样本积压、逐候选关键语义与绑定 run 摘要的 holdout 核验，未闭环则 winner=null。参考 schema 中 `acceptable_texts` 用于人工认可的语义等价表达，`semantic_observations[run_name]` 为 correct／critical_error，baseline `critical_error` 不能保持 null 后宣称质量通过。
 
 Gemini batch 入口严格限制为授权的四个 development 范围；Keychain 凭据只留在内存，逐段删除上传文件，失败和删除结果保留。`make_gemini_review.py` 从真实 word annotations 提出20个短语和本地听审音频，不自动标 verified。分析时用 `--reference` 指定新参考文件；核验更新不覆盖原模型响应或原运行事件。没有听审的字符差异不是绝对 CER，也不能把模型时间当作人工精确时间。
+
+`check_cancellation.py` 在三个冻结候选完成首个真实 inference 后，只向父 runner 发 SIGTERM，并检查 metadata 及其进程组释放；强制 group kill 仅用于失败清理，不算取消验收通过。`make_candidate_review.py` 生成绑定原始 run 摘要的 +2s 显示、最终邻近文本、模型短语匹配和听审上下文；保留各 repeat／holdout 的实际输出。分析器分别匹配逐字原文和人工批准的语义表达，明确标 uncertain 的锚点可排除，但未输出的已核验锚点仍留在覆盖率分母；pending 参考不通过验收。

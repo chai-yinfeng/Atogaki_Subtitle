@@ -275,7 +275,8 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 2026-10-04 梳理 [online 实验控制与指标合同](online-experiment-contract.md)：区分模型／runtime／提交策略与解码调度，列明当前硬编码参数和未实现的有效 draft／稳定显示延迟；Qwen-Audio-3.0 streaming、开源 Qwen3-ASR、Qwen-MT 作为不同候选记录，尚未调用或接入。
 - [x] 2026-10-05 实现 v3 受控 ASR runner：官方同源 small／base／tiny 未量化转换、SS MPS／FP16 局部适配、32ms 独立因果供给、单消费者解码、显式尾部动作和 live Silero worker；resolved config、source／lock／model／runtime 精度审计与 reference-aware 指标分开保存。见 [0046](decisions/0046-controlled-online-asr-performance.md)。
 - [x] 按用户授权完成四段 development 共240s的 Gemini 3.5 Transcribe，四个远端临时文件均删除；生成20个本地候选听审片段，语义／逐字／声学时间仍待分别核验。
-- [ ] 完成 v3 正式顺序筛选、三次完整 development、冻结 holdout、10分钟积压和 VAD／边界回归；SS small／1s 原生解码出现预算退出，保留失败，不以可见进度冒充有效延迟。人工核验不足时不选生产胜者。
+- [x] 完成 v3 18组同源 small／base／tiny 顺序筛选：17组完成，SS small／1s 预算退出；固定 small／500ms 为临时资源对照配置，不作为质量胜者。短语听审改用连续节目前后文，保留用户原备注，边缘后缀差异不直接算识别错误。
+- [ ] 完成 v3 三次完整 development、冻结 holdout、10分钟积压和 VAD／边界回归；SS small／1s 原生解码出现预算退出，保留失败，不以可见进度冒充有效延迟。人工核验不足时不选生产胜者。
 - [ ] 解耦 VAD 供给／唤醒与 ASR 尾部解码、flush／reset；当前 gate batching 与 SS CPU endpoint 成本会增加积压，先配对复测再扩展听审样本与有效词延迟。选定后只提取一套 adapter／session／VAD，清理可重建环境与未选权重格式，保持 offline／GUI 分离。
 - [ ] 在 development 样本增加音乐开场、交叠说话、专名与过去经历回归；验证 VAD／会话重置、异常 EOF 和专名上下文，再进行独立 holdout 验收。
 - [ ] 完整短节目、自然句末与长样本回归；MPS 适配、时钟漂移、分组差异、Hy-MT2 否定与截断句处理仍待验证。

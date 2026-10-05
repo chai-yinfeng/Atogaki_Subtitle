@@ -65,6 +65,24 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(r['verified_semantic']['matched'], 1)
         self.assertEqual(r['verified_text']['eligible'], 0)
 
+    def test_semantic_review_does_not_approve_original_model_error(self):
+        r = reference_score(self.events(['否定']), [self.anchor(semantic_status='verified', timing_status='verified', acceptable_texts=['不赞同'])])
+        self.assertEqual(r['verified_semantic']['coverage'], 0)
+        self.assertEqual(r['model_reference_diagnostic']['matched'], 1)
+
+    def test_paraphrase_does_not_pass_verbatim_gate(self):
+        r = reference_score(self.events(['不赞同']), [self.anchor(text_status='verified_verbatim', semantic_status='verified', timing_status='verified', acceptable_texts=['不赞同'])])
+        self.assertEqual(r['verified_text']['coverage'], 0)
+        self.assertEqual(r['verified_semantic']['coverage'], 1)
+        self.assertEqual(r['effective']['coverage'], 1)
+
+    def test_uncertain_anchor_excluded_but_missing_verified_anchor_retained(self):
+        r = reference_score(self.events(['别的话']), [self.anchor(text_status='verified_verbatim', timing_status='verified'), self.anchor(id='b', timing_status='uncertain')])
+        self.assertEqual(r['effective']['eligible'], 1)
+        self.assertEqual(r['effective']['missing_or_ambiguous'], 1)
+        self.assertEqual(r['effective']['excluded_uncertain'], 1)
+        self.assertEqual(r['effective']['pending'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

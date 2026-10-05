@@ -7,6 +7,9 @@ from pathlib import Path
 from asr_metrics import summarize, normalized
 from harness import percentile
 
+METRICS_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+ASR_METRICS_SHA256 = hashlib.sha256(Path(__file__).with_name("asr_metrics.py").read_bytes()).hexdigest()
+
 
 def reference_score(events, anchors):
     history, snapshots = {}, []
@@ -14,37 +17,56 @@ def reference_score(events, anchors):
         if e['kind'] == 'display':
             history[e['slot']] = e['text']
             snapshots.append((e['emission_s'], normalized(''.join(history[k] for k in sorted(history)))))
-    rows = []
-    for a in anchors:
-        variants = [normalized(t) for t in [a['text'], *a.get('acceptable_texts', [])] if normalized(t)]
+    def match(variants, audio_end):
+        variants = [normalized(t) for t in variants if normalized(t)]
         states = [(t, any(v in text for v in variants), max((text.count(v) for v in variants), default=0) > 1)
                   for t, text in snapshots]
-        hit = next((t for t, yes, ambiguous in states if yes and not ambiguous), None)
         ambiguous = any(amb for _, yes, amb in states if yes)
+        hit = next((t for t, yes, amb in states if yes and not amb), None)
         stable = None
         if states and states[-1][1] and not ambiguous:
             stable = next((t for t, yes, amb in states if yes and not any(not later[1] for later in states if later[0] > t)), None)
+        return dict(ambiguous=ambiguous, matched=hit is not None and not ambiguous,
+                    first_s=hit, stable_s=stable,
+                    latency_s=hit - audio_end if hit is not None and not ambiguous else None,
+                    stable_latency_s=stable - audio_end if stable is not None else None)
+
+    rows = []
+    for a in anchors:
         timing = a.get('timing_status') == 'verified'
         verified = timing and a.get('text_status') == 'verified_verbatim'
         semantic = timing and a.get('semantic_status') == 'verified' and bool(a.get('acceptable_texts'))
+        model_match = match([a['text']], a['audio_end_s'])
+        # A semantic equivalence never makes an unapproved model phrase correct,
+        # and an approved paraphrase is not a verbatim transcription.
+        text_match = match([a['text']], a['audio_end_s']) if verified else None
+        semantic_match = match(a.get('acceptable_texts', []), a['audio_end_s']) if semantic else None
+        effective = semantic_match if semantic else text_match if verified else model_match
         rows.append(dict(id=a['id'], reference_status=a.get('text_status'), timing_status=a.get('timing_status'),
-                         verified_verbatim=verified, verified_semantic=semantic, ambiguous=ambiguous,
-                         matched=hit is not None and not ambiguous,
-                         first_s=hit, stable_s=stable,
-                         latency_s=hit - a['audio_end_s'] if hit is not None and not ambiguous else None,
-                         stable_latency_s=stable - a['audio_end_s'] if stable is not None else None))
-    def group(label):
-        eligible = [r for r in rows if r[label]]
+                         verified_verbatim=verified, verified_semantic=semantic,
+                         explicitly_uncertain=a.get('timing_status') == 'uncertain' or a.get('text_status') == 'uncertain',
+                         text_match=text_match, semantic_match=semantic_match, model_match=model_match, **effective))
+    def group(label, key):
+        eligible = [r[key] for r in rows if r[label]]
         latencies = [r['latency_s'] for r in eligible if r['matched']]
         return dict(eligible=len(eligible), matched=len(latencies), missing_or_ambiguous=len(eligible) - len(latencies),
                     coverage=len(latencies) / len(eligible) if eligible else None,
                     p50_s=percentile(latencies, .5), p95_s=percentile(latencies, .95),
                     stable_p95_s=percentile([r['stable_latency_s'] for r in eligible if r['stable_latency_s'] is not None], .95))
-    return dict(total_anchors=len(rows), anchors=rows, verified_text=group('verified_verbatim'),
-                verified_semantic=group('verified_semantic'),
-                model_reference_diagnostic=dict(matched=sum(r['matched'] for r in rows),
-                    p95_s=percentile([r['latency_s'] for r in rows if r['matched']], .95),
+    effective = [r for r in rows if r['verified_verbatim'] or r['verified_semantic']]
+    latencies = [r['latency_s'] for r in effective if r['matched']]
+    return dict(total_anchors=len(rows), anchors=rows, verified_text=group('verified_verbatim', 'text_match'),
+                verified_semantic=group('verified_semantic', 'semantic_match'),
+                effective=dict(eligible=len(effective), matched=len(latencies),
+                    coverage=len(latencies) / len(effective) if effective else None,
+                    p50_s=percentile(latencies, .5), p95_s=percentile(latencies, .95),
+                    missing_or_ambiguous=len(effective)-len(latencies),
+                    excluded_uncertain=sum(r['explicitly_uncertain'] and not (r['verified_verbatim'] or r['verified_semantic']) for r in rows),
+                    pending=sum(not (r['verified_verbatim'] or r['verified_semantic'] or r['explicitly_uncertain']) for r in rows)),
+                model_reference_diagnostic=dict(matched=sum(r['model_match']['matched'] for r in rows),
+                    p95_s=percentile([r['model_match']['latency_s'] for r in rows if r['model_match']['matched']], .95),
                     note='Unreviewed text/provider time; NOT effective-text latency or selection evidence'))
+
 
 
 def report(folder, reference=None):
@@ -53,7 +75,7 @@ def report(folder, reference=None):
         meta = dict(meta, **json.loads((folder / 'suite-watchdog.json').read_text()))
     events = [json.loads(l) for l in (folder / 'events.jsonl').read_text().splitlines()] if (folder / 'events.jsonl').exists() else []
     metrics = summarize(events) if meta['status'] == 'completed' else None
-    result = dict(run_metadata_sha256=hashlib.sha256((folder / 'run.json').read_bytes()).hexdigest(),
+    result = dict(metrics_driver_sha256=METRICS_SHA256, asr_metrics_sha256=ASR_METRICS_SHA256, run_metadata_sha256=hashlib.sha256((folder / 'run.json').read_bytes()).hexdigest(),
                   evaluated_reference_sha256=hashlib.sha256(json.dumps(reference, sort_keys=True, ensure_ascii=False).encode()).hexdigest() if reference else None, run=folder.name, metadata=meta, metrics=metrics, eligibility='provisional_no_verified_reference')
     if metrics:
         calls = [e for e in events if e['kind'] == 'inference' and e['model_decode']]
@@ -75,10 +97,8 @@ def report(folder, reference=None):
                 if lo < end <= hi:
                     anchors.append(dict(a, audio_end_s=end - lo))
         result['reference'] = reference_score(events, anchors)
-        g = result['reference']['verified_text']
-        if not g['eligible']:
-            g = result['reference']['verified_semantic']
-        if len(anchors) and g['eligible'] == len(anchors):
+        g = result['reference']['effective']
+        if g['eligible'] and not g['pending']:
             if g['coverage'] >= .95 and g['p50_s'] is not None and g['p50_s'] <= 1 and g['p95_s'] <= 2:
                 result['eligibility'] = 'latency_pass_pending_semantic_and_long_run_review'
             else:
