@@ -160,3 +160,7 @@ Cached VAD 为控制实验；live VAD 在独立的 SS uv CPU worker 中逐帧运
 Gemini batch 入口严格限制为授权的四个 development 范围；Keychain 凭据只留在内存，逐段删除上传文件，失败和删除结果保留。`make_gemini_review.py` 从真实 word annotations 提出20个短语和本地听审音频，不自动标 verified。分析时用 `--reference` 指定新参考文件；核验更新不覆盖原模型响应或原运行事件。没有听审的字符差异不是绝对 CER，也不能把模型时间当作人工精确时间。
 
 `check_cancellation.py` 在三个冻结候选完成首个真实 inference 后，只向父 runner 发 SIGTERM，并检查 metadata 及其进程组释放；强制 group kill 仅用于失败清理，不算取消验收通过。`make_candidate_review.py` 生成绑定原始 run 摘要的 +2s 显示、最终邻近文本、模型短语匹配和听审上下文；保留各 repeat／holdout 的实际输出。分析器分别匹配逐字原文和人工批准的语义表达，明确标 uncertain 的锚点可排除，但未输出的已核验锚点仍留在覆盖率分母；pending 参考不通过验收。
+
+`sample_resources.py` 每30s只观察本轮 runner 和其子进程的 current RSS／VSZ，不记录其他应用 argv；`controlled_metrics.py` 报告10分钟最后2分钟与第2–3分钟的 runner RSS 中位数变化。模型 allocator 终点、进程峰值和 RSS 采样各有不同口径，保留原始进程序列，不宣称精确系统／GPU 总峰值。
+
+时间坐标审计另发现 pinned SS `insert_audio` 在一次移除多个 segment 时只返回最后一个移除时长，native finish 清空模型 buffer 后也没有完整重设 online timestamp offset。原生 provider timestamps 因此保留为带警示的诊断，不能作为统一声学末尾；本轮 anchor／输入落后仍用独立原媒体时钟，不通过修补 timestamp 伪装延迟改善。该上游 bookkeeping 问题留待选型后的具体 adapter 修复。

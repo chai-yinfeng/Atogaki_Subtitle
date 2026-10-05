@@ -1,7 +1,10 @@
 import time
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from controlled_clock import FeedClock, next_decode
-from controlled_metrics import reference_score
+from controlled_metrics import reference_score, resource_growth
 
 
 class ProducerTests(unittest.TestCase):
@@ -82,6 +85,26 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(r['effective']['missing_or_ambiguous'], 1)
         self.assertEqual(r['effective']['excluded_uncertain'], 1)
         self.assertEqual(r['effective']['pending'], 0)
+
+
+class ResourceTests(unittest.TestCase):
+    def test_parent_rss_growth_does_not_sum_children(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root/'long'
+            rows = [dict(run='long',run_age_s=t,processes=[dict(role='runner',rss_bytes=rss),dict(role='child',rss_bytes=100)])
+                    for t,rss in [(90,10),(150,12),(510,20),(570,22)]]
+            (root/'resource-samples.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in rows))
+            r = resource_growth(folder,dict(audio_duration_s=600))
+            self.assertEqual(r['runner_rss_delta_bytes'],10)
+            self.assertEqual(r['runner_peak_sampled_bytes'],22)
+
+    def test_partial_series_does_not_invent_memory_growth(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'resource-samples.jsonl').write_text(json.dumps(dict(run='long',run_age_s=570,processes=[dict(role='runner',rss_bytes=22)]))+'\n')
+            r = resource_growth(root/'long',dict(audio_duration_s=600))
+            self.assertIsNone(r['runner_rss_delta_bytes'])
 
 
 if __name__ == '__main__':

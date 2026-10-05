@@ -350,3 +350,5 @@ Windows 基础发行先于样式系统：跨平台字体可用性、fallback、�
 - 真实窗口回归可通过绝对路径 `ATOGAKI_DATA_DIR` 隔离 SQLite、任务目录、词表与烧录快照；正式应用数据目录仍是未设置该变量时的默认路径。
 - macOS Tahoe 的 Dock“Apps”启动器依赖 LaunchServices／Spotlight 注册；外部测试发现从 DMG 拖到 `/Applications` 后偶尔要首次手工启动才出现。排查同时发现历史 Bundle 未声明已有图标，导致 App 内没有 `.icns` 和 `CFBundleIconFile`，现已补齐完整图标元数据。Finder 复制按 Apple 设计应触发注册，但 Tahoe 的 Apps／Spotlight 仍有系统级延迟报告，且当前 ad-hoc、未公证分发无法提供 Developer ID 的首次信任路径；发布前继续在外部测试机回归，正式稳定分发应采用 Developer ID 签名和公证。
 - 打包 WebView 中原生 `window.prompt`/`window.confirm` 无法作为可靠交互边界；词表修正和所有覆盖、删除、批量重译、烧录取消已使用应用内对话框。
+
+- Online ASR 技术债：pinned SS 多 segment 淘汰的累计移除时长与 finish 后 timestamp offset 不完整；provider 时间只能诊断。共同延迟验收继续使用独立媒体时钟和人工锚点，具体 adapter 收敛时修复并回归坐标。

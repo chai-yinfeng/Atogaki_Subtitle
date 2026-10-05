@@ -69,6 +69,31 @@ def reference_score(events, anchors):
 
 
 
+def resource_growth(folder, metadata):
+    path = folder.parent / 'resource-samples.jsonl'
+    if not path.exists():
+        return dict(status='not_sampled')
+    samples = []
+    for line in path.read_text().splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:  # A concurrent sampler may be appending the final line.
+            continue
+        if value['run'] == folder.name:
+            age = value['run_age_s']-metadata.get('load_s', 0)-metadata.get('warmup_s', 0)
+            rss = next((p['rss_bytes'] for p in value['processes'] if p['role']=='runner'), None)
+            if rss is not None:
+                samples.append((age,rss))
+    duration = metadata['audio_duration_s']
+    early = [rss for t,rss in samples if 60 <= t < 180]
+    late = [rss for t,rss in samples if duration-120 <= t < duration]
+    return dict(status='sampled' if samples else 'not_sampled_for_run', samples=len(samples),
+                runner_peak_sampled_bytes=max((rss for _,rss in samples), default=None),
+                early_samples=len(early),late_samples=len(late),
+                runner_rss_delta_bytes=percentile(late,.5)-percentile(early,.5) if duration>=300 and early and late else None,
+                note='30s ps current RSS of runner; time approximates replay clock from metadata creation minus load/warmup. Children remain separate in raw samples; not total GPU/system peak.')
+
+
 def report(folder, reference=None):
     meta = json.loads((folder / 'run.json').read_text())
     if (folder / 'suite-watchdog.json').exists():
@@ -77,6 +102,9 @@ def report(folder, reference=None):
     metrics = summarize(events) if meta['status'] == 'completed' else None
     result = dict(metrics_driver_sha256=METRICS_SHA256, asr_metrics_sha256=ASR_METRICS_SHA256, run_metadata_sha256=hashlib.sha256((folder / 'run.json').read_bytes()).hexdigest(),
                   evaluated_reference_sha256=hashlib.sha256(json.dumps(reference, sort_keys=True, ensure_ascii=False).encode()).hexdigest() if reference else None, run=folder.name, metadata=meta, metrics=metrics, eligibility='provisional_no_verified_reference')
+    if meta['config']['backend'] == 'simulstreaming':
+        result['native_provider_timing_note'] = 'Pinned SS insert_audio returns only the last evicted segment duration when multiple segments expire; native finish clears audio without fully resetting online timestamp offset. Provider timestamps remain raw diagnostics, not unified anchor/media timing.'
+    result['resource_growth'] = resource_growth(folder, meta)
     if metrics:
         calls = [e for e in events if e['kind'] == 'inference' and e['model_decode']]
         duration = meta['audio_duration_s']
