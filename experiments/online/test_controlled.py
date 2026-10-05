@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from controlled_clock import FeedClock, next_decode
-from controlled_metrics import reference_score, resource_growth
+from controlled_metrics import reference_score, resource_growth, sustained_score
 from summarize_controlled import quality_reasons, native_cohort_key
 
 
@@ -107,6 +107,22 @@ class ResourceTests(unittest.TestCase):
             (root/'resource-samples.jsonl').write_text(json.dumps(dict(run='long',run_age_s=570,processes=[dict(role='runner',rss_bytes=22)]))+'\n')
             r = resource_growth(root/'long',dict(audio_duration_s=600))
             self.assertIsNone(r['runner_rss_delta_bytes'])
+
+
+class SustainedTests(unittest.TestCase):
+    def test_shrinking_backlog_cannot_approve_delayed_vad_resume(self):
+        events = [dict(kind='vad_decision',action='start',decision_s=299),
+            *[dict(kind='inference',model_decode=True,audio_available_s=t,emission_s=t+lag)
+              for t,lag in [(90,200),(150,100),(300,53),(510,17),(570,18)]]]
+        r = sustained_score(events,600,0)
+        self.assertTrue(r['passed'])
+        self.assertFalse(r['deployment_diagnostics_passed'])
+        self.assertEqual(r['resume_input'][0]['input_ready_delay_s'],54)
+
+    def test_missing_resume_decode_is_not_zero_delay(self):
+        r = sustained_score([dict(kind='vad_decision',action='start',decision_s=10)],600,0)
+        self.assertIsNone(r['resume_input'][0]['input_ready_delay_s'])
+        self.assertFalse(r['resume_input_budget_passed'])
 
 
 class BaselineReviewTests(unittest.TestCase):

@@ -104,6 +104,26 @@ def resource_growth(folder, metadata):
                 note='30s ps current RSS of runner; time approximates replay clock from metadata creation minus load/warmup. Children remain separate in raw samples; not total GPU/system peak.')
 
 
+def sustained_score(events, duration, dropped_audio_s):
+    calls = [e for e in events if e['kind'] == 'inference' and e.get('model_decode')]
+    early = [e['emission_s'] - e['audio_available_s'] for e in calls if 60 <= e['audio_available_s'] < 180]
+    late = [e['emission_s'] - e['audio_available_s'] for e in calls if duration - 120 <= e['audio_available_s'] < duration]
+    delta = percentile(late, .5) - percentile(early, .5) if duration >= 300 and early and late else None
+    resume = []
+    for e in events:
+        if e['kind'] == 'vad_decision' and e.get('action') == 'start':
+            covered = next((c for c in calls if c['audio_available_s'] >= e['decision_s']), None)
+            resume.append(dict(decision_s=e['decision_s'],
+                input_ready_delay_s=covered['emission_s']-e['decision_s'] if covered else None))
+    growth_pass = delta <= 1 and dropped_audio_s == 0 if delta is not None else None
+    resume_pass = all(r['input_ready_delay_s'] is not None and r['input_ready_delay_s'] <= 2 for r in resume)
+    return dict(backlog_delta_s=delta, passed=growth_pass,
+        late_input_lag_p50_s=percentile(late,.5), resume_input=resume,
+        resume_input_budget_passed=resume_pass,
+        deployment_diagnostics_passed=bool(growth_pass and resume_pass),
+        note='passed is the prescribed growth condition only. Resume input readiness uses a conservative 2s operational guard; it is not verified-text latency. Negative growth cannot hide a delayed VAD wakeup.')
+
+
 def report(folder, reference=None):
     meta = json.loads((folder / 'run.json').read_text())
     if (folder / 'suite-watchdog.json').exists():
@@ -114,6 +134,8 @@ def report(folder, reference=None):
                   evaluated_reference_sha256=hashlib.sha256(json.dumps(reference, sort_keys=True, ensure_ascii=False).encode()).hexdigest() if reference else None, run=folder.name, metadata=meta, metrics=metrics, eligibility='provisional_no_verified_reference')
     if meta['config']['backend'] == 'simulstreaming':
         result['native_provider_timing_note'] = 'Pinned SS insert_audio returns only the last evicted segment duration when multiple segments expire; native finish clears audio without fully resetting online timestamp offset. Provider timestamps remain raw diagnostics, not unified anchor/media timing.'
+    result['preprocessing'] = dict(measured_s=meta.get('preprocessing_s') if meta['config']['backend']=='simulstreaming' else None,
+        note='SS explicit CPU mel/transfer timer; WS/CPP preprocessing is included in native inference service and not isolated. Their raw zero was a placeholder, not a measured zero.')
     result['resource_growth'] = resource_growth(folder, meta)
     if metrics:
         calls = [e for e in events if e['kind'] == 'inference' and e['model_decode']]
@@ -123,10 +145,7 @@ def report(folder, reference=None):
             lag = [e['emission_s'] - e['audio_available_s'] for e in calls if lo <= e['audio_available_s'] < lo + 60]
             minute.append(dict(start_s=lo, lag_p50_s=percentile(lag, .5), samples=len(lag)))
         result['minute_backlog'] = minute
-        early = [e['emission_s'] - e['audio_available_s'] for e in calls if 60 <= e['audio_available_s'] < 180]
-        late = [e['emission_s'] - e['audio_available_s'] for e in calls if duration - 120 <= e['audio_available_s'] < duration]
-        delta = percentile(late, .5) - percentile(early, .5) if duration >= 300 and early and late else None
-        result['sustained'] = dict(backlog_delta_s=delta, passed=(delta <= 1 and meta['dropped_audio_s'] == 0) if delta is not None else None)
+        result['sustained'] = sustained_score(events, duration, meta['dropped_audio_s'])
         anchors = []
         if reference and reference.get('media_sha256') == meta['case']['media_sha256']:
             lo, hi = meta['case']['start_ms'] / 1000, meta['case']['end_ms'] / 1000

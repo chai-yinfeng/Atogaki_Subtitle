@@ -170,3 +170,5 @@ Gemini batch 入口严格限制为授权的四个 development 范围；Keychain 
 CPP 的模型在 native worker 内，RSS 增长另外按每个 child PID 计算并报告；Python parent、worker 和 VAD child 保持不同列，不把 parent 小占用当成 ASR 总占用。
 
 `--phase live-long --live-backends whisper-streaming whisper-cpp` 在已冻结 native 参数上补 live VAD 十分钟资源／积压对照。纯静音 off 的 hallucination 及短 live 的时钟开销说明不能只用 cached 概率外推部署效果；失败配置可明确排除，不重复 holdout。选择器分别检查 off 和 live 的持续性证据，不把两种运行合成一条长样本。
+
+本轮固定配置、80组模型回放、3组忙碌取消及参考状态见 [受控验证报告](../../docs/online-controlled-asr-validation.md)。当前 pause runner 在长静音后会按30s追赶旧 PCM；live 长回归已暴露此调度问题，不能作为可部署默认。`sustained.passed` 只代表原增长条件；`deployment_diagnostics_passed` 还要求 VAD 起声坐标的输入恢复不超过2s。这是保守的调度诊断，不是有效文本延迟。完整录音与有限 ASR 上下文的分离策略尚未收敛，后续修复必须保留真实媒体坐标并单独复测。WS／CPP 预处理没有隔离测量，分析报告用 null 表示，原 metadata 中的0为占位值。

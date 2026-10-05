@@ -51,8 +51,8 @@ def main():
             reasons.append('three complete development repeats required')
         if len(long)!=1 or not long[0].get('sustained',{}).get('passed'):
             reasons.append('long-run stability not passed')
-        if len(live_long)!=1 or not live_long[0].get('sustained',{}).get('passed'):
-            reasons.append('deployment live-VAD long-run stability not passed or unavailable')
+        if len(live_long)!=1 or not live_long[0].get('sustained',{}).get('deployment_diagnostics_passed'):
+            reasons.append('deployment live-VAD growth/resume-input guard not passed or unavailable')
         if not full or any(r['eligibility']!='latency_pass_pending_semantic_and_long_run_review' for r in full):
             reasons.append('verified latency/coverage gate not passed or unavailable')
         holdout = [r for r in rows if r['metadata']['case']['role']=='holdout']

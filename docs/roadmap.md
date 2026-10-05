@@ -276,10 +276,12 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 2026-10-05 实现 v3 受控 ASR runner：官方同源 small／base／tiny 未量化转换、SS MPS／FP16 局部适配、32ms 独立因果供给、单消费者解码、显式尾部动作和 live Silero worker；resolved config、source／lock／model／runtime 精度审计与 reference-aware 指标分开保存。见 [0046](decisions/0046-controlled-online-asr-performance.md)。
 - [x] 按用户授权完成四段 development 共240s的 Gemini 3.5 Transcribe，四个远端临时文件均删除；生成20个本地候选听审片段，语义／逐字／声学时间仍待分别核验。
 - [x] 完成 v3 18组同源 small／base／tiny 顺序筛选：17组完成，SS small／1s 预算退出；固定 small／500ms 为临时资源对照配置，不作为质量胜者。短语听审改用连续节目前后文，保留用户原备注，边缘后缀差异不直接算识别错误。
-- [ ] 完成 v3 三次完整 development、冻结 holdout、10分钟积压和 VAD／边界回归；SS small／1s 原生解码出现预算退出，保留失败，不以可见进度冒充有效延迟。人工核验不足时不选生产胜者。
-- [ ] 解耦 VAD 供给／唤醒与 ASR 尾部解码、flush／reset；当前 gate batching 与 SS CPU endpoint 成本会增加积压，先配对复测再扩展听审样本与有效词延迟。选定后只提取一套 adapter／session／VAD，清理可重建环境与未选权重格式，保持 offline／GUI 分离。
+- [x] 完成 v3 80组模型回放与3组实际解码中取消：三轮完整 development（SS 一轮 Unicode 异常）、冻结 holdout、off／live 十分钟积压、12组 VAD／尾部消融和33组边界。39项回归通过，失败与未核验参考保留；见 [受控验证报告](online-controlled-asr-validation.md)。
+- [x] 解耦 VAD classifier／解码暂停与尾部 decode／finish／reset，保存同源概率及 live 计算开销；不默认短暂停重置。正式共享模型／offline sidecar 的摘要、大小和mtime核验未变化。
+- [ ] 修复长静音恢复的 runner 调度缺陷：当前每次最多30s追赶未解码 PCM，live 长回归 WS／CPP 的首次输入恢复分别53.076s／4.720s。积压增长下降不等于实时通过；增加独立恢复诊断，尚未决定如何分离完整录音保存与有限 ASR 声学上下文，不用跳音频／填零／reset 改写本轮结果。
+- [ ] 完成20个连续上下文锚点的语义／声学核验、逐候选关键语义及独立 large-v3／holdout 审核；当前不选生产胜者。SS MPS 完整路径可运行，但small长样本开销、Unicode分组和原生provider时钟仍需处理。选定后只提取一套 adapter／session／VAD，清理未选且可重建的产物，保持 offline／GUI 分离。
 - [ ] 在 development 样本增加音乐开场、交叠说话、专名与过去经历回归；验证 VAD／会话重置、异常 EOF 和专名上下文，再进行独立 holdout 验收。
-- [ ] 完整短节目、自然句末与长样本回归；MPS 适配、时钟漂移、分组差异、Hy-MT2 否定与截断句处理仍待验证。
+- [ ] 在线翻译阶段的自然句末、分组差异、Hy-MT2 否定与截断句处理仍待验证；本轮 ASR 已完成独立短节目／长样本执行，翻译和并发资源竞争未测。
 - [ ] 媒体时钟驱动的并发翻译、过期响应、背压、取消、gap 与 EOF 回归；当前串行重放不能作为实时性能结论。
 
 实施顺序见本轮 P5：先录音流式回放与提交策略，再接入采集。candidate／stable／committed 和离线精修 revision 分开；Muse Voice Transcribe、SeamlessStreaming、SimulStreaming 分别研究。
