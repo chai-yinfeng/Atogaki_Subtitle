@@ -131,3 +131,5 @@ experiments/online/envs/simulstreaming/.venv/bin/python experiments/online/run_a
 选定方案后，只把所选 ASR adapter、最小 session／时钟／VAD／输出合同提取为具体一版；未选 runtime 不进入桌面依赖。保留输入摘要、pins／lock、评估结果与失败证据，再清理可重建的 clone、build、venv 和未采用模型格式。共享模型仅在确认其他功能无引用后才处理，绝不随实验清理删除正式模型。
 
 本轮 12 组 ASR-only 实测与存储／隔离核验见 [验证记录](../../docs/online-asr-vad-validation.md)。
+
+参数控制、指标语义、VAD／调度配对设计与 Qwen 候选边界见 [online 实验合同](../../docs/online-experiment-contract.md)。该合同区分已有观测与待实现指标，不代表已经接入新 provider。
