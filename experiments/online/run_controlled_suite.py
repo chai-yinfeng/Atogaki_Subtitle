@@ -97,7 +97,7 @@ def main():
                            ('mask',['--mask-silence'])]:
             run('ablation-'+name, 'simulstreaming', options=base+opts)
     else:
-        for case in ['silence', 'long-gap', 'quiet-onset', 'cut-eof', 'repeat-regression']:
+        for case in ['silence', 'music-intro', 'long-gap', 'quiet-onset', 'mid-sentence-eof', 'repeat-regression']:
             for b in BACKENDS:
                 run('boundary-'+case+'-off-'+b, b, case)
                 if case != 'repeat-regression':
