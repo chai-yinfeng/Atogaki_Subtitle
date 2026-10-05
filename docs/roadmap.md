@@ -1,6 +1,6 @@
 # 开发路线图
 
-_最后更新：2026-10-02_
+_最后更新：2026-10-04_
 
 路线图按用户价值排序；完成一个阶段前，不提前将后续阶段变成产品默认路径。已完成条目保留为能力与决策历史，当前行动以本页顶部的推进顺序和各阶段未完成项为准。
 
@@ -271,6 +271,8 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 第一轮正式 large-v3 实验：同一 60 秒开发样本完成 WS／MLX 与 SS／CPU 顺序回放及 Hy-MT2 1.8B 四组翻译策略重放；见 [验证记录](online-large-v3-validation.md)，无人工 gold，不作准确率结论。
 - [x] 按用户授权完成一次 Gemini 3.5 Flash 候选段落文本翻译，生成原文／Gemini／Hy-MT2 校对材料；尚未听审，不作为 gold，未上传音频。
 - [x] 2026-10-04 完成候选问答的视觉字幕核对、一次授权 Gemini Transcribe、WS／SS large-v3 与 Hy-MT2 1.8B／7B／Gemini 翻译对照；保留字幕与听感分歧、音乐开场失败及模型错误，见 [验证记录](online-paragraph-reference-validation.md)。holdout 仅作评估，未用于调参。
+- [x] 2026-10-04 补齐 whisper.cpp stream policy 文件适配版，统一真实时钟／draft／commit／flush 指标和 Silero 因果 VAD；完成三套 ASR 的 off／gate／endpoint500 及 CPP 阈值／step 共 12 组 development 回放，本轮不运行 Hy-MT2。见 [ASR／VAD 验证](online-asr-vad-validation.md)。
+- [ ] 解耦 VAD 供给／唤醒与 ASR 尾部解码、flush／reset；当前 gate batching 与 SS CPU endpoint 成本会增加积压，先配对复测再扩展听审样本与有效词延迟。选定后只提取一套 adapter／session／VAD，清理可重建环境与未选权重格式，保持 offline／GUI 分离。
 - [ ] 在 development 样本增加音乐开场、交叠说话、专名与过去经历回归；验证 VAD／会话重置、异常 EOF 和专名上下文，再进行独立 holdout 验收。
 - [ ] 完整短节目、自然句末与长样本回归；MPS 适配、时钟漂移、分组差异、Hy-MT2 否定与截断句处理仍待验证。
 - [ ] 媒体时钟驱动的并发翻译、过期响应、背压、取消、gap 与 EOF 回归；当前串行重放不能作为实时性能结论。
