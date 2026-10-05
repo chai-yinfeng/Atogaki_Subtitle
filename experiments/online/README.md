@@ -155,7 +155,7 @@ Cached VAD 为控制实验；live VAD 在独立的 SS uv CPU worker 中逐帧运
 
 后续 `--phase evaluation` 使用冻结候选，按轮换顺序重复完整 development 三次，再跑10分钟和一次 holdout。提取 holdout 必须传 `prepare_controlled_cases.py --frozen-config`，回放还会核对摘要和模型／解码／原生参数；不能评估完继续改它。`--phase vad` 比较 cached／live pause，及 SS 尾部动作／静音阈值消融；`--phase boundaries` 使用确定性派生 fixture 和既有重复片段。运行目录不覆盖失败；同名复用要求命令和 driver 都一致。
 
-`controlled_metrics.py` 只把人工明确核验的文字／语义及声学时间用于有效延迟；模型文字、provider 时间保持 diagnostic。未输出／多处匹配进入缺失或歧义分母；窗口重复不事后修正。`summarize_controlled.py` 另外检查3次完整回放、长样本积压、逐候选关键语义与绑定 run 摘要的 holdout 核验，未闭环则 winner=null。参考 schema 中 `acceptable_texts` 用于人工认可的语义等价表达，`semantic_observations[run_name]` 为 correct／critical_error，baseline `critical_error` 不能保持 null 后宣称质量通过。
+`controlled_metrics.py` 只把人工明确核验的文字／语义及声学时间用于有效延迟；模型文字、provider 时间保持 diagnostic。未输出／多处匹配进入缺失或歧义分母；窗口重复不事后修正。`summarize_controlled.py` 另外检查3次完整回放、长样本积压、逐候选关键语义与绑定 run 摘要的 holdout 核验，未闭环则 winner=null。参考 schema 中 `acceptable_texts` 用于人工认可的语义等价表达，`semantic_observations[run_name]` 为 correct／critical_error，`large_v3_baseline` 必须绑定历史输出摘要、review_status=reviewed 以及逐 anchor 的 correct／critical_error；不能用 Gemini 是否正确替代 large-v3 基线审核。
 
 Gemini batch 入口严格限制为授权的四个 development 范围；Keychain 凭据只留在内存，逐段删除上传文件，失败和删除结果保留。`make_gemini_review.py` 从真实 word annotations 提出20个短语和本地听审音频，不自动标 verified。分析时用 `--reference` 指定新参考文件；核验更新不覆盖原模型响应或原运行事件。没有听审的字符差异不是绝对 CER，也不能把模型时间当作人工精确时间。
 

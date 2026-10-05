@@ -52,7 +52,9 @@ def main():
                     '-i',str(a.cases/name/'audio.wav'),'-t',str(hi-max(0,lo-.5)+.5),str(clip)],check=True)
             lines += [f'## {aid}：估计 {lo:.2f}–{hi:.2f}s', '',text,'',f'![核验音频]({clip.resolve()})','']
     reference = dict(version=1,source='gemini-3.5-transcribe-model-reference',sources=sources,
-        media_sha256=json.loads((a.cases/'dev-0/case.json').read_text())['media_sha256'],anchors=anchors)
+        media_sha256=json.loads((a.cases/'dev-0/case.json').read_text())['media_sha256'],anchors=anchors,
+        large_v3_baseline=dict(source_sha256=json.loads((a.cases/'reference.json').read_text())['source_sha256'],
+                               review_status='pending',observations={}))
     with (a.cases/'gemini-reference.json').open('x') as f:
         json.dump(reference,f,ensure_ascii=False,indent=2); f.write('\n')
     with (a.cases/'gemini-reference-review.md').open('x') as f:

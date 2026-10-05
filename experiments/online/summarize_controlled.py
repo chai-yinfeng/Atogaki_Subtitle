@@ -7,6 +7,22 @@ from controlled_metrics import report
 from harness import percentile
 
 
+def quality_reasons(reference, full):
+    baseline = reference.get('large_v3_baseline', {})
+    if baseline.get('review_status') != 'reviewed' or not baseline.get('source_sha256'):
+        return ['reviewed and bound large-v3 baseline required']
+    annotations = baseline.get('observations', {})
+    complete = bool(full) and all(annotations.get(a['id']) in ['correct','critical_error'] and
+        all(a.get('semantic_observations',{}).get(r['run']) in ['correct','critical_error'] for r in full)
+        for a in reference['anchors'])
+    if not complete:
+        return ['key-semantic human review incomplete']
+    if any(annotations[a['id']]=='correct' and a['semantic_observations'][r['run']]=='critical_error'
+           for a in reference['anchors'] for r in full):
+        return ['additional key-semantic error relative to reviewed large-v3']
+    return []
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--roots', nargs='+', type=Path, required=True)
@@ -32,14 +48,7 @@ def main():
             reasons.append('frozen holdout evaluation incomplete')
         # Human key-semantic observations are per candidate/run, not a property
         # silently inferred from matching a model-generated transcript.
-        quality_complete = all(a.get('critical_error') is not None and
-                               all(a.get('semantic_observations',{}).get(r['run']) in ['correct','critical_error'] for r in full)
-                               for a in ref['anchors']) and bool(full)
-        if not quality_complete:
-            reasons.append('key-semantic human review incomplete')
-        elif any(a['semantic_observations'][r['run']]=='critical_error' and not a['critical_error']
-                 for a in ref['anchors'] for r in full):
-            reasons.append('additional key-semantic error')
+        reasons.extend(quality_reasons(ref, full))
         # Holdout meaning must also be reviewed independently before declaring winner.
         held = ref.get('holdout_semantic_review', {}).get(backend, {})
         if not holdout or held.get('run_metadata_sha256') != holdout[0]['run_metadata_sha256'] or held.get('status') != 'verified':

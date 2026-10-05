@@ -20,8 +20,14 @@ def main():
     p.add_argument('--cases', type=Path, required=True)
     p.add_argument('--gemini', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--large-v3-output', type=Path)
     a = p.parse_args()
     ref = json.loads(a.reference.read_text())
+    baseline = json.loads(a.large_v3_output.read_text()) if a.large_v3_output else []
+    if a.large_v3_output:
+        expected = json.loads((a.cases/'reference.json').read_text())['source_sha256']
+        if file_sha256(a.large_v3_output) != expected:
+            raise ValueError('historical large-v3 source changed')
     words = []
     for i in range(4):
         source = json.loads((a.gemini/f'dev-{i}'/'reference.json').read_text())
@@ -56,6 +62,9 @@ def main():
                 '-i',str(a.cases/'dev-full/audio.wav'),'-t',str(hi-lo),str(clip)],check=True)
         lines += [f"## {anchor['id']}：全节目估计末尾 {global_end:.2f}s", '',
                   f"Gemini 短语：{anchor['text']}", '',f'上下文（模型）：{context}', '',f'![上下文音频]({clip.resolve()})','']
+        if baseline:
+            base_text = ''.join(s['source_text'] for s in baseline if s['start_ms']/1000 < hi and s['end_ms']/1000 > lo)
+            lines += [f'历史 large-v3（待审核；来源 `{file_sha256(a.large_v3_output)}`）：{base_text}', '']
         for name, digest, meta, events, snapshots in runs:
             if meta['case']['media_sha256'] != ref['media_sha256']:
                 raise ValueError('review run is from different recording')

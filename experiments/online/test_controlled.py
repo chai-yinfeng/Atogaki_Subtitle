@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from controlled_clock import FeedClock, next_decode
 from controlled_metrics import reference_score, resource_growth
+from summarize_controlled import quality_reasons
 
 
 class ProducerTests(unittest.TestCase):
@@ -105,6 +106,19 @@ class ResourceTests(unittest.TestCase):
             (root/'resource-samples.jsonl').write_text(json.dumps(dict(run='long',run_age_s=570,processes=[dict(role='runner',rss_bytes=22)]))+'\n')
             r = resource_growth(root/'long',dict(audio_duration_s=600))
             self.assertIsNone(r['runner_rss_delta_bytes'])
+
+
+class BaselineReviewTests(unittest.TestCase):
+    def test_gemini_correctness_cannot_replace_large_v3_review(self):
+        ref = dict(anchors=[dict(id='a',critical_error=False,semantic_observations={'run':'correct'})])
+        self.assertTrue(quality_reasons(ref,[dict(run='run')]))
+
+    def test_additional_critical_error_relative_to_reviewed_baseline(self):
+        ref = dict(anchors=[dict(id='a',semantic_observations={'run':'critical_error'})],
+                   large_v3_baseline=dict(source_sha256='bound',review_status='reviewed',observations={'a':'correct'}))
+        self.assertTrue(quality_reasons(ref,[dict(run='run')]))
+        ref['large_v3_baseline']['observations']['a'] = 'critical_error'
+        self.assertEqual(quality_reasons(ref,[dict(run='run')]),[])
 
 
 if __name__ == '__main__':
