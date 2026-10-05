@@ -35,6 +35,7 @@ int main(int argc, char **argv) {
         }
         auto p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
         p.n_threads = 4; p.language = argv[2];
+        p.temperature = 0.0f; p.temperature_inc = 0.0f; p.greedy.best_of = 1;
         p.single_segment = true; p.no_context = true; p.no_timestamps = true;
         p.print_progress = false; p.print_realtime = false; p.print_timestamps = false;
         if (whisper_full(ctx, p, audio.data(), count)) { whisper_free(ctx); return 6; }

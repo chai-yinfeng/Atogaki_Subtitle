@@ -133,3 +133,28 @@ experiments/online/envs/simulstreaming/.venv/bin/python experiments/online/run_a
 本轮 12 组 ASR-only 实测与存储／隔离核验见 [验证记录](../../docs/online-asr-vad-validation.md)。
 
 参数控制、指标语义、VAD／调度配对设计与 Qwen 候选边界见 [online 实验合同](../../docs/online-experiment-contract.md)。该合同区分已有观测与待实现指标，不代表已经接入新 provider。
+
+## v3：同源模型与独立供给时钟
+
+本轮实现遵循 [0046](../../docs/decisions/0046-controlled-online-asr-performance.md)。`prepare_models.py` 在 SS uv 环境下载并校验官方 small／base／tiny checkpoint，转换 MLX FP16 和 GGML F16（指定小张量仍为 FP32），记录源／工具／资产摘要及 alignment heads。MLX 使用 greedy，不传会触发未实现 beam search 的 `beam_size=1`。SS 的局部 compatibility shim 在 hooks／context 创建前指定 MPS／FP16，CPU 明确负责 float32 STFT／mel，不允许隐式模型 CPU fallback。GPU 完成同步包含在调用计时内；实际 activation／logit dtype 与 kernel 累积精度的未知部分单列。
+
+```sh
+experiments/online/envs/simulstreaming/.venv/bin/python experiments/online/prepare_models.py --size small
+experiments/online/envs/simulstreaming/.venv/bin/python experiments/online/prepare_controlled_cases.py \
+  --manifest /path/to/evaluation/manifest.json --root local-artifacts/online/controlled-cases
+experiments/online/envs/simulstreaming/.venv/bin/python experiments/online/run_controlled_suite.py \
+  --root local-artifacts/online/controlled-final --cases local-artifacts/online/controlled-cases \
+  --phase screen --sizes small base tiny
+```
+
+`replay_controlled.py` 读冻结的 case，而不是裸音频路径。单独 producer 按每帧 32ms 的到达时刻更新 cursor／VAD decisions，consumer 一次只执行一个 ASR 调用，过期触发合并，原媒体坐标不变。VAD pause 保留原始 PCM，不自动 tail decode、finish 或 reset；`--tail-decode`、`--finish-on-pause`、`--reset-on-pause` 分开。明确的一项限制：SS 上游 finish 本身会清除 segment/context，因此 SS 的 finish 实验包含该原生状态变化；不能宣称其为“纯 buffer flush”。WS finish 只预览尾部，不把它重复追加进已确认前缀。
+
+Cached VAD 为控制实验；live VAD 在独立的 SS uv CPU worker 中逐帧运行，因此无需把 torch 加进 WS runtime。其计算／IPC 与 ASR 并发开销包含在 replay 时钟内。EOF 排空最后语音尾部；VAD 完全未起声时不为了 EOF 对整段静音强制解码；最后停声后的已检测静音可不交 ASR，另列 `asr_unprocessed_trailing_silence_s`，完整输入供给和原始录音仍保留。不能把这项与无声学证据的丢包混淆。
+
+每次运行保存 resolved config、driver/shim hash、lock、packages、upstream pin、实际设备／dtype、模型／worker／library 摘要。旧 v2、适配探针和正式 v3 保存在不同目录；调试时资源重叠的探针不用于性能排名。父进程 RSS、CPP/VAD child 最大 RSS、MLX peak 和 MPS allocator 观测分别保存，不能简单相加声称系统总峰值。
+
+后续 `--phase evaluation` 使用冻结候选，按轮换顺序重复完整 development 三次，再跑10分钟和一次 holdout。提取 holdout 必须传 `prepare_controlled_cases.py --frozen-config`，回放还会核对摘要和模型／解码／原生参数；不能评估完继续改它。`--phase vad` 比较 cached／live pause，及 SS 尾部动作／静音阈值消融；`--phase boundaries` 使用确定性派生 fixture 和既有重复片段。运行目录不覆盖失败；同名复用要求命令和 driver 都一致。
+
+`controlled_metrics.py` 只把人工明确核验的文字／语义及声学时间用于有效延迟；模型文字、provider 时间保持 diagnostic。未输出／多处匹配进入缺失或歧义分母；窗口重复不事后修正。`summarize_controlled.py` 另外检查3次完整回放、长样本积压、逐候选关键语义与绑定 run 摘要的 holdout 核验，未闭环则 winner=null。参考 schema 中 `acceptable_texts` 用于人工认可的语义等价表达，`semantic_observations[run_name]` 为 correct／critical_error，baseline `critical_error` 不能保持 null 后宣称质量通过。
+
+Gemini batch 入口严格限制为授权的四个 development 范围；Keychain 凭据只留在内存，逐段删除上传文件，失败和删除结果保留。`make_gemini_review.py` 从真实 word annotations 提出20个短语和本地听审音频，不自动标 verified。分析时用 `--reference` 指定新参考文件；核验更新不覆盖原模型响应或原运行事件。没有听审的字符差异不是绝对 CER，也不能把模型时间当作人工精确时间。

@@ -1,6 +1,6 @@
 # 产品方向：多语言音视频理解工作台
 
-_最后更新：2026-10-02_
+_最后更新：2026-10-05_
 
 ## 项目起点与泛化方向
 
@@ -45,7 +45,7 @@ Windows 基础发行通过实机闭环后，日常核心开发与交互质量继
 
 实时模式只提供低延迟的理解辅助，不承诺最终准确性。它应保留会话录音，结束后可单独运行完整的全文 offline ASR → translation，以提高最终资料的准确率；自动调度方式后续确定。Online session、实时翻译调度和未来 GUI 与 offline 工作流分离，只共享适合的基础设施。首轮 CLI 实验比较 Whisper-Streaming／SimulStreaming，translation backend 使用 Hy-MT2，见 [决策 0045](decisions/0045-independent-online-experiments.md)。
 
-- 可接受十几秒级延迟和较粗的转写。
+- 实时 ASR 优先低延迟的可修改草稿，开发目标为有效显示 p50≤1s、p95≤2s，结合关键语义、覆盖率和持续积压验收；这是待验证目标，不能用输入处理落后冒充字幕延迟。后续翻译另测预算，见 [0046](decisions/0046-controlled-online-asr-performance.md)。
 - 优先展示原文粗转写；粗翻译仅作为可选提示。
 - 任何实时结果都需要明确标注为“处理中/非最终版”。
 

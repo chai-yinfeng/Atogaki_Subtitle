@@ -1,6 +1,6 @@
 # 开发路线图
 
-_最后更新：2026-10-04_
+_最后更新：2026-10-05_
 
 路线图按用户价值排序；完成一个阶段前，不提前将后续阶段变成产品默认路径。已完成条目保留为能力与决策历史，当前行动以本页顶部的推进顺序和各阶段未完成项为准。
 
@@ -273,7 +273,9 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 2026-10-04 完成候选问答的视觉字幕核对、一次授权 Gemini Transcribe、WS／SS large-v3 与 Hy-MT2 1.8B／7B／Gemini 翻译对照；保留字幕与听感分歧、音乐开场失败及模型错误，见 [验证记录](online-paragraph-reference-validation.md)。holdout 仅作评估，未用于调参。
 - [x] 2026-10-04 补齐 whisper.cpp stream policy 文件适配版，统一真实时钟／draft／commit／flush 指标和 Silero 因果 VAD；完成三套 ASR 的 off／gate／endpoint500 及 CPP 阈值／step 共 12 组 development 回放，本轮不运行 Hy-MT2。见 [ASR／VAD 验证](online-asr-vad-validation.md)。
 - [x] 2026-10-04 梳理 [online 实验控制与指标合同](online-experiment-contract.md)：区分模型／runtime／提交策略与解码调度，列明当前硬编码参数和未实现的有效 draft／稳定显示延迟；Qwen-Audio-3.0 streaming、开源 Qwen3-ASR、Qwen-MT 作为不同候选记录，尚未调用或接入。
-- [ ] 补 resolved config／driver revision，解耦 feed clock 与 decode trigger，配对控制尾部 decode／finish／reset；建立少量人工时间对齐的有效显示延迟、覆盖与稳定性测量后再扩大模型矩阵。Qwen cloud 与 MT 后续分别评估，不将旧 Gemini 文件参考排入 streaming 延迟榜。
+- [x] 2026-10-05 实现 v3 受控 ASR runner：官方同源 small／base／tiny 未量化转换、SS MPS／FP16 局部适配、32ms 独立因果供给、单消费者解码、显式尾部动作和 live Silero worker；resolved config、source／lock／model／runtime 精度审计与 reference-aware 指标分开保存。见 [0046](decisions/0046-controlled-online-asr-performance.md)。
+- [x] 按用户授权完成四段 development 共240s的 Gemini 3.5 Transcribe，四个远端临时文件均删除；生成20个本地候选听审片段，语义／逐字／声学时间仍待分别核验。
+- [ ] 完成 v3 正式顺序筛选、三次完整 development、冻结 holdout、10分钟积压和 VAD／边界回归；SS small／1s 原生解码出现预算退出，保留失败，不以可见进度冒充有效延迟。人工核验不足时不选生产胜者。
 - [ ] 解耦 VAD 供给／唤醒与 ASR 尾部解码、flush／reset；当前 gate batching 与 SS CPU endpoint 成本会增加积压，先配对复测再扩展听审样本与有效词延迟。选定后只提取一套 adapter／session／VAD，清理可重建环境与未选权重格式，保持 offline／GUI 分离。
 - [ ] 在 development 样本增加音乐开场、交叠说话、专名与过去经历回归；验证 VAD／会话重置、异常 EOF 和专名上下文，再进行独立 holdout 验收。
 - [ ] 完整短节目、自然句末与长样本回归；MPS 适配、时钟漂移、分组差异、Hy-MT2 否定与截断句处理仍待验证。
