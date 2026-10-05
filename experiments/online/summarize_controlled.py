@@ -7,6 +7,15 @@ from controlled_metrics import report
 from harness import percentile
 
 
+def native_cohort_key(row):
+    meta = row['metadata']
+    keys = ['backend','decode_ms','device','trimming','frame_threshold','length','keep','language']
+    return json.dumps(dict(config={k:meta['config'].get(k) for k in keys},
+        artifacts=meta.get('provenance',{}).get('artifacts'),
+        source_hashes=meta.get('source_hashes'),locks=meta.get('lock_hashes'),
+        worker=meta.get('worker_sha256'),pins=meta.get('upstream_pins')),sort_keys=True)
+
+
 def quality_reasons(reference, full):
     baseline = reference.get('large_v3_baseline', {})
     if baseline.get('review_status') != 'reviewed' or not baseline.get('source_sha256'):
@@ -34,18 +43,24 @@ def main():
     candidates = []
     for backend in ['whisper-streaming','simulstreaming','whisper-cpp']:
         rows = [r for r in reports if r['metadata']['config']['backend']==backend]
-        long = [r for r in rows if r['metadata']['case']['role']=='long_regression']
+        long = [r for r in rows if r['metadata']['case']['role']=='long_regression' and r['metadata']['config']['vad']=='off']
+        live_long = [r for r in rows if r['metadata']['case']['role']=='long_regression' and r['metadata']['config']['vad']=='live']
         full = [r for r in rows if r['run'].startswith('full-r')]
         reasons = []
         if len(full)!=3 or any(r['metadata']['status']!='completed' for r in full):
             reasons.append('three complete development repeats required')
         if len(long)!=1 or not long[0].get('sustained',{}).get('passed'):
             reasons.append('long-run stability not passed')
+        if len(live_long)!=1 or not live_long[0].get('sustained',{}).get('passed'):
+            reasons.append('deployment live-VAD long-run stability not passed or unavailable')
         if not full or any(r['eligibility']!='latency_pass_pending_semantic_and_long_run_review' for r in full):
             reasons.append('verified latency/coverage gate not passed or unavailable')
         holdout = [r for r in rows if r['metadata']['case']['role']=='holdout']
         if len(holdout)!=1 or holdout[0]['metadata']['status']!='completed':
             reasons.append('frozen holdout evaluation incomplete')
+        cohort = full + long + live_long + [r for r in rows if r['metadata']['case']['role']=='holdout']
+        if len({native_cohort_key(r) for r in cohort}) != 1:
+            reasons.append('mixed native model/runtime/driver cohort')
         # Human key-semantic observations are per candidate/run, not a property
         # silently inferred from matching a model-generated transcript.
         reasons.extend(quality_reasons(ref, full))

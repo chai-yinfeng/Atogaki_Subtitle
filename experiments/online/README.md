@@ -166,3 +166,7 @@ Gemini batch 入口严格限制为授权的四个 development 范围；Keychain 
 时间坐标审计另发现 pinned SS `insert_audio` 在一次移除多个 segment 时只返回最后一个移除时长，native finish 清空模型 buffer 后也没有完整重设 online timestamp offset。原生 provider timestamps 因此保留为带警示的诊断，不能作为统一声学末尾；本轮 anchor／输入落后仍用独立原媒体时钟，不通过修补 timestamp 伪装延迟改善。该上游 bookkeeping 问题留待选型后的具体 adapter 修复。
 
 取消探针不改主 runner／模型驱动，只在独立子进程内包裹 run 写开始 marker，用于验证忙碌时释放；该轮源摘要单独保存，不进入性能排名。
+
+CPP 的模型在 native worker 内，RSS 增长另外按每个 child PID 计算并报告；Python parent、worker 和 VAD child 保持不同列，不把 parent 小占用当成 ASR 总占用。
+
+`--phase live-long --live-backends whisper-streaming whisper-cpp` 在已冻结 native 参数上补 live VAD 十分钟资源／积压对照。纯静音 off 的 hallucination 及短 live 的时钟开销说明不能只用 cached 概率外推部署效果；失败配置可明确排除，不重复 holdout。选择器分别检查 off 和 live 的持续性证据，不把两种运行合成一条长样本。

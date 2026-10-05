@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from controlled_clock import FeedClock, next_decode
 from controlled_metrics import reference_score, resource_growth
-from summarize_controlled import quality_reasons
+from summarize_controlled import quality_reasons, native_cohort_key
 
 
 class ProducerTests(unittest.TestCase):
@@ -93,12 +93,13 @@ class ResourceTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             folder = root/'long'
-            rows = [dict(run='long',run_age_s=t,processes=[dict(role='runner',rss_bytes=rss),dict(role='child',rss_bytes=100)])
+            rows = [dict(run='long',run_age_s=t,processes=[dict(role='runner',rss_bytes=rss),dict(pid=22,role='child',rss_bytes=100)])
                     for t,rss in [(90,10),(150,12),(510,20),(570,22)]]
             (root/'resource-samples.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in rows))
             r = resource_growth(folder,dict(audio_duration_s=600))
             self.assertEqual(r['runner_rss_delta_bytes'],10)
             self.assertEqual(r['runner_peak_sampled_bytes'],22)
+            self.assertEqual(r['children'][0]['rss_delta_bytes'],0)
 
     def test_partial_series_does_not_invent_memory_growth(self):
         with TemporaryDirectory() as tmp:
@@ -109,6 +110,13 @@ class ResourceTests(unittest.TestCase):
 
 
 class BaselineReviewTests(unittest.TestCase):
+    def test_cohort_separates_models_but_allows_vad_pairing(self):
+        a = dict(metadata=dict(config=dict(backend='whisper-cpp',decode_ms=500,vad='off'),provenance=dict(artifacts={'weights':'small'})))
+        b = dict(metadata=dict(config=dict(backend='whisper-cpp',decode_ms=500,vad='live'),provenance=dict(artifacts={'weights':'small'})))
+        self.assertEqual(native_cohort_key(a),native_cohort_key(b))
+        b['metadata']['provenance']['artifacts']['weights']='base'
+        self.assertNotEqual(native_cohort_key(a),native_cohort_key(b))
+
     def test_gemini_correctness_cannot_replace_large_v3_review(self):
         ref = dict(anchors=[dict(id='a',critical_error=False,semantic_observations={'run':'correct'})])
         self.assertTrue(quality_reasons(ref,[dict(run='run')]))

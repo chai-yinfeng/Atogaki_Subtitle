@@ -21,6 +21,7 @@ def main():
     p.add_argument('--gemini', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--large-v3-output', type=Path)
+    p.add_argument('--repeat', type=int, choices=[0,1,2], help='compact review of one repeat; full evidence remains separate')
     a = p.parse_args()
     ref = json.loads(a.reference.read_text())
     baseline = json.loads(a.large_v3_output.read_text()) if a.large_v3_output else []
@@ -34,6 +35,8 @@ def main():
         words.extend(dict(text=w['text'], start=seconds(w['start_offset'])+i*60, end=seconds(w['end_offset'])+i*60) for w in source['words'])
     runs = []
     for path in sorted(a.runs.glob('full-r*/run.json')):
+        if a.repeat is not None and not path.parent.name.startswith(f'full-r{a.repeat}-'):
+            continue
         meta = json.loads(path.read_text())
         events = [json.loads(line) for line in (path.parent/'events.jsonl').read_text().splitlines()] if (path.parent/'events.jsonl').exists() else []
         snapshots, history = [], {}

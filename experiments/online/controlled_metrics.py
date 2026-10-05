@@ -73,7 +73,7 @@ def resource_growth(folder, metadata):
     path = folder.parent / 'resource-samples.jsonl'
     if not path.exists():
         return dict(status='not_sampled')
-    samples = []
+    samples, child_series = [], {}
     for line in path.read_text().splitlines():
         try:
             value = json.loads(line)
@@ -84,10 +84,20 @@ def resource_growth(folder, metadata):
             rss = next((p['rss_bytes'] for p in value['processes'] if p['role']=='runner'), None)
             if rss is not None:
                 samples.append((age,rss))
+            for child in value['processes']:
+                if child['role'] == 'child':
+                    child_series.setdefault(child['pid'],[]).append((age,child['rss_bytes']))
     duration = metadata['audio_duration_s']
     early = [rss for t,rss in samples if 60 <= t < 180]
     late = [rss for t,rss in samples if duration-120 <= t < duration]
-    return dict(status='sampled' if samples else 'not_sampled_for_run', samples=len(samples),
+    children = []
+    for pid, series in child_series.items():
+        child_early = [rss for t,rss in series if 60 <= t < 180]
+        child_late = [rss for t,rss in series if duration-120 <= t < duration]
+        children.append(dict(pid=pid,samples=len(series),peak_sampled_bytes=max(rss for _,rss in series),
+            early_samples=len(child_early),late_samples=len(child_late),
+            rss_delta_bytes=percentile(child_late,.5)-percentile(child_early,.5) if duration>=300 and child_early and child_late else None))
+    return dict(status='sampled' if samples else 'not_sampled_for_run', samples=len(samples),children=children,
                 runner_peak_sampled_bytes=max((rss for _,rss in samples), default=None),
                 early_samples=len(early),late_samples=len(late),
                 runner_rss_delta_bytes=percentile(late,.5)-percentile(early,.5) if duration>=300 and early and late else None,

@@ -18,7 +18,8 @@ def main():
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--cases', type=Path, required=True)
     p.add_argument('--reference', type=Path)
-    p.add_argument('--phase', choices=['screen', 'evaluation', 'vad', 'boundaries'], required=True)
+    p.add_argument('--phase', choices=['screen', 'evaluation', 'vad', 'boundaries', 'live-long'], required=True)
+    p.add_argument('--live-backends', nargs='+', choices=BACKENDS, default=BACKENDS, help='live-long candidates; other phases keep the fixed matrix')
     p.add_argument('--sizes', nargs='+', default=['small'], choices=['small', 'base', 'tiny'])
     a = p.parse_args()
     a.root.mkdir(parents=True, exist_ok=True)
@@ -86,6 +87,10 @@ def main():
         if (a.cases / 'holdout/case.json').exists():
             for b in BACKENDS:
                 run('holdout-'+b, b, 'holdout', **cfg[b])
+    elif a.phase == 'live-long':
+        cfg = json.loads((a.root/'frozen-candidates.json').read_text())['candidates']
+        for b in a.live_backends:
+            run('live-long-'+b,b,'long-10m',**cfg[b],options=['--vad','live'])
     elif a.phase == 'vad':
         for b in BACKENDS:
             for mode in ['cached','live']:
