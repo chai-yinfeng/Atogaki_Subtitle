@@ -2,7 +2,15 @@
 name = "atogaki-online-simulstreaming"
 version = "0.0.1"
 requires-python = ">=3.11,<3.12"
-dependencies = ["torch", "torchaudio", "librosa", "soundfile", "tqdm", "tiktoken"]
+dependencies = [
+    "torch",
+    "torchaudio",
+    "librosa",
+    "soundfile",
+    "tqdm",
+    "tiktoken",
+    "silero-vad>=6.2.3",
+]
 
 [tool.uv]
 package = false

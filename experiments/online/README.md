@@ -90,3 +90,44 @@ python3 experiments/online/compare_runs.py \
 Gemini 3.5 Transcribe 可后续作为 `model_reference` 记录，需与相同音频范围对应，并保留模型、参数、时间戳与来源。模型参考用于定位分歧和缩短听审成本，未经听审不能成为 gold，也不能用相对于它的差异率描述绝对准确率。本轮只跑本地实验，不调用云端。
 
 第一轮 large-v3／Hy-MT2 1.8B 的实际结果和限制见 [验证记录](../../docs/online-large-v3-validation.md)。
+
+## 三套 ASR 与 VAD 的统一回放（不运行翻译）
+
+`replay_asr.py` 是独立的 v2 ASR 实验入口，使用单调时钟按真实媒体时间供给 PCM；推理落后时合并已到达的音频（最多 30 秒），不丢包、不改变原始时间轴。与旧 computationally-aware CLI 的指标分别保存，不混合排名。录音必须来自 `prepare_case.py` 校验过的 development 范围。
+
+第三个 baseline 使用 `setup_cpp.py` 按既有 sidecar 源码 pin／SHA-256 构建私有 inference worker。窗口拼接、周期 rollover、重叠和默认关闭上下文沿用该版本官方 `examples/stream/stream.cpp`；文件时钟替代 SDL 麦克风采集，并采用无丢包供给。因此称为 **whisper.cpp stream policy 文件适配版**，不是未经修改的 `whisper-stream` 二进制实测。当前 worker 固定 greedy、4 threads、Metal／flash attention、single segment，不生成可用于词级延迟的时间戳；periodic rollover／endpoint freeze 都不等于稳定提交。
+
+```sh
+python3 experiments/online/setup_cpp.py
+uv sync --locked --project experiments/online/envs/simulstreaming
+experiments/online/envs/simulstreaming/.venv/bin/python experiments/online/vad_plan.py \
+  --audio local-artifacts/online/cases/development/audio.wav \
+  --output local-artifacts/online/cases/development/vad.json
+experiments/online/envs/simulstreaming/.venv/bin/python experiments/online/run_asr_suite.py \
+  --audio local-artifacts/online/cases/development/audio.wav \
+  --vad-plan local-artifacts/online/cases/development/vad.json \
+  --cpp-model /path/to/existing/ggml-large-v3-q5_0.bin \
+  --output-dir local-artifacts/online/asr-vad-round
+```
+
+仅新增实验用 silero-vad dependency，锁在 SS 的 uv 环境，WS／CPP 读取相同概率文件。Silero 每 512 个 16 kHz samples（32 ms）因果处理，保存模型 SHA-256、概率、每帧耗时、输入摘要。回放只消费当前已到达的 frame decisions；预先计算不会提前提供未来 speech endpoint。检测计算耗时单独报告，不冒充 live VAD＋ASR 的资源争用测量。
+
+矩阵为三套 backend × off／gate／endpoint（500 ms），另对 CPP 测 250／800 ms endpoint 及 500 ms step。统一默认 step=1 秒、CPP length=5 秒／keep=200 ms；threshold=.5、negative threshold=.35、pre-roll=200 ms，参数是待评估候选。每个 child 有 wall-time 限制，顺序运行，不启动 Hy-MT2、不调用云端。输出目录存在时只复用已完成、同音频且调用配置完全相同的证据，不覆盖未完成轮次。
+
+- `off`：所有 PCM 均进入 ASR。
+- `gate`：非语音时不推理；第一次起声从 pre-roll 开始，以后将跳过的时间填零，保留原媒体坐标和 ASR 状态。它测量过滤＋暂停推理，不将静音压缩掉。
+- `endpoint`：使用同一 gating，但检测到持续静音后处理尾部、调用 finish，并在下次起声重新初始化 ASR 状态。这同时改变结束等待和跨段上下文，不能把质量变化只归于 VAD classifier。
+
+`events.jsonl` 保存 inference、commit、flush、display、VAD decision 和 finish。WS 另外读取 pinned upstream 的未确认 buffer 用于 draft 显示观测；SS 只暴露 AlignAtt 输出，不伪造未暴露的 hypothesis。Only `commit` events contribute to commit latency；EOF／endpoint 强制 flush 不纳入稳定提交。Display snapshot 可以含已确认前缀与未确认尾部，不能仅靠 snapshot 的 stage 推断整段稳定。
+
+`asr_metrics.py` 汇总首次可见／首次算法提交、模型推理次数与耗时、输入处理落后 p50／p95、显示撤回字符数、EOF flush、endpoint 服务等待及最终显示文本。输入落后是 `emission − consumed PCM end`，与所有 backend 的相同文件时钟对应，**不是单词说完到显示的延迟**。Provider commit delay 另列，CPP 没有该值；SS 的零显示撤回只表示 append-only 可观测接口，不证明其内部没有修改。
+
+可额外用 `--vad-reference vad.json` 报告参考起声前的非空显示，以及起声后的首个更新；它们只帮助发现音乐段输出，仍需人工判断文本是否有效。没有听审 reference 的轮次不输出 CER/WER，不使用空白占位补造时间戳。失败轮次保留 metadata／日志，并从成功指标聚合中剔除，失败率单独说明。
+
+### 实验结束后的收敛
+
+实验源码与文档留在 `experiments/online/`，大文件和所有媒体产物保持忽略。本轮只读复用 offline 的 GGML 模型，使用独立 build、worker 和 uv 环境；不替换 offline sidecar，不读写正式 SQLite 或任务目录。运行期间仍占用 CPU／GPU／RAM，可能与同时进行的 offline 任务争用资源；进程结束后释放，不代表功能耦合。
+
+选定方案后，只把所选 ASR adapter、最小 session／时钟／VAD／输出合同提取为具体一版；未选 runtime 不进入桌面依赖。保留输入摘要、pins／lock、评估结果与失败证据，再清理可重建的 clone、build、venv 和未采用模型格式。共享模型仅在确认其他功能无引用后才处理，绝不随实验清理删除正式模型。
+
+本轮 12 组 ASR-only 实测与存储／隔离核验见 [验证记录](../../docs/online-asr-vad-validation.md)。
