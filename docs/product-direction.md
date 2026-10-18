@@ -1,6 +1,6 @@
 # 产品方向：多语言音视频理解工作台
 
-_最后更新：2026-09-18_
+_最后更新：2026-10-18_
 
 ## 项目起点与泛化方向
 
@@ -73,6 +73,12 @@ ASR 可疑信号、人工／自动审查和修复尝试进入正式数据模型�
 实时 candidate、stable、committed 与离线精修结果分开。模型、算法、部署细节和质量结论按阶段验证，不因记录方向而视为已经实现。详见 [管线演进计划](pipeline-evolution.md) 与 [决策 0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
 
 桌面产品范围从 2026-09-18 起按 [能力矩阵](app-capability-matrix.md) 冻结。后续模型、prompt、分段、translation grouping、实时协议和 commit policy 优先在 CLI／evaluation harness 中验证，不再为每轮实验增加桌面入口或独立 Test App。可复用实现继续进入 core/application，只有通过固定质量基线、失败恢复和隐私边界验收，并经过单独产品确认的能力才晋升到桌面 UI；详见 [决策 0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。
+
+## 2026-10-18 执行补充：离线恢复与工作流统一
+
+用户已确认按决策 [0045](decisions/0045-resumable-offline-workflows.md) 推进。长节目恢复可靠性优先于新增模型：约两分钟识别检查点、重启后手动继续、部分结果只读、完整转录后按任务选择自动翻译。翻译阶段与识别阶段分别恢复，已完成块和人工工作区保持可追溯。
+
+配置按转录、翻译、模型与存储、词典、网络与高级组织；支持任务级后端、批量导入和命名预设。学习闭环扩展为检索、全部来源例句、已收藏词高亮及文本 Anki TSV 导出，不在本轮建设内建复习系统。MLX 继续只在 CLI 验证；JSON／cue ID 合同失败不能降低验收标准或晋升桌面。
 
 ## 当前核心闭环
 
