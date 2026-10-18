@@ -40,6 +40,8 @@ struct ChunkEvidence {
     units: Vec<TimedUnit>,
     device: String,
     raw_sha256: String,
+    #[serde(default)]
+    recognition_elapsed_ms: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AudioIdentity {
@@ -86,6 +88,26 @@ pub fn write_json(path: &Path, value: &(impl Serialize + ?Sized)) -> Result<()> 
     atomic_write(path, &serde_json::to_vec_pretty(value)?)
 }
 pub fn file_digest(path: &Path) -> Result<String> {
+    if path.is_dir() {
+        let mut entries = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+        entries.sort_by_key(|e| e.file_name());
+        let mut digest = Sha256::new();
+        for entry in entries {
+            let name = entry.file_name();
+            if name == ".git" || name == ".cache" {
+                continue;
+            }
+            if entry.file_type()?.is_symlink() && entry.path().is_dir() {
+                bail!("symlinked model directories are not supported")
+            }
+            digest.update(name.to_string_lossy().as_bytes());
+            digest.update([0]);
+            digest.update(file_digest(&entry.path())?.as_bytes());
+            digest.update([0]);
+        }
+        return Ok(format!("{:x}", digest.finalize()));
+    }
+
     let mut f = fs::File::open(path).with_context(|| format!("cannot read {}", path.display()))?;
     let mut hash = Sha256::new();
     let mut buf = [0; 65536];
@@ -221,12 +243,20 @@ pub fn recovery_summary(job: &Job) -> Result<TaskRecoverySummary> {
     let path = job.dir.join("asr-checkpoint/plan.json");
     if !path.is_file() {
         return Ok(TaskRecoverySummary {
-            phase: "legacy".into(),
+            phase: if job.dir.join("workflow-version.json").exists() {
+                "extracting_audio".into()
+            } else {
+                "legacy".into()
+            },
             completed_ms: 0,
             duration_ms: 0,
             completed_ranges: vec![],
-            can_resume: false,
-            blocked_reason: Some("该历史任务无法断点继续；可重新运行".into()),
+            can_resume: job.dir.join("workflow-version.json").exists(),
+            blocked_reason: if job.dir.join("workflow-version.json").exists() {
+                None
+            } else {
+                Some("该历史任务无法断点继续；可重新运行".into())
+            },
         });
     }
     let plan: AcousticPlan = serde_json::from_slice(&fs::read(path)?)?;
@@ -291,13 +321,19 @@ pub async fn execute_chunks(
 ) -> Result<AsrResponse> {
     let root = job.dir.join("asr-checkpoint");
     fs::create_dir_all(&root)?;
-    let mut config = serde_json::to_value(options)?;
-    for key in ["model", "vad_model", "glossary"] {
-        if let Some(path) = config.get(key).and_then(|v| v.as_str()) {
-            config[key] = serde_json::Value::String(file_digest(Path::new(path))?);
+    let fingerprint_options = options.clone();
+    let provider_id = provider.status().id.clone();
+    let config = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
+        let mut config = serde_json::to_value(&fingerprint_options)?;
+        for key in ["model", "vad_model", "glossary"] {
+            if let Some(path) = config.get(key).and_then(|v| v.as_str()) {
+                config[key] = serde_json::Value::String(file_digest(Path::new(path))?);
+            }
         }
-    }
-    config["provider"] = serde_json::Value::String(provider.status().id.clone());
+        config["provider"] = serde_json::Value::String(provider_id);
+        Ok(config)
+    })
+    .await??;
     let identity: AudioIdentity =
         serde_json::from_slice(&fs::read(job.dir.join("audio-identity.json"))?)?;
     let desired = AcousticPlan::new(identity.duration_ms, identity.sha256, json_digest(&config)?);
@@ -334,6 +370,7 @@ pub async fn execute_chunks(
             )
             .await?;
             let prefix = attempt.join("provider-output");
+            let recognition_started = std::time::Instant::now();
             let response = provider
                 .transcribe(AsrRequest {
                     audio_path: wav.clone(),
@@ -355,9 +392,12 @@ pub async fn execute_chunks(
                 let (Some(s), Some(e)) = (unit.start_ms, unit.end_ms) else {
                     bail!("ASR returned missing timestamps")
                 };
-                if e <= s || e > chunk.read_end_ms - chunk.read_start_ms + 100 {
+                if e <= s || s >= chunk.read_end_ms - chunk.read_start_ms {
                     bail!("ASR returned invalid chunk timestamps")
                 };
+                if e > chunk.read_end_ms - chunk.read_start_ms {
+                    unit.timing_source = crate::application::TimingSource::Unknown;
+                }
                 unit.start_ms = Some(chunk.read_start_ms + s);
                 unit.end_ms = Some((chunk.read_start_ms + e).min(chunk.read_end_ms));
             }
@@ -370,6 +410,11 @@ pub async fn execute_chunks(
                 units,
                 device,
                 raw_sha256: file_digest(&raw)?,
+                recognition_elapsed_ms: recognition_started
+                    .elapsed()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX),
             };
             write_json(&attempt.join("evidence.json"), &evidence)?;
             atomic_write(
@@ -437,6 +482,22 @@ pub fn candidate_cues(units: &[TimedUnit]) -> crate::application::CandidateCueSe
             })
             .collect(),
     }
+}
+
+pub fn boundary_signals(
+    job_id: &str,
+    run_id: &str,
+    units: &[TimedUnit],
+    created_at_unix: u64,
+) -> Vec<crate::application::QualitySignal> {
+    let mut signals = vec![];
+    for (index, unit) in units.iter().enumerate() {
+        let overlaps = index > 0 && units[index - 1].end_ms > unit.start_ms;
+        if unit.timing_source == crate::application::TimingSource::Unknown || overlaps {
+            signals.push(crate::application::QualitySignal {schema_version:1,id:uuid::Uuid::new_v4().to_string(),job_id:job_id.into(),run_id:run_id.into(),kind:crate::application::QualitySignalKind::ManualConcern,severity:crate::application::QualitySignalSeverity::Warning,start_ms:unit.start_ms,end_ms:unit.end_ms,cue_ids:vec![],detector_version:ACOUSTIC_STRATEGY.into(),message:if overlaps {"相邻识别证据时间重叠，未静默删词；请复核接缝".into()}else{"模型时间超过读取音频，已限制到实际边界并标记精度未知；请复核片尾".into()},evidence:serde_json::json!({"timed_unit_id":unit.id,"boundary_overlap":overlaps,"timing_source":unit.timing_source}),created_at_unix});
+        }
+    }
+    signals
 }
 
 #[cfg(test)]

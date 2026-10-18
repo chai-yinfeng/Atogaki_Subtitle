@@ -441,6 +441,50 @@ impl DesktopSettingsService {
         }
     }
 
+    pub async fn task_presets(&self) -> Result<Vec<serde_json::Value>> {
+        self.database
+            .get_setting("desktop.task_presets")
+            .await?
+            .map(|value| serde_json::from_str(&value).map_err(Into::into))
+            .unwrap_or_else(|| Ok(vec![]))
+    }
+    pub async fn save_task_preset(
+        &self,
+        name: &str,
+        configuration: &serde_json::Value,
+    ) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 64 {
+            bail!("预设名称须为 1–64 字")
+        }
+        let mut safe = serde_json::Map::new();
+        for key in [
+            "modelPath",
+            "vadModelPath",
+            "sourceLanguage",
+            "glossaryId",
+            "selectedContentGroups",
+            "translationProviderId",
+        ] {
+            if let Some(value) = configuration.get(key) {
+                safe.insert(key.into(), value.clone());
+            }
+        }
+        let mut presets = self.task_presets().await?;
+        presets.retain(|p| p["name"] != name);
+        presets.push(serde_json::json!({"name":name,"configuration":safe}));
+        if presets.len() > 50 {
+            bail!("最多保存 50 个预设")
+        }
+        let value = serde_json::to_string(&presets)?;
+        if value.len() > 65536 {
+            bail!("预设内容过大")
+        }
+        self.database
+            .set_setting("desktop.task_presets", &value)
+            .await
+    }
+
     pub async fn initialize(&self) -> Result<DesktopSettings> {
         std::fs::create_dir_all(&self.models_directory)?;
         let settings = self.load().await?;
@@ -529,8 +573,9 @@ impl DesktopSettingsService {
         };
         let translation_style_instruction = self
             .database
-            .get_setting(LLM_STYLE_INSTRUCTION)
+            .get_setting(&format!("translation.{translation_provider_id}.style"))
             .await?
+            .or(self.database.get_setting(LLM_STYLE_INSTRUCTION).await?)
             .unwrap_or_else(|| DEFAULT_LLM_STYLE.to_string());
         let key_saved = if let Some(key) = key_saved_setting(&translation_provider_id) {
             self.database.get_setting(key).await?.as_deref() == Some("true")
@@ -664,6 +709,12 @@ impl DesktopSettingsService {
                 )
                 .await?;
         }
+        self.database
+            .set_setting(
+                &format!("translation.{}.style", request.translation_provider_id),
+                &translation_style_instruction,
+            )
+            .await?;
         self.database
             .set_setting(LLM_STYLE_INSTRUCTION, &translation_style_instruction)
             .await?;
@@ -990,6 +1041,71 @@ impl DesktopSettingsService {
         base_url: Option<&str>,
         style_instruction: &str,
     ) -> Result<()> {
+        let provider = self
+            .make_provider(
+                provider_id,
+                network,
+                model,
+                base_url,
+                style_instruction,
+                None,
+            )
+            .await?;
+        self.provider.replace(provider);
+        Ok(())
+    }
+
+    pub async fn task_provider(
+        &self,
+        profile: &serde_json::Value,
+    ) -> Result<Arc<dyn TranslationProvider>> {
+        let network = self.download_network_settings().await?;
+        let id = profile["provider_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("task provider missing"))?;
+        self.make_provider(
+            id,
+            &network.client,
+            profile["model"].as_str(),
+            profile["base_url"].as_str(),
+            profile["style"].as_str().unwrap_or(DEFAULT_LLM_STYLE),
+            profile["local_model"].as_str(),
+        )
+        .await
+    }
+
+    pub async fn translation_profile(&self, id: &str) -> Result<serde_json::Value> {
+        validate_provider_id(id)?;
+        let settings = self.load().await?;
+        let model = match id {
+            DEEPSEEK_PROVIDER_ID => Some(
+                self.database
+                    .get_setting(DEEPSEEK_MODEL)
+                    .await?
+                    .unwrap_or_else(|| DEFAULT_DEEPSEEK_MODEL.into()),
+            ),
+            OPENAI_COMPATIBLE_PROVIDER_ID => self.database.get_setting(OPENAI_MODEL).await?,
+            _ => None,
+        };
+        let base_url = if id == OPENAI_COMPATIBLE_PROVIDER_ID {
+            self.database.get_setting(OPENAI_BASE_URL).await?
+        } else {
+            None
+        };
+        Ok(
+            serde_json::json!({"provider_id":id,"model":model,"base_url":base_url,"style":self.database.get_setting(&format!("translation.{id}.style")).await?.unwrap_or(settings.translation_style_instruction),"local_model":if id==HY_MT2_LOCAL_PROVIDER_ID {settings.hy_mt2_model_path}else{None},"automatic":id!="none"}),
+        )
+    }
+
+    async fn make_provider(
+        &self,
+        provider_id: &str,
+        network: &NetworkClientConfig,
+        model: Option<&str>,
+        base_url: Option<&str>,
+        style_instruction: &str,
+        local_model: Option<&str>,
+    ) -> Result<Arc<dyn TranslationProvider>> {
         let provider: Arc<dyn TranslationProvider> = match provider_id {
             "none" => Arc::new(UnconfiguredTranslationProvider),
             DEEPL_PROVIDER_ID => Arc::new(DeferredDeepLTranslationProvider::new(
@@ -1027,12 +1143,15 @@ impl DesktopSettingsService {
                 })
             }
             HY_MT2_LOCAL_PROVIDER_ID => {
-                let model_path = self
-                    .database
-                    .get_setting(HY_MT2_MODEL_PATH)
-                    .await?
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| self.models_directory.join("missing-hy-mt2-model.gguf"));
+                let model_path = if let Some(path) = local_model {
+                    PathBuf::from(path)
+                } else {
+                    self.database
+                        .get_setting(HY_MT2_MODEL_PATH)
+                        .await?
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| self.models_directory.join("missing-hy-mt2-model.gguf"))
+                };
                 Arc::new(LocalLlamaTranslationProvider::new(
                     LocalLlamaConfig::hy_mt2(
                         self.llama_server_path.clone(),
@@ -1043,8 +1162,7 @@ impl DesktopSettingsService {
             }
             _ => return Err(anyhow!("unsupported translation provider: {provider_id}")),
         };
-        self.provider.replace(provider);
-        Ok(())
+        Ok(provider)
     }
 
     async fn refresh_active_provider(&self) -> Result<()> {

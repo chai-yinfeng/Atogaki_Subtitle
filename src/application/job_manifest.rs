@@ -77,6 +77,8 @@ impl JobManifest {
         }
         if status.is_terminal() {
             self.completed_at_unix = Some(now);
+        } else {
+            self.completed_at_unix = None;
         }
         self.status = status;
         self.message = status.label().to_string();

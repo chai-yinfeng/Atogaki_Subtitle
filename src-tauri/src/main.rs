@@ -392,6 +392,8 @@ async fn get_subtitle_style_state(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubmitTranscriptionRequest {
+    #[serde(default)]
+    translation_provider_id: Option<String>,
     input_path: String,
     model_path: String,
     source_language: LanguageCode,
@@ -817,6 +819,29 @@ async fn pause_task(state: State<'_, DesktopState>, job_id: String) -> Result<()
 }
 #[tauri::command]
 async fn resume_task(state: State<'_, DesktopState>, job_id: String) -> Result<String, String> {
+    let detail = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = PathBuf::from(detail.job.storage_dir).join("task-preferences.json");
+    if path.is_file() {
+        let profile: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        if profile["automatic"].as_bool() == Some(true) {
+            let provider = state
+                .settings_service
+                .task_provider(&profile)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            state
+                .task_service
+                .configure_task_translation(&job_id, provider)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
     state
         .task_service
         .resume(&job_id)
@@ -947,14 +972,111 @@ async fn delete_job(state: State<'_, DesktopState>, job_id: String) -> Result<()
 }
 
 #[tauri::command]
+async fn translation_profiles(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut profiles = vec![];
+    for id in [
+        "none",
+        "deepseek",
+        "deepl",
+        "hy-mt2-local",
+        "openai-compatible",
+    ] {
+        profiles.push(
+            state
+                .settings_service
+                .translation_profile(id)
+                .await
+                .map_err(|e| format!("{e:#}"))?,
+        );
+    }
+    Ok(profiles)
+}
+async fn task_workspace(
+    state: &DesktopState,
+    job_id: &str,
+) -> Result<LocalWorkspaceService, String> {
+    let detail = state
+        .workspace_service
+        .get_job(job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = PathBuf::from(detail.job.storage_dir).join("task-preferences.json");
+    if !path.is_file() {
+        return Ok(state.workspace_service.clone());
+    }
+    let profile: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    let provider = state
+        .settings_service
+        .task_provider(&profile)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(state.workspace_service.using_provider(provider))
+}
+#[tauri::command]
+async fn set_task_translation(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    provider_id: String,
+) -> Result<(), String> {
+    let detail = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !matches!(detail.job.status.as_str(), "done" | "failed") {
+        return Err("请等待当前任务停止后更改后端".into());
+    }
+    let profile = state
+        .settings_service
+        .translation_profile(&provider_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    atogaki_subtitle::application::acoustic_plan::write_json(
+        &PathBuf::from(detail.job.storage_dir).join("task-preferences.json"),
+        &profile,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn submit_transcription(
     state: State<'_, DesktopState>,
     request: SubmitTranscriptionRequest,
 ) -> Result<String, String> {
     let transcription = desktop_transcription_options(&request)?;
+    let settings = state
+        .settings_service
+        .load()
+        .await
+        .map_err(|e| e.to_string())?;
+    let id = request
+        .translation_provider_id
+        .as_deref()
+        .unwrap_or(&settings.translation_provider_id);
+    let profile = state
+        .settings_service
+        .translation_profile(id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let translation = if id != "none" {
+        Some((
+            state
+                .settings_service
+                .task_provider(&profile)
+                .await
+                .map_err(|e| format!("{e:#}"))?,
+            profile,
+        ))
+    } else {
+        None
+    };
     let snapshot = state
         .task_service
-        .submit_transcription_with_glossary(
+        .submit_with_translation(
             TranscribeSpec {
                 input: request.input_path.into(),
                 output_dir: None,
@@ -962,6 +1084,7 @@ async fn submit_transcription(
             },
             request.glossary_id.as_deref(),
             &request.selected_content_groups,
+            translation,
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -1209,8 +1332,15 @@ async fn save_subtitle_timing(
 }
 
 #[tauri::command]
-fn translation_status(state: State<'_, DesktopState>) -> LocalTranslationStatus {
-    state.workspace_service.translation_status()
+async fn translation_status(
+    state: State<'_, DesktopState>,
+    job_id: Option<String>,
+) -> Result<LocalTranslationStatus, String> {
+    if let Some(job_id) = job_id {
+        Ok(task_workspace(&state, &job_id).await?.translation_status())
+    } else {
+        Ok(state.workspace_service.translation_status())
+    }
 }
 
 #[tauri::command]
@@ -1219,8 +1349,8 @@ async fn translate_subtitle(
     job_id: String,
     segment_id: String,
 ) -> Result<LocalSubtitleSegmentRecord, String> {
-    state
-        .workspace_service
+    task_workspace(&state, &job_id)
+        .await?
         .translate_segment(&job_id, &segment_id)
         .await
         .map_err(|error| format!("{error:#}"))
@@ -1231,8 +1361,8 @@ async fn translate_all_subtitles(
     state: State<'_, DesktopState>,
     job_id: String,
 ) -> Result<LocalBatchTranslationResult, String> {
-    state
-        .workspace_service
+    task_workspace(&state, &job_id)
+        .await?
         .translate_all(&job_id)
         .await
         .map_err(|error| format!("{error:#}"))
@@ -1310,6 +1440,81 @@ async fn get_waveform_window(
         )
         .await
         .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn cancel_asr_candidate(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<(), String> {
+    state
+        .retranscription_service
+        .cancel(&job_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn test_translation_connection(
+    state: State<'_, DesktopState>,
+    provider_id: String,
+) -> Result<String, String> {
+    let profile = state
+        .settings_service
+        .translation_profile(&provider_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let provider = state
+        .settings_service
+        .task_provider(&profile)
+        .await
+        .map_err(|e| e.to_string())?;
+    let response = provider
+        .translate(atogaki_subtitle::application::TranslationRequest {
+            options: atogaki_subtitle::application::TranslationOptions::new(
+                LanguageCode::English,
+                LanguageCode::SimplifiedChinese,
+            ),
+            before_context: vec![],
+            after_context: vec![],
+            style_instruction: None,
+            targets: vec![atogaki_subtitle::application::TranslationTargetSegment {
+                segment_id: "connection-check".into(),
+                source_text: "Hello.".into(),
+            }],
+        })
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if response.translations.len() != 1
+        || response.translations[0].segment_id != "connection-check"
+        || response.translations[0].translated_text.trim().is_empty()
+    {
+        return Err("连接成功，但翻译合同未通过".into());
+    }
+    Ok(format!("{} 已验证", provider.status().name))
+}
+
+#[tauri::command]
+async fn reopen_asr_candidate(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    run_id: String,
+) -> Result<LocalRetranscriptionPreview, String> {
+    state
+        .retranscription_service
+        .reopen(&job_id, &run_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn preview_full_retranscription(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<LocalRetranscriptionPreview, String> {
+    state
+        .retranscription_service
+        .preview_full(&job_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -1464,6 +1669,81 @@ async fn cancel_video_render(
         .cancel(&render_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn pick_media_files(app: AppHandle) -> Result<Vec<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("选择音频或视频（可多选）")
+        .add_filter("媒体", &["mp3", "m4a", "wav", "mp4", "mkv", "webm", "mov"])
+        .pick_files(move |selection| {
+            let _ = sender.send(selection);
+        });
+    receiver
+        .await
+        .map_err(|_| "文件选择器已关闭".to_string())?
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| {
+            p.into_path()
+                .map(|p| p.display().to_string())
+                .map_err(|e| e.to_string())
+        })
+        .collect()
+}
+#[tauri::command]
+async fn export_learning_anki(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    language: String,
+) -> Result<Option<String>, String> {
+    if !matches!(language.as_str(), "ja" | "en" | "ko") {
+        return Err("不支持的单词本语言".into());
+    }
+    let items = state
+        .learning_service
+        .list_items()
+        .await
+        .map_err(|e| e.to_string())?;
+    let output = atogaki_subtitle::application::local_learning_service::anki_tsv(&items, &language);
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("导出 Anki 文本资料")
+        .add_filter("TSV", &["tsv"])
+        .set_file_name(format!("Atogaki-{language}.tsv"))
+        .save_file(move |selection| {
+            let _ = sender.send(selection);
+        });
+    let Some(selection) = receiver.await.map_err(|_| "保存窗口已关闭".to_string())? else {
+        return Ok(None);
+    };
+    let path = selection.into_path().map_err(|e| e.to_string())?;
+    atogaki_subtitle::application::acoustic_plan::atomic_write(&path, output.as_bytes())
+        .map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+#[tauri::command]
+async fn task_presets(state: State<'_, DesktopState>) -> Result<Vec<serde_json::Value>, String> {
+    state
+        .settings_service
+        .task_presets()
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn save_task_preset(
+    state: State<'_, DesktopState>,
+    name: String,
+    configuration: serde_json::Value,
+) -> Result<(), String> {
+    state
+        .settings_service
+        .save_task_preset(&name, &configuration)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2344,6 +2624,10 @@ fn main() {
             get_subtitle_style_state,
             get_waveform_window,
             preview_retranscription,
+            reopen_asr_candidate,
+            cancel_asr_candidate,
+            test_translation_connection,
+            preview_full_retranscription,
             confirm_retranscription,
             list_glossaries,
             list_asr_quality_signals,
@@ -2357,6 +2641,10 @@ fn main() {
             model_download_states,
             media_capabilities,
             pick_media_file,
+            pick_media_files,
+            export_learning_anki,
+            task_presets,
+            save_task_preset,
             pick_model_file,
             pick_hy_mt2_model_file,
             pick_subtitle_export_directory,
@@ -2391,6 +2679,8 @@ fn main() {
             save_subtitle_styles,
             select_model,
             submit_transcription,
+            translation_profiles,
+            set_task_translation,
             start_model_download,
             start_dictionary_download,
             test_network_connection,
@@ -2496,6 +2786,7 @@ mod tests {
     #[test]
     fn desktop_request_keeps_vad_disabled_when_no_model_is_selected() {
         let request = SubmitTranscriptionRequest {
+            translation_provider_id: None,
             input_path: "audio.wav".to_string(),
             model_path: "whisper.bin".to_string(),
             source_language: LanguageCode::Japanese,
@@ -2520,6 +2811,7 @@ mod tests {
         let vad_model = root.join("ggml-silero.bin");
         fs::write(&vad_model, b"test model placeholder").unwrap();
         let request = SubmitTranscriptionRequest {
+            translation_provider_id: None,
             input_path: "audio.wav".to_string(),
             model_path: "whisper.bin".to_string(),
             source_language: LanguageCode::English,

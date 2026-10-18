@@ -155,6 +155,14 @@ impl LocalWorkspaceService {
         }
     }
 
+    pub fn using_provider(&self, provider: Arc<dyn TranslationProvider>) -> Self {
+        Self {
+            database: self.database.clone(),
+            translation_provider: provider,
+            translation_locks: Arc::clone(&self.translation_locks),
+        }
+    }
+
     pub async fn playback_position(&self, job_id: &str) -> Result<i64> {
         self.database
             .get_job(job_id)
@@ -370,6 +378,16 @@ impl LocalWorkspaceService {
     }
 
     pub async fn translate_all(&self, job_id: &str) -> Result<LocalBatchTranslationResult> {
+        self.translate_batch(job_id, false).await
+    }
+    pub async fn translate_pending(&self, job_id: &str) -> Result<LocalBatchTranslationResult> {
+        self.translate_batch(job_id, true).await
+    }
+    async fn translate_batch(
+        &self,
+        job_id: &str,
+        only_pending: bool,
+    ) -> Result<LocalBatchTranslationResult> {
         let translation_lock = self.translation_lock_for_job(job_id).await;
         let _guard = translation_lock.lock().await;
         let segments = self.database.list_segments(job_id).await?;
@@ -398,6 +416,15 @@ impl LocalWorkspaceService {
             })
             .cloned()
             .collect::<Vec<_>>();
+        if only_pending && pending.is_empty() {
+            return Ok(LocalBatchTranslationResult {
+                segments,
+                requested_count: 0,
+                translated_count: 0,
+                empty_segment_ids: vec![],
+                resumed: true,
+            });
+        }
         let resumed = !pending.is_empty() && pending.len() < segments.len();
         let targets = if pending.is_empty() {
             &segments

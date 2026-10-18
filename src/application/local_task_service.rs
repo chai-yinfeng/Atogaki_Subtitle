@@ -34,6 +34,7 @@ const DEFAULT_QUEUE_CAPACITY: usize = 8;
 pub struct LocalTaskService {
     sender: mpsc::Sender<QueuedTask>,
     controls: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
+    automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
     jobs_dir: PathBuf,
     database: Option<LocalDatabase>,
 }
@@ -50,6 +51,22 @@ enum QueuedTask {
 }
 
 impl LocalTaskService {
+    pub async fn configure_task_translation(
+        &self,
+        job_id: &str,
+        provider: Arc<dyn crate::application::TranslationProvider>,
+    ) -> Result<()> {
+        let db = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("translation requires SQLite"))?;
+        self.automatic.lock().await.insert(
+            job_id.into(),
+            crate::application::LocalWorkspaceService::with_provider(db.clone(), provider),
+        );
+        Ok(())
+    }
+
     /// Starts a single worker. One is the safe default because local Whisper
     /// models usually compete for the same CPU, memory, or GPU resources.
     pub fn start(config: AppConfig, jobs_dir: impl Into<PathBuf>) -> Result<Self> {
@@ -103,6 +120,7 @@ impl LocalTaskService {
         let (sender, receiver) = mpsc::channel(queue_capacity);
         let receiver = Arc::new(Mutex::new(receiver));
         let controls = Arc::new(Mutex::new(HashMap::new()));
+        let automatic = Arc::new(Mutex::new(HashMap::new()));
 
         for _ in 0..workers {
             handle.spawn(run_worker(
@@ -110,12 +128,14 @@ impl LocalTaskService {
                 Arc::clone(&receiver),
                 database.clone(),
                 Arc::clone(&controls),
+                Arc::clone(&automatic),
             ));
         }
 
         Ok(Self {
             sender,
             controls,
+            automatic,
             jobs_dir: jobs_dir.into(),
             database,
         })
@@ -128,9 +148,23 @@ impl LocalTaskService {
 
     pub async fn submit_transcription_with_glossary(
         &self,
+        spec: TranscribeSpec,
+        glossary_id: Option<&str>,
+        selected_content_groups: &[String],
+    ) -> Result<JobSnapshot> {
+        self.submit_with_translation(spec, glossary_id, selected_content_groups, None)
+            .await
+    }
+
+    pub async fn submit_with_translation(
+        &self,
         mut spec: TranscribeSpec,
         glossary_id: Option<&str>,
         selected_content_groups: &[String],
+        translation: Option<(
+            Arc<dyn crate::application::TranslationProvider>,
+            serde_json::Value,
+        )>,
     ) -> Result<JobSnapshot> {
         self.require_service_owned_output_dir(spec.output_dir.as_deref())?;
         let languages = LanguagePair::new(
@@ -183,6 +217,13 @@ impl LocalTaskService {
                 )
                 .await?;
             spec.transcription.glossary = Some(snapshot_path);
+        }
+        if let Some((provider, profile)) = translation {
+            crate::application::acoustic_plan::write_json(
+                &job.dir.join("task-preferences.json"),
+                &profile,
+            )?;
+            self.configure_task_translation(&job.id(), provider).await?;
         }
         spec.output_dir = Some(job.dir.clone());
         let prompt = crate::domain::glossary::build_whisper_prompt(&spec.transcription)?;
@@ -795,20 +836,28 @@ impl LocalTaskService {
             };
             controls.insert(job_id.into(), watch::channel(false).0);
         }
-        manifest.mark(JobStatus::Queued);
-        job.write_manifest(&manifest)?;
-        db.sync_snapshot(&JobSnapshot::load(&job.dir)?).await?;
-        self.enqueue(
-            job.clone(),
-            QueuedTask::Transcribe {
-                job_dir: job.dir.clone(),
-                spec,
-            },
-        )
-        .await
+        let result = async {
+            manifest.mark(JobStatus::Queued);
+            job.write_manifest(&manifest)?;
+            db.sync_snapshot(&JobSnapshot::load(&job.dir)?).await?;
+            self.enqueue(
+                job.clone(),
+                QueuedTask::Transcribe {
+                    job_dir: job.dir.clone(),
+                    spec,
+                },
+            )
+            .await
+        }
+        .await;
+        if result.is_err() {
+            self.controls.lock().await.remove(job_id);
+        }
+        result
     }
 
     async fn enqueue(&self, job: Job, task: QueuedTask) -> Result<JobSnapshot> {
+        crate::application::acoustic_plan::write_json(&job.dir.join("workflow-version.json"), &1)?;
         self.controls
             .lock()
             .await
@@ -832,6 +881,7 @@ async fn run_worker(
     receiver: Arc<Mutex<mpsc::Receiver<QueuedTask>>>,
     database: Option<LocalDatabase>,
     controls: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
+    automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
 ) {
     let mut runner = JobRunner::new(config);
     if let Some(database) = &database {
@@ -862,11 +912,38 @@ async fn run_worker(
             .get(&id)
             .map(|s| s.subscribe())
             .expect("queued task has control");
+        let automatic_workspace = automatic.lock().await.get(&id).cloned();
         let work = async {
-            match task {
-                QueuedTask::Transcribe { spec, .. } => runner.transcribe(spec).await.map(|_| ()),
-                QueuedTask::Process { spec, .. } => runner.process(spec).await.map(|_| ()),
+            let job = Job::open(job_dir.clone())?;
+            if !job.dir.join("asr-published.json").is_file() {
+                match task {
+                    QueuedTask::Transcribe { spec, .. } => {
+                        runner.transcribe(spec).await?;
+                    }
+                    QueuedTask::Process { spec, .. } => {
+                        runner.process(spec).await?;
+                    }
+                }
+                if let Some(db) = &database {
+                    db.sync_snapshot(&JobSnapshot::load(&job_dir)?).await?;
+                    sync_initial_asr_provenance(db, &job_dir).await?;
+                }
+                crate::application::acoustic_plan::write_json(
+                    &job.dir.join("asr-published.json"),
+                    &true,
+                )?;
             }
+            if let Some(workspace) = automatic_workspace {
+                let mut manifest = job
+                    .read_manifest_if_exists()?
+                    .ok_or_else(|| anyhow!("task manifest missing"))?;
+                manifest.mark(JobStatus::Translating);
+                job.write_manifest(&manifest)?;
+                workspace.translate_pending(&id).await?;
+                manifest.mark(JobStatus::Done);
+                job.write_manifest(&manifest)?;
+            }
+            Ok::<(), anyhow::Error>(())
         };
         let result=run_with_status_sync(&job_dir,database.as_ref(),async {
             if *pause.borrow() {return Err(anyhow!("已暂停；可从检查点继续"))}
@@ -915,6 +992,7 @@ async fn run_worker(
             }
         }
         controls.lock().await.remove(&id);
+        automatic.lock().await.remove(&id);
     }
 }
 
@@ -940,23 +1018,28 @@ async fn run_with_status_sync<T>(
     database: Option<&LocalDatabase>,
     task: impl Future<Output = Result<T>>,
 ) -> Result<T> {
-    let Some(database) = database else {
+    let Some(database) = database.cloned() else {
         return task.await;
     };
-    let mut task = Box::pin(task);
-    let mut refresh = tokio::time::interval(Duration::from_millis(500));
-    loop {
-        tokio::select! {
-            result = &mut task => return result,
-            _ = refresh.tick() => {
-                if let Ok(snapshot) = JobSnapshot::load(job_dir)
-                    && let Err(error) = database.sync_snapshot(&snapshot).await
-                {
+    let path = job_dir.to_path_buf();
+    // A progress query must never suspend the work future while it owns a
+    // SQLite transaction. Run polling independently, then join its cancellation
+    // before publishing the terminal snapshot.
+    let progress = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            interval.tick().await;
+            if let Ok(snapshot) = JobSnapshot::load(&path) {
+                if let Err(error) = database.sync_snapshot(&snapshot).await {
                     eprintln!("[task-service] failed to publish running task status: {error:#}");
                 }
             }
         }
-    }
+    });
+    let result = task.await;
+    progress.abort();
+    let _ = progress.await;
+    result
 }
 
 #[cfg(test)]
@@ -997,6 +1080,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             controls: std::sync::Arc::new(
                 tokio::sync::Mutex::new(std::collections::HashMap::new()),
             ),
@@ -1031,6 +1117,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             controls: std::sync::Arc::new(
                 tokio::sync::Mutex::new(std::collections::HashMap::new()),
             ),
@@ -1090,6 +1179,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             controls: std::sync::Arc::new(
                 tokio::sync::Mutex::new(std::collections::HashMap::new()),
             ),
@@ -1172,6 +1264,9 @@ mod tests {
         let (sender, _receiver) = mpsc::channel(1);
         let jobs_dir = root.join("jobs");
         let service = LocalTaskService {
+            automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             controls: std::sync::Arc::new(
                 tokio::sync::Mutex::new(std::collections::HashMap::new()),
             ),
@@ -1216,6 +1311,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(2);
         let service = LocalTaskService {
+            automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             controls: std::sync::Arc::new(
                 tokio::sync::Mutex::new(std::collections::HashMap::new()),
             ),
@@ -1309,6 +1407,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             controls: std::sync::Arc::new(
                 tokio::sync::Mutex::new(std::collections::HashMap::new()),
             ),
@@ -1380,6 +1481,110 @@ mod tests {
         drop(service);
         database.close().await;
         drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pause_kills_decoder_and_resume_keeps_task_without_original_media() {
+        use std::{os::unix::fs::PermissionsExt, time::Duration};
+        let root = std::env::temp_dir().join(format!("atogaki-pause-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let ffmpeg = root.join("ffmpeg");
+        fs::write(&ffmpeg,"#!/bin/sh\nneed_input=0\nfor arg do\n if [ \"$need_input\" = 1 ]; then input=$arg; need_input=0; fi\n if [ \"$arg\" = -i ]; then need_input=1; fi\n destination=$arg\ndone\ncp \"$input\" \"$destination\"\n").unwrap();
+        let whisper = root.join("whisper");
+        fs::write(&whisper,"#!/bin/sh\nneed_prefix=0\nfor arg do\n if [ \"$need_prefix\" = 1 ]; then prefix=$arg; need_prefix=0; fi\n if [ \"$arg\" = -of ]; then need_prefix=1; fi\ndone\necho $$ > \"$prefix.pid\"\nexec sleep 60\n").unwrap();
+        for path in [&ffmpeg, &whisper] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let input = root.join("input.wav");
+        let mut wav = vec![];
+        wav.extend(b"RIFF");
+        wav.extend(32036u32.to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16u32.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(16000u32.to_le_bytes());
+        wav.extend(32000u32.to_le_bytes());
+        wav.extend(2u16.to_le_bytes());
+        wav.extend(16u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend(32000u32.to_le_bytes());
+        wav.resize(32044, 0);
+        fs::write(&input, wav).unwrap();
+        let model = root.join("model.bin");
+        fs::write(&model, b"fixture").unwrap();
+        let db = LocalDatabase::open(root.join("db.sqlite")).await.unwrap();
+        let service = LocalTaskService::start_with_database(
+            AppConfig {
+                ffmpeg,
+                whisper_cli: whisper,
+                deepl_auth_key: None,
+            },
+            root.join("jobs"),
+            db.clone(),
+        )
+        .unwrap();
+        let snapshot = service
+            .submit_transcription(TranscribeSpec {
+                input: input.clone(),
+                output_dir: None,
+                transcription: TranscriptionOptions::japanese(model),
+            })
+            .await
+            .unwrap();
+        let id = snapshot.manifest.job_id;
+        let job = crate::infrastructure::job_store::Job::open(root.join("jobs").join(&id)).unwrap();
+        let pid = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let mut found = None;
+                if let Ok(entries) = fs::read_dir(job.dir.join("asr-checkpoint")) {
+                    for entry in entries.flatten() {
+                        if let Ok(pid) =
+                            fs::read_to_string(entry.path().join("provider-output.pid"))
+                        {
+                            found = Some(pid);
+                            break;
+                        }
+                    }
+                }
+                if let Some(pid) = found {
+                    break pid.trim().to_string();
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        service.pause(&id).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while service.controls.lock().await.contains_key(&id) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(db.get_job(&id).await.unwrap().unwrap().status, "failed");
+        let status = std::process::Command::new("/bin/kill")
+            .args(["-0", &pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(!status.success(), "decoder must be terminated");
+        fs::remove_file(input).unwrap();
+        let resumed = service.resume(&id).await.unwrap();
+        assert_eq!(resumed.manifest.job_id, id);
+        assert!(service.resume(&id).await.is_err());
+        service.pause(&id).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while service.controls.lock().await.contains_key(&id) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        drop(service);
+        db.close().await;
         fs::remove_dir_all(root).unwrap();
     }
 }

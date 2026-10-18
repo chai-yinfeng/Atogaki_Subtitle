@@ -563,7 +563,7 @@ impl LocalDatabase {
                 source_language = excluded.source_language,
                 target_language = excluded.target_language,
                 started_at_unix = COALESCE(local_jobs.started_at_unix, excluded.started_at_unix),
-                completed_at_unix = COALESCE(local_jobs.completed_at_unix, excluded.completed_at_unix),
+                completed_at_unix = excluded.completed_at_unix,
                 updated_at_unix = MAX(local_jobs.updated_at_unix, excluded.updated_at_unix)",
         )
         .bind(&manifest.job_id)

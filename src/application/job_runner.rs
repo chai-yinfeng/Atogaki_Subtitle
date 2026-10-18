@@ -366,7 +366,10 @@ impl JobRunner {
             database.update_asr_run(&run).await?;
         }
 
-        let response = if self.asr_provider.status().id == "whisper.cpp" {
+        let response = if matches!(
+            self.asr_provider.status().id.as_str(),
+            "whisper.cpp" | "mlx-whisper"
+        ) {
             crate::application::acoustic_plan::execute_chunks(
                 job,
                 &self.config.ffmpeg,
@@ -391,9 +394,21 @@ impl JobRunner {
         let completion: Result<Vec<crate::domain::TranscriptSegment>> = async {
             let response = response?;
             let cache = job.dir.join("asr-checkpoint/final-cues.json");
-            let mut cue_set = if self.asr_provider.status().id == "whisper.cpp" {
-                if cache.is_file() {
+            let mut cue_set = if matches!(
+                self.asr_provider.status().id.as_str(),
+                "whisper.cpp" | "mlx-whisper"
+            ) {
+                if cache.is_file()
+                    && std::fs::read_to_string(cache.with_extension("sha256"))
+                        .ok()
+                        .as_deref()
+                        == crate::application::acoustic_plan::file_digest(&cache)
+                            .ok()
+                            .as_deref()
+                {
                     serde_json::from_slice(&std::fs::read(&cache)?)?
+                } else if self.asr_provider.status().id == "mlx-whisper" {
+                    segment_timed_units(&response.timed_units, options.source_language)?
                 } else {
                     crate::application::acoustic_plan::candidate_cues(&response.timed_units)
                 }
@@ -404,11 +419,24 @@ impl JobRunner {
             cue_set.replace_transcript_segments(candidates.clone())?;
             artifacts.write_timed_units(&response.timed_units)?;
             artifacts.write_candidate_cues(&cue_set)?;
-            if self.asr_provider.status().id == "whisper.cpp" {
+            if matches!(
+                self.asr_provider.status().id.as_str(),
+                "whisper.cpp" | "mlx-whisper"
+            ) {
                 crate::application::acoustic_plan::write_json(&cache, &cue_set)?;
+                crate::application::acoustic_plan::atomic_write(
+                    &cache.with_extension("sha256"),
+                    crate::application::acoustic_plan::file_digest(&cache)?.as_bytes(),
+                )?;
             }
-            let signals =
+            let mut signals =
                 detect_quality_signals(job.id().as_str(), &run.id, &cue_set, run.created_at_unix);
+            signals.extend(crate::application::acoustic_plan::boundary_signals(
+                &job.id(),
+                &run.id,
+                &response.timed_units,
+                run.created_at_unix,
+            ));
             artifacts.write_quality_signals(&signals)?;
             if let Some(database) = &self.database {
                 database
