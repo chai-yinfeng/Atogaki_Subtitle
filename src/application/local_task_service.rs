@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     future::Future,
     path::{Path, PathBuf},
@@ -7,7 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 
 use crate::{
     application::{
@@ -32,6 +33,7 @@ const DEFAULT_QUEUE_CAPACITY: usize = 8;
 #[derive(Clone)]
 pub struct LocalTaskService {
     sender: mpsc::Sender<QueuedTask>,
+    controls: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
     jobs_dir: PathBuf,
     database: Option<LocalDatabase>,
 }
@@ -100,17 +102,20 @@ impl LocalTaskService {
             .context("local task service must be started inside a Tokio runtime")?;
         let (sender, receiver) = mpsc::channel(queue_capacity);
         let receiver = Arc::new(Mutex::new(receiver));
+        let controls = Arc::new(Mutex::new(HashMap::new()));
 
         for _ in 0..workers {
             handle.spawn(run_worker(
                 config.clone(),
                 Arc::clone(&receiver),
                 database.clone(),
+                Arc::clone(&controls),
             ));
         }
 
         Ok(Self {
             sender,
+            controls,
             jobs_dir: jobs_dir.into(),
             database,
         })
@@ -727,7 +732,88 @@ impl LocalTaskService {
         Ok(job)
     }
 
+    pub async fn recovery(
+        &self,
+        job_id: &str,
+    ) -> Result<crate::application::acoustic_plan::TaskRecoverySummary> {
+        let db = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("recovery requires SQLite"))?;
+        let record = db
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("task not found"))?;
+        let job = Job::open(PathBuf::from(record.storage_dir))?;
+        let mut summary = crate::application::acoustic_plan::recovery_summary(&job)?;
+        summary.can_resume &= record.status == "failed";
+        summary.phase = record.status;
+        Ok(summary)
+    }
+
+    pub async fn pause(&self, job_id: &str) -> Result<()> {
+        let controls = self.controls.lock().await;
+        let sender = controls
+            .get(job_id)
+            .ok_or_else(|| anyhow!("task is not running or queued"))?;
+        sender.send_replace(true);
+        Ok(())
+    }
+
+    pub async fn resume(&self, job_id: &str) -> Result<JobSnapshot> {
+        let db = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("resume requires SQLite"))?;
+        let record = db
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("task not found"))?;
+        if record.status != "failed" {
+            bail!("only stopped tasks can resume")
+        }
+        let job = Job::open(PathBuf::from(&record.storage_dir))?;
+        if !crate::application::acoustic_plan::recovery_summary(&job)?.can_resume {
+            bail!("该历史任务无法断点继续；可重新运行")
+        }
+        let mut manifest = job
+            .read_manifest_if_exists()?
+            .ok_or_else(|| anyhow!("task manifest missing"))?;
+        let spec = TranscribeSpec {
+            input: manifest
+                .input
+                .clone()
+                .unwrap_or_else(|| job.audio_wav.clone()),
+            output_dir: Some(job.dir.clone()),
+            transcription: job.read_recognition_options()?,
+        };
+        // Reserve this task before enqueueing: simultaneous clicks cannot dispatch twice.
+        {
+            let mut controls = self.controls.lock().await;
+            if controls.contains_key(job_id) {
+                bail!("task already queued or running")
+            };
+            controls.insert(job_id.into(), watch::channel(false).0);
+        }
+        manifest.mark(JobStatus::Queued);
+        job.write_manifest(&manifest)?;
+        db.sync_snapshot(&JobSnapshot::load(&job.dir)?).await?;
+        self.enqueue(
+            job.clone(),
+            QueuedTask::Transcribe {
+                job_dir: job.dir.clone(),
+                spec,
+            },
+        )
+        .await
+    }
+
     async fn enqueue(&self, job: Job, task: QueuedTask) -> Result<JobSnapshot> {
+        self.controls
+            .lock()
+            .await
+            .entry(job.id())
+            .or_insert_with(|| watch::channel(false).0);
         if self.sender.send(task).await.is_err() {
             let mut manifest = job
                 .read_manifest_if_exists()?
@@ -745,6 +831,7 @@ async fn run_worker(
     config: AppConfig,
     receiver: Arc<Mutex<mpsc::Receiver<QueuedTask>>>,
     database: Option<LocalDatabase>,
+    controls: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
 ) {
     let mut runner = JobRunner::new(config);
     if let Some(database) = &database {
@@ -761,22 +848,54 @@ async fn run_worker(
             return;
         };
 
-        let (job_dir, result) = match task {
-            QueuedTask::Transcribe { job_dir, spec } => {
-                let result =
-                    run_with_status_sync(&job_dir, database.as_ref(), runner.transcribe(spec))
-                        .await
-                        .map(|_| ());
-                (job_dir, result)
-            }
-            QueuedTask::Process { job_dir, spec } => {
-                let result =
-                    run_with_status_sync(&job_dir, database.as_ref(), runner.process(spec))
-                        .await
-                        .map(|_| ());
-                (job_dir, result)
+        let job_dir = match &task {
+            QueuedTask::Transcribe { job_dir, .. } | QueuedTask::Process { job_dir, .. } => {
+                job_dir.clone()
             }
         };
+        let id = Job::open(job_dir.clone())
+            .map(|j| j.id())
+            .unwrap_or_default();
+        let mut pause = controls
+            .lock()
+            .await
+            .get(&id)
+            .map(|s| s.subscribe())
+            .expect("queued task has control");
+        let work = async {
+            match task {
+                QueuedTask::Transcribe { spec, .. } => runner.transcribe(spec).await.map(|_| ()),
+                QueuedTask::Process { spec, .. } => runner.process(spec).await.map(|_| ()),
+            }
+        };
+        let result=run_with_status_sync(&job_dir,database.as_ref(),async {
+            if *pause.borrow() {return Err(anyhow!("已暂停；可从检查点继续"))}
+            tokio::select! { result=work => result, _=pause.changed()=>Err(anyhow!("已暂停；可从检查点继续")) }
+        }).await;
+        if let Err(error) = &result {
+            if let (Some(db), Ok(job)) = (&database, Job::open(job_dir.clone())) {
+                if let Ok(runs) = db.list_asr_runs(&id).await {
+                    for record in runs
+                        .into_iter()
+                        .filter(|r| r.status == "running" || r.status == "queued")
+                    {
+                        if let Ok(artifacts) = AsrRunArtifacts::open(&job, &record.id) {
+                            if let Ok(mut run) = artifacts.read_run() {
+                                run.fail(format!("{error:#}"));
+                                let _ = artifacts.write_run(&run);
+                                let _ = db.update_asr_run(&run).await;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Ok(job) = Job::open(job_dir.clone()) {
+                if let Ok(Some(mut manifest)) = job.read_manifest_if_exists() {
+                    manifest.fail(format!("{error:#}"));
+                    let _ = job.write_manifest(&manifest);
+                }
+            }
+        }
 
         if let Err(error) = result {
             eprintln!("[task-service] task failed: {error:#}");
@@ -795,6 +914,7 @@ async fn run_worker(
                 Err(error) => eprintln!("[task-service] failed to load task state: {error:#}"),
             }
         }
+        controls.lock().await.remove(&id);
     }
 }
 
@@ -877,6 +997,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            controls: std::sync::Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             sender,
             jobs_dir: root.join("jobs"),
             database: Some(database.clone()),
@@ -908,6 +1031,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            controls: std::sync::Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             sender,
             jobs_dir: root.join("jobs"),
             database: Some(database.clone()),
@@ -964,6 +1090,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            controls: std::sync::Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             sender,
             jobs_dir: root.join("jobs"),
             database: Some(database.clone()),
@@ -1043,6 +1172,9 @@ mod tests {
         let (sender, _receiver) = mpsc::channel(1);
         let jobs_dir = root.join("jobs");
         let service = LocalTaskService {
+            controls: std::sync::Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             sender,
             jobs_dir: jobs_dir.clone(),
             database: Some(database.clone()),
@@ -1084,6 +1216,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(2);
         let service = LocalTaskService {
+            controls: std::sync::Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             sender,
             jobs_dir: root.join("jobs"),
             database: Some(database.clone()),
@@ -1174,6 +1309,9 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            controls: std::sync::Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             sender,
             jobs_dir: root.join("jobs"),
             database: Some(database.clone()),

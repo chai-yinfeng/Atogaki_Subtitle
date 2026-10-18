@@ -66,6 +66,7 @@ pub async fn transcribe_response(
         eprintln!("whisper-cli: requesting GPU device 0 when supported by this build");
     }
 
+    let mut effective_cpu = config.no_gpu;
     let first = run_whisper(
         whisper_cli,
         options,
@@ -85,6 +86,7 @@ pub async fn transcribe_response(
             "whisper-cli failed in GPU mode; retrying with --no-gpu. Original failure: {}",
             error.summary()
         );
+        effective_cpu = true;
         run_whisper(
             whisper_cli,
             options,
@@ -97,6 +99,10 @@ pub async fn transcribe_response(
         .map_err(anyhow::Error::from)?;
     }
 
+    crate::application::acoustic_plan::atomic_write(
+        &output_prefix.with_extension("device"),
+        if effective_cpu { b"cpu" } else { b"gpu" },
+    )?;
     let json_path = json_path(output_prefix);
     let data =
         fs::read(&json_path).with_context(|| format!("failed to read {}", json_path.display()))?;

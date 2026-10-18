@@ -17,12 +17,12 @@ use std::{
 
 use atogaki_subtitle::{
     application::{
-        LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
-        LocalBatchTranslationResult, LocalGlossaryService, LocalGlossaryTermDraft,
+        LocalBatchTranslationResult, LocalGlossaryApplyResult, LocalGlossaryPreview,
+        LocalGlossaryPromptPreview, LocalGlossaryService, LocalGlossaryTermDraft,
         LocalLearningService, LocalRenderEstimate, LocalRenderQuality, LocalRenderRequest,
         LocalRenderService, LocalRetranscriptionPreview, LocalRetranscriptionService,
-        LocalSubtitleExport, LocalSubtitleExportArtifact,
-        LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
+        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
+        LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
         MutableTranslationProvider, RepairAttempt, RepairAttemptStatus, ReviewDecision,
         ReviewDecisionKind, SubtitleFontFamily, SubtitleFontService, SubtitleStylePreview,
         SubtitleStyleService, SubtitleStyleState, TranscriptionOptions,
@@ -36,9 +36,9 @@ use atogaki_subtitle::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
             LocalAsrQualitySignalRecord, LocalAsrRunRecord, LocalDatabase, LocalGlossaryDetail,
-            LocalGlossaryRecord,
-            LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail, LocalRenderJobRecord,
-            LocalSubtitleSegmentRecord, LocalTranslationRunRecord, NewLocalLearningSelection,
+            LocalGlossaryRecord, LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail,
+            LocalRenderJobRecord, LocalSubtitleSegmentRecord, LocalTranslationRunRecord,
+            NewLocalLearningSelection,
         },
         media::MediaCapabilities,
         waveform::WaveformWindow,
@@ -86,9 +86,9 @@ struct PlaybackMediaRegistry {
 
 impl PlaybackMediaRegistry {
     fn register(&self, path: &Path) -> Result<String, String> {
-        let path = path
-            .canonicalize()
-            .map_err(|error| format!("failed to resolve local media {}: {error}", path.display()))?;
+        let path = path.canonicalize().map_err(|error| {
+            format!("failed to resolve local media {}: {error}", path.display())
+        })?;
         let mut hasher = Sha256::new();
         hasher.update(path.to_string_lossy().as_bytes());
         let token = format!("{:x}", hasher.finalize());
@@ -626,6 +626,7 @@ struct DesktopJobDetail {
 struct DesktopJobSummary {
     #[serde(flatten)]
     job: LocalJobRecord,
+    recovery: Option<atogaki_subtitle::application::acoustic_plan::TaskRecoverySummary>,
     translation_status: &'static str,
     segment_count: i64,
     translated_segment_count: i64,
@@ -651,7 +652,14 @@ impl DesktopJobSummary {
         } else {
             "translated"
         };
+        let recovery =
+            atogaki_subtitle::infrastructure::job_store::Job::open(PathBuf::from(&job.storage_dir))
+                .ok()
+                .and_then(|j| {
+                    atogaki_subtitle::application::acoustic_plan::recovery_summary(&j).ok()
+                });
         Self {
+            recovery,
             job,
             translation_status,
             segment_count: stats.segment_count,
@@ -782,11 +790,7 @@ async fn use_learning_dictionary_definition(
 ) -> Result<LocalLearningItemDetail, String> {
     state
         .learning_service
-        .use_lookup_definition(
-            &request.item_id,
-            &request.provider_id,
-            &request.definition,
-        )
+        .use_lookup_definition(&request.item_id, &request.provider_id, &request.definition)
         .await
         .map_err(|error| error.to_string())
 }
@@ -801,6 +805,57 @@ async fn delete_learning_item(
         .delete_item(&item_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn pause_task(state: State<'_, DesktopState>, job_id: String) -> Result<(), String> {
+    state
+        .task_service
+        .pause(&job_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn resume_task(state: State<'_, DesktopState>, job_id: String) -> Result<String, String> {
+    state
+        .task_service
+        .resume(&job_id)
+        .await
+        .map(|s| s.manifest.job_id)
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn task_recovery_status(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<atogaki_subtitle::application::acoustic_plan::TaskRecoverySummary, String> {
+    state
+        .task_service
+        .recovery(&job_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn partial_transcript(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Vec<atogaki_subtitle::domain::TranscriptSegment>, String> {
+    let record = state
+        .task_service
+        .list_persisted_jobs()
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|j| j.job_id == job_id)
+        .ok_or("task not found")?;
+    let job = atogaki_subtitle::infrastructure::job_store::Job::open(record.storage_dir.into())
+        .map_err(|e| e.to_string())?;
+    atogaki_subtitle::application::acoustic_plan::partial_units(&job)
+        .map(|units| {
+            atogaki_subtitle::application::acoustic_plan::candidate_cues(&units)
+                .transcript_segments()
+        })
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -836,10 +891,7 @@ async fn rename_job(
 }
 
 #[tauri::command]
-async fn reorder_jobs(
-    state: State<'_, DesktopState>,
-    job_ids: Vec<String>,
-) -> Result<(), String> {
+async fn reorder_jobs(state: State<'_, DesktopState>, job_ids: Vec<String>) -> Result<(), String> {
     state
         .task_service
         .reorder_persisted_jobs(&job_ids)
@@ -1273,7 +1325,8 @@ async fn preview_retranscription(
                 .gemini_asr_provider()
                 .await
                 .map_err(|error| format!("{error:#}"))?,
-        ) as Arc<dyn atogaki_subtitle::application::AsrProvider>),
+        )
+            as Arc<dyn atogaki_subtitle::application::AsrProvider>),
         provider => return Err(format!("unsupported ASR provider: {provider}")),
     };
     let preview = if let Some(provider) = provider {
@@ -1763,10 +1816,7 @@ async fn cancel_model_download(
 }
 
 #[tauri::command]
-async fn uninstall_model(
-    state: State<'_, DesktopState>,
-    model_id: String,
-) -> Result<(), String> {
+async fn uninstall_model(state: State<'_, DesktopState>, model_id: String) -> Result<(), String> {
     state
         .model_download_service
         .uninstall(&model_id)
@@ -1981,7 +2031,10 @@ fn playback_media_response(
             return base
                 .status(StatusCode::PARTIAL_CONTENT)
                 .header(header::CONTENT_TYPE, content_type)
-                .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{length}"))
+                .header(
+                    header::CONTENT_RANGE,
+                    format!("bytes {start}-{end}/{length}"),
+                )
                 .header(header::CONTENT_LENGTH, body.len())
                 .body(body)
                 .expect("valid partial media response");
@@ -2323,6 +2376,10 @@ fn main() {
             rename_job,
             reorder_jobs,
             retry_job,
+            pause_task,
+            resume_task,
+            task_recovery_status,
+            partial_transcript,
             save_download_network_settings,
             save_asr_credential,
             save_dictionary_credential,
@@ -2525,11 +2582,13 @@ mod tests {
             &registry,
         );
         let multipart_text = String::from_utf8(multipart.body().clone()).unwrap();
-        assert_eq!(
-            multipart.status(),
-            tauri::http::StatusCode::PARTIAL_CONTENT
+        assert_eq!(multipart.status(), tauri::http::StatusCode::PARTIAL_CONTENT);
+        assert!(
+            multipart.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .starts_with("multipart/byteranges")
         );
-        assert!(multipart.headers()["content-type"].to_str().unwrap().starts_with("multipart/byteranges"));
         assert!(multipart_text.contains("Content-Range: bytes 0-1/10\r\n\r\n01\r\n"));
         assert!(multipart_text.contains("Content-Range: bytes 8-9/10\r\n\r\n89\r\n"));
         assert!(multipart_text.ends_with("--atogaki-media-boundary--\r\n"));

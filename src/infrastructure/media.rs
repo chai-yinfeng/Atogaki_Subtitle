@@ -1063,6 +1063,7 @@ async fn run_render_command(
 
 async fn run_checked(mut cmd: Command, name: &str) -> Result<()> {
     cmd.kill_on_drop(true);
+    cmd.kill_on_drop(true);
     let output = cmd
         .output()
         .await

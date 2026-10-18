@@ -55,13 +55,13 @@ impl Job {
 
     pub fn write_segments(&self, segments: &[TranscriptSegment]) -> Result<()> {
         let data = serde_json::to_vec_pretty(segments)?;
-        fs::write(&self.segments_json, data)
+        crate::application::acoustic_plan::atomic_write(&self.segments_json, &data)
             .with_context(|| format!("failed to write {}", self.segments_json.display()))
     }
 
     pub fn write_manifest(&self, manifest: &JobManifest) -> Result<()> {
         let data = serde_json::to_vec_pretty(manifest)?;
-        fs::write(&self.status_json, data)
+        crate::application::acoustic_plan::atomic_write(&self.status_json, &data)
             .with_context(|| format!("failed to write {}", self.status_json.display()))
     }
 

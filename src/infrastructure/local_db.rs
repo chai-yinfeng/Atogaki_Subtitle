@@ -423,6 +423,19 @@ impl LocalDatabase {
     /// Dropping the final SQLite pool handle eventually closes its connections,
     /// but callers that need to move or remove the database file must wait for
     /// an explicit close on platforms such as Windows that lock open files.
+    pub async fn record_acoustic_checkpoint(
+        &self,
+        job_id: &str,
+        run_id: &str,
+        chunk: &crate::application::acoustic_plan::AcousticChunk,
+        path: &Path,
+        device: &str,
+    ) -> Result<()> {
+        sqlx::query("INSERT INTO local_acoustic_checkpoints (job_id, chunk_index, run_id, start_ms, end_ms, artifact_path, device) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id, chunk_index) DO UPDATE SET run_id=excluded.run_id, artifact_path=excluded.artifact_path, device=excluded.device")
+            .bind(job_id).bind(chunk.index as i64).bind(run_id).bind(chunk.start_ms as i64).bind(chunk.end_ms as i64).bind(path.display().to_string()).bind(device).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn close(&self) {
         self.pool.close().await;
     }

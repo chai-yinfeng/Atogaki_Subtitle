@@ -66,7 +66,12 @@ impl JobRunner {
 
         let result = async {
             self.mark(&job, &mut manifest, JobStatus::ExtractingAudio)?;
-            let wav = media::extract_wav(&self.config.ffmpeg, &spec.input, &job.audio_wav).await?;
+            let wav = crate::application::acoustic_plan::prepare_audio(
+                &self.config.ffmpeg,
+                &spec.input,
+                &job,
+            )
+            .await?;
 
             self.mark(&job, &mut manifest, JobStatus::Transcribing)?;
             let refined = self
@@ -109,7 +114,12 @@ impl JobRunner {
 
         let result = async {
             self.mark(&job, &mut manifest, JobStatus::ExtractingAudio)?;
-            let wav = media::extract_wav(&self.config.ffmpeg, &spec.input, &job.audio_wav).await?;
+            let wav = crate::application::acoustic_plan::prepare_audio(
+                &self.config.ffmpeg,
+                &spec.input,
+                &job,
+            )
+            .await?;
 
             self.mark(&job, &mut manifest, JobStatus::Transcribing)?;
             let mut segments = self
@@ -327,9 +337,17 @@ impl JobRunner {
         let provider = self.asr_provider.status();
         let config_snapshot = serde_json::to_value(options)
             .context("failed to snapshot recognition configuration")?;
+        let parent = if let Some(db) = &self.database {
+            db.list_asr_runs(&job.id())
+                .await?
+                .first()
+                .map(|r| r.id.clone())
+        } else {
+            None
+        };
         let mut run = AsrRun::new(
             job.id(),
-            None,
+            parent,
             provider.id,
             provider.name,
             options.whisper.model.display().to_string(),
@@ -348,24 +366,47 @@ impl JobRunner {
             database.update_asr_run(&run).await?;
         }
 
-        let response = self
-            .asr_provider
-            .transcribe(AsrRequest {
-                audio_path: audio_path.to_path_buf(),
-                output_prefix: artifacts.provider_output_prefix.clone(),
-                scope: AsrInputScope::full(),
-                cloud_audio_upload_authorized: false,
-                transcription: options.clone(),
-            })
-            .await;
+        let response = if self.asr_provider.status().id == "whisper.cpp" {
+            crate::application::acoustic_plan::execute_chunks(
+                job,
+                &self.config.ffmpeg,
+                Arc::clone(&self.asr_provider),
+                options,
+                &run.id,
+                self.database.as_ref(),
+            )
+            .await
+        } else {
+            self.asr_provider
+                .transcribe(AsrRequest {
+                    audio_path: audio_path.to_path_buf(),
+                    output_prefix: artifacts.provider_output_prefix.clone(),
+                    scope: AsrInputScope::full(),
+                    cloud_audio_upload_authorized: false,
+                    transcription: options.clone(),
+                })
+                .await
+        };
 
         let completion: Result<Vec<crate::domain::TranscriptSegment>> = async {
             let response = response?;
-            let mut cue_set = segment_timed_units(&response.timed_units, options.source_language)?;
+            let cache = job.dir.join("asr-checkpoint/final-cues.json");
+            let mut cue_set = if self.asr_provider.status().id == "whisper.cpp" {
+                if cache.is_file() {
+                    serde_json::from_slice(&std::fs::read(&cache)?)?
+                } else {
+                    crate::application::acoustic_plan::candidate_cues(&response.timed_units)
+                }
+            } else {
+                segment_timed_units(&response.timed_units, options.source_language)?
+            };
             let candidates = glossary::apply_to_segments(options, cue_set.transcript_segments())?;
             cue_set.replace_transcript_segments(candidates.clone())?;
             artifacts.write_timed_units(&response.timed_units)?;
             artifacts.write_candidate_cues(&cue_set)?;
+            if self.asr_provider.status().id == "whisper.cpp" {
+                crate::application::acoustic_plan::write_json(&cache, &cue_set)?;
+            }
             let signals =
                 detect_quality_signals(job.id().as_str(), &run.id, &cue_set, run.created_at_unix);
             artifacts.write_quality_signals(&signals)?;

@@ -6,7 +6,9 @@ import "./styles.css";
 type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
 type LearningLanguage = "ja" | "en" | "ko";
 
+type RecoverySummary = { phase: string; completed_ms: number; duration_ms: number; completed_ranges: [number, number][]; can_resume: boolean; blocked_reason: string | null };
 type LocalJob = {
+  recovery?: RecoverySummary;
   job_id: string;
   display_name: string | null;
   storage_dir: string;
@@ -2408,7 +2410,10 @@ function renderJobs(jobs: LocalJob[]): void {
             </span>
           </button>
           <div class="job-actions">
-            ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重试</button>` : ""}
+            ${job.recovery?.duration_ms ? `<span>${formatTime(job.recovery.completed_ms)} / ${formatTime(job.recovery.duration_ms)}</span><button type="button" class="secondary" data-partial-job="${escapeHtml(job.job_id)}">查看已保存原文</button>` : ""}
+            ${job.status === "failed" && job.recovery?.can_resume ? `<button type="button" data-resume-job="${escapeHtml(job.job_id)}">继续</button>` : ""}
+            ${runningJob(job) ? `<button type="button" class="secondary" data-pause-job="${escapeHtml(job.job_id)}">暂停</button>` : ""}
+            ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重新运行</button>` : ""}
             <button type="button" class="secondary" data-rename-job="${escapeHtml(job.job_id)}">重命名</button>
             <button type="button" class="danger" data-delete-job="${escapeHtml(job.job_id)}" ${matchesTerminalStatus(job.status) ? "" : "disabled"} title="${matchesTerminalStatus(job.status) ? "删除任务数据，但保留原始媒体" : "任务结束后才能删除"}">删除</button>
           </div>
@@ -2416,8 +2421,21 @@ function renderJobs(jobs: LocalJob[]): void {
     )
     .join("");
   enableJobOrdering();
+  for (const [attribute, command] of [["resume", "resume_task"], ["pause", "pause_task"]]) {
+    jobList.querySelectorAll<HTMLButtonElement>(`[data-${attribute}-job]`).forEach(button => button.addEventListener("click", async () => {
+      button.disabled = true;
+      try { await invoke(command, {jobId: button.getAttribute(`data-${attribute}-job`)}); await refresh(); }
+      catch (error) { if (jobManagementMessage) jobManagementMessage.textContent = String(error); }
+      finally { button.disabled = false; }
+    }));
+  }
+  jobList.querySelectorAll<HTMLButtonElement>("[data-partial-job]").forEach(button => button.addEventListener("click", () => void showPartialTranscript(button.dataset.partialJob ?? "")));
   jobList.querySelectorAll<HTMLButtonElement>("[data-job-id]").forEach((button) => {
-    button.addEventListener("click", () => void openJob(button.dataset.jobId ?? ""));
+    button.addEventListener("click", () => {
+      const job = jobs.find(j => j.job_id === button.dataset.jobId);
+      if (job && job.status !== "done" && job.recovery?.duration_ms) void showPartialTranscript(job.job_id);
+      else void openJob(button.dataset.jobId ?? "");
+    });
   });
   jobList.querySelectorAll<HTMLButtonElement>("[data-rename-job]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -6782,3 +6800,17 @@ window.setInterval(() => {
     void refreshVideoRenders();
   }
 }, 1_000);
+
+async function showPartialTranscript(jobId: string): Promise<void> {
+  const dialog = document.createElement("dialog"); dialog.className = "settings-dialog";
+  dialog.innerHTML = '<div class="dialog-heading"><h2>已保存原文 · 只读</h2><button type="button">关闭</button></div><p>完整识别完成后开放校对、翻译、收藏和导出。只显示通过校验的完成块。</p><div class="partial-media"></div><div class="partial-text">正在读取…</div>';
+  document.body.append(dialog);
+  dialog.querySelector("button")!.onclick = () => dialog.close();
+  dialog.addEventListener("close", () => { dialog.querySelector("audio")?.pause(); dialog.remove(); }); dialog.showModal();
+  try {
+    const [segments, detail] = await Promise.all([invoke<SubtitleSegment[]>("partial_transcript", {jobId}), invoke<JobDetail>("get_job_detail", {jobId})]);
+    const audio = document.createElement("audio"); audio.controls = true; audio.src = detail.audio_fallback_path ?? detail.playback_path ?? ""; dialog.querySelector(".partial-media")!.append(audio);
+    dialog.querySelector(".partial-text")!.innerHTML = segments.map(segment => `<p><button type="button" data-time="${segment.start_ms}" class="secondary">${formatTime(segment.start_ms)}</button> ${escapeHtml(segment.source_text)}</p>`).join("") || "还没有已完成的音频块。";
+    dialog.querySelectorAll<HTMLButtonElement>("[data-time]").forEach(button => button.onclick = () => { audio.currentTime = Number(button.dataset.time) / 1000; void audio.play(); });
+  } catch(error) { dialog.querySelector(".partial-text")!.textContent = String(error); }
+}
