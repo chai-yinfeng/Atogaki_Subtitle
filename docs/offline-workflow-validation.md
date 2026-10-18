@@ -69,7 +69,7 @@ CLI 也可以直接运行 `transcribe --engine mlx-whisper --python <env-python>
 
 - 完整真实长节目接缝听审与少量人工 reference；翻译盲评仍需人工判断。
 - Windows 本机的暂停／继续、原子文件替换、路径和窗口行为；本机未宣称 Windows 通过。
-- 公开发行、签名与公证未执行。本机优化 CLI 构建遇到 sqlx proc-macro 动态库的 `mis-aligned LINKEDIT string pool`，清理该依赖缓存后仍出现；调试构建与测试通过，正式发行前需独立解决该工具链问题。
+- 公开发行、签名与公证未执行。优化 CLI 的 sqlx proc-macro LINKEDIT 阻塞已通过编译时依赖 profile 修正，见下方恢复工作记录；这不等同于安装包发行验收。
 
 ## 2026-10-18 暂停 checkpoint
 
@@ -85,3 +85,35 @@ CLI 也可以直接运行 `transcribe --engine mlx-whisper --python <env-python>
 4. 解决 release CLI 的 sqlx proc-macro LINKEDIT 工具链问题，再做正式构建；Windows 需要独立实机验收。无需自动发布安装包或执行新的云端上传。
 
 本机模型和评测输入、输出位于 Git 忽略目录，未提交媒体、模型、凭据。评测 Python 环境 `/private/tmp/atogaki-mlx-validation-env` 与临时数据库可能被系统清理；脚本、锁定依赖和模型 revision 已入库，可按本文件重建。
+
+## checkpoint 恢复后的工程验证（2026-10-18）
+
+用户已确认先完成工程验证，接缝人工听审、reference 与翻译盲评后补。核心新增回归通过后为 125 项通过／4 项忽略，Tauri 为 29 项通过／4 项忽略；前端 4 项通过，类型检查与生产构建通过，标准调试 App 构建通过。
+
+修正与结构：
+
+- 重做损坏块前失效旧的 final-cues 缓存；完整证据不变时保留缓存和稳定 cue ID。增加拼接输出路径故障的断言，恢复只重新拼接、不调用 ASR。
+- GPU 失败保留原始 stdout／stderr、原因与实际设备；这些内容进入摘要保护的块证据。故障注入验证仅尝试一次 CPU，CPU 再失败即停止。
+- 任务音频与原始输出用可写句柄同步，满足 Windows `FlushFileBuffers` 要求；增加跨平台保留文件内容的同步测试。[Microsoft API 合同](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)。
+- 从完整 ASR run 首次重开时使用真实 WAV 总时长，包含尾部静音；时间粒度从持久 TimedUnit 恢复。采用冲突仍检查冻结工作区，不自动刷新对照快照。
+- 修正预设跨语言词表重载、内容包清空和流水线摘要过期；新的可疑范围清除旧 Gemini 授权。搜索空结果与真正空单词本分开显示，候选预览改为通用标题并保留可见采用按钮。
+- 翻译设置提供独立后端卡片；兼容服务折叠到高级项，Hy-MT2 两档保持实验，可从卡片下载所需模型。凭据独立保存／删除不改变全局默认后端。就绪状态区分未配置、资源缺失、未验证、已验证与失败。验证结果绑定配置和凭据版本摘要，晚到的旧配置响应不能验证新配置；列卡片不读取系统凭据。测试只在显式点击后发送固定 `Hello.`，本轮未执行真实云端请求。
+
+真实窗口记录（全部使用 `/private/tmp/atogaki-offline-window-20261018`）：
+
+- 从两个已翻译测试任务收藏同一句，合并为一个条目、两个来源；展开全部例句，并从第二个来源返回正确任务播放。重启后条目与来源保留。
+- 原生 Anki 保存面板成功导出 UTF-8 TSV，校验一行八列与两个任务来源。学习检索命中／无命中及总数文案通过。
+- 当前句循环与 A/B 区间状态、关闭循环和恢复普通播放通过；全文搜索命中定位通过。
+- 预设跨重启保留，从空词表恢复到指定词表后仍保留勾选的内容包，翻译摘要同步。
+- 原生多选导入坏 WAV 与有效 WAV，同时排队两个任务。坏文件提取失败后有效文件继续识别并完成；未上传媒体或自动切云端。
+- 历史候选可以重开并显示双栏原文、模型、范围和差异入口。原生自动化在部分 HTML 模态弹窗内缺失 AX 控件树，坐标点击返回 `noWindowsAvailable`；使用可见键盘焦点与截图继续完成候选采用冲突、显式重新对照及采用。确认冲突保留人工修改，重新对照不新增 ASR run。设置卡片中 DeepSeek 模型草稿保留，切到 DeepL 再切回时两侧 Key 草稿均为空；输入不中断。未保存测试 Key，也未调用连接测试。
+
+MLX：130 秒真实节目片段的两块识别经同一 CLI 执行器完成。第二块故意失败，恢复仅重做未提交块；导出故障恢复未调用 ASR，cue ID 与第一块全部证据摘要保持一致。报告在 Git 忽略的 `local-artifacts/mlx/recovery/a7a3152a-0acb-4fcc-8f5a-edd2e6887afd/report.json`。该短样本补 MLX runtime 恢复证据，不替代上一轮 Whisper.cpp 62 分钟验收。MLX 显式拒绝尚未实现的 Silero VAD、CPU 和有限 token context 参数；no-speech threshold 传入真实 runtime。恢复 harness 固定 CLI 副本及摘要，保留 venv 启动路径，不把符号链接解析为系统 Python。Hy-MT2 MLX 的输出结构失败结论保持不变。
+
+Release 工具链：根 CLI 与 Tauri 的独立 Cargo manifest 设置 `[profile.release.build-override] debug = 2`，仅对编译时依赖保留调试信息，最终二进制维持 release 优化。普通 `cargo build --release --bin atogaki-subtitle --offline` 与 `cargo check --release --manifest-path src-tauri/Cargo.toml --offline` 已通过；无需修改系统工具链。原因与 [Rust 上游 LINKEDIT 记录](https://github.com/rust-lang/rust/issues/157750) 一致。
+
+额外的发布与采用保护：采用绑定 SQLite 工作区 revision 的事务快照，自动化包含改动后还原为相同内容的 ABA 冲突。历史 artifact 缺少 revision 时允许重开，但必须显式重新对照后才能采用，不伪造生成时版本。恢复补记初始 ASR 来源仅修改未编辑的 legacy 行，不覆盖人工来源、时间修改或 stale 对齐。旧 schema 使用原 SQLx 迁移及校验历史构建，升级并重复打开后验证人工字幕、cue ID、学习来源和 TSV 导出保留。翻译阶段恢复不再要求已完成 ASR 的模型／媒体仍存在；注入全部识别资源缺失后仅翻译待完成 group，并保留人工译文。
+
+当前后续门禁：人工接缝听审、参考文本与翻译盲评由用户后补；Windows 继续只按 CI 共享核心／壳层结果记录，不代替原生窗口和 sidecar 实机回归。真实云端 Gemini 上传／删除及错误验收仍需另行授权样本。没有发布安装包，也没有将 MLX 或实验翻译模型设为桌面默认。
+
+最终窗口补测确认：未保存草稿阻止候选采用；显式重新对照后的 artifact 保存工作区 revision（测试值 86），采用后同 ID 文本即时刷新，ASR run 数量仍为 2。模型重新定位先验证冻结摘要，选错模型不会写坏原识别配置，随后定位相同内容仍能继续。

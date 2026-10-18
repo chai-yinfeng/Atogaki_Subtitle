@@ -27,6 +27,8 @@ _最后更新：2026-10-18_
 
 2026-10-18 应用户要求在额度刷新前暂停。当前分支 `codex/offline-workflow-recovery`，实现、验证证据和继续顺序见 [离线工作流验收与 checkpoint](offline-workflow-validation.md)。上述勾选表示实现完成，尚未完成的真实交互／质量／跨平台验收以该文档为准。
 
+2026-10-18 已从 checkpoint 恢复：补齐损坏块拼接缓存失效、GPU 回退证据、跨平台文件同步、后端配置卡片和就绪状态；真实多文件失败隔离、学习多来源／Anki、预设内容包恢复和 MLX 双块恢复验证通过。release CLI 与 Tauri release 编译阻塞已解决。人工接缝听审与盲评按用户确认后补；Windows CI 与剩余弹窗交互证据见验收文档。
+
 ## 本轮：处理管线与翻译质量
 
 - [x] 明确四层表示、两段式主路线、第一阶段 cue 对应和同任务独立 ASR runs；记录 [0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
