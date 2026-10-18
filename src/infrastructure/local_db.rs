@@ -2131,6 +2131,8 @@ impl LocalDatabase {
         .with_context(|| format!("failed to list subtitle provenance for task {job_id}"))
     }
 
+    /// Recover initial publication metadata only for untouched legacy rows.
+    /// Explicit candidate adoption uses the strict transactional helper below.
     pub async fn assign_asr_cue_provenance(
         &self,
         job_id: &str,
@@ -2142,7 +2144,31 @@ impl LocalDatabase {
             .begin()
             .await
             .context("failed to begin ASR cue provenance transaction")?;
-        assign_asr_cue_provenance_in_transaction(&mut tx, job_id, run_id, candidates).await?;
+        for candidate in &candidates.cues {
+            sqlx::query(
+                "UPDATE local_subtitle_provenance
+                 SET source_kind = 'asr', source_run_id = ?, timed_unit_ids_json = ?,
+                     timing_source = 'model', alignment_status = 'current',
+                     updated_at_unix = CAST(strftime('%s', 'now') AS INTEGER)
+                 WHERE job_id = ? AND segment_id = ? AND source_kind = 'legacy'
+                   AND source_revision = 0 AND timing_source = 'legacy'
+                   AND EXISTS (SELECT 1 FROM local_subtitle_segments s
+                               WHERE s.id = local_subtitle_provenance.segment_id AND s.job_id = ?
+                                 AND s.source_edited = 0 AND s.timing_edited = 0
+                                 AND s.source_text = ? AND s.start_ms = ? AND s.end_ms = ?)",
+            )
+            .bind(run_id)
+            .bind(serde_json::to_string(&candidate.timed_unit_ids)?)
+            .bind(job_id)
+            .bind(&candidate.cue.id)
+            .bind(job_id)
+            .bind(&candidate.cue.source_text)
+            .bind(to_i64(candidate.cue.start_ms, "candidate start")?)
+            .bind(to_i64(candidate.cue.end_ms, "candidate end")?)
+            .execute(&mut *tx)
+            .await
+            .context("failed to recover initial ASR provenance")?;
+        }
         tx.commit()
             .await
             .context("failed to commit ASR cue provenance transaction")
@@ -2682,6 +2708,21 @@ impl LocalDatabase {
     /// Replaces exactly the subtitle blocks fully contained in a user-selected
     /// range. The expected snapshot makes preview confirmation fail safely if
     /// another edit happened while the preview was open.
+    pub async fn subtitle_workspace_snapshot(
+        &self,
+        job_id: &str,
+    ) -> Result<(i64, Vec<LocalSubtitleSegmentRecord>)> {
+        let mut tx = self.pool.begin().await?;
+        let revision =
+            sqlx::query_scalar("SELECT workspace_revision FROM local_jobs WHERE job_id = ?")
+                .bind(job_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        let segments = list_segments_in_transaction(&mut tx, job_id).await?;
+        tx.commit().await?;
+        Ok((revision, segments))
+    }
+
     pub async fn replace_segment_range(
         &self,
         job_id: &str,
@@ -2690,6 +2731,29 @@ impl LocalDatabase {
         expected_segments: &[LocalSubtitleSegmentRecord],
         candidates: &[TranscriptSegment],
         asr_provenance: Option<(&str, &CandidateCueSet)>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        self.replace_segment_range_with_revision(
+            job_id,
+            start_ms,
+            end_ms,
+            expected_segments,
+            candidates,
+            asr_provenance,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn replace_segment_range_with_revision(
+        &self,
+        job_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+        expected_segments: &[LocalSubtitleSegmentRecord],
+        candidates: &[TranscriptSegment],
+        asr_provenance: Option<(&str, &CandidateCueSet)>,
+        expected_revision: Option<i64>,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         if start_ms < 0 || end_ms <= start_ms {
             return Err(anyhow!("invalid retranscription range"));
@@ -2700,6 +2764,18 @@ impl LocalDatabase {
             .await
             .context("failed to begin selected-range replacement transaction")?;
         ensure_structure_editable(&mut tx, job_id).await?;
+        if let Some(expected) = expected_revision {
+            let current: i64 =
+                sqlx::query_scalar("SELECT workspace_revision FROM local_jobs WHERE job_id = ?")
+                    .bind(job_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if current != expected {
+                return Err(anyhow!(
+                    "subtitle workspace revision changed; refresh the comparison before adoption"
+                ));
+            }
+        }
         let current = list_segments_in_transaction(&mut tx, job_id).await?;
         let affected = current
             .iter()
@@ -3324,6 +3400,150 @@ mod tests {
         domain::TranscriptSegment,
         infrastructure::job_store::Job,
     };
+
+    #[tokio::test]
+    async fn checkpoint_migration_preserves_existing_manual_work_and_learning_sources() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-checkpoint-migration-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let path = root.join("legacy.sqlite");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        let legacy = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                super::MIGRATOR
+                    .iter()
+                    .filter(|m| m.version < 202610180001)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        legacy.run(&pool).await.unwrap();
+        let old = LocalDatabase { pool };
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        job.write_manifest(&manifest).unwrap();
+        let segment = TranscriptSegment::new(1000, 2500, "元の文".into());
+        old.sync_snapshot(&JobSnapshot {
+            manifest,
+            segments: vec![segment.clone()],
+        })
+        .await
+        .unwrap();
+        let mut run = AsrRun::new(
+            job.id(),
+            None,
+            "whisper.cpp",
+            "Whisper.cpp",
+            "legacy-model",
+            job.audio_wav.clone(),
+            AsrInputScope::full(),
+            serde_json::json!({}),
+        );
+        run.succeed();
+        old.record_asr_run(&run, &job.asr_runs_dir.join(&run.id))
+            .await
+            .unwrap();
+        let candidates = crate::application::CandidateCueSet {
+            schema_version: 1,
+            segmentation_policy: "legacy-v1".into(),
+            cues: vec![crate::application::CandidateCue {
+                cue: segment.clone(),
+                timed_unit_ids: vec!["legacy-unit".into()],
+            }],
+        };
+        old.assign_asr_cue_provenance(&job.id(), &run.id, &candidates)
+            .await
+            .unwrap();
+        assert_eq!(
+            old.list_subtitle_provenance(&job.id()).await.unwrap()[0].source_kind,
+            "asr"
+        );
+        crate::application::LocalWorkspaceService::new(old.clone())
+            .update_subtitle(
+                &job.id(),
+                &segment.id,
+                "人工修正".into(),
+                Some("人工译文".into()),
+                1000,
+                2500,
+            )
+            .await
+            .unwrap();
+        let before = old.list_segments(&job.id()).await.unwrap();
+        let saved = old
+            .save_learning_selection(NewLocalLearningSelection {
+                job_id: job.id(),
+                segment_id: segment.id.clone(),
+                item_type: "sentence".into(),
+                selection_start_utf16: 0,
+                selection_end_utf16: 4,
+            })
+            .await
+            .unwrap();
+        old.close().await;
+        let upgraded = LocalDatabase::open(&path).await.unwrap();
+        upgraded
+            .assign_asr_cue_provenance(&job.id(), &run.id, &candidates)
+            .await
+            .unwrap();
+        let provenance = upgraded.list_subtitle_provenance(&job.id()).await.unwrap();
+        assert_eq!(provenance[0].source_kind, "manual");
+        assert_eq!(provenance[0].alignment_status, "stale");
+        assert_eq!(upgraded.list_segments(&job.id()).await.unwrap(), before);
+        assert!(before[0].source_edited && before[0].translation_edited);
+        assert_eq!(
+            upgraded
+                .acoustic_checkpoint_ranges(&job.id())
+                .await
+                .unwrap(),
+            vec![]
+        );
+        assert!(
+            !crate::application::acoustic_plan::recovery_summary(&job)
+                .unwrap()
+                .can_resume
+        );
+        let learning = upgraded
+            .get_learning_item(&saved.item.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            learning.occurrences[0].segment_id.as_deref(),
+            Some(segment.id.as_str())
+        );
+        assert_eq!(learning.occurrences[0].segment_source_snapshot, "人工修正");
+        assert_eq!(
+            learning.occurrences[0]
+                .segment_translation_snapshot
+                .as_deref(),
+            Some("人工译文")
+        );
+        let exported = crate::application::local_learning_service::anki_tsv(
+            &upgraded.list_learning_items().await.unwrap(),
+            "ja",
+        );
+        assert!(exported.contains("人工修正") && exported.contains("人工译文"));
+        upgraded.close().await;
+        let repeated = LocalDatabase::open(&path).await.unwrap();
+        assert_eq!(repeated.list_segments(&job.id()).await.unwrap(), before);
+        assert_eq!(repeated.list_learning_items().await.unwrap().len(), 1);
+        repeated.close().await;
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn indexes_asr_run_lifecycle_and_recovers_interrupted_runs() {

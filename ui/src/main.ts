@@ -127,6 +127,7 @@ type RetranscriptionCandidate = {
 
 type RetranscriptionPreview = {
   comparison_id?: string | null;
+  workspace_revision?: number | null;
   preview_id: string;
   job_id: string;
   start_ms: number;
@@ -3535,7 +3536,7 @@ function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
     refresh.onclick=async()=>{try{showRetranscriptionPreview(await invoke<RetranscriptionPreview>("refresh_asr_comparison",{jobId:preview.job_id,runId:preview.preview_id}));}catch(e){if(retranscriptionConfirmMessage)retranscriptionConfirmMessage.textContent=String(e);}};
     retranscriptionDialog.querySelector(".retranscription-comparison")?.before(refresh);
     const diff=document.createElement("details");diff.className="candidate-diff";
-    diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")||"未知")}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
+    diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")||"未知")} · 工作区版本：${preview.workspace_revision ?? "历史候选，采用前需重新对照"}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
     retranscriptionDialog.querySelector(".retranscription-comparison")?.after(diff);
   }
   if(!retranscriptionDialog?.open)retranscriptionDialog?.showModal();
@@ -3585,6 +3586,10 @@ async function previewSelectedRange(): Promise<void> {
 
 async function confirmSelectedRangeReplacement(): Promise<void> {
   if (!activeDetail || !activeRetranscriptionPreview || retranscriptionBusy) return;
+  if (hasUnsavedSubtitleEdits()) {
+    if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "采用候选前请先保存或放弃当前文字草稿。";
+    return;
+  }
   const preview = activeRetranscriptionPreview;
   const repairSignalId = activeRepairSignalId;
   const before = cloneSubtitleSegments(activeDetail.segments);
@@ -4028,7 +4033,11 @@ function updateKaraokePosition(milliseconds: number): void {
       ? `${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)} · #${segment.segment_index + 1}`
       : "当前没有字幕";
   }
-  if (!karaokeTextDraftDirty && karaokeTextDraftSegmentId !== segment?.id) syncKaraokeTextDraft(segment);
+  if (!karaokeTextDraftDirty && (
+    karaokeTextDraftSegmentId !== segment?.id
+    || karaokeCurrentSource?.value !== (segment?.source_text ?? "")
+    || karaokeCurrentTranslation?.value !== (segment?.translated_text ?? "")
+  )) syncKaraokeTextDraft(segment);
   const segmentIndex = segment ? activeDetail?.segments.findIndex((item) => item.id === segment.id) ?? -1 : -1;
   const playhead = Math.round(milliseconds);
   if (karaokeCutSegmentButton) {

@@ -24,6 +24,8 @@ pub struct LocalRetranscriptionPreview {
     pub preview_id: String,
     #[serde(default)]
     pub comparison_id: Option<String>,
+    #[serde(default)]
+    pub workspace_revision: Option<i64>,
     pub job_id: String,
     pub start_ms: i64,
     pub end_ms: i64,
@@ -108,7 +110,8 @@ impl LocalRetranscriptionService {
                 "selected-range retranscription is only available after the task stops"
             ));
         }
-        let all_segments = self.database.list_segments(job_id).await?;
+        let (workspace_revision, all_segments) =
+            self.database.subtitle_workspace_snapshot(job_id).await?;
         let original_segments = all_segments
             .into_iter()
             .filter(|item| item.start_ms < end_ms && item.end_ms > start_ms)
@@ -346,6 +349,7 @@ impl LocalRetranscriptionService {
         }
 
         let preview = LocalRetranscriptionPreview {
+            workspace_revision: Some(workspace_revision),
             preview_id: run_id,
             comparison_id: None,
             job_id: job_id.into(),
@@ -395,7 +399,8 @@ impl LocalRetranscriptionService {
                 return Err(anyhow!("候选尚未完成"));
             }
             let candidates = artifacts.read_candidate_cues()?.transcript_segments();
-            let all = self.database.list_segments(job_id).await?;
+            let (workspace_revision, all) =
+                self.database.subtitle_workspace_snapshot(job_id).await?;
             let start_ms = run.scope.start_ms as i64;
             let end_ms = run
                 .scope
@@ -436,6 +441,7 @@ impl LocalRetranscriptionService {
                 .filter(|s| s.start_ms < end_ms && s.end_ms > start_ms)
                 .collect();
             let preview = LocalRetranscriptionPreview {
+                workspace_revision: Some(workspace_revision),
                 preview_id: preview_id.into(),
                 comparison_id: None,
                 job_id: job_id.into(),
@@ -468,10 +474,9 @@ impl LocalRetranscriptionService {
         run_id: &str,
     ) -> Result<LocalRetranscriptionPreview> {
         let mut preview = self.reopen(job_id, run_id).await?;
-        preview.original_segments = self
-            .database
-            .list_segments(job_id)
-            .await?
+        let (revision, segments) = self.database.subtitle_workspace_snapshot(job_id).await?;
+        preview.workspace_revision = Some(revision);
+        preview.original_segments = segments
             .into_iter()
             .filter(|s| s.start_ms < preview.end_ms && s.end_ms > preview.start_ms)
             .collect();
@@ -547,6 +552,9 @@ impl LocalRetranscriptionService {
                 "retranscription preview belongs to a different task"
             ));
         }
+        let revision = preview
+            .workspace_revision
+            .ok_or_else(|| anyhow!("旧候选缺少工作区版本；请先以当前字幕重新对照，再明确采用"))?;
         let job_record = self
             .database
             .get_job(job_id)
@@ -557,13 +565,14 @@ impl LocalRetranscriptionService {
         let cue_set = artifacts.read_candidate_cues()?;
         let updated = self
             .database
-            .replace_segment_range(
+            .replace_segment_range_with_revision(
                 job_id,
                 preview.start_ms,
                 preview.end_ms,
                 &preview.original_segments,
                 &preview.candidate_segments,
                 Some((preview_id, &cue_set)),
+                Some(revision),
             )
             .await?;
         self.database
@@ -691,6 +700,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(db.list_asr_runs(&job.id()).await.unwrap().len(), count);
+        let workspace = LocalWorkspaceService::new(db.clone());
+        workspace
+            .update_subtitle(&job.id(), &original.id, "另一版".into(), None, 0, 1000)
+            .await
+            .unwrap();
+        workspace
+            .update_subtitle(&job.id(), &original.id, "人工修正".into(), None, 0, 1000)
+            .await
+            .unwrap();
+        assert_eq!(
+            db.list_segments(&job.id()).await.unwrap(),
+            new.original_segments
+        );
+        assert!(
+            reopened
+                .confirm_comparison(&job.id(), &new.preview_id, new.comparison_id.as_deref())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("revision changed")
+        );
+        let new = reopened
+            .refresh_comparison(&job.id(), &preview.preview_id)
+            .await
+            .unwrap();
         assert_eq!(
             reopened
                 .confirm_comparison(&job.id(), &new.preview_id, new.comparison_id.as_deref())
@@ -739,6 +773,31 @@ mod tests {
         assert_eq!(
             full_preview.timing_granularities,
             vec![crate::application::AsrTimingGranularity::ProviderSegment]
+        );
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&fs::read(full_artifacts.dir.join("preview.json")).unwrap())
+                .unwrap();
+        legacy.as_object_mut().unwrap().remove("workspace_revision");
+        crate::application::acoustic_plan::write_json(
+            &full_artifacts.dir.join("preview.json"),
+            &legacy,
+        )
+        .unwrap();
+        assert!(
+            reopened
+                .confirm(&job.id(), &full.id)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("旧候选缺少工作区版本")
+        );
+        assert!(
+            reopened
+                .refresh_comparison(&job.id(), &full.id)
+                .await
+                .unwrap()
+                .workspace_revision
+                .is_some()
         );
         db.close().await;
         fs::remove_dir_all(root).unwrap();

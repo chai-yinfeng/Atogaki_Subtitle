@@ -879,22 +879,38 @@ impl LocalTaskService {
             .read_manifest_if_exists()?
             .ok_or_else(|| anyhow!("task manifest missing"))?;
         let mut options = job.read_recognition_options()?;
-        if !options.whisper.model.exists() {
+        let asr_pending = !job.dir.join("asr-published.json").is_file();
+        let mut relocated = false;
+        if asr_pending && !options.whisper.model.exists() {
+            relocated = true;
             options.whisper.model = whisper_override
                 .filter(|p| p.is_file())
                 .ok_or_else(|| anyhow!("原识别模型缺失；请在设置中重新定位相同模型"))?;
         }
-        if options
-            .whisper
-            .vad_model
-            .as_ref()
-            .is_some_and(|p| !p.is_file())
+        if asr_pending
+            && options
+                .whisper
+                .vad_model
+                .as_ref()
+                .is_some_and(|p| !p.is_file())
         {
+            relocated = true;
             options.whisper.vad_model = Some(
                 vad_override
                     .filter(|p| p.is_file())
                     .ok_or_else(|| anyhow!("原 VAD 模型缺失；请在设置中重新定位相同模型"))?,
             );
+        }
+        let plan_path = job.dir.join("asr-checkpoint/plan.json");
+        if relocated && plan_path.is_file() {
+            let plan: crate::application::acoustic_plan::AcousticPlan =
+                serde_json::from_slice(&fs::read(plan_path)?)?;
+            if crate::application::acoustic_plan::configuration_digest(&options, "whisper.cpp")
+                .await?
+                != plan.configuration_sha256
+            {
+                bail!("重新定位的模型内容与检查点不一致；原配置未改变，请选择相同模型")
+            }
         }
         job.write_recognition_options(&options)?;
         let spec = TranscribeSpec {
@@ -1152,6 +1168,138 @@ mod tests {
 
         assert!(LocalTaskService::with_workers(config.clone(), "jobs", 0, 1).is_err());
         assert!(LocalTaskService::with_workers(config, "jobs", 1, 0).is_err());
+    }
+
+    #[tokio::test]
+    async fn translation_resume_does_not_require_removed_asr_models_or_rerun_asr() {
+        use crate::application::{
+            JobSnapshot, TranslationFuture, TranslationProvider, TranslationProviderStatus,
+            TranslationRequest, TranslationResponse, TranslationResult, TranslationUsage,
+            job_manifest::JobManifest, job_status::JobStatus,
+        };
+        use std::sync::{Arc, Mutex};
+        #[derive(Debug)]
+        struct Provider(Arc<Mutex<Vec<String>>>);
+        impl TranslationProvider for Provider {
+            fn status(&self) -> TranslationProviderStatus {
+                TranslationProviderStatus {
+                    id: "fixture".into(),
+                    name: "Fixture".into(),
+                    configured: true,
+                    model: None,
+                    endpoint_kind: "test".into(),
+                    configuration_hint: None,
+                }
+            }
+            fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+                Box::pin(async move {
+                    self.0.lock().unwrap().extend(
+                        request
+                            .targets
+                            .iter()
+                            .map(|target| target.segment_id.clone()),
+                    );
+                    Ok(TranslationResponse {
+                        translations: request
+                            .targets
+                            .into_iter()
+                            .map(|target| TranslationResult {
+                                segment_id: target.segment_id,
+                                translated_text: "恢复后的译文".into(),
+                            })
+                            .collect(),
+                        model: None,
+                        usage: TranslationUsage::default(),
+                    })
+                })
+            }
+        }
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-translation-resume-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = crate::infrastructure::job_store::Job::create_in(&root.join("jobs")).unwrap();
+        let db = LocalDatabase::open(root.join("state.sqlite"))
+            .await
+            .unwrap();
+        let mut manifest = JobManifest::new(
+            &job,
+            Some(root.join("removed-media")),
+            None,
+            crate::domain::LanguagePair::default(),
+        );
+        manifest.mark(JobStatus::Translating);
+        manifest.fail("injected translation interruption");
+        job.write_manifest(&manifest).unwrap();
+        let mut options = TranscriptionOptions::japanese(root.join("removed-model"));
+        options.whisper.vad_model = Some(root.join("removed-vad"));
+        job.write_recognition_options(&options).unwrap();
+        crate::application::acoustic_plan::write_json(&job.dir.join("workflow-version.json"), &1)
+            .unwrap();
+        crate::application::acoustic_plan::write_json(&job.dir.join("asr-published.json"), &true)
+            .unwrap();
+        assert_eq!(
+            crate::application::acoustic_plan::recovery_summary(&job)
+                .unwrap()
+                .phase,
+            "translating"
+        );
+        let mut completed = crate::domain::TranscriptSegment::new(0, 1000, "最初の文。".into());
+        completed.set_translation(Some("保留的译文".into()));
+        let pending = crate::domain::TranscriptSegment::new(20000, 21000, "次の文。".into());
+        job.write_segments(&[completed.clone(), pending.clone()])
+            .unwrap();
+        db.sync_snapshot(&JobSnapshot::load(&job.dir).unwrap())
+            .await
+            .unwrap();
+        crate::application::LocalWorkspaceService::new(db.clone())
+            .update_subtitle(
+                &job.id(),
+                &completed.id,
+                completed.source_text.clone(),
+                Some("人工保留译文".into()),
+                0,
+                1000,
+            )
+            .await
+            .unwrap();
+        let service = LocalTaskService::start_with_database(
+            AppConfig {
+                ffmpeg: "must-not-run-ffmpeg".into(),
+                whisper_cli: "must-not-run-asr".into(),
+                deepl_auth_key: None,
+            },
+            root.join("jobs"),
+            db.clone(),
+        )
+        .unwrap();
+        let targets = Arc::new(Mutex::new(Vec::new()));
+        service
+            .configure_task_translation(&job.id(), Arc::new(Provider(targets.clone())))
+            .await
+            .unwrap();
+        service.resume(&job.id()).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let status = db.get_job(&job.id()).await.unwrap().unwrap().status;
+                if status == "done" {
+                    break;
+                }
+                assert_ne!(status, "failed");
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(*targets.lock().unwrap(), vec![pending.id.clone()]);
+        let segments = db.list_segments(&job.id()).await.unwrap();
+        assert_eq!(segments[0].id, completed.id);
+        assert_eq!(segments[0].translated_text.as_deref(), Some("人工保留译文"));
+        assert_eq!(segments[1].translated_text.as_deref(), Some("恢复后的译文"));
+        assert!(db.list_asr_runs(&job.id()).await.unwrap().is_empty());
+        drop(service);
+        db.close().await;
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
@@ -1677,7 +1825,21 @@ mod tests {
             .unwrap();
         assert!(!status.success(), "decoder must be terminated");
         fs::remove_file(input).unwrap();
-        let resumed = service.resume(&id).await.unwrap();
+        let moved_model = root.join("moved-model.bin");
+        fs::rename(&model, &moved_model).unwrap();
+        let wrong_model = root.join("wrong-model.bin");
+        fs::write(&wrong_model, b"different weights").unwrap();
+        assert!(
+            service
+                .resume_with_models(&id, Some(wrong_model), None)
+                .await
+                .is_err()
+        );
+        assert_eq!(job.read_recognition_options().unwrap().whisper.model, model);
+        let resumed = service
+            .resume_with_models(&id, Some(moved_model), None)
+            .await
+            .unwrap();
         assert_eq!(resumed.manifest.job_id, id);
         assert!(service.resume(&id).await.is_err());
         service.pause(&id).await.unwrap();

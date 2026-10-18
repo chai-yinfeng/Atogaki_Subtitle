@@ -256,7 +256,7 @@ pub fn recovery_summary(job: &Job) -> Result<TaskRecoverySummary> {
     if !path.is_file() {
         return Ok(TaskRecoverySummary {
             phase: if job.dir.join("workflow-version.json").exists() {
-                "extracting_audio".into()
+                phase
             } else {
                 "legacy".into()
             },
@@ -332,6 +332,25 @@ fn stitch_units(mut units: Vec<(usize, TimedUnit)>) -> Vec<TimedUnit> {
     output.into_iter().map(|(_, unit)| unit).collect()
 }
 
+pub async fn configuration_digest(
+    options: &TranscriptionOptions,
+    provider_id: &str,
+) -> Result<String> {
+    let fingerprint_options = options.clone();
+    let provider_id = provider_id.to_string();
+    tokio::task::spawn_blocking(move || -> Result<String> {
+        let mut config = serde_json::to_value(&fingerprint_options)?;
+        for key in ["model", "vad_model", "glossary"] {
+            if let Some(path) = config.get(key).and_then(|v| v.as_str()) {
+                config[key] = serde_json::Value::String(file_digest(Path::new(path))?);
+            }
+        }
+        config["provider"] = serde_json::Value::String(provider_id);
+        json_digest(&config)
+    })
+    .await?
+}
+
 pub async fn execute_chunks(
     job: &Job,
     ffmpeg: &Path,
@@ -342,22 +361,10 @@ pub async fn execute_chunks(
 ) -> Result<AsrResponse> {
     let root = job.dir.join("asr-checkpoint");
     fs::create_dir_all(&root)?;
-    let fingerprint_options = options.clone();
-    let provider_id = provider.status().id.clone();
-    let config = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
-        let mut config = serde_json::to_value(&fingerprint_options)?;
-        for key in ["model", "vad_model", "glossary"] {
-            if let Some(path) = config.get(key).and_then(|v| v.as_str()) {
-                config[key] = serde_json::Value::String(file_digest(Path::new(path))?);
-            }
-        }
-        config["provider"] = serde_json::Value::String(provider_id);
-        Ok(config)
-    })
-    .await??;
+    let configuration_sha256 = configuration_digest(options, &provider.status().id).await?;
     let identity: AudioIdentity =
         serde_json::from_slice(&fs::read(job.dir.join("audio-identity.json"))?)?;
-    let desired = AcousticPlan::new(identity.duration_ms, identity.sha256, json_digest(&config)?);
+    let desired = AcousticPlan::new(identity.duration_ms, identity.sha256, configuration_sha256);
     let plan_path = root.join("plan.json");
     let plan = if plan_path.is_file() {
         let p: AcousticPlan = serde_json::from_slice(&fs::read(&plan_path)?)?;
