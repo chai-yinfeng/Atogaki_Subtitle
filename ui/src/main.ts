@@ -1082,7 +1082,7 @@ app.innerHTML = `
               <option value="deepl">DeepL（传统翻译 API）</option>
               <option value="deepseek">DeepSeek（LLM API）</option>
               <option value="openai-compatible">OpenAI-compatible（高级）</option>
-              <option value="none">关闭云端翻译</option>
+              <option value="none">不翻译／仅保留原文</option>
             </select>
           </label>
           <div id="llm-provider-fields" class="settings-grid hidden">
@@ -1617,6 +1617,7 @@ function overwriteSettingsField<T extends HTMLInputElement | HTMLSelectElement>(
 
 function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
+  if (!settingsDirtyFields.has("settings-provider")) lastSettingsProvider = settings.translationProviderId;
   overwriteSettingsField(settingsWhisperModel, settings.whisperModelPath ?? "");
   overwriteSettingsField(settingsVadModel, settings.vadModelPath ?? "");
   overwriteSettingsField(settingsHyMt2Model, settings.hyMt2ModelPath ?? "");
@@ -6176,7 +6177,14 @@ settingsForm?.addEventListener("change", (event) => {
 document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
 document.querySelector<HTMLButtonElement>("#settings-choose-hy-mt2")?.addEventListener("click", () => void chooseSettingsModel("hy-mt2"));
+const providerDrafts = new Map<string, { model: string; endpoint: string; style: string }>();
+let lastSettingsProvider = "none";
 settingsProvider?.addEventListener("change", () => {
+  // Never carry a secret or delete intent into another provider.
+  if (settingsApiKey) settingsApiKey.value = "";
+  if (settingsClearApiKey) settingsClearApiKey.checked = false;
+  providerDrafts.set(lastSettingsProvider, { model: settingsProviderModel?.value ?? "", endpoint: settingsProviderBaseUrl?.value ?? "", style: settingsTranslationStyle?.value ?? "" });
+  lastSettingsProvider = settingsProvider.value;
   if (settingsProvider.value === "deepseek") {
     if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.deepseek.com";
     if (settingsProviderModel) settingsProviderModel.value = "deepseek-v4-flash";
@@ -6188,6 +6196,12 @@ settingsProvider?.addEventListener("change", () => {
   }
   if ((settingsProvider.value === "deepseek" || settingsProvider.value === "openai-compatible") && settingsTranslationStyle && !settingsTranslationStyle.value.trim()) {
     settingsTranslationStyle.value = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
+  }
+  const draft = providerDrafts.get(settingsProvider.value);
+  if (draft) {
+    if (settingsProviderModel) settingsProviderModel.value = draft.model;
+    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = draft.endpoint;
+    if (settingsTranslationStyle) settingsTranslationStyle.value = draft.style;
   }
   syncProviderSettings();
   if (apiKeyStatus && settingsProvider.value !== "none") {

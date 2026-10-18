@@ -663,7 +663,11 @@ impl LocalWorkspaceService {
         context_segments: &[LocalSubtitleSegmentRecord],
         segments_to_translate: &[LocalSubtitleSegmentRecord],
     ) -> Result<(Vec<LocalSubtitleSegmentRecord>, Vec<String>)> {
-        let provider = self.translation_provider.status();
+        let frozen = self
+            .translation_provider
+            .execution_snapshot()
+            .unwrap_or_else(|| Arc::clone(&self.translation_provider));
+        let provider = frozen.status();
         if !provider.configured {
             return Err(anyhow!(
                 "{} is not configured. {}",
@@ -753,19 +757,15 @@ impl LocalWorkspaceService {
                         .unwrap_or_default(),
                 })
                 .collect::<Vec<_>>();
-            let response = execute_translation_group(
-                self.translation_provider.as_ref(),
-                options.clone(),
-                group.clone(),
-                None,
-            )
-            .await
-            .map_err(|error| {
-                anyhow!(
-                    "failed to translate SQLite subtitle workspace with {}: {error:#}",
-                    provider.name
-                )
-            })?;
+            let response =
+                execute_translation_group(frozen.as_ref(), options.clone(), group.clone(), None)
+                    .await
+                    .map_err(|error| {
+                        anyhow!(
+                            "failed to translate SQLite subtitle workspace with {}: {error:#}",
+                            provider.name
+                        )
+                    })?;
             let response_model = response.model.clone().or_else(|| provider.model.clone());
             let response_usage = response.usage.clone();
             let (updates, empty) =
@@ -824,7 +824,7 @@ impl LocalWorkspaceService {
                     })
                     .collect::<Vec<_>>();
                 let retry_response = execute_translation_group(
-                    self.translation_provider.as_ref(),
+                    frozen.as_ref(),
                     options.clone(),
                     retry_group.clone(),
                     Some(retry_style.to_string()),
