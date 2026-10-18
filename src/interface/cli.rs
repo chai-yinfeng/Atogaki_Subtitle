@@ -111,6 +111,14 @@ pub struct RecordArgs {
 
 #[derive(Debug, Args)]
 pub struct TranscribeArgs {
+    #[arg(long, default_value="whisper.cpp", value_parser=["whisper.cpp","mlx-whisper"])]
+    pub engine: String,
+    #[arg(
+        long,
+        default_value = "python3",
+        help = "Explicit Python environment for the MLX CLI experiment"
+    )]
+    pub python: PathBuf,
     pub input: PathBuf,
 
     #[command(flatten)]
