@@ -35,8 +35,8 @@ use atogaki_subtitle::{
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
-            LocalAsrQualitySignalRecord, LocalAsrRunRecord, LocalDatabase, LocalGlossaryDetail,
-            LocalGlossaryRecord, LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail,
+            LocalAsrQualitySignalRecord, LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord,
+            LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail,
             LocalRenderJobRecord, LocalSubtitleSegmentRecord, LocalTranslationRunRecord,
             NewLocalLearningSelection,
         },
@@ -521,6 +521,7 @@ fn default_whisper_provider() -> String {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ConfirmRetranscriptionRequest {
+    comparison_id: Option<String>,
     job_id: String,
     preview_id: String,
 }
@@ -699,12 +700,38 @@ async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopJobSumma
 async fn list_asr_runs(
     state: State<'_, DesktopState>,
     job_id: String,
-) -> Result<Vec<LocalAsrRunRecord>, String> {
-    state
+) -> Result<Vec<serde_json::Value>, String> {
+    let detail = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let job = atogaki_subtitle::infrastructure::job_store::Job::open(detail.job.storage_dir.into())
+        .map_err(|e| e.to_string())?;
+    let runs = state
         .task_service
         .list_persisted_asr_runs(&job_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|e| e.to_string())?;
+    runs.into_iter()
+        .map(|run| {
+            let artifacts = atogaki_subtitle::infrastructure::asr_run_store::AsrRunArtifacts::open(
+                &job, &run.id,
+            )
+            .ok();
+            let progress = artifacts
+                .as_ref()
+                .and_then(|a| std::fs::read(a.dir.join("checkpoints.json")).ok())
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+            let reopenable = artifacts.as_ref().is_some_and(|a| {
+                a.dir.join("preview.json").is_file() || a.candidate_cues_json.is_file()
+            });
+            let mut output = serde_json::to_value(run).map_err(|e| e.to_string())?;
+            output["checkpoint_progress"] = progress.unwrap_or(serde_json::Value::Null);
+            output["reopenable"] = reopenable.into();
+            Ok(output)
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -842,9 +869,18 @@ async fn resume_task(state: State<'_, DesktopState>, job_id: String) -> Result<S
                 .map_err(|e| e.to_string())?;
         }
     }
+    let settings = state
+        .settings_service
+        .load()
+        .await
+        .map_err(|e| e.to_string())?;
     state
         .task_service
-        .resume(&job_id)
+        .resume_with_models(
+            &job_id,
+            settings.whisper_model_path.map(PathBuf::from),
+            settings.vad_model_path.map(PathBuf::from),
+        )
         .await
         .map(|s| s.manifest.job_id)
         .map_err(|e| format!("{e:#}"))
@@ -1443,6 +1479,60 @@ async fn get_waveform_window(
 }
 
 #[tauri::command]
+async fn asr_candidate_progress(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    let detail = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let job = atogaki_subtitle::infrastructure::job_store::Job::open(detail.job.storage_dir.into())
+        .map_err(|e| e.to_string())?;
+    let runs = state
+        .task_service
+        .list_persisted_asr_runs(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(run) = runs
+        .into_iter()
+        .find(|r| r.status == "running" || r.status == "queued")
+    else {
+        return Ok(None);
+    };
+    let artifacts =
+        atogaki_subtitle::infrastructure::asr_run_store::AsrRunArtifacts::open(&job, &run.id)
+            .map_err(|e| e.to_string())?;
+    let mut progress: serde_json::Value = std::fs::read(artifacts.dir.join("progress.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_else(|| serde_json::json!({"phase":"transcribing"}));
+    if let Ok(bytes) = std::fs::read(artifacts.dir.join("checkpoint-root.json")) {
+        if let Ok(root) = serde_json::from_slice::<PathBuf>(&bytes) {
+            if let (Ok(root), Ok(allowed)) = (
+                root.canonicalize(),
+                job.dir.join("candidate-checkpoints").canonicalize(),
+            ) {
+                if root.starts_with(allowed) {
+                    if let Ok(scratch) =
+                        atogaki_subtitle::infrastructure::job_store::Job::open(root)
+                    {
+                        if let Ok(summary) =
+                            atogaki_subtitle::application::acoustic_plan::recovery_summary(&scratch)
+                        {
+                            progress["completed_ms"] = summary.completed_ms.into();
+                            progress["duration_ms"] = summary.duration_ms.into();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(Some(progress))
+}
+
+#[tauri::command]
 async fn cancel_asr_candidate(
     state: State<'_, DesktopState>,
     job_id: String,
@@ -1493,6 +1583,18 @@ async fn test_translation_connection(
     Ok(format!("{} 已验证", provider.status().name))
 }
 
+#[tauri::command]
+async fn refresh_asr_comparison(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    run_id: String,
+) -> Result<LocalRetranscriptionPreview, String> {
+    state
+        .retranscription_service
+        .refresh_comparison(&job_id, &run_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
 #[tauri::command]
 async fn reopen_asr_candidate(
     state: State<'_, DesktopState>,
@@ -1580,7 +1682,11 @@ async fn confirm_retranscription(
 ) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
     state
         .retranscription_service
-        .confirm(&request.job_id, &request.preview_id)
+        .confirm_comparison(
+            &request.job_id,
+            &request.preview_id,
+            request.comparison_id.as_deref(),
+        )
         .await
         .map_err(|error| format!("{error:#}"))
 }
@@ -2625,7 +2731,9 @@ fn main() {
             get_waveform_window,
             preview_retranscription,
             reopen_asr_candidate,
+            refresh_asr_comparison,
             cancel_asr_candidate,
+            asr_candidate_progress,
             test_translation_connection,
             preview_full_retranscription,
             confirm_retranscription,

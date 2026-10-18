@@ -240,6 +240,10 @@ fn read_evidence(root: &Path, chunk: &AcousticChunk) -> Result<ChunkEvidence> {
     Ok(evidence)
 }
 pub fn recovery_summary(job: &Job) -> Result<TaskRecoverySummary> {
+    let phase = job
+        .read_manifest_if_exists()?
+        .map(|m| m.failed_stage.unwrap_or(m.status).as_str().to_string())
+        .unwrap_or_else(|| "transcribing".into());
     let path = job.dir.join("asr-checkpoint/plan.json");
     if !path.is_file() {
         return Ok(TaskRecoverySummary {
@@ -267,7 +271,7 @@ pub fn recovery_summary(job: &Job) -> Result<TaskRecoverySummary> {
         .map(|c| (c.start_ms, c.end_ms))
         .collect::<Vec<_>>();
     Ok(TaskRecoverySummary {
-        phase: "transcribing".into(),
+        phase,
         completed_ms: completed_ranges.iter().map(|(s, e)| e - s).sum(),
         duration_ms: plan.duration_ms,
         completed_ranges,
@@ -281,7 +285,11 @@ pub fn partial_units(job: &Job) -> Result<Vec<TimedUnit>> {
     let mut units = vec![];
     for chunk in &plan.chunks {
         if let Ok(e) = read_evidence(&root, chunk) {
-            units.extend(owned_units(chunk, e.units));
+            units.extend(
+                owned_units(chunk, e.units)
+                    .into_iter()
+                    .map(|unit| (chunk.index, unit)),
+            );
         }
     }
     Ok(stitch_units(units))
@@ -297,18 +305,23 @@ fn owned_units(chunk: &AcousticChunk, units: Vec<TimedUnit>) -> Vec<TimedUnit> {
         })
         .collect()
 }
-fn stitch_units(mut units: Vec<TimedUnit>) -> Vec<TimedUnit> {
-    units.sort_by_key(|u| u.start_ms);
-    let mut output: Vec<TimedUnit> = vec![];
-    for unit in units {
-        if let Some(previous) = output.last() {
-            if previous.end_ms > unit.start_ms && previous.text.trim() == unit.text.trim() {
+fn stitch_units(mut units: Vec<(usize, TimedUnit)>) -> Vec<TimedUnit> {
+    units.sort_by_key(|(_, unit)| unit.start_ms);
+    let mut output: Vec<(usize, TimedUnit)> = vec![];
+    for (chunk, unit) in units {
+        if let Some((previous_chunk, previous)) = output.last() {
+            // Only cross-chunk observations of the same overlapping span are
+            // duplicates. Repetition inside one decoder output is review evidence.
+            if *previous_chunk != chunk
+                && previous.end_ms > unit.start_ms
+                && previous.text.trim() == unit.text.trim()
+            {
                 continue;
             }
         }
-        output.push(unit);
+        output.push((chunk, unit));
     }
-    output
+    output.into_iter().map(|(_, unit)| unit).collect()
 }
 
 pub async fn execute_chunks(
@@ -441,6 +454,21 @@ pub async fn execute_chunks(
         if evidence.device == "cpu" {
             effective.whisper.no_gpu = true;
         }
+        if let Ok(artifacts) =
+            crate::infrastructure::asr_run_store::AsrRunArtifacts::open(job, run_id)
+        {
+            let confirmed = plan
+                .chunks
+                .iter()
+                .take(chunk.index + 1)
+                .map(|c| (c.start_ms, c.end_ms))
+                .collect::<Vec<_>>();
+            write_json(
+                &artifacts.dir.join("checkpoints.json"),
+                &serde_json::json!({"duration_ms":plan.duration_ms,"completed_ms":confirmed.iter().map(|(s,e)|e-s).sum::<u64>(),"completed_ranges":confirmed}),
+            )?;
+        }
+
         if let Some(db) = database {
             db.record_acoustic_checkpoint(
                 &job.id(),
@@ -620,6 +648,45 @@ mod tests {
         assert_eq!(fake.calls.load(Ordering::SeqCst), 31); // 30 successful chunks + failed call
         assert_eq!(response.timed_units.len(), 30);
         assert_eq!(recovery_summary(&job).unwrap().completed_ms, 3600000);
+        let db = LocalDatabase::open(root.join("index.sqlite"))
+            .await
+            .unwrap();
+        let mut manifest = crate::application::job_manifest::JobManifest::new(
+            &job,
+            None,
+            None,
+            crate::domain::LanguagePair::default(),
+        );
+        manifest.mark(crate::application::job_status::JobStatus::Done);
+        job.write_manifest(&manifest).unwrap();
+        db.sync_snapshot(&crate::application::JobSnapshot::load(&job.dir).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            db.acoustic_checkpoint_ranges(&job.id())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        execute_chunks(
+            &job,
+            &ffmpeg,
+            fake.clone(),
+            &options,
+            "index-repair",
+            Some(&db),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            db.acoustic_checkpoint_ranges(&job.id())
+                .await
+                .unwrap()
+                .len(),
+            30
+        );
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 31);
+        db.close().await;
         // A damaged raw artifact invalidates only that chunk.
         fs::write(
             job.dir
@@ -647,5 +714,30 @@ mod tests {
         );
         assert_eq!(fake.calls.load(Ordering::SeqCst), 32);
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn overlapping_repetition_inside_one_chunk_is_not_silently_deleted() {
+        let unit = |id: &str, start, end| TimedUnit {
+            id: id.into(),
+            text: "はい".into(),
+            kind: crate::application::TimedUnitKind::ProviderSegment,
+            start_ms: Some(start),
+            end_ms: Some(end),
+            timing_source: crate::application::TimingSource::Model,
+            provider_confidence: None,
+            speaker: None,
+        };
+        assert_eq!(
+            stitch_units(vec![(0, unit("a", 0, 1000)), (0, unit("b", 500, 1500))]).len(),
+            2
+        );
+        assert_eq!(
+            stitch_units(vec![
+                (0, unit("a", 119000, 120500)),
+                (1, unit("b", 119500, 121000))
+            ])
+            .len(),
+            1
+        );
     }
 }

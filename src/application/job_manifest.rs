@@ -30,6 +30,8 @@ pub struct JobManifest {
     pub completed_at_unix: Option<u64>,
     pub updated_at_unix: u64,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_stage: Option<JobStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +69,7 @@ impl JobManifest {
             completed_at_unix: None,
             updated_at_unix: now,
             error: None,
+            failed_stage: None,
         }
     }
 
@@ -85,10 +88,14 @@ impl JobManifest {
         self.updated_at_unix = now;
         if status != JobStatus::Failed {
             self.error = None;
+            self.failed_stage = None;
         }
     }
 
     pub fn fail(&mut self, error: impl Into<String>) {
+        if self.status != JobStatus::Failed {
+            self.failed_stage = Some(self.status);
+        }
         let now = unix_now();
         self.status = JobStatus::Failed;
         self.message = JobStatus::Failed.label().to_string();

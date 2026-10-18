@@ -2,6 +2,13 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
+import { matchesQuery, highlightSaved, candidateTextDiff } from "./offline-tools";
+let selectedMediaFiles: string[] = [];
+let playbackLoop: {startMs:number;endMs:number;repeat:boolean} | null = null;
+let loopStartMs: number | null = null;
+let taskTitleQuery = "";
+let learningQuery = "";
+let learningTaskFilter = "";
 
 type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
 type LearningLanguage = "ja" | "en" | "ko";
@@ -119,13 +126,18 @@ type RetranscriptionCandidate = {
 };
 
 type RetranscriptionPreview = {
+  comparison_id?: string | null;
   preview_id: string;
   job_id: string;
   start_ms: number;
   end_ms: number;
   original_segments: SubtitleSegment[];
   candidate_segments: RetranscriptionCandidate[];
-  context_mode: "isolated";
+  context_mode: "isolated" | "provider-managed";
+  provider_name?: string;
+  model_identity?: string;
+  timing_granularities?: string[];
+  configuration?: Record<string, unknown>;
 };
 
 type BatchTranslationResult = {
@@ -607,6 +619,7 @@ app.innerHTML = `
           </div>
           <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
           <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地实验</option><option value="openai-compatible">自定义兼容服务</option></select><span>完整转录后自动翻译；云端只发送字幕文本和上下文。</span></label>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
@@ -1483,16 +1496,16 @@ function formatElapsed(seconds: number): string {
   return `${remainingSeconds}秒`;
 }
 
-function jobTimingLabel(job: Pick<LocalJob, "status" | "created_at_unix" | "started_at_unix" | "completed_at_unix">): string {
+function jobTimingLabel(job: Pick<LocalJob, "status" | "created_at_unix" | "started_at_unix" | "completed_at_unix"> & Partial<Pick<LocalJob,"updated_at_unix">>): string {
   const now = Math.floor(Date.now() / 1_000);
-  if (job.status === "queued") return `排队 ${formatElapsed(now - job.created_at_unix)}`;
+  if (job.status === "queued") return `排队 ${formatElapsed(now - (job.updated_at_unix ?? job.created_at_unix))}`;
   if (matchesTerminalStatus(job.status)) {
     if (job.started_at_unix !== null && job.completed_at_unix !== null && job.completed_at_unix >= job.started_at_unix) {
-      return `处理用时 ${formatElapsed(job.completed_at_unix - job.started_at_unix)}`;
+      return `任务历时 ${formatElapsed(job.completed_at_unix - job.started_at_unix)}`;
     }
     return "历史任务未记录处理用时";
   }
-  if (job.started_at_unix !== null) return `已运行 ${formatElapsed(now - job.started_at_unix)}`;
+  if (job.started_at_unix !== null) return `任务历时 ${formatElapsed(now - job.started_at_unix)}`;
   return `准备中 ${formatElapsed(now - job.created_at_unix)}`;
 }
 
@@ -1505,6 +1518,7 @@ function updateVisibleJobTimings(): void {
     if (!Number.isFinite(createdAt)) return;
     element.textContent = jobTimingLabel({
       created_at_unix: createdAt,
+      updated_at_unix: Number(element.dataset.updatedAt) || createdAt,
       started_at_unix: startedAt,
       completed_at_unix: completedAt,
       status,
@@ -1619,6 +1633,8 @@ function overwriteSettingsField<T extends HTMLInputElement | HTMLSelectElement>(
 
 function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
+  settingsDialog?.classList.toggle("onboarding",settings.needsOnboarding);
+  const title=settingsDialog?.querySelector("h2");if(title)title.textContent=settings.needsOnboarding ? "首次配置" : "设置";
   if (!settingsDirtyFields.has("settings-provider")) lastSettingsProvider = settings.translationProviderId;
   overwriteSettingsField(settingsWhisperModel, settings.whisperModelPath ?? "");
   overwriteSettingsField(settingsVadModel, settings.vadModelPath ?? "");
@@ -1663,8 +1679,11 @@ function renderDesktopSettings(settings: DesktopSettings): void {
       : source;
     apiKeyStatus.classList.toggle("warning", Boolean(settings.credentialError));
   }
+  const taskProvider = document.querySelector<HTMLSelectElement>("#task-translation-provider");
+  if (taskProvider && !taskProvider.value && settings.translationProviderId !== "none") taskProvider.value = settings.translationProviderId;
   if (modelPath && settings.whisperModelPath) modelPath.value = settings.whisperModelPath;
   if (vadModelPath && settings.vadModelPath) vadModelPath.value = settings.vadModelPath;
+  updateTaskPipelineSummary();
   syncProviderSettings();
   syncNetworkSettings();
   renderModelCatalog();
@@ -1915,15 +1934,17 @@ async function checkDictionaryCredential(providerId: string): Promise<void> {
 
 async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
   try {
-    const [settings, catalog, downloads] = await Promise.all([
+    const [settings, catalog, downloads, profiles] = await Promise.all([
       invoke<DesktopSettings>("desktop_settings"),
       availableModels.length ? Promise.resolve(availableModels) : invoke<ModelCatalogItem[]>("model_catalog"),
       invoke<ModelDownloadState[]>("model_download_states"),
+      invoke<Array<{provider_id: string; model: string | null; base_url: string | null; style: string}>>("translation_profiles"),
     ]);
+    profiles.forEach(profile => providerDrafts.set(profile.provider_id, {model: profile.model ?? "", endpoint: profile.base_url ?? (profile.provider_id === "openai-compatible" ? "https://api.openai.com/v1" : "https://api.deepseek.com"), style:profile.style}));
     availableModels = catalog;
     modelDownloads = downloads;
     renderDesktopSettings(settings);
-    await Promise.all([loadDictionarySettings(), loadAsrCredentialStatus()]);
+    await loadDictionarySettings();
     if (openWhenNeeded && settings.needsOnboarding && !settingsDialog?.open) settingsDialog?.showModal();
   } catch (error) {
     if (settingsMessage) settingsMessage.textContent = `无法读取启动配置：${String(error)}`;
@@ -1932,7 +1953,12 @@ async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
 
 async function refreshTranslationStatus(): Promise<void> {
   try {
-    translationStatus = await invoke<TranslationStatus>("translation_status");
+    const jobId = activeDetail?.job.job_id ?? null;
+    const status = await invoke<TranslationStatus>("translation_status",{jobId});
+    if (jobId !== (activeDetail?.job.job_id ?? null)) return;
+    translationStatus = status;
+    const choice=document.querySelector<HTMLSelectElement>("#task-provider-choice");
+    if(choice)choice.value=status.provider_id;
     updateTranslationControls();
   } catch (error) {
     setWorkspaceAction(`无法读取翻译配置：${String(error)}`, true);
@@ -2390,6 +2416,7 @@ function hasUnsavedSubtitleEdits(): boolean {
 }
 
 function renderJobs(jobs: LocalJob[]): void {
+  jobs = jobs.filter(job => matchesQuery(taskTitleQuery,[displayName(job)]));
   if (!jobList || !jobCount) return;
   jobCount.textContent = `${jobs.length} 个任务`;
   if (jobs.length === 0) {
@@ -2403,14 +2430,14 @@ function renderJobs(jobs: LocalJob[]): void {
         <article class="job-card" data-job-card="${escapeHtml(job.job_id)}">
           <button class="job-drag-handle" type="button" aria-label="拖动调整${escapeHtml(displayName(job))}的顺序" title="拖动排序；聚焦后也可用上下方向键">⠿</button>
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
-            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-started-at="${job.started_at_unix ?? ""}" data-completed-at="${job.completed_at_unix ?? ""}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
+            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-updated-at="${job.updated_at_unix}" data-started-at="${job.started_at_unix ?? ""}" data-completed-at="${job.completed_at_unix ?? ""}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
             <span class="job-statuses">
-              <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+              <span class="status status-${escapeHtml(job.status)}">${escapeHtml(job.error_message?.includes("已暂停") ? "已暂停" : statusLabel(job.status))}</span>
               <span class="status translation-status translation-status-${escapeHtml(job.translation_status)}">${escapeHtml(translationStatusLabel(job))}</span>
             </span>
           </button>
           <div class="job-actions">
-            ${job.recovery?.duration_ms ? `<span>${formatTime(job.recovery.completed_ms)} / ${formatTime(job.recovery.duration_ms)}</span><button type="button" class="secondary" data-partial-job="${escapeHtml(job.job_id)}">查看已保存原文</button>` : ""}
+            ${job.recovery?.duration_ms ? `<span>${job.status==="failed" ? `${escapeHtml(statusLabel(job.recovery.phase))} · ` : ""}${formatTime(job.recovery.completed_ms)} / ${formatTime(job.recovery.duration_ms)}</span><button type="button" class="secondary" data-partial-job="${escapeHtml(job.job_id)}">查看已保存原文</button>` : ""}
             ${job.status === "failed" && job.recovery?.can_resume ? `<button type="button" data-resume-job="${escapeHtml(job.job_id)}">继续</button>` : ""}
             ${runningJob(job) ? `<button type="button" class="secondary" data-pause-job="${escapeHtml(job.job_id)}">暂停</button>` : ""}
             ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重新运行</button>` : ""}
@@ -2420,7 +2447,7 @@ function renderJobs(jobs: LocalJob[]): void {
         </article>`,
     )
     .join("");
-  enableJobOrdering();
+  if (!taskTitleQuery.trim()) enableJobOrdering();
   for (const [attribute, command] of [["resume", "resume_task"], ["pause", "pause_task"]]) {
     jobList.querySelectorAll<HTMLButtonElement>(`[data-${attribute}-job]`).forEach(button => button.addEventListener("click", async () => {
       button.disabled = true;
@@ -2433,7 +2460,7 @@ function renderJobs(jobs: LocalJob[]): void {
   jobList.querySelectorAll<HTMLButtonElement>("[data-job-id]").forEach((button) => {
     button.addEventListener("click", () => {
       const job = jobs.find(j => j.job_id === button.dataset.jobId);
-      if (job && job.status !== "done" && job.recovery?.duration_ms) void showPartialTranscript(job.job_id);
+      if (job && job.status !== "done" && job.recovery?.duration_ms && (job.recovery.completed_ms < job.recovery.duration_ms || job.segment_count === 0)) void showPartialTranscript(job.job_id);
       else void openJob(button.dataset.jobId ?? "");
     });
   });
@@ -2717,6 +2744,9 @@ function showWorkspace(show: boolean): void {
 }
 
 async function stopActivePlayback(): Promise<void> {
+  playbackLoop = null; loopStartMs = null;
+  document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
+
   const media = activeMedia;
   const detail = activeDetail;
   const area = currentArea;
@@ -2807,6 +2837,8 @@ async function openListeningJob(
       invoke<number>("get_playback_position", { jobId }),
     ]);
     if (requestId !== navigationRequestId || currentArea !== "listening") return;
+    await refreshLearningItems();
+    if (requestId !== navigationRequestId) return;
     activeDetail = detail;
     activeSegmentId = null;
     if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
@@ -2830,7 +2862,7 @@ function renderListeningSubtitles(segments: SubtitleSegment[]): void {
     <article class="listening-subtitle" data-segment-id="${escapeHtml(segment.id)}">
       <button type="button" class="listening-time" data-listen-time="${segment.start_ms}" aria-label="跳转到 ${escapeHtml(formatTime(segment.start_ms))}">${escapeHtml(formatTime(segment.start_ms))}</button>
       <div class="listening-text">
-        <p class="listening-source" data-learning-source title="选择词语、短语或语法表达后收藏">${escapeHtml(segment.source_text)}</p>
+        <p class="listening-source" data-learning-source title="选择词语、短语或语法表达后收藏">${highlightSaved(segment.source_text,learningItems.filter(d=>d.item.source_language===activeDetail?.job.source_language).map(d=>d.item.source_text), learningItems.flatMap(d=>d.occurrences.filter(o=>o.job_id===activeDetail?.job.job_id && o.segment_id===segment.id && o.segment_source_snapshot===segment.source_text).map(o=>[o.selection_start_utf16,o.selection_end_utf16] as [number,number])), activeDetail?.job.source_language)}</p>
         <p class="listening-translation">${escapeHtml(segment.translated_text ?? "")}</p>
       </div>
       <button type="button" class="collect-learning-sentence secondary" data-collect-sentence="${escapeHtml(segment.id)}">收藏整句</button>
@@ -2988,9 +3020,15 @@ async function refreshLearningItems(): Promise<void> {
 
 function renderLearningItems(): void {
   if (!learningItemList) return;
-  const languageItems = learningItems.filter(
-    (detail) => detail.item.source_language === activeLearningLanguage,
-  );
+  const languageItems = learningItems.filter(detail => detail.item.source_language === activeLearningLanguage
+    && matchesQuery(learningQuery,[detail.item.source_text,detail.item.meaning_text,...detail.occurrences.map(o=>o.segment_source_snapshot)])
+    && (!learningTaskFilter || detail.occurrences.some(o=>o.job_id===learningTaskFilter)));
+  const taskFilter = document.querySelector<HTMLSelectElement>("#learning-task-filter");
+  if (taskFilter) {
+    const sources = new Map(learningItems.flatMap(d=>d.occurrences.filter(o=>o.job_id).map(o=>[o.job_id!,o.job_display_name_snapshot] as const)));
+    taskFilter.innerHTML = '<option value="">全部来源任务</option>' + Array.from(sources).map(([id,title])=>`<option value="${escapeHtml(id)}">${escapeHtml(title)}</option>`).join("");
+    taskFilter.value = learningTaskFilter;
+  }
   const languageName = languageLabel(activeLearningLanguage);
   learningLanguageTabs?.querySelectorAll<HTMLButtonElement>("[data-learning-language]").forEach((button) => {
     const language = button.dataset.learningLanguage as LearningLanguage;
@@ -3029,6 +3067,7 @@ function renderLearningItems(): void {
       <label>学习译义${detail.item.meaning_source_label ? `<span class="learning-meaning-source">当前来自 ${escapeHtml(detail.item.meaning_source_label)}</span>` : ""}<input class="learning-meaning" value="${escapeHtml(detail.item.meaning_text ?? "")}" placeholder="可手工填写，或从词典详情选择一条释义" /></label>
       <div class="learning-source-meta">${sourceMeta}</div>
       ${context}
+      <details><summary>全部 ${detail.occurrences.length} 个来源例句</summary>${detail.occurrences.map(o=>`<blockquote><p>${escapeHtml(o.segment_source_snapshot)}</p><p>${escapeHtml(o.segment_translation_snapshot ?? "")}</p><span>${escapeHtml(o.job_display_name_snapshot)} · ${formatTime(o.start_ms)}</span>${o.job_id ? `<button type="button" class="secondary" data-play-occurrence="${escapeHtml(o.id)}">回到原句</button>` : '<span>原任务已删除；保留收藏快照</span>'}</blockquote>`).join("")}</details>
       <div class="learning-card-actions">
         <button type="button" data-save-learning-meaning="${escapeHtml(detail.item.id)}">保存译义</button>
         <button type="button" class="secondary" data-open-learning-dictionary="${escapeHtml(detail.item.id)}">查看词典</button>
@@ -3037,6 +3076,10 @@ function renderLearningItems(): void {
       </div>
     </article>`;
   }).join("");
+  learningItemList.querySelectorAll<HTMLButtonElement>("[data-play-occurrence]").forEach(button => button.onclick = async () => {
+    const occurrence = learningItems.flatMap(d=>d.occurrences).find(o=>o.id===button.dataset.playOccurrence);
+    if (occurrence?.job_id) { await showTopLevelArea("listening"); await openListeningJob(occurrence.job_id,occurrence.start_ms,true); }
+  });
   learningItemList.querySelectorAll<HTMLButtonElement>("[data-save-learning-meaning]").forEach((button) => {
     button.addEventListener("click", () => void saveLearningMeaning(button.dataset.saveLearningMeaning ?? ""));
   });
@@ -3406,6 +3449,8 @@ function setRetranscriptionMessage(message: string, isError = false): void {
 }
 
 function useVisibleWindowForRetranscription(): void {
+  if(authorizeGeminiUpload)authorizeGeminiUpload.checked=false;
+  activeRepairSignalId=null;
   if (!karaokeWaveformWindow || !retranscriptionStartInput || !retranscriptionEndInput) return;
   retranscriptionStartInput.value = formatPreciseTime(karaokeWaveformWindow.start_ms);
   retranscriptionEndInput.value = formatPreciseTime(karaokeWaveformWindow.end_ms);
@@ -3423,6 +3468,8 @@ function retranscriptionRange(): { startMs: number; endMs: number } | null {
 }
 
 function expandRetranscriptionRangeToSegments(): void {
+  if(authorizeGeminiUpload)authorizeGeminiUpload.checked=false;
+  activeRepairSignalId=null;
   if (!activeDetail || !retranscriptionStartInput || !retranscriptionEndInput) return;
   const range = retranscriptionRange();
   if (!range) return;
@@ -3467,12 +3514,22 @@ function renderRetranscriptionItems(
 function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
   activeRetranscriptionPreview = preview;
   if (retranscriptionPreviewSummary) {
-    retranscriptionPreviewSummary.textContent = `${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)} · 当前 ${preview.original_segments.length} 段 · 候选 ${preview.candidate_segments.length} 段 · 已隔离前文文字上下文`;
+    retranscriptionPreviewSummary.textContent = `${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)} · 当前 ${preview.original_segments.length} 段 · 候选 ${preview.candidate_segments.length} 段 · ${preview.provider_name ?? "识别候选"} · ${preview.model_identity ?? ""} · ${preview.context_mode === "isolated" ? "前文文字已隔离" : "独立识别候选"}`;
   }
   renderRetranscriptionItems(retranscriptionOriginalList, preview.original_segments);
   renderRetranscriptionItems(retranscriptionCandidateList, preview.candidate_segments);
   if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "";
-  retranscriptionDialog?.showModal();
+  if(retranscriptionDialog) {
+    retranscriptionDialog.querySelector(".candidate-diff")?.remove();
+    retranscriptionDialog.querySelector(".refresh-comparison")?.remove();
+    const refresh=document.createElement("button");refresh.type="button";refresh.className="secondary refresh-comparison";refresh.textContent="以当前字幕重新对照（不重跑识别）";
+    refresh.onclick=async()=>{try{showRetranscriptionPreview(await invoke<RetranscriptionPreview>("refresh_asr_comparison",{jobId:preview.job_id,runId:preview.preview_id}));}catch(e){if(retranscriptionConfirmMessage)retranscriptionConfirmMessage.textContent=String(e);}};
+    retranscriptionDialog.querySelector(".retranscription-comparison")?.before(refresh);
+    const diff=document.createElement("details");diff.className="candidate-diff";
+    diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")??"未知")}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
+    retranscriptionDialog.querySelector(".retranscription-comparison")?.after(diff);
+  }
+  if(!retranscriptionDialog?.open)retranscriptionDialog?.showModal();
 }
 
 async function previewSelectedRange(): Promise<void> {
@@ -3489,6 +3546,7 @@ async function previewSelectedRange(): Promise<void> {
     setRetranscriptionMessage("使用 Gemini 前，请确认只上传当前所选范围并勾选音频上传授权。", true);
     return;
   }
+  if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
   retranscriptionBusy = true;
   if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = true;
   setRetranscriptionMessage(providerId === "gemini-transcribe"
@@ -3526,7 +3584,7 @@ async function confirmSelectedRangeReplacement(): Promise<void> {
   if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "正在原子替换所选范围…";
   try {
     const after = await invoke<SubtitleSegment[]>("confirm_retranscription", {
-      request: { jobId: activeDetail.job.job_id, previewId: preview.preview_id },
+      request: { jobId: activeDetail.job.job_id, previewId: preview.preview_id, comparisonId: preview.comparison_id ?? null },
     });
     rememberStructureEdit(before, after, `局部重新识别 ${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)}`);
     applySubtitleStructure(after, preview.candidate_segments[0]?.id);
@@ -4126,6 +4184,7 @@ async function openJob(jobId: string, initialSection: WorkspaceSection = "transl
     activeDetail = await invoke<JobDetail>("get_job_detail", { jobId });
     if (requestId !== navigationRequestId || currentArea !== "workspace") return;
     renderWorkspace(activeDetail);
+    await refreshTranslationStatus();
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "workspace") return;
     activeDetail = null;
@@ -4902,6 +4961,11 @@ function hideSubtitleOverlay(): void {
 }
 
 function updateActiveSubtitle(milliseconds: number): void {
+  if (activeMedia && playbackLoop && activeMedia.currentTime * 1000 >= playbackLoop.endMs) {
+    if (playbackLoop.repeat) activeMedia.currentTime = playbackLoop.startMs / 1000;
+    else { activeMedia.pause(); playbackLoop = null; }
+  }
+
   const segment = subtitleAt(milliseconds);
   const nextId = segment?.id ?? null;
   if (currentSource) currentSource.textContent = segment?.source_text ?? "当前时间没有字幕。";
@@ -6694,11 +6758,13 @@ async function chooseFile(kind: "media" | "model" | "vad"): Promise<void> {
   if (taskMessage) taskMessage.textContent = `正在打开${label}选择器…`;
   try {
     const command = kind === "media" ? "pick_media_file" : kind === "model" ? "pick_model_file" : "pick_vad_model_file";
-    const path = await invoke<string | null>(command);
+    const selected = kind === "media" ? await invoke<string[]>("pick_media_files") : null;
+    const path = selected ? selected[0] : await invoke<string | null>(command);
+    if (kind === "media") selectedMediaFiles = selected ?? [];
     if (typeof path === "string") {
       const input = kind === "media" ? mediaPath : kind === "model" ? modelPath : vadModelPath;
       if (input) input.value = path;
-      if (taskMessage) taskMessage.textContent = `已选择${label}。`;
+      if (taskMessage) taskMessage.textContent = `已选择${label}${kind === "media" && selectedMediaFiles.length > 1 ? ` ${selectedMediaFiles.length} 个文件` : ""}。`;
     } else if (taskMessage) {
       taskMessage.textContent = "已取消选择。";
     }
@@ -6739,26 +6805,26 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
   }
   submitButton.disabled = true;
   taskMessage.textContent = "正在创建本地任务…";
-  void invoke<string>("submit_transcription", {
-    request: {
+  const request = {
       inputPath: mediaPath.value,
       modelPath: modelPath.value,
       sourceLanguage: selectedSourceLanguage(),
+      translationProviderId: (document.querySelector<HTMLSelectElement>("#task-translation-provider")?.value || "none"),
       vadModelPath: vadEnabled?.checked ? vadModelPath?.value.trim() || null : null,
       glossaryId: taskGlossary?.value || null,
       selectedContentGroups: taskGlossary?.value ? Array.from(selectedTaskContentGroups) : [],
-    },
-  })
-    .then((jobId) => {
-      taskMessage.textContent = `已排队：${jobId}`;
-      void refresh();
-    })
-    .catch((error) => {
-      taskMessage.textContent = `创建失败：${String(error)}`;
-    })
-    .finally(() => {
-      submitButton.disabled = false;
-    });
+    };
+  const inputs = selectedMediaFiles.length && selectedMediaFiles[0] === mediaPath.value ? [...selectedMediaFiles] : [mediaPath.value];
+  void (async () => {
+    let succeeded = 0; const failures: string[] = [];
+    for (const inputPath of inputs) {
+      taskMessage.textContent = `正在排队 ${succeeded + failures.length + 1}/${inputs.length}…`;
+      try { await invoke<string>("submit_transcription", {request: {...request,inputPath}}); succeeded++; }
+      catch(error) { failures.push(`${inputPath}: ${String(error)}`); }
+      await refresh();
+    }
+    taskMessage.textContent = `已排队 ${succeeded} 个任务${failures.length ? `；${failures.length} 个失败：${failures.join("；")}` : ""}`;
+  })().finally(() => { submitButton.disabled = false; });
 });
 
 registerSubtitleFollowHost(subtitleList);
@@ -6802,15 +6868,429 @@ window.setInterval(() => {
 }, 1_000);
 
 async function showPartialTranscript(jobId: string): Promise<void> {
-  const dialog = document.createElement("dialog"); dialog.className = "settings-dialog";
-  dialog.innerHTML = '<div class="dialog-heading"><h2>已保存原文 · 只读</h2><button type="button">关闭</button></div><p>完整识别完成后开放校对、翻译、收藏和导出。只显示通过校验的完成块。</p><div class="partial-media"></div><div class="partial-text">正在读取…</div>';
+  const dialog = document.createElement("dialog");
+  dialog.className = "settings-dialog";
+  dialog.innerHTML =
+    '<div class="dialog-heading"><h2>已保存原文 · 只读</h2><button type="button">关闭</button></div><p>完整识别完成后开放校对、翻译、收藏和导出。只显示通过校验的完成块。</p><div class="partial-media"></div><div class="partial-text">正在读取…</div>';
   document.body.append(dialog);
   dialog.querySelector("button")!.onclick = () => dialog.close();
-  dialog.addEventListener("close", () => { dialog.querySelector("audio")?.pause(); dialog.remove(); }); dialog.showModal();
+  dialog.addEventListener("close", () => {
+    dialog.querySelector("audio")?.pause();
+    dialog.remove();
+  });
+  dialog.showModal();
   try {
-    const [segments, detail] = await Promise.all([invoke<SubtitleSegment[]>("partial_transcript", {jobId}), invoke<JobDetail>("get_job_detail", {jobId})]);
-    const audio = document.createElement("audio"); audio.controls = true; audio.src = detail.audio_fallback_path ?? detail.playback_path ?? ""; dialog.querySelector(".partial-media")!.append(audio);
-    dialog.querySelector(".partial-text")!.innerHTML = segments.map(segment => `<p><button type="button" data-time="${segment.start_ms}" class="secondary">${formatTime(segment.start_ms)}</button> ${escapeHtml(segment.source_text)}</p>`).join("") || "还没有已完成的音频块。";
-    dialog.querySelectorAll<HTMLButtonElement>("[data-time]").forEach(button => button.onclick = () => { audio.currentTime = Number(button.dataset.time) / 1000; void audio.play(); });
-  } catch(error) { dialog.querySelector(".partial-text")!.textContent = String(error); }
+    const [segments, detail] = await Promise.all([
+      invoke<SubtitleSegment[]>("partial_transcript", { jobId }),
+      invoke<JobDetail>("get_job_detail", { jobId }),
+    ]);
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.src = detail.audio_fallback_path ?? detail.playback_path ?? "";
+    dialog.querySelector(".partial-media")!.append(audio);
+    dialog.querySelector(".partial-text")!.innerHTML =
+      segments
+        .map(
+          (segment) =>
+            `<p><button type="button" data-time="${segment.start_ms}" class="secondary">${formatTime(segment.start_ms)}</button> ${escapeHtml(segment.source_text)}</p>`,
+        )
+        .join("") || "还没有已完成的音频块。";
+    dialog.querySelectorAll<HTMLButtonElement>("[data-time]").forEach(
+      (button) =>
+        (button.onclick = () => {
+          audio.currentTime = Number(button.dataset.time) / 1000;
+          void audio.play();
+        }),
+    );
+  } catch (error) {
+    dialog.querySelector(".partial-text")!.textContent = String(error);
+  }
 }
+
+// Keep the existing typed controls; reorganize their ownership without duplicate forms.
+function organizeSettings(): void {
+  const form = document.querySelector<HTMLFormElement>("#settings-form");
+  if (!form) return;
+  const sections = Array.from(form.querySelectorAll<HTMLElement>(":scope > .settings-section"));
+  const models = sections[0],
+    network = sections[1],
+    asr = sections[2],
+    translation = sections[3],
+    dictionaries = sections[4];
+  if (!models || !network || !asr || !translation || !dictionaries) return;
+  const downloads = document.createElement("section");
+  downloads.className = "settings-section";
+  downloads.innerHTML = "<h3>模型与存储</h3><p>统一下载、校验与卸载。模型按需安装。</p>";
+  for (const selector of ["#models-directory", "#model-catalog", "#model-download-message"]) {
+    const item = form.querySelector(selector);
+    if (item) downloads.append(item);
+  }
+  const localModel = document.querySelector("#settings-hy-mt2-model")?.closest(".settings-path-row");
+  if (localModel) translation.prepend(localModel);
+  models.querySelector("strong")!.textContent = "本地转录";
+  const optionalAsr = document.createElement("details"); optionalAsr.className="onboarding-optional";
+  optionalAsr.innerHTML='<summary>可选：Gemini 局部修复</summary>';
+  optionalAsr.append(asr); models.append(optionalAsr);
+  translation.querySelector("strong")!.textContent = "翻译";
+  network.querySelector("strong")!.textContent = "网络与高级";
+  dictionaries.querySelector("strong")!.textContent = "词典";
+  const nav = document.createElement("nav");
+  nav.className = "settings-tabs";
+  nav.setAttribute("aria-label", "设置分区");
+  const pages = [
+    ["transcription", "转录", models],
+    ["translation", "翻译", translation],
+    ["models", "模型与存储", downloads],
+    ["dictionary", "词典", dictionaries],
+    ["network", "网络与高级", network],
+  ] as const;
+  const footer = form.querySelector(".settings-footer");
+  pages.forEach(([key, label, page]) => {
+    page.dataset.settingsPage = key;
+    if (page === downloads) form.insertBefore(page, footer);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = label;
+    button.dataset.settingsTab = key;
+    button.onclick = () => {
+      pages.forEach(([candidate, , section]) => section.classList.toggle("hidden", candidate !== key));
+      nav.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
+    };
+    nav.append(button);
+    page.classList.toggle("hidden", key !== "transcription");
+  });
+  form.querySelector(".dialog-help")?.after(nav);
+  const heading = form.querySelector("h2");
+  if (heading) heading.textContent = "设置";
+  const advanced = document.createElement("details");
+  advanced.innerHTML = "<summary>高级：模型路径与 VAD 参数</summary>";
+  const taskForm = document.querySelector("#task-form");
+  for (const selector of ["#model-path", "#choose-model", "#vad-model-path", "#choose-vad-model"]) {
+    const control = document.querySelector(selector);
+    if (control) advanced.append(control.tagName === "INPUT" ? control.closest("label")! : control);
+  }
+  taskForm?.querySelector(".form-footer")?.before(advanced);
+}
+organizeSettings();
+
+function addOfflineTools(): void {
+  const jobsSearch = document.createElement("input");
+  jobsSearch.type = "search";
+  jobsSearch.placeholder = "搜索任务标题";
+  jobsSearch.setAttribute("aria-label", "搜索任务标题");
+  jobsSearch.oninput = () => {
+    taskTitleQuery = jobsSearch.value;
+    renderJobs(latestJobs);
+  };
+  jobList?.before(jobsSearch);
+  const learningBar = document.createElement("div");
+  learningBar.className = "offline-tools";
+  learningBar.innerHTML =
+    '<input id="learning-search" type="search" aria-label="搜索学习条目" placeholder="搜索词句、释义、例句"/><select id="learning-task-filter" aria-label="按来源任务筛选"><option value="">全部来源任务</option></select><button id="export-anki" type="button" class="secondary">导出当前单词本到 Anki</button>';
+  learningItemList?.before(learningBar);
+  learningBar.querySelector<HTMLInputElement>("input")!.oninput = (event) => {
+    learningQuery = (event.target as HTMLInputElement).value;
+    renderLearningItems();
+  };
+  learningBar.querySelector<HTMLSelectElement>("select")!.onchange = (event) => {
+    learningTaskFilter = (event.target as HTMLSelectElement).value;
+    renderLearningItems();
+  };
+  learningBar.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
+    try {
+      const path = await invoke<string | null>("export_learning_anki", { language: activeLearningLanguage });
+      if (learningMessage)
+        learningMessage.textContent = path
+          ? `已导出 ${path}；在 Anki 中导入 TSV 并按列映射。`
+          : "已取消导出。";
+    } catch (error) {
+      if (learningMessage) learningMessage.textContent = String(error);
+    }
+  };
+  const search = document.createElement("section");
+  search.className = "subtitle-search";
+  search.innerHTML =
+    '<input type="search" aria-label="搜索当前字幕" placeholder="搜索当前任务的原文或译文"/><div class="subtitle-search-results"></div>';
+  subtitleList?.before(search);
+  search.querySelector("input")!.oninput = (event) => {
+    const query = (event.target as HTMLInputElement).value;
+    const results = query.trim()
+      ? (activeDetail?.segments.filter((segment) =>
+          matchesQuery(query, [segment.source_text, segment.translated_text]),
+        ) ?? [])
+      : [];
+    const host = search.querySelector("div")!;
+    host.innerHTML = results
+      .map(
+        (segment) =>
+          `<button type="button" class="secondary" data-search-time="${segment.start_ms}">${formatTime(segment.start_ms)} · ${escapeHtml(segment.source_text)}</button>`,
+      )
+      .join("");
+    host
+      .querySelectorAll<HTMLButtonElement>("[data-search-time]")
+      .forEach((button) => (button.onclick = () => seekTo(Number(button.dataset.searchTime))));
+  };
+  for (const host of document.querySelectorAll(".playback-tools")) {
+    const tools = document.createElement("div");
+    tools.className = "offline-tools loop-tools";
+    tools.innerHTML =
+      '<button type="button" class="secondary" data-loop="sentence">循环当前句</button><button type="button" class="secondary" data-loop="a">设置 A</button><button type="button" class="secondary" data-loop="b">设置 B 并循环</button><button type="button" class="secondary" data-loop="head">试听句首衔接</button><button type="button" class="secondary" data-loop="tail">试听句尾衔接</button><button type="button" class="secondary" data-loop="off">关闭循环</button><span class="loop-state">循环已关闭</span>';
+    host.after(tools);
+    tools.querySelectorAll<HTMLButtonElement>("[data-loop]").forEach(
+      (button) =>
+        (button.onclick = () => {
+          if (!activeMedia) return;
+          const time = activeMedia.currentTime * 1000,
+            cue = subtitleAt(time),
+            action = button.dataset.loop;
+          if (action === "off") {
+            playbackLoop = null;
+            loopStartMs = null;
+          } else if (action === "a") {
+            loopStartMs = time;
+            playbackLoop = null;
+          } else if (action === "b") {
+            if (loopStartMs === null || time <= loopStartMs) {
+              tools.querySelector("span")!.textContent = "请先设置早于 B 的 A 点";
+              return;
+            }
+            playbackLoop = { startMs: loopStartMs, endMs: time, repeat: true };
+          } else if (cue) {
+            playbackLoop =
+              action === "sentence"
+                ? { startMs: cue.start_ms, endMs: cue.end_ms, repeat: true }
+                : action === "head"
+                  ? {
+                      startMs: Math.max(0, cue.start_ms - 500),
+                      endMs: Math.min(cue.end_ms, cue.start_ms + 1000),
+                      repeat: false,
+                    }
+                  : {
+                      startMs: Math.max(cue.start_ms, cue.end_ms - 1000),
+                      endMs: Math.min(
+                        Number.isFinite(activeMedia.duration)
+                          ? activeMedia.duration * 1000
+                          : cue.end_ms + 500,
+                        cue.end_ms + 500,
+                      ),
+                      repeat: false,
+                    };
+          }
+          if (playbackLoop) {
+            activeMedia.currentTime = playbackLoop.startMs / 1000;
+            void activeMedia.play();
+          }
+          document
+            .querySelectorAll<HTMLElement>(".loop-state")
+            .forEach(
+              (e) =>
+                (e.textContent = playbackLoop
+                  ? `${playbackLoop.repeat ? "循环" : "试听"} ${formatPreciseTime(playbackLoop.startMs)} → ${formatPreciseTime(playbackLoop.endMs)}`
+                  : loopStartMs !== null
+                    ? `A: ${formatPreciseTime(loopStartMs)}`
+                    : "循环已关闭"),
+            );
+        }),
+    );
+  }
+  for (const input of [retranscriptionStartInput, retranscriptionEndInput])
+    input?.addEventListener("input", () => {
+      if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
+    });
+  const candidateTools = document.createElement("div");
+  candidateTools.className = "offline-tools";
+  candidateTools.innerHTML =
+    '<button type="button" class="secondary" data-full-candidate>生成全片本地候选</button><button type="button" class="secondary" data-candidate-history>历史候选</button><button type="button" class="secondary" data-cancel-candidate>取消候选运行</button><div class="candidate-history"></div>';
+  asrQualitySignalsHost?.after(candidateTools);
+  candidateTools.querySelector<HTMLButtonElement>("[data-full-candidate]")!.onclick = async () => {
+    if (!activeDetail || retranscriptionBusy) return;
+    activeRepairSignalId=null;
+    retranscriptionBusy = true;
+    setRetranscriptionMessage("正在生成全片候选；不会覆盖当前工作区。", false);
+    try {
+      showRetranscriptionPreview(
+        await invoke<RetranscriptionPreview>("preview_full_retranscription", {
+          jobId: activeDetail.job.job_id,
+        }),
+      );
+    } catch (e) {
+      setRetranscriptionMessage(String(e), true);
+    } finally {
+      retranscriptionBusy = false;
+    }
+  };
+  candidateTools.querySelector<HTMLButtonElement>("[data-cancel-candidate]")!.onclick = async () => {
+    if (!activeDetail) return;
+    try {
+      await invoke("cancel_asr_candidate", { jobId: activeDetail.job.job_id });
+      setRetranscriptionMessage("已请求取消；云端请求会先完成上传文件清理。", false);
+    } catch (e) {
+      setRetranscriptionMessage(String(e), true);
+    }
+  };
+  candidateTools.querySelector<HTMLButtonElement>("[data-candidate-history]")!.onclick = async () => {
+    if (!activeDetail) return;
+    const jobId = activeDetail.job.job_id;
+    try {
+      const runs = await invoke<
+        Array<{ id: string; provider_name: string; status: string; model_identity: string; reopenable?: boolean }>
+      >("list_asr_runs", { jobId });
+      const host = candidateTools.querySelector(".candidate-history")!;
+      host.innerHTML =
+        runs
+          .filter((r) => r.status === "succeeded" && r.reopenable !== false)
+          .map(
+            (r) =>
+              `<button type="button" class="secondary" data-reopen-run="${escapeHtml(r.id)}">${escapeHtml(r.provider_name)} · ${escapeHtml(r.model_identity)}</button>`,
+          )
+          .join("") || "还没有成功候选。";
+      host.querySelectorAll<HTMLButtonElement>("[data-reopen-run]").forEach(
+        (button) =>
+          (button.onclick = async () => {
+            try {
+              showRetranscriptionPreview(
+                await invoke<RetranscriptionPreview>("reopen_asr_candidate", {
+                  jobId,
+                  runId: button.dataset.reopenRun,
+                }),
+              );
+            } catch (e) {
+              setRetranscriptionMessage(`此运行没有可重开的候选：${String(e)}`, true);
+            }
+          }),
+      );
+    } catch (e) {
+      setRetranscriptionMessage(String(e), true);
+    }
+  };
+  const connection = document.createElement("button");
+  connection.type = "button";
+  connection.className = "secondary";
+  connection.textContent = "测试已保存配置（发送 Hello.，可能计费）";
+  connection.onclick = async () => {
+    if (!settingsProvider || settingsProvider.value === "none") return;
+    connection.disabled = true;
+    try {
+      const result = await invoke<string>("test_translation_connection", {
+        providerId: settingsProvider.value,
+      });
+      if (apiKeyStatus) apiKeyStatus.textContent = result;
+    } catch (e) {
+      if (apiKeyStatus) apiKeyStatus.textContent = `验证失败：${String(e)}`;
+    } finally {
+      connection.disabled = false;
+    }
+  };
+  apiKeyStatus?.after(connection);
+  const taskChoice = document.createElement("div");
+  taskChoice.className = "offline-tools";
+  taskChoice.innerHTML =
+    '<label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地实验</option><option value="openai-compatible">高级兼容服务</option></select></label><button type="button" class="secondary">设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>';
+  document.querySelector("#workspace-translation-panel")?.prepend(taskChoice);
+  taskChoice.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
+    if (!activeDetail) return;
+    try {
+      await invoke("set_task_translation", {
+        jobId: activeDetail.job.job_id,
+        providerId: taskChoice.querySelector("select")!.value,
+      });
+      await refreshTranslationStatus();
+      setWorkspaceAction("本任务后端已更新；已有字幕未改变。");
+    } catch (e) {
+      setWorkspaceAction(String(e), true);
+    }
+  };
+}
+addOfflineTools();
+
+mediaPath?.addEventListener("input", () => {
+  selectedMediaFiles = [];
+});
+const presetTools = document.createElement("div");
+presetTools.className = "offline-tools";
+presetTools.innerHTML =
+  '<select aria-label="任务预设"><option value="">选择任务预设</option></select><input aria-label="预设名称" placeholder="预设名称" maxlength="64"/><button type="button" class="secondary">保存当前配置为预设</button><span>预设不保存媒体路径或 API Key。</span>';
+document.querySelector("#task-form")?.prepend(presetTools);
+let taskPresets: Array<{
+  name: string;
+  configuration: {
+    modelPath: string;
+    vadModelPath: string | null;
+    sourceLanguage: LanguageCode;
+    glossaryId: string | null;
+    selectedContentGroups: string[];
+    translationProviderId: string;
+  };
+}> = [];
+async function loadTaskPresets(): Promise<void> {
+  try {
+    taskPresets = await invoke("task_presets");
+    presetTools.querySelector("select")!.innerHTML =
+      '<option value="">选择任务预设</option>' +
+      taskPresets.map((p, i) => `<option value="${i}">${escapeHtml(p.name)}</option>`).join("");
+  } catch (e) {
+    if (taskMessage) taskMessage.textContent = `预设读取失败：${String(e)}`;
+  }
+}
+presetTools.querySelector<HTMLSelectElement>("select")!.onchange = async (event) => {
+  const value = (event.target as HTMLSelectElement).value;
+  if (!value) return;
+  const config = taskPresets[Number(value)]?.configuration;
+  if (!config) return;
+  if (modelPath) modelPath.value = config.modelPath;
+  if (sourceLanguage) sourceLanguage.value = config.sourceLanguage;
+  if (vadEnabled) vadEnabled.checked = Boolean(config.vadModelPath);
+  if (vadModelPath) vadModelPath.value = config.vadModelPath ?? "";
+  if (taskGlossary) taskGlossary.value = config.glossaryId ?? "";
+  const provider = document.querySelector<HTMLSelectElement>("#task-translation-provider");
+  if (provider) provider.value = config.translationProviderId;
+  selectedTaskContentGroups.clear();
+  config.selectedContentGroups.forEach((g) => selectedTaskContentGroups.add(g));
+  syncVadControls();
+  await refreshTaskGlossaryConfiguration();
+};
+presetTools.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
+  try {
+    await invoke("save_task_preset", {
+      name: presetTools.querySelector("input")!.value,
+      configuration: {
+        modelPath: modelPath?.value,
+        vadModelPath: vadEnabled?.checked ? vadModelPath?.value : null,
+        sourceLanguage: selectedSourceLanguage(),
+        glossaryId: taskGlossary?.value || null,
+        selectedContentGroups: Array.from(selectedTaskContentGroups),
+        translationProviderId:
+          document.querySelector<HTMLSelectElement>("#task-translation-provider")?.value || "none",
+      },
+    });
+    await loadTaskPresets();
+    if (taskMessage) taskMessage.textContent = "预设已保存。";
+  } catch (e) {
+    if (taskMessage) taskMessage.textContent = String(e);
+  }
+};
+void loadTaskPresets();
+
+function updateTaskPipelineSummary():void {
+  const summary=document.querySelector<HTMLElement>("#task-pipeline-summary");
+  if(!summary)return;
+  const provider=document.querySelector<HTMLSelectElement>("#task-translation-provider");
+  const model=(modelPath?.value??"").split(/[\\/]/).at(-1)||"未选择模型";
+  summary.textContent=`转录：Whisper · ${model} · 本地；翻译：${provider?.selectedOptions[0]?.textContent??"未选择"}`;
+}
+const pipelineSummary=document.createElement("p");pipelineSummary.id="task-pipeline-summary";pipelineSummary.className="settings-message";
+document.querySelector("#task-form")?.before(pipelineSummary);
+for(const input of [modelPath,document.querySelector<HTMLSelectElement>("#task-translation-provider")])input?.addEventListener("change",updateTaskPipelineSummary);
+updateTaskPipelineSummary();
+
+window.setInterval(async()=>{
+  if(!retranscriptionBusy||!activeDetail)return;
+  const jobId=activeDetail.job.job_id;
+  try{
+    const progress=await invoke<{phase:string;completed_ms?:number;duration_ms?:number}|null>("asr_candidate_progress",{jobId});
+    if(!progress||!retranscriptionBusy||activeDetail?.job.job_id!==jobId)return;
+    const phase=({extracting_audio:"提取音频",transcribing:"识别",refining_segments:"生成字幕候选",candidate_ready:"候选已就绪",failed:"候选失败"} as Record<string,string>)[progress.phase]??progress.phase;
+    setRetranscriptionMessage(`${phase}${progress.duration_ms?` · ${formatTime(progress.completed_ms??0)} / ${formatTime(progress.duration_ms)}`:""}`,false);
+  }catch{/* Preserve the active operation's result or actionable error. */}
+},1000);

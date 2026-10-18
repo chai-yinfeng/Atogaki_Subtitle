@@ -565,3 +565,25 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
   .settings-footer { align-items: stretch; flex-direction: column; }
   .settings-footer > div { justify-content: flex-end; }
 }
+
+/* Offline workflow controls share the existing secondary button language. */
+.settings-tabs, .offline-tools {display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0;}
+.settings-tabs {position:sticky;top:0;z-index:2;background:var(--surface,#faf9f6);padding:12px 0;}
+.settings-tabs button.active {outline:2px solid currentColor;outline-offset:1px;}
+.offline-tools input {flex:1;min-width:180px;} .offline-tools select {max-width:300px;}
+.subtitle-search-results,.candidate-history {display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;margin:8px 0;}
+.saved-expression {background:#f1e5a8;color:inherit;border-radius:3px;}
+.partial-text {max-height:55vh;overflow:auto;} .partial-media audio {width:100%;}
+.learning-card details blockquote {margin:10px 0;padding:12px;border-left:2px solid #aaa;}
+.loop-state {font-size:12px;} .loop-tools {border-bottom:1px solid #ddd;padding-bottom:8px;}
+
+.clear-secret.hidden {display:none !important;}
+
+.settings-dialog.onboarding .onboarding-optional {display:none;}
+
+.create-task form > .offline-tools, .create-task form > details, .task-translation-setting {grid-column:1 / -1;}
+.create-task details > label {margin:12px 0 6px;}
+.job-actions {flex-wrap:wrap;justify-content:flex-end;max-width:520px;}
+.candidate-diff p {white-space:pre-wrap;line-height:1.7;}
+.candidate-diff del {background:#f8d8d2;} .candidate-diff ins {background:#d8eddf;text-decoration:none;}
+.candidate-diff pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;}

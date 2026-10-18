@@ -22,6 +22,8 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalRetranscriptionPreview {
     pub preview_id: String,
+    #[serde(default)]
+    pub comparison_id: Option<String>,
     pub job_id: String,
     pub start_ms: i64,
     pub end_ms: i64,
@@ -196,6 +198,10 @@ impl LocalRetranscriptionService {
             .await
             .insert(job_id.into(), cancel_tx);
         let cloud = metadata.0 == "gemini-transcribe";
+        crate::application::acoustic_plan::write_json(
+            &artifacts.dir.join("progress.json"),
+            &serde_json::json!({"phase":"extracting_audio"}),
+        )?;
         let recognition_future = async {
             media::extract_wav_range(
                 &self.ffmpeg,
@@ -205,6 +211,10 @@ impl LocalRetranscriptionService {
                 end_ms as u64,
             )
             .await?;
+            crate::application::acoustic_plan::write_json(
+                &artifacts.dir.join("progress.json"),
+                &serde_json::json!({"phase":"transcribing"}),
+            )?;
             let response = if metadata.0 == "whisper.cpp" {
                 use sha2::{Digest, Sha256};
                 let key = serde_json::to_vec(
@@ -215,6 +225,10 @@ impl LocalRetranscriptionService {
                     .join("candidate-checkpoints")
                     .join(format!("{:x}", Sha256::digest(key)));
                 let scratch = Job::create(Some(&root))?;
+                crate::application::acoustic_plan::write_json(
+                    &artifacts.dir.join("checkpoint-root.json"),
+                    &root,
+                )?;
                 crate::application::acoustic_plan::prepare_audio(
                     &self.ffmpeg,
                     &selected_wav,
@@ -241,6 +255,11 @@ impl LocalRetranscriptionService {
                     })
                     .await?
             };
+            run.model_identity = response.model_identity.clone();
+            crate::application::acoustic_plan::write_json(
+                &artifacts.dir.join("progress.json"),
+                &serde_json::json!({"phase":"refining_segments"}),
+            )?;
             let mut timed_units = response.timed_units;
             for unit in &mut timed_units {
                 unit.start_ms = unit
@@ -275,6 +294,20 @@ impl LocalRetranscriptionService {
             tokio::select! { result=recognition_future => result, _=cancel_rx.changed()=>Err(anyhow!("候选已取消；已有检查点保留")) }
         };
         self.cancellations.lock().await.remove(job_id);
+        if let Ok(bytes) = fs::read(artifacts.dir.join("checkpoint-root.json")) {
+            if let Ok(root) = serde_json::from_slice::<PathBuf>(&bytes) {
+                if let Ok(scratch) = Job::open(root) {
+                    if let Ok(summary) =
+                        crate::application::acoustic_plan::recovery_summary(&scratch)
+                    {
+                        crate::application::acoustic_plan::write_json(
+                            &artifacts.dir.join("checkpoints.json"),
+                            &summary,
+                        )?;
+                    }
+                }
+            }
+        }
         let (cue_set, timed_units) = match recognition {
             Ok(result) => result,
             Err(error) => {
@@ -314,6 +347,7 @@ impl LocalRetranscriptionService {
 
         let preview = LocalRetranscriptionPreview {
             preview_id: run_id,
+            comparison_id: None,
             job_id: job_id.into(),
             start_ms,
             end_ms,
@@ -326,13 +360,17 @@ impl LocalRetranscriptionService {
             },
             provider_id: metadata.0,
             provider_name: metadata.1,
-            model_identity: metadata.2,
+            model_identity: run.model_identity.clone(),
             timing_granularities: metadata.3,
             configuration: metadata.4,
         };
         crate::application::acoustic_plan::write_json(
             &artifacts.dir.join("preview.json"),
             &preview,
+        )?;
+        crate::application::acoustic_plan::write_json(
+            &artifacts.dir.join("progress.json"),
+            &serde_json::json!({"phase":"candidate_ready"}),
         )?;
         Ok(preview)
     }
@@ -349,11 +387,83 @@ impl LocalRetranscriptionService {
             .ok_or_else(|| anyhow!("task not found"))?;
         let job = Job::open(record.storage_dir.into())?;
         let artifacts = AsrRunArtifacts::open(&job, preview_id)?;
-        let preview: LocalRetranscriptionPreview =
-            serde_json::from_slice(&fs::read(artifacts.dir.join("preview.json"))?)?;
+        let preview: LocalRetranscriptionPreview = if artifacts.dir.join("preview.json").is_file() {
+            serde_json::from_slice(&fs::read(artifacts.dir.join("preview.json"))?)?
+        } else {
+            let run = artifacts.read_run()?;
+            if run.status != crate::application::AsrRunStatus::Succeeded {
+                return Err(anyhow!("候选尚未完成"));
+            }
+            let candidates = artifacts.read_candidate_cues()?.transcript_segments();
+            let all = self.database.list_segments(job_id).await?;
+            let start_ms = run.scope.start_ms as i64;
+            let end_ms = run.scope.end_ms.map(|v| v as i64).unwrap_or_else(|| {
+                all.iter()
+                    .map(|s| s.end_ms)
+                    .chain(candidates.iter().map(|s| s.end_ms as i64))
+                    .max()
+                    .unwrap_or(start_ms)
+            });
+            let original_segments = all
+                .into_iter()
+                .filter(|s| s.start_ms < end_ms && s.end_ms > start_ms)
+                .collect();
+            let preview = LocalRetranscriptionPreview {
+                preview_id: preview_id.into(),
+                comparison_id: None,
+                job_id: job_id.into(),
+                start_ms,
+                end_ms,
+                original_segments,
+                candidate_segments: candidates,
+                context_mode: "provider-managed".into(),
+                provider_id: run.provider_id,
+                provider_name: run.provider_name,
+                model_identity: run.model_identity,
+                timing_granularities: vec![],
+                configuration: run.config_snapshot,
+            };
+            crate::application::acoustic_plan::write_json(
+                &artifacts.dir.join("preview.json"),
+                &preview,
+            )?;
+            preview
+        };
         if preview.job_id != job_id || preview.preview_id != preview_id {
             return Err(anyhow!("candidate identity mismatch"));
         }
+        Ok(preview)
+    }
+
+    pub async fn refresh_comparison(
+        &self,
+        job_id: &str,
+        run_id: &str,
+    ) -> Result<LocalRetranscriptionPreview> {
+        let mut preview = self.reopen(job_id, run_id).await?;
+        preview.original_segments = self
+            .database
+            .list_segments(job_id)
+            .await?
+            .into_iter()
+            .filter(|s| s.start_ms < preview.end_ms && s.end_ms > preview.start_ms)
+            .collect();
+        let comparison = uuid::Uuid::new_v4().to_string();
+        preview.comparison_id = Some(comparison.clone());
+        let record = self
+            .database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("task not found"))?;
+        let job = Job::open(record.storage_dir.into())?;
+        let artifacts = AsrRunArtifacts::open(&job, run_id)?;
+        crate::application::acoustic_plan::write_json(
+            &artifacts
+                .dir
+                .join("comparisons")
+                .join(format!("{comparison}.json")),
+            &preview,
+        )?;
         Ok(preview)
     }
 
@@ -373,7 +483,38 @@ impl LocalRetranscriptionService {
         job_id: &str,
         preview_id: &str,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
-        let preview = self.reopen(job_id, preview_id).await?;
+        self.confirm_comparison(job_id, preview_id, None).await
+    }
+    pub async fn confirm_comparison(
+        &self,
+        job_id: &str,
+        preview_id: &str,
+        comparison_id: Option<&str>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        let preview = if let Some(comparison) = comparison_id {
+            uuid::Uuid::parse_str(comparison).context("invalid comparison id")?;
+            let record = self
+                .database
+                .get_job(job_id)
+                .await?
+                .ok_or_else(|| anyhow!("task not found"))?;
+            let job = Job::open(record.storage_dir.into())?;
+            let artifacts = AsrRunArtifacts::open(&job, preview_id)?;
+            let preview: LocalRetranscriptionPreview = serde_json::from_slice(&fs::read(
+                artifacts
+                    .dir
+                    .join("comparisons")
+                    .join(format!("{comparison}.json")),
+            )?)?;
+            if preview.preview_id != preview_id
+                || preview.comparison_id.as_deref() != Some(comparison)
+            {
+                return Err(anyhow!("comparison identity mismatch"));
+            }
+            preview
+        } else {
+            self.reopen(job_id, preview_id).await?
+        };
         if preview.job_id != job_id {
             return Err(anyhow!(
                 "retranscription preview belongs to a different task"
@@ -517,12 +658,26 @@ mod tests {
             db.list_segments(&job.id()).await.unwrap()[0].source_text,
             "人工修正"
         );
-        let new = reopened.preview(&job.id(), 0, 1000).await.unwrap();
+        let count = db.list_asr_runs(&job.id()).await.unwrap().len();
+        let new = reopened
+            .refresh_comparison(&job.id(), &preview.preview_id)
+            .await
+            .unwrap();
+        assert_eq!(db.list_asr_runs(&job.id()).await.unwrap().len(), count);
         assert_eq!(
-            reopened.confirm(&job.id(), &new.preview_id).await.unwrap()[0].source_text,
+            reopened
+                .confirm_comparison(&job.id(), &new.preview_id, new.comparison_id.as_deref())
+                .await
+                .unwrap()[0]
+                .source_text,
             "候補"
         );
-        assert!(reopened.confirm(&job.id(), &new.preview_id).await.is_err());
+        assert!(
+            reopened
+                .confirm_comparison(&job.id(), &new.preview_id, new.comparison_id.as_deref())
+                .await
+                .is_err()
+        );
         db.close().await;
         fs::remove_dir_all(root).unwrap();
     }

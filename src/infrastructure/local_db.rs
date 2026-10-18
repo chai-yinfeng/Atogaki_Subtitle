@@ -423,6 +423,10 @@ impl LocalDatabase {
     /// Dropping the final SQLite pool handle eventually closes its connections,
     /// but callers that need to move or remove the database file must wait for
     /// an explicit close on platforms such as Windows that lock open files.
+    pub async fn acoustic_checkpoint_ranges(&self, job_id: &str) -> Result<Vec<(i64, i64)>> {
+        Ok(sqlx::query_as("SELECT start_ms,end_ms FROM local_acoustic_checkpoints WHERE job_id=? ORDER BY chunk_index").bind(job_id).fetch_all(&self.pool).await?)
+    }
+
     pub async fn record_acoustic_checkpoint(
         &self,
         job_id: &str,

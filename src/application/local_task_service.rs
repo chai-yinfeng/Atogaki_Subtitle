@@ -33,10 +33,23 @@ const DEFAULT_QUEUE_CAPACITY: usize = 8;
 #[derive(Clone)]
 pub struct LocalTaskService {
     sender: mpsc::Sender<QueuedTask>,
-    controls: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
+    controls: Arc<Mutex<HashMap<String, TaskControl>>>,
     automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
     jobs_dir: PathBuf,
     database: Option<LocalDatabase>,
+}
+
+struct TaskControl {
+    sender: watch::Sender<bool>,
+    started: bool,
+}
+impl TaskControl {
+    fn new() -> Self {
+        Self {
+            sender: watch::channel(false).0,
+            started: false,
+        }
+    }
 }
 
 enum QueuedTask {
@@ -788,20 +801,47 @@ impl LocalTaskService {
         let job = Job::open(PathBuf::from(record.storage_dir))?;
         let mut summary = crate::application::acoustic_plan::recovery_summary(&job)?;
         summary.can_resume &= record.status == "failed";
-        summary.phase = record.status;
+        if record.status != "failed" {
+            summary.phase = record.status;
+        }
         Ok(summary)
     }
 
     pub async fn pause(&self, job_id: &str) -> Result<()> {
         let controls = self.controls.lock().await;
-        let sender = controls
+        let control = controls
             .get(job_id)
             .ok_or_else(|| anyhow!("task is not running or queued"))?;
-        sender.send_replace(true);
+        control.sender.send_replace(true);
+        if !control.started {
+            let db = self
+                .database
+                .as_ref()
+                .ok_or_else(|| anyhow!("pause requires SQLite"))?;
+            let record = db
+                .get_job(job_id)
+                .await?
+                .ok_or_else(|| anyhow!("task not found"))?;
+            let job = Job::open(record.storage_dir.into())?;
+            let mut manifest = job
+                .read_manifest_if_exists()?
+                .ok_or_else(|| anyhow!("task manifest missing"))?;
+            manifest.fail("已暂停（等待处理）；可继续原排队项");
+            job.write_manifest(&manifest)?;
+            db.sync_snapshot(&JobSnapshot::load(&job.dir)?).await?;
+        }
         Ok(())
     }
 
     pub async fn resume(&self, job_id: &str) -> Result<JobSnapshot> {
+        self.resume_with_models(job_id, None, None).await
+    }
+    pub async fn resume_with_models(
+        &self,
+        job_id: &str,
+        whisper_override: Option<PathBuf>,
+        vad_override: Option<PathBuf>,
+    ) -> Result<JobSnapshot> {
         let db = self
             .database
             .as_ref()
@@ -813,6 +853,24 @@ impl LocalTaskService {
         if record.status != "failed" {
             bail!("only stopped tasks can resume")
         }
+        {
+            let mut controls = self.controls.lock().await;
+            if let Some(control) = controls.get_mut(job_id) {
+                let paused = *control.sender.borrow();
+                if !control.started && paused {
+                    let job = Job::open(PathBuf::from(&record.storage_dir))?;
+                    let mut manifest = job
+                        .read_manifest_if_exists()?
+                        .ok_or_else(|| anyhow!("task manifest missing"))?;
+                    manifest.mark(JobStatus::Queued);
+                    job.write_manifest(&manifest)?;
+                    db.sync_snapshot(&JobSnapshot::load(&job.dir)?).await?;
+                    control.sender.send_replace(false);
+                    return JobSnapshot::load(&job.dir);
+                }
+                bail!("task already queued or running")
+            }
+        }
         let job = Job::open(PathBuf::from(&record.storage_dir))?;
         if !crate::application::acoustic_plan::recovery_summary(&job)?.can_resume {
             bail!("该历史任务无法断点继续；可重新运行")
@@ -820,13 +878,32 @@ impl LocalTaskService {
         let mut manifest = job
             .read_manifest_if_exists()?
             .ok_or_else(|| anyhow!("task manifest missing"))?;
+        let mut options = job.read_recognition_options()?;
+        if !options.whisper.model.exists() {
+            options.whisper.model = whisper_override
+                .filter(|p| p.is_file())
+                .ok_or_else(|| anyhow!("原识别模型缺失；请在设置中重新定位相同模型"))?;
+        }
+        if options
+            .whisper
+            .vad_model
+            .as_ref()
+            .is_some_and(|p| !p.is_file())
+        {
+            options.whisper.vad_model = Some(
+                vad_override
+                    .filter(|p| p.is_file())
+                    .ok_or_else(|| anyhow!("原 VAD 模型缺失；请在设置中重新定位相同模型"))?,
+            );
+        }
+        job.write_recognition_options(&options)?;
         let spec = TranscribeSpec {
             input: manifest
                 .input
                 .clone()
                 .unwrap_or_else(|| job.audio_wav.clone()),
             output_dir: Some(job.dir.clone()),
-            transcription: job.read_recognition_options()?,
+            transcription: options,
         };
         // Reserve this task before enqueueing: simultaneous clicks cannot dispatch twice.
         {
@@ -834,7 +911,7 @@ impl LocalTaskService {
             if controls.contains_key(job_id) {
                 bail!("task already queued or running")
             };
-            controls.insert(job_id.into(), watch::channel(false).0);
+            controls.insert(job_id.into(), TaskControl::new());
         }
         let result = async {
             manifest.mark(JobStatus::Queued);
@@ -862,7 +939,7 @@ impl LocalTaskService {
             .lock()
             .await
             .entry(job.id())
-            .or_insert_with(|| watch::channel(false).0);
+            .or_insert_with(TaskControl::new);
         if self.sender.send(task).await.is_err() {
             let mut manifest = job
                 .read_manifest_if_exists()?
@@ -880,7 +957,7 @@ async fn run_worker(
     config: AppConfig,
     receiver: Arc<Mutex<mpsc::Receiver<QueuedTask>>>,
     database: Option<LocalDatabase>,
-    controls: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
+    controls: Arc<Mutex<HashMap<String, TaskControl>>>,
     automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
 ) {
     let mut runner = JobRunner::new(config);
@@ -903,15 +980,23 @@ async fn run_worker(
                 job_dir.clone()
             }
         };
-        let id = Job::open(job_dir.clone())
-            .map(|j| j.id())
+        let id = job_dir
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        let mut pause = controls
-            .lock()
-            .await
-            .get(&id)
-            .map(|s| s.subscribe())
-            .expect("queued task has control");
+        let mut pause = {
+            let mut entries = controls.lock().await;
+            let Some(control) = entries.get_mut(&id) else {
+                continue;
+            };
+            control.started = true;
+            control.sender.subscribe()
+        };
+        if !job_dir.is_dir() {
+            controls.lock().await.remove(&id);
+            automatic.lock().await.remove(&id);
+            continue;
+        }
         let automatic_workspace = automatic.lock().await.get(&id).cloned();
         let work = async {
             let job = Job::open(job_dir.clone())?;
@@ -1529,7 +1614,7 @@ mod tests {
             .submit_transcription(TranscribeSpec {
                 input: input.clone(),
                 output_dir: None,
-                transcription: TranscriptionOptions::japanese(model),
+                transcription: TranscriptionOptions::japanese(model.clone()),
             })
             .await
             .unwrap();
@@ -1556,6 +1641,26 @@ mod tests {
         })
         .await
         .unwrap();
+        let queued = service
+            .submit_transcription(TranscribeSpec {
+                input: input.clone(),
+                output_dir: None,
+                transcription: TranscriptionOptions::japanese(model.clone()),
+            })
+            .await
+            .unwrap();
+        let queued_id = queued.manifest.job_id;
+        service.pause(&queued_id).await.unwrap();
+        assert_eq!(
+            db.get_job(&queued_id).await.unwrap().unwrap().status,
+            "failed"
+        );
+        assert_eq!(
+            service.resume(&queued_id).await.unwrap().manifest.job_id,
+            queued_id
+        );
+        assert!(service.resume(&queued_id).await.is_err());
+        service.pause(&queued_id).await.unwrap();
         service.pause(&id).await.unwrap();
         tokio::time::timeout(Duration::from_secs(3), async {
             while service.controls.lock().await.contains_key(&id) {
