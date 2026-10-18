@@ -1019,13 +1019,19 @@ async fn translation_profiles(
         "hy-mt2-local",
         "openai-compatible",
     ] {
-        profiles.push(
+        let mut profile = state
+            .settings_service
+            .translation_profile(id)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        profile["readiness"] = serde_json::json!(
             state
                 .settings_service
-                .translation_profile(id)
+                .translation_readiness(id)
                 .await
-                .map_err(|e| format!("{e:#}"))?,
+                .map_err(|e| format!("{e:#}"))?
         );
+        profiles.push(profile);
     }
     Ok(profiles)
 }
@@ -1544,43 +1550,71 @@ async fn cancel_asr_candidate(
         .map_err(|e| format!("{e:#}"))
 }
 #[tauri::command]
+async fn save_translation_credential(
+    state: State<'_, DesktopState>,
+    provider_id: String,
+    api_key: Option<String>,
+    clear: bool,
+) -> Result<(), String> {
+    state
+        .settings_service
+        .save_translation_credential(&provider_id, api_key, clear)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
 async fn test_translation_connection(
     state: State<'_, DesktopState>,
     provider_id: String,
 ) -> Result<String, String> {
-    let profile = state
+    let fingerprint = state
         .settings_service
-        .translation_profile(&provider_id)
+        .translation_validation_fingerprint(&provider_id)
         .await
         .map_err(|e| e.to_string())?;
-    let provider = state
-        .settings_service
-        .task_provider(&profile)
-        .await
-        .map_err(|e| e.to_string())?;
-    let response = provider
-        .translate(atogaki_subtitle::application::TranslationRequest {
-            options: atogaki_subtitle::application::TranslationOptions::new(
-                LanguageCode::English,
-                LanguageCode::SimplifiedChinese,
-            ),
-            before_context: vec![],
-            after_context: vec![],
-            style_instruction: None,
-            targets: vec![atogaki_subtitle::application::TranslationTargetSegment {
-                segment_id: "connection-check".into(),
-                source_text: "Hello.".into(),
-            }],
-        })
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    if response.translations.len() != 1
-        || response.translations[0].segment_id != "connection-check"
-        || response.translations[0].translated_text.trim().is_empty()
-    {
-        return Err("连接成功，但翻译合同未通过".into());
+    let result = async {
+        let profile = state
+            .settings_service
+            .translation_profile(&provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let provider = state
+            .settings_service
+            .task_provider(&profile)
+            .await
+            .map_err(|e| e.to_string())?;
+        let response = provider
+            .translate(atogaki_subtitle::application::TranslationRequest {
+                options: atogaki_subtitle::application::TranslationOptions::new(
+                    LanguageCode::English,
+                    LanguageCode::SimplifiedChinese,
+                ),
+                before_context: vec![],
+                after_context: vec![],
+                style_instruction: None,
+                targets: vec![atogaki_subtitle::application::TranslationTargetSegment {
+                    segment_id: "connection-check".into(),
+                    source_text: "Hello.".into(),
+                }],
+            })
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        if response.translations.len() != 1
+            || response.translations[0].segment_id != "connection-check"
+            || response.translations[0].translated_text.trim().is_empty()
+        {
+            return Err("连接成功，但翻译合同未通过".into());
+        }
+        Ok(format!("{} 已验证", provider.status().name))
     }
-    Ok(format!("{} 已验证", provider.status().name))
+    .await;
+    state
+        .settings_service
+        .record_translation_validation(&provider_id, &fingerprint, result.is_ok())
+        .await
+        .map_err(|e| e.to_string())?;
+    result
 }
 
 #[tauri::command]
@@ -2735,6 +2769,7 @@ fn main() {
             cancel_asr_candidate,
             asr_candidate_progress,
             test_translation_connection,
+            save_translation_credential,
             preview_full_retranscription,
             confirm_retranscription,
             list_glossaries,

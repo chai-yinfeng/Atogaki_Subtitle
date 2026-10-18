@@ -22,6 +22,7 @@ use atogaki_subtitle::{
     },
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::credential_store::{CredentialStore, SystemCredentialStore};
 
@@ -737,25 +738,12 @@ impl DesktopSettingsService {
                 "none" | HY_MT2_LOCAL_PROVIDER_ID
             )
         {
-            self.credentials.delete(&request.translation_provider_id)?;
-            self.replace_cached_provider_key(&request.translation_provider_id, None, None);
-            if let Some(key) = key_saved_setting(&request.translation_provider_id) {
-                self.database.delete_setting(key).await?;
-            }
+            self.save_translation_credential(&request.translation_provider_id, None, true)
+                .await?;
         }
         if let Some(secret) = normalized_secret(request.api_key) {
-            if matches!(
-                request.translation_provider_id.as_str(),
-                "none" | HY_MT2_LOCAL_PROVIDER_ID
-            ) {
-                bail!("cannot save an API key for this translation provider");
-            }
-            self.credentials
-                .set(&request.translation_provider_id, &secret)?;
-            self.replace_cached_provider_key(&request.translation_provider_id, Some(secret), None);
-            if let Some(key) = key_saved_setting(&request.translation_provider_id) {
-                self.database.set_setting(key, "true").await?;
-            }
+            self.save_translation_credential(&request.translation_provider_id, Some(secret), false)
+                .await?;
         }
 
         self.replace_provider(
@@ -1095,6 +1083,107 @@ impl DesktopSettingsService {
         Ok(
             serde_json::json!({"provider_id":id,"model":model,"base_url":base_url,"style":self.database.get_setting(&format!("translation.{id}.style")).await?.unwrap_or(settings.translation_style_instruction),"local_model":if id==HY_MT2_LOCAL_PROVIDER_ID {settings.hy_mt2_model_path}else{None},"automatic":id!="none"}),
         )
+    }
+
+    pub async fn save_translation_credential(
+        &self,
+        id: &str,
+        api_key: Option<String>,
+        clear: bool,
+    ) -> Result<()> {
+        validate_provider_id(id)?;
+        let marker = key_saved_setting(id)
+            .ok_or_else(|| anyhow!("this provider does not use API credentials"))?;
+        if clear {
+            self.credentials.delete(id)?;
+            self.replace_cached_provider_key(id, None, None);
+            self.database.delete_setting(marker).await?;
+        } else {
+            let secret =
+                normalized_secret(api_key).ok_or_else(|| anyhow!("API Key cannot be empty"))?;
+            self.credentials.set(id, &secret)?;
+            self.replace_cached_provider_key(id, Some(secret), None);
+            self.database.set_setting(marker, "true").await?;
+        }
+        self.database
+            .set_setting(
+                &format!("translation.{id}.credential_revision"),
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn translation_validation_fingerprint(&self, id: &str) -> Result<String> {
+        let value = serde_json::json!({
+            "profile": self.translation_profile(id).await?,
+            "network_mode": self.database.get_setting(NETWORK_PROXY_MODE).await?,
+            "proxy": self.database.get_setting(NETWORK_PROXY_URL).await?,
+            "credential_revision": self.database.get_setting(&format!("translation.{id}.credential_revision")).await?,
+        });
+        Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&value)?)))
+    }
+
+    pub async fn record_translation_validation(
+        &self,
+        id: &str,
+        fingerprint: &str,
+        success: bool,
+    ) -> Result<()> {
+        validate_provider_id(id)?;
+        self.database
+            .set_setting(
+                &format!("translation.{id}.validation"),
+                &serde_json::json!({"fingerprint": fingerprint, "success": success}).to_string(),
+            )
+            .await
+    }
+
+    /// Only persisted metadata is read here. Listing cards must never open Keychain.
+    pub async fn translation_readiness(&self, id: &str) -> Result<&'static str> {
+        validate_provider_id(id)?;
+        if id == "none" {
+            return Ok("disabled");
+        }
+        if id == HY_MT2_LOCAL_PROVIDER_ID {
+            let settings = self.load().await?;
+            if !settings.hy_mt2_model_ready || !settings.local_translation_runtime_ready {
+                return Ok("resources_missing");
+            }
+        } else {
+            let saved = if let Some(key) = key_saved_setting(id) {
+                self.database.get_setting(key).await?.as_deref() == Some("true")
+            } else {
+                false
+            };
+            let environment = (id == DEEPL_PROVIDER_ID && self.environment_deepl_key.is_some())
+                || (id == DEEPSEEK_PROVIDER_ID && self.environment_deepseek_key.is_some());
+            if !saved && !environment {
+                return Ok("unconfigured");
+            }
+            if id == OPENAI_COMPATIBLE_PROVIDER_ID
+                && self.database.get_setting(OPENAI_MODEL).await?.is_none()
+            {
+                return Ok("configuration_missing");
+            }
+        }
+        if let Some(record) = self
+            .database
+            .get_setting(&format!("translation.{id}.validation"))
+            .await?
+            .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+        {
+            if record["fingerprint"].as_str()
+                == Some(self.translation_validation_fingerprint(id).await?.as_str())
+            {
+                return Ok(if record["success"].as_bool() == Some(true) {
+                    "verified"
+                } else {
+                    "validation_failed"
+                });
+            }
+        }
+        Ok("unverified")
     }
 
     async fn make_provider(
@@ -1660,6 +1749,110 @@ mod tests {
 
         drop(service);
         drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn validation_status_is_scoped_to_configuration_and_never_reads_secrets() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-provider-validation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let database = LocalDatabase::open(root.join("state.sqlite"))
+            .await
+            .unwrap();
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            credentials.clone(),
+        );
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unconfigured"
+        );
+        service
+            .save_translation_credential("deepseek", Some("test-only-key".into()), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.load().await.unwrap().translation_provider_id,
+            "none",
+            "saving a provider credential does not change the default"
+        );
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unverified"
+        );
+        let original = service
+            .translation_validation_fingerprint("deepseek")
+            .await
+            .unwrap();
+        service
+            .record_translation_validation("deepseek", &original, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "verified"
+        );
+        assert_eq!(
+            service.translation_readiness("deepl").await.unwrap(),
+            "unconfigured"
+        );
+        database
+            .set_setting(super::DEEPSEEK_MODEL, "another-model")
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unverified"
+        );
+        let current = service
+            .translation_validation_fingerprint("deepseek")
+            .await
+            .unwrap();
+        service
+            .record_translation_validation("deepseek", &current, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "validation_failed"
+        );
+        // A late successful response for old settings must not validate new settings.
+        service
+            .record_translation_validation("deepseek", &original, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unverified"
+        );
+        service
+            .record_translation_validation("deepseek", &current, true)
+            .await
+            .unwrap();
+        service
+            .save_translation_credential("deepseek", Some("replacement-test-key".into()), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unverified"
+        );
+        service
+            .save_translation_credential("deepseek", None, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unconfigured"
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+        database.close().await;
         fs::remove_dir_all(root).unwrap();
     }
 

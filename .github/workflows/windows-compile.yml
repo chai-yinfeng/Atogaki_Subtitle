@@ -21,6 +21,7 @@ on:
       - "ui/package-lock.json"
       - "ui/package.json"
       - "ui/src/**"
+      - "ui/tests/**"
       - "ui/tsconfig.json"
       - "ui/vite.config.ts"
   pull_request:
@@ -41,6 +42,7 @@ on:
       - "ui/package-lock.json"
       - "ui/package.json"
       - "ui/src/**"
+      - "ui/tests/**"
       - "ui/tsconfig.json"
       - "ui/vite.config.ts"
   workflow_dispatch:
@@ -80,6 +82,9 @@ jobs:
 
       - name: Build frontend
         run: npm run build --prefix ui
+
+      - name: Test frontend text helpers
+        run: npm test --prefix ui
 
       - name: Set up Rust
         shell: pwsh

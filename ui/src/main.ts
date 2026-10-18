@@ -946,7 +946,7 @@ app.innerHTML = `
     </dialog>
     <dialog id="retranscription-dialog" class="retranscription-dialog">
       <div class="dialog-heading">
-        <div><p class="eyebrow">RETRANSCRIPTION PREVIEW</p><h2>局部识别候选</h2></div>
+        <div><p class="eyebrow">ASR CANDIDATE PREVIEW</p><h2>识别候选对照</h2></div>
         <button id="close-retranscription-preview" type="button" class="secondary">关闭</button>
       </div>
       <p id="retranscription-preview-summary" class="dialog-help"></p>
@@ -1594,6 +1594,8 @@ function syncProviderSettings(): void {
   const clearApiKeyLabel = document.querySelector<HTMLSpanElement>("#clear-api-key-label");
   if (apiKeyLabel) apiKeyLabel.textContent = `${providerLabel} API Key`;
   if (clearApiKeyLabel) clearApiKeyLabel.textContent = `删除系统凭据库中已保存的 ${providerLabel} Key`;
+  settingsHyMt2Model?.closest(".settings-path-row")?.classList.toggle("hidden", provider !== "hy-mt2-local");
+  renderProviderCards();
 }
 
 async function checkSelectedApiKey(): Promise<void> {
@@ -1643,9 +1645,10 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   overwriteSettingsField(settingsProxyUrl, settings.networkProxyUrl ?? "");
   overwriteSettingsField(settingsModelMirror, settings.modelMirrorUrl ?? "");
   overwriteSettingsField(settingsProvider, settings.translationProviderId);
-  overwriteSettingsField(settingsProviderModel, settings.translationModel ?? "");
-  overwriteSettingsField(settingsProviderBaseUrl, settings.translationBaseUrl ?? "");
-  overwriteSettingsField(settingsTranslationStyle, settings.translationStyleInstruction);
+  const profile = providerDrafts.get(settingsProvider?.value ?? settings.translationProviderId);
+  overwriteSettingsField(settingsProviderModel, profile?.model ?? settings.translationModel ?? "");
+  overwriteSettingsField(settingsProviderBaseUrl, profile?.endpoint ?? settings.translationBaseUrl ?? "");
+  overwriteSettingsField(settingsTranslationStyle, profile?.style ?? settings.translationStyleInstruction);
   overwriteSettingsField(settingsApiKey, "");
   overwriteSettingsField(settingsClearApiKey, false);
   if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
@@ -1735,6 +1738,7 @@ function renderModelCatalog(): void {
       else void startModelDownload(modelId);
     });
   });
+  renderProviderCards();
 }
 
 function renderDictionaryCatalog(): void {
@@ -1938,9 +1942,9 @@ async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
       invoke<DesktopSettings>("desktop_settings"),
       availableModels.length ? Promise.resolve(availableModels) : invoke<ModelCatalogItem[]>("model_catalog"),
       invoke<ModelDownloadState[]>("model_download_states"),
-      invoke<Array<{provider_id: string; model: string | null; base_url: string | null; style: string}>>("translation_profiles"),
+      invoke<TranslationProfileSummary[]>("translation_profiles"),
     ]);
-    profiles.forEach(profile => providerDrafts.set(profile.provider_id, {model: profile.model ?? "", endpoint: profile.base_url ?? (profile.provider_id === "openai-compatible" ? "https://api.openai.com/v1" : "https://api.deepseek.com"), style:profile.style}));
+    updateProviderProfiles(profiles);
     availableModels = catalog;
     modelDownloads = downloads;
     renderDesktopSettings(settings);
@@ -1992,6 +1996,8 @@ async function saveSettings(finishOnboarding: boolean): Promise<void> {
       },
     });
     settingsDirtyFields.clear();
+    providerDirtyDrafts.delete(settingsProvider.value);
+    updateProviderProfiles(await invoke<TranslationProfileSummary[]>("translation_profiles"));
     renderDesktopSettings(settings);
     await refreshTranslationStatus();
     if (settingsMessage) settingsMessage.textContent = "配置已保存；如提供密钥，只会写入系统凭据库。";
@@ -3020,8 +3026,9 @@ async function refreshLearningItems(): Promise<void> {
 
 function renderLearningItems(): void {
   if (!learningItemList) return;
-  const languageItems = learningItems.filter(detail => detail.item.source_language === activeLearningLanguage
-    && matchesQuery(learningQuery,[detail.item.source_text,detail.item.meaning_text,...detail.occurrences.map(o=>o.segment_source_snapshot)])
+  const allLanguageItems = learningItems.filter(detail => detail.item.source_language === activeLearningLanguage);
+  const languageItems = allLanguageItems.filter(detail =>
+    matchesQuery(learningQuery,[detail.item.source_text,detail.item.meaning_text,...detail.occurrences.map(o=>o.segment_source_snapshot)])
     && (!learningTaskFilter || detail.occurrences.some(o=>o.job_id===learningTaskFilter)));
   const taskFilter = document.querySelector<HTMLSelectElement>("#learning-task-filter");
   if (taskFilter) {
@@ -3040,14 +3047,16 @@ function renderLearningItems(): void {
     if (countHost) countHost.textContent = String(count);
   });
   if (learningLanguageSummary) {
-    learningLanguageSummary.textContent = `${languageName} · ${languageItems.length} 个条目`;
+    learningLanguageSummary.textContent = `${languageName} · ${languageItems.length} 个条目${learningQuery.trim() || learningTaskFilter ? `（共 ${allLanguageItems.length} 个）` : ""}`;
   }
   if (learningItems.length === 0) {
     learningItemList.innerHTML = '<div class="empty-state"><strong>单词本还是空的。</strong><span>到收听区选择词语、短语或语法表达；也可以直接收藏整句。</span></div>';
     return;
   }
   if (languageItems.length === 0) {
-    learningItemList.innerHTML = `<div class="empty-state"><strong>${escapeHtml(languageName)}单词本还是空的。</strong><span>打开一项${escapeHtml(languageName)}任务，在收听区选择词语、短语或语法表达。</span></div>`;
+    learningItemList.innerHTML = allLanguageItems.length
+      ? '<div class="empty-state"><strong>没有匹配的学习条目。</strong><span>请调整搜索文字或来源任务筛选。</span></div>'
+      : `<div class="empty-state"><strong>${escapeHtml(languageName)}单词本还是空的。</strong><span>打开一项${escapeHtml(languageName)}任务，在收听区选择词语、短语或语法表达。</span></div>`;
     return;
   }
   learningItemList.innerHTML = languageItems.map((detail) => {
@@ -3526,7 +3535,7 @@ function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
     refresh.onclick=async()=>{try{showRetranscriptionPreview(await invoke<RetranscriptionPreview>("refresh_asr_comparison",{jobId:preview.job_id,runId:preview.preview_id}));}catch(e){if(retranscriptionConfirmMessage)retranscriptionConfirmMessage.textContent=String(e);}};
     retranscriptionDialog.querySelector(".retranscription-comparison")?.before(refresh);
     const diff=document.createElement("details");diff.className="candidate-diff";
-    diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")??"未知")}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
+    diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")||"未知")}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
     retranscriptionDialog.querySelector(".retranscription-comparison")?.after(diff);
   }
   if(!retranscriptionDialog?.open)retranscriptionDialog?.showModal();
@@ -6260,6 +6269,24 @@ document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventL
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
 document.querySelector<HTMLButtonElement>("#settings-choose-hy-mt2")?.addEventListener("click", () => void chooseSettingsModel("hy-mt2"));
 const providerDrafts = new Map<string, { model: string; endpoint: string; style: string }>();
+const providerDirtyDrafts = new Set<string>();
+const providerReadiness = new Map<string, string>();
+type TranslationProfileSummary = { provider_id: string; model: string | null; base_url: string | null; style: string; readiness: string };
+function updateProviderProfiles(profiles: TranslationProfileSummary[]): void {
+  for (const profile of profiles) {
+    providerReadiness.set(profile.provider_id, profile.readiness);
+    if (!providerDirtyDrafts.has(profile.provider_id)) providerDrafts.set(profile.provider_id, {
+      model: profile.model ?? "", endpoint: profile.base_url ?? (profile.provider_id === "openai-compatible" ? "https://api.openai.com/v1" : "https://api.deepseek.com"), style: profile.style,
+    });
+  }
+}
+for (const input of [settingsProviderModel, settingsProviderBaseUrl, settingsTranslationStyle]) input?.addEventListener("input", () => {
+  if (settingsProvider) {
+    providerDirtyDrafts.add(settingsProvider.value);
+    providerDrafts.set(settingsProvider.value, { model: settingsProviderModel?.value ?? "", endpoint: settingsProviderBaseUrl?.value ?? "", style: settingsTranslationStyle?.value ?? "" });
+  }
+  renderProviderCards();
+});
 let lastSettingsProvider = "none";
 settingsProvider?.addEventListener("change", () => {
   // Never carry a secret or delete intent into another provider.
@@ -6290,6 +6317,7 @@ settingsProvider?.addEventListener("change", () => {
     apiKeyStatus.textContent = "尚未检查当前 provider；可点击“检查所选 Key”确认系统凭据是否存在。";
     apiKeyStatus.classList.remove("warning");
   }
+  renderProviderCards();
 });
 checkApiKeyButton?.addEventListener("click", () => void checkSelectedApiKey());
 document.querySelector("#dictionary-credentials")?.addEventListener("click", (event) => {
@@ -6554,6 +6582,7 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
   const endMs = Number(target.dataset.endMs);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || !retranscriptionStartInput || !retranscriptionEndInput) return;
   activeRepairSignalId = signalId;
+  if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
   setRetranscriptionMessage("已载入可疑范围；可选择 Whisper 或 Gemini 生成独立候选 run。", false);
@@ -6908,6 +6937,115 @@ async function showPartialTranscript(jobId: string): Promise<void> {
 }
 
 // Keep the existing typed controls; reorganize their ownership without duplicate forms.
+let providerEditor: HTMLDivElement | null = null;
+function renderProviderCards(): void {
+  const selected = settingsProvider?.value ?? "none";
+  const labels: Record<string, string> = {
+    disabled: "仅转录", unconfigured: "未配置凭据", resources_missing: "本地资源缺失",
+    unverified: "凭据已配置，尚未验证连接", verified: "上次连接测试通过", validation_failed: "上次连接验证失败", configuration_missing: "配置不完整，请保存模型与端点",
+  };
+  for (const card of document.querySelectorAll<HTMLElement>("[data-provider-card]")) {
+    const id = card.dataset.providerCard!;
+    card.classList.toggle("active", selected === id);
+    const status = card.querySelector<HTMLElement>("[data-provider-readiness]");
+    if (status) status.textContent = id === "hy-mt2-local" && providerReadiness.get(id) === "unverified" ? "本地资源就绪，尚未验证" : labels[providerReadiness.get(id) ?? ""] ?? "正在读取配置状态…";
+    if (status && providerDirtyDrafts.has(id)) status.textContent += "（当前草稿未保存）";
+    const body = card.querySelector<HTMLElement>("[data-provider-editor]");
+    if (selected === id && body && providerEditor) {
+      if (providerEditor.parentElement !== body) body.append(providerEditor);
+      providerEditor.classList.remove("hidden");
+      const advanced = card.closest("details");
+      if (advanced) advanced.open = true;
+    }
+  }
+  if (selected === "none") providerEditor?.classList.add("hidden");
+  document.querySelector("[data-save-provider-key]")?.classList.toggle("hidden", selected === "none" || selected === "hy-mt2-local");
+  document.querySelector("[data-delete-provider-key]")?.classList.toggle("hidden", selected === "none" || selected === "hy-mt2-local");
+  const shortcuts = document.querySelector<HTMLElement>(".provider-model-shortcuts");
+  if (shortcuts) {
+    shortcuts.innerHTML = availableModels.filter(model => model.kind === "hy-mt2").map(model => {
+      const state = modelDownloads.find(download => download.modelId === model.id);
+      const busy = state && ["queued", "downloading", "cancelling"].includes(state.status);
+      return `<button type="button" class="secondary" data-provider-model="${escapeHtml(model.id)}" ${busy ? "disabled" : ""}>${busy ? "下载中" : state?.status === "done" ? "选择" : "下载"} ${escapeHtml(model.name)} · ${escapeHtml(model.sizeLabel)}</button>`;
+    }).join("");
+    shortcuts.querySelectorAll<HTMLButtonElement>("button").forEach(button => button.onclick = () => {
+      const id = button.dataset.providerModel!;
+      void (modelDownloads.find(download => download.modelId === id)?.status === "done" ? selectModel(id) : startModelDownload(id));
+    });
+  }
+}
+
+async function refreshProviderReadiness(): Promise<void> {
+  updateProviderProfiles(await invoke<TranslationProfileSummary[]>("translation_profiles"));
+  renderProviderCards();
+}
+
+function organizeTranslationCards(section: HTMLElement): void {
+  const heading = section.querySelector(".settings-section-heading");
+  const selector = settingsProvider?.closest("label");
+  if (!selector) return;
+  // Card actions replace the older shared check/delete controls.
+  settingsClearApiKey?.closest("label")?.remove();
+  checkApiKeyButton?.closest("div")?.remove();
+  selector.firstChild!.textContent = "下次新任务的默认翻译方式（保存后生效）";
+  providerEditor = document.createElement("div");
+  providerEditor.className = "provider-editor hidden";
+  for (const child of Array.from(section.children)) if (child !== heading && child !== selector) providerEditor.append(child);
+  const cards = document.createElement("div"); cards.className = "provider-cards";
+  const entries = [
+    ["deepseek", "DeepSeek", "云端文本翻译；只发送字幕与上下文。"],
+    ["deepl", "DeepL", "云端文本翻译；使用独立的 DeepL 凭据。"],
+    ["hy-mt2-local", "Hy-MT2 · 本地实验", "1.8B 与 7B 均保持实验档位，人工质量评审待完成。"],
+    ["openai-compatible", "OpenAI-compatible", "高级：自定义端点、模型与独立凭据。"],
+  ];
+  const advanced = document.createElement("details"); advanced.innerHTML = "<summary>高级：自定义兼容服务</summary>";
+  for (const [id, title, description] of entries) {
+    const card = document.createElement("article"); card.className = "provider-card"; card.dataset.providerCard = id;
+    card.innerHTML = `<h4>${escapeHtml(title)}</h4><p>${escapeHtml(description)}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<div class="provider-model-shortcuts"></div>' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div>`;
+    card.querySelector<HTMLButtonElement>("[data-configure-provider]")!.onclick = () => {
+      if (!settingsProvider) return;
+      if (settingsProvider.value !== id) { settingsProvider.value = id; settingsProvider.dispatchEvent(new Event("change", { bubbles: true })); }
+      renderProviderCards();
+    };
+    card.querySelector<HTMLButtonElement>("[data-test-provider]")!.onclick = async (event) => {
+      const button = event.currentTarget as HTMLButtonElement; button.disabled = true;
+      try { await invoke<string>("test_translation_connection", { providerId: id }); }
+      catch (error) { if (settingsMessage) settingsMessage.textContent = `连接测试失败：${String(error)}`; }
+      finally { button.disabled = false; await refreshProviderReadiness().catch(() => {}); }
+    };
+    const check = card.querySelector<HTMLButtonElement>("[data-check-provider]");
+    if (check) check.onclick = async () => {
+      check.disabled = true;
+      try {
+        const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", { providerId: id });
+        if (settingsMessage) settingsMessage.textContent = `${result.providerName}：${result.storedInSystem || result.availableFromEnvironment ? "凭据存在，尚不代表连接已通过" : "未找到凭据"}；本次未调用翻译 API。`;
+        await refreshProviderReadiness();
+      } catch (error) { if (settingsMessage) settingsMessage.textContent = String(error); }
+      finally { check.disabled = false; }
+    };
+    if (id === "openai-compatible") advanced.append(card); else cards.append(card);
+  }
+  cards.append(advanced); section.append(cards);
+  const actions = document.createElement("div"); actions.className = "offline-tools";
+  actions.innerHTML = '<button type="button" data-save-provider-key>保存此后端凭据</button><button type="button" class="secondary" data-delete-provider-key>删除此后端凭据</button>';
+  providerEditor.append(actions);
+  for (const button of actions.querySelectorAll<HTMLButtonElement>("button")) button.onclick = async () => {
+    const id = settingsProvider?.value, secret = settingsApiKey?.value ?? "";
+    if (!id) return;
+    button.disabled = true;
+    try {
+      await invoke("save_translation_credential", { providerId: id, apiKey: button.hasAttribute("data-save-provider-key") ? secret : null, clear: button.hasAttribute("data-delete-provider-key") });
+      if (settingsProvider?.value === id && settingsApiKey?.value === secret) settingsApiKey.value = "";
+      if (settingsClearApiKey) settingsClearApiKey.checked = false;
+      await refreshProviderReadiness();
+      if (settingsProvider?.value === id && apiKeyStatus) apiKeyStatus.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；连接状态请查看卡片。`;
+      if (settingsMessage) settingsMessage.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；其他后端配置未改变。`;
+    } catch (error) { if (settingsMessage) settingsMessage.textContent = String(error); }
+    finally { button.disabled = false; }
+  };
+  renderProviderCards();
+}
+
 function organizeSettings(): void {
   const form = document.querySelector<HTMLFormElement>("#settings-form");
   if (!form) return;
@@ -6932,6 +7070,7 @@ function organizeSettings(): void {
   optionalAsr.innerHTML='<summary>可选：Gemini 局部修复</summary>';
   optionalAsr.append(asr); models.append(optionalAsr);
   translation.querySelector("strong")!.textContent = "翻译";
+  organizeTranslationCards(translation);
   network.querySelector("strong")!.textContent = "网络与高级";
   dictionaries.querySelector("strong")!.textContent = "词典";
   const nav = document.createElement("nav");
@@ -7164,25 +7303,6 @@ function addOfflineTools(): void {
       setRetranscriptionMessage(String(e), true);
     }
   };
-  const connection = document.createElement("button");
-  connection.type = "button";
-  connection.className = "secondary";
-  connection.textContent = "测试已保存配置（发送 Hello.，可能计费）";
-  connection.onclick = async () => {
-    if (!settingsProvider || settingsProvider.value === "none") return;
-    connection.disabled = true;
-    try {
-      const result = await invoke<string>("test_translation_connection", {
-        providerId: settingsProvider.value,
-      });
-      if (apiKeyStatus) apiKeyStatus.textContent = result;
-    } catch (e) {
-      if (apiKeyStatus) apiKeyStatus.textContent = `验证失败：${String(e)}`;
-    } finally {
-      connection.disabled = false;
-    }
-  };
-  apiKeyStatus?.after(connection);
   const taskChoice = document.createElement("div");
   taskChoice.className = "offline-tools";
   taskChoice.innerHTML =
@@ -7240,15 +7360,18 @@ presetTools.querySelector<HTMLSelectElement>("select")!.onchange = async (event)
   if (!config) return;
   if (modelPath) modelPath.value = config.modelPath;
   if (sourceLanguage) sourceLanguage.value = config.sourceLanguage;
+  renderGlossaryOptions();
   if (vadEnabled) vadEnabled.checked = Boolean(config.vadModelPath);
   if (vadModelPath) vadModelPath.value = config.vadModelPath ?? "";
   if (taskGlossary) taskGlossary.value = config.glossaryId ?? "";
+  taskGlossaryConfigurationId = taskGlossary?.value || null;
   const provider = document.querySelector<HTMLSelectElement>("#task-translation-provider");
   if (provider) provider.value = config.translationProviderId;
   selectedTaskContentGroups.clear();
   config.selectedContentGroups.forEach((g) => selectedTaskContentGroups.add(g));
   syncVadControls();
   await refreshTaskGlossaryConfiguration();
+  updateTaskPipelineSummary();
 };
 presetTools.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
   try {
