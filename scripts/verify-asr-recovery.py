@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -20,6 +21,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input',required=True,type=Path)
     parser.add_argument('--model',required=True,type=Path)
+    parser.add_argument('--engine', choices=['whisper.cpp', 'mlx-whisper'], default='whisper.cpp')
+    parser.add_argument('--python', type=Path, default=Path(sys.executable))
+    parser.add_argument('--minimum-duration-seconds', type=int, default=3600,
+                        help='Default acceptance gate is one hour; use an explicit shorter gate for runtime experiments')
     parser.add_argument('--cli',type=Path,default=Path('target/debug/atogaki-subtitle'))
     parser.add_argument('--ffmpeg',type=Path,default=Path('/Applications/Atogaki.app/Contents/MacOS/ffmpeg'))
     parser.add_argument('--whisper-cli',type=Path,default=Path('/Applications/Atogaki.app/Contents/MacOS/whisper-cli'))
@@ -27,6 +32,8 @@ def main():
     parser.add_argument('--output',type=Path,default=Path('local-artifacts/recovery'))
     args=parser.parse_args()
     output=args.output.resolve()/str(uuid.uuid4());output.mkdir(parents=True)
+    # Later builds must not replace the executable between recovery attempts.
+    cli=output/'atogaki-subtitle';shutil.copy2(args.cli.resolve(),cli)
     counter=output/'calls.jsonl';marker=output/'failed-once';wrapper=output/'whisper-fault.py'
     wrapper.write_text(f'''#!{sys.executable}
 import json,os,sys
@@ -43,9 +50,31 @@ if index=={args.fail_at} and not marker.exists():
 os.execv({str(args.whisper_cli.resolve())!r},[{str(args.whisper_cli.resolve())!r},*sys.argv[1:]])
 ''')
     wrapper.chmod(0o755)
+    if args.engine == 'mlx-whisper':
+        wrapper.write_text(f'''#!{sys.executable}
+import json,os,sys
+from pathlib import Path
+payload=sys.stdin.buffer.read()
+request=json.loads(payload)
+prefix=Path(request['output_prefix'])
+index=int(prefix.parent.name.split('-',2)[1])
+with open({str(counter)!r},'a') as stream:
+ stream.write(json.dumps(index)+'\\n');stream.flush();os.fsync(stream.fileno())
+marker=Path({str(marker)!r})
+if index=={args.fail_at} and not marker.exists():
+ marker.write_text('failed')
+ print('injected recoverable decode failure',file=sys.stderr)
+ sys.exit(42)
+saved=prefix.parent/'bridge-request.json'
+saved.write_bytes(payload)
+with saved.open('rb') as stream:
+ os.dup2(stream.fileno(),0)
+os.execv({os.path.abspath(args.python)!r},[{os.path.abspath(args.python)!r},*sys.argv[1:]])
+''')
     job=output/'job'
-    command=[str(args.cli.resolve()),'--ffmpeg',str(args.ffmpeg),'--whisper-cli',str(wrapper),'transcribe',str(args.input.resolve()),'--model',str(args.model.resolve()),'--output-dir',str(job)]
-    report={'schema_version':1,'fault_chunk':args.fail_at,'runs':[],'human_boundary_review':'pending'}
+    command=[str(cli),'--ffmpeg',str(args.ffmpeg),'--whisper-cli',str(wrapper),'transcribe',str(args.input.resolve()),'--engine',args.engine,'--model',str(args.model.resolve()),'--output-dir',str(job)]
+    if args.engine == 'mlx-whisper':command.extend(['--python',str(wrapper)])
+    report={'schema_version':1,'engine':args.engine,'cli_sha256':hashlib.sha256(cli.read_bytes()).hexdigest(),'fault_chunk':args.fail_at,'runs':[],'human_boundary_review':'pending'}
     def run(label):
         started=time.perf_counter()
         with (output/f'{label}.log').open('w') as stream:
@@ -63,7 +92,7 @@ os.execv({str(args.whisper_cli.resolve())!r},[{str(args.whisper_cli.resolve())!r
     after=evidence()
     assert all(after.get(path)==value for path,value in committed.items()),'completed evidence changed'
     plan=json.loads((job/'asr-checkpoint/plan.json').read_text())
-    assert plan['duration_ms']>=3600000,'choose a real program of at least one hour'
+    assert plan['duration_ms']>=args.minimum_duration_seconds*1000,'input is shorter than the explicit acceptance gate'
     calls=Counter(json.loads(line) for line in counter.read_text().splitlines())
     assert len(calls)==len(plan['chunks'])
     assert calls[args.fail_at]==2 and all(count==1 for chunk,count in calls.items() if chunk!=args.fail_at)

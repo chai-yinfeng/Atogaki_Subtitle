@@ -397,13 +397,40 @@ impl LocalRetranscriptionService {
             let candidates = artifacts.read_candidate_cues()?.transcript_segments();
             let all = self.database.list_segments(job_id).await?;
             let start_ms = run.scope.start_ms as i64;
-            let end_ms = run.scope.end_ms.map(|v| v as i64).unwrap_or_else(|| {
-                all.iter()
-                    .map(|s| s.end_ms)
-                    .chain(candidates.iter().map(|s| s.end_ms as i64))
-                    .max()
-                    .unwrap_or(start_ms)
-            });
+            let end_ms = run
+                .scope
+                .end_ms
+                .or_else(|| crate::application::acoustic_plan::wav_duration(&job.audio_wav).ok())
+                .map(|v| i64::try_from(v).context("candidate input duration is too large"))
+                .transpose()?
+                .unwrap_or_else(|| {
+                    all.iter()
+                        .map(|s| s.end_ms)
+                        .chain(candidates.iter().map(|s| s.end_ms as i64))
+                        .max()
+                        .unwrap_or(start_ms)
+                });
+            let units: Vec<TimedUnit> = fs::read(&artifacts.timed_units_json)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or_default();
+            let mut timing_granularities = Vec::new();
+            for unit in units {
+                let granularity = match unit.kind {
+                    crate::application::TimedUnitKind::ProviderSegment => {
+                        crate::application::AsrTimingGranularity::ProviderSegment
+                    }
+                    crate::application::TimedUnitKind::Token => {
+                        crate::application::AsrTimingGranularity::Token
+                    }
+                    crate::application::TimedUnitKind::Word => {
+                        crate::application::AsrTimingGranularity::Word
+                    }
+                };
+                if !timing_granularities.contains(&granularity) {
+                    timing_granularities.push(granularity);
+                }
+            }
             let original_segments = all
                 .into_iter()
                 .filter(|s| s.start_ms < end_ms && s.end_ms > start_ms)
@@ -420,7 +447,7 @@ impl LocalRetranscriptionService {
                 provider_id: run.provider_id,
                 provider_name: run.provider_name,
                 model_identity: run.model_identity,
-                timing_granularities: vec![],
+                timing_granularities,
                 configuration: run.config_snapshot,
             };
             crate::application::acoustic_plan::write_json(
@@ -677,6 +704,41 @@ mod tests {
                 .confirm_comparison(&job.id(), &new.preview_id, new.comparison_id.as_deref())
                 .await
                 .is_err()
+        );
+        // Full-run scope includes trailing silence, not merely the last cue.
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&64036_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&16000_u32.to_le_bytes());
+        wav.extend_from_slice(&32000_u32.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&64000_u32.to_le_bytes());
+        wav.resize(64044, 0);
+        fs::write(&job.audio_wav, wav).unwrap();
+        let original_artifacts = AsrRunArtifacts::open(&job, &preview.preview_id).unwrap();
+        let mut full = original_artifacts.read_run().unwrap();
+        full.id = uuid::Uuid::new_v4().to_string();
+        full.scope = AsrInputScope::full();
+        let full_artifacts = AsrRunArtifacts::create(&job, &full).unwrap();
+        full_artifacts
+            .write_candidate_cues(&original_artifacts.read_candidate_cues().unwrap())
+            .unwrap();
+        fs::copy(
+            &original_artifacts.timed_units_json,
+            &full_artifacts.timed_units_json,
+        )
+        .unwrap();
+        let full_preview = reopened.reopen(&job.id(), &full.id).await.unwrap();
+        assert_eq!(full_preview.end_ms, 2000);
+        assert_eq!(
+            full_preview.timing_granularities,
+            vec![crate::application::AsrTimingGranularity::ProviderSegment]
         );
         db.close().await;
         fs::remove_dir_all(root).unwrap();

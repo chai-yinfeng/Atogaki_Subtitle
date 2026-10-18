@@ -13,6 +13,43 @@ pub struct MlxWhisperProvider {
     pub python: PathBuf,
     pub model: PathBuf,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::{AsrInputScope, TranscriptionOptions};
+
+    #[tokio::test]
+    async fn unsupported_runtime_options_are_rejected_before_spawning_python() {
+        let model =
+            std::env::temp_dir().join(format!("atogaki-mlx-options-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&model).unwrap();
+        let provider = MlxWhisperProvider {
+            python: "must-not-run".into(),
+            model: model.clone(),
+        };
+        for variant in 0..3 {
+            let mut transcription = TranscriptionOptions::japanese(model.clone());
+            match variant {
+                0 => transcription.whisper.no_gpu = true,
+                1 => transcription.whisper.vad_model = Some("vad.bin".into()),
+                _ => transcription.whisper.max_context = Some(100),
+            }
+            let error = provider
+                .transcribe(AsrRequest {
+                    audio_path: "unused.wav".into(),
+                    output_prefix: "unused".into(),
+                    scope: AsrInputScope::full(),
+                    cloud_audio_upload_authorized: false,
+                    transcription,
+                })
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("does not support"));
+        }
+        std::fs::remove_dir(model).unwrap();
+    }
+}
 #[derive(Deserialize)]
 struct BridgeResponse {
     raw_output_path: PathBuf,
@@ -40,9 +77,21 @@ impl AsrProvider for MlxWhisperProvider {
             if !self.model.is_dir() {
                 bail!("MLX model must be an existing local directory")
             }
+            if request.transcription.whisper.vad_model.is_some()
+                || request.transcription.whisper.no_gpu
+                || request
+                    .transcription
+                    .whisper
+                    .max_context
+                    .is_some_and(|value| value != 0)
+            {
+                bail!(
+                    "MLX experiment does not support Silero VAD, CPU mode, or a bounded text-context token count; use an explicitly supported configuration"
+                )
+            }
             let prompt = crate::domain::glossary::build_whisper_prompt(&request.transcription)?;
             let payload = serde_json::to_vec(
-                &serde_json::json!({"audio":request.audio_path,"model":self.model,"output_prefix":request.output_prefix,"language":request.transcription.source_language.whisper_code(),"prompt":prompt,"max_context":request.transcription.whisper.max_context}),
+                &serde_json::json!({"audio":request.audio_path,"model":self.model,"output_prefix":request.output_prefix,"language":request.transcription.source_language.whisper_code(),"prompt":prompt,"max_context":request.transcription.whisper.max_context,"no_speech_threshold":request.transcription.whisper.no_speech_threshold}),
             )?;
             let mut command = crate::infrastructure::child_process::sidecar_command(&self.python);
             command

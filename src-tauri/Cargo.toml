@@ -6,6 +6,11 @@ edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
 
+# This manifest is a separate Cargo root, so it needs the same host-build fix.
+# https://github.com/rust-lang/rust/issues/157750
+[profile.release.build-override]
+debug = 2
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 

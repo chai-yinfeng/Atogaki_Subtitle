@@ -25,6 +25,7 @@ def main():
         language=request["language"], word_timestamps=True,
         initial_prompt=request.get("prompt"), verbose=False,
         condition_on_previous_text=request.get("max_context") != 0,
+        no_speech_threshold=request["no_speech_threshold"],
     )
     prefix = Path(request["output_prefix"])
     raw = prefix.with_suffix(".json")

@@ -39,6 +39,8 @@ struct ChunkEvidence {
     chunk: AcousticChunk,
     units: Vec<TimedUnit>,
     device: String,
+    #[serde(default)]
+    gpu_fallback: Option<serde_json::Value>,
     raw_sha256: String,
     #[serde(default)]
     recognition_elapsed_ms: u64,
@@ -82,6 +84,12 @@ fn sync_directory(path: &Path) -> Result<()> {
 }
 #[cfg(not(unix))]
 fn sync_directory(_: &Path) -> Result<()> {
+    Ok(())
+}
+fn sync_output_file(path: &Path) -> Result<()> {
+    // FlushFileBuffers requires a writable handle on Windows. These files were
+    // created by this run; opening for write without truncate preserves bytes.
+    fs::OpenOptions::new().write(true).open(path)?.sync_all()?;
     Ok(())
 }
 pub fn write_json(path: &Path, value: &(impl Serialize + ?Sized)) -> Result<()> {
@@ -180,7 +188,7 @@ pub async fn prepare_audio(ffmpeg: &Path, input: &Path, job: &Job) -> Result<Pat
         duration_ms: wav_duration(&temp)?,
         sha256: file_digest(&temp)?,
     };
-    fs::File::open(&temp)?.sync_all()?;
+    sync_output_file(&temp)?;
     fs::rename(&temp, &job.audio_wav)?;
     sync_directory(&job.dir)?;
     write_json(&identity_path, &identity)?;
@@ -371,6 +379,15 @@ pub async fn execute_chunks(
         let evidence = if let Ok(evidence) = read_evidence(&root, chunk) {
             evidence
         } else {
+            // A repaired block can produce different units. Do not publish cues
+            // stitched from the old evidence, even if that cache still hashes correctly.
+            for name in ["final-cues.json", "final-cues.sha256"] {
+                match fs::remove_file(root.join(name)) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
             let attempt = root.join(format!("attempt-{}-{}", chunk.index, uuid::Uuid::new_v4()));
             fs::create_dir(&attempt)?;
             let wav = attempt.join("input.wav");
@@ -422,6 +439,13 @@ pub async fn execute_chunks(
                 chunk: chunk.clone(),
                 units,
                 device,
+                gpu_fallback: if prefix.with_extension("gpu-failure.json").is_file() {
+                    Some(serde_json::from_slice(&fs::read(
+                        prefix.with_extension("gpu-failure.json"),
+                    )?)?)
+                } else {
+                    None
+                },
                 raw_sha256: file_digest(&raw)?,
                 recognition_elapsed_ms: recognition_started
                     .elapsed()
@@ -438,7 +462,7 @@ pub async fn execute_chunks(
                 )
                 .as_bytes(),
             )?;
-            fs::File::open(&raw)?.sync_all()?;
+            sync_output_file(&raw)?;
             let _ = fs::remove_file(wav);
             let destination = evidence_path(&root, chunk.index);
             if destination.exists() {
@@ -531,6 +555,16 @@ pub fn boundary_signals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn syncing_external_output_preserves_bytes_on_all_platforms() {
+        let path =
+            std::env::temp_dir().join(format!("atogaki-output-sync-{}", uuid::Uuid::new_v4()));
+        fs::write(&path, b"complete decoder output").unwrap();
+        sync_output_file(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"complete decoder output");
+        fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn chunk_plan_has_exact_ownership_and_bounded_context() {
         let plan = AcousticPlan::new(3601000, "a".into(), "c".into());
@@ -648,6 +682,9 @@ mod tests {
         assert_eq!(fake.calls.load(Ordering::SeqCst), 31); // 30 successful chunks + failed call
         assert_eq!(response.timed_units.len(), 30);
         assert_eq!(recovery_summary(&job).unwrap().completed_ms, 3600000);
+        let cache = job.dir.join("asr-checkpoint/final-cues.json");
+        fs::write(&cache, b"previously stitched cues").unwrap();
+        fs::write(cache.with_extension("sha256"), b"previous digest").unwrap();
         let db = LocalDatabase::open(root.join("index.sqlite"))
             .await
             .unwrap();
@@ -686,7 +723,32 @@ mod tests {
             30
         );
         assert_eq!(fake.calls.load(Ordering::SeqCst), 31);
+        assert!(cache.is_file(), "unchanged evidence keeps stable cue IDs");
         db.close().await;
+        // A stitching write failure must not invalidate committed acoustic work.
+        let merged = job.dir.join("asr-checkpoint/merged-units.json");
+        fs::remove_file(&merged).unwrap();
+        fs::create_dir(&merged).unwrap();
+        assert!(
+            execute_chunks(
+                &job,
+                &ffmpeg,
+                fake.clone(),
+                &options,
+                "stitch-failure",
+                None
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 31);
+        assert_eq!(recovery_summary(&job).unwrap().completed_ms, 3600000);
+        fs::remove_dir(&merged).unwrap();
+        execute_chunks(&job, &ffmpeg, fake.clone(), &options, "stitch-resume", None)
+            .await
+            .unwrap();
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 31);
+        assert!(cache.is_file());
         // A damaged raw artifact invalidates only that chunk.
         fs::write(
             job.dir
@@ -698,6 +760,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fake.calls.load(Ordering::SeqCst), 32);
+        assert!(!cache.exists(), "repaired evidence must be stitched again");
+        assert!(!cache.with_extension("sha256").exists());
         // Moving identical weights preserves identity; changing weights cannot reuse evidence.
         let moved = root.join("moved.bin");
         fs::rename(&model, &moved).unwrap();
