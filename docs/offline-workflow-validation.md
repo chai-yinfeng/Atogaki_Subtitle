@@ -127,3 +127,11 @@ Release 工具链：根 CLI 与 Tauri 的独立 Cargo manifest 设置 `[profile.
 本机安装完成：`cargo fmt --check`、`git diff --check`、前端 4 项测试、类型检查及生产构建通过；`cargo tauri build --config tauri.macos-complete.conf.json --bundles app` release 构建通过，四个 sidecar（ffmpeg、ffprobe、whisper-cli、llama-server）齐全，源 bundle 与安装 bundle 均通过 `codesign --verify --deep --strict`，主程序逐字节一致。未执行公证或公开发行。
 
 `/Applications/Atogaki.app` 已替换并通过原生窗口启动：正式数据目录和原有 12 个任务可见，新版任务预设／翻译选择／标题搜索及五个设置分区可见，窗口留在设置页供用户试用。旧 App 保留为 `/Applications/.Atogaki.previous.20261019`；另有 App 副本、完整性检查为 ok 的 SQLite 一致性备份与已完成盲评副本保留在 `local-artifacts/install-backups/20261019/`（Git 忽略）。不将启动检查视为完整人工功能验收。
+
+## 2026-10-19：首轮界面反馈
+
+去除桌面 Hy-MT2 与 Whisper 模型目录中的实验标签，普通文案不再暴露 SQLite 实现。高级编辑以顶部红色播放头把手为独立拖动目标，优先于波形背景平移／字幕块修剪，暂停播放并使用拖动开始时的可视范围映射时间；保留字幕草稿。局部修复按钮及说明改用范围、字幕边界、对照后替换的用户措辞。整体视觉风格本轮仅讨论，不改配色或布局。
+
+验证：共享核心 125 项通过／4 项忽略，壳层模型目录 6 项通过；前端 5 项测试（含播放头命中不能占用波形／字幕轨道与越界定位）通过，类型检查、生产构建、cargo fmt 和 diff 检查通过。独立 bundle ID 的临时 App 使用 /private/tmp/atogaki-offline-window-20261018：顶部把手从 0 秒拖至 6.692 秒，可视窗口不变；背景拖动将窗口改为 4.253–34.083 秒，播放位置不变。全部字幕数据库行前后摘要一致。未发送音频或调用云端服务。
+
+上述修改已完成 release App 构建并更新 /Applications/Atogaki.app，四个 sidecar 与签名检查通过，安装主程序与构建产物一致。原生启动可见 Hy-MT2「本地翻译」与正式目录现有 13 个任务；本轮未切换翻译设置或运行真实任务。替换前版本保留为 /Applications/.Atogaki.previous.20261019-ui。

@@ -639,7 +639,7 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
         ModelCatalogItem {
             id: "whisper-large-v3-q5_0",
             kind: "whisper",
-            name: "Whisper large-v3 q5（质量实验）",
+            name: "Whisper large-v3 q5",
             file_name: "ggml-large-v3-q5_0.bin",
             size_label: "约 1.1 GiB",
             recommended_for: "现代 Apple Silicon；适合优先追求识别准确性。",
@@ -650,7 +650,7 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
         ModelCatalogItem {
             id: "whisper-large-v3-turbo-q5_0",
             kind: "whisper",
-            name: "Whisper large-v3-turbo q5（实验）",
+            name: "Whisper large-v3-turbo q5",
             file_name: "ggml-large-v3-turbo-q5_0.bin",
             size_label: "约 547 MiB",
             recommended_for: "现代 Apple Silicon / GPU；速度与磁盘占用较低。",
@@ -661,7 +661,7 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
         ModelCatalogItem {
             id: "whisper-large-v3-turbo-q8_0",
             kind: "whisper",
-            name: "Whisper large-v3-turbo q8（质量实验）",
+            name: "Whisper large-v3-turbo q8",
             file_name: "ggml-large-v3-turbo-q8_0.bin",
             size_label: "约 834 MiB",
             recommended_for: "turbo 的较高精度量化档；适合优先追求 turbo 的识别质量。",

@@ -92,3 +92,15 @@ export function candidateTextDiff(before: string, after: string): string {
     ending
   );
 }
+
+/** Only the top handle owns scrubbing; the waveform and subtitle track keep their gestures. */
+export function playheadHandleContains(x: number, y: number, width: number,
+  currentMs: number, startMs: number, endMs: number): boolean {
+  if (width <= 0 || endMs <= startMs || currentMs < startMs || currentMs > endMs) return false;
+  const headX = (currentMs - startMs) / (endMs - startMs) * width;
+  return x >= 0 && x <= width && y >= 15 && y <= 37 && Math.abs(x - headX) <= 12;
+}
+export function timelineTimeAtX(x: number, width: number, startMs: number, endMs: number): number {
+  if (width <= 0 || endMs <= startMs) return startMs;
+  return Math.round(startMs + Math.max(0, Math.min(1, x / width)) * (endMs - startMs));
+}

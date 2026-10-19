@@ -49,7 +49,7 @@ impl LocalLlamaConfig {
             runtime_path,
             model_path,
             model_id,
-            provider_name: "Hy-MT2（本地实验）".to_string(),
+            provider_name: "Hy-MT2（本地翻译）".to_string(),
             style_instruction,
             context_size: 8_192,
             gpu_layers: 99,

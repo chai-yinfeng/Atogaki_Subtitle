@@ -2,7 +2,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
-import { matchesQuery, highlightSaved, candidateTextDiff } from "./offline-tools";
+import { matchesQuery, highlightSaved, candidateTextDiff, playheadHandleContains, timelineTimeAtX } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
 let playbackLoop: {startMs:number;endMs:number;repeat:boolean} | null = null;
 let loopStartMs: number | null = null;
@@ -602,7 +602,7 @@ app.innerHTML = `
     <div id="home-view">
       <section class="intro">
         <h2>离线理解，保留在本机。</h2>
-        <p>选择节目语言、本地媒体与 Whisper 模型后，任务会先写入本地 SQLite，再在后台开始转写。</p>
+        <p>选择节目语言、本地媒体与 Whisper 模型，保存任务后即可在后台转写。</p>
         <p class="data-path" id="data-path">正在读取本地数据目录…</p>
       </section>
       <section class="create-task" aria-labelledby="create-heading">
@@ -620,7 +620,7 @@ app.innerHTML = `
           </div>
           <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
           <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
-          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地实验</option><option value="openai-compatible">自定义兼容服务</option></select><span>完整转录后自动翻译；云端只发送字幕文本和上下文。</span></label>
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>完整转录后自动翻译；云端只发送字幕文本和上下文。</span></label>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
@@ -734,21 +734,21 @@ app.innerHTML = `
               <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-follow-playhead" type="button" class="secondary active">跟随播放头</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销上次打轴</button></div>
             </div>
             <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。拖动字幕块可移动，拖动左右边缘可单独修剪；空白合法，同轨不能重叠。</div>
-            <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="可点击定位的声音波形与字幕时间轴"></canvas>
+            <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="声音波形与字幕时间轴：拖动顶部播放头定位，拖动波形背景平移"></canvas>
             <div class="retranscription-range" aria-labelledby="retranscription-heading">
-              <div><p class="eyebrow">RECOGNIZE SELECTED RANGE</p><h4 id="retranscription-heading">局部重新识别</h4><p>只识别明确填写的范围，并隔离前文识别上下文。生成候选后不会自动覆盖字幕。</p></div>
+              <div><p class="eyebrow">RECOGNIZE SELECTED RANGE</p><h4 id="retranscription-heading">局部重新识别</h4><p>选一段音频重新识别，先对照原字幕，再决定是否替换。</p></div>
               <label>开始<input id="retranscription-start" inputmode="decimal" placeholder="00:49:00.000" /></label>
               <label>结束<input id="retranscription-end" inputmode="decimal" placeholder="00:55:00.000" /></label>
               <label>识别 provider<select id="retranscription-provider"><option value="whisper.cpp">Whisper.cpp（本地）</option><option value="gemini-transcribe">Gemini 3.5 Transcribe（云端）</option></select></label>
               <label id="gemini-upload-consent" class="clear-secret hidden"><input id="authorize-gemini-upload" type="checkbox" /><span>允许将这次所选范围的音频上传给 Google；免费层数据可能用于改进产品</span></label>
-              <div class="retranscription-actions"><button id="retranscription-use-window" type="button" class="secondary">使用当前可视范围</button><button id="retranscription-expand-segments" type="button" class="secondary">扩展到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
+              <div class="retranscription-actions"><button id="retranscription-use-window" type="button" class="secondary">使用当前波形范围</button><button id="retranscription-expand-segments" type="button" class="secondary">对齐到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
               <p id="retranscription-message" class="media-message">范围边界不能切穿已有字幕块；需要时请显式扩展。</p>
               <div id="asr-quality-signals" class="asr-quality-signals"></div>
             </div>
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
             <div class="karaoke-text-editor"><span id="karaoke-segment-time">当前没有字幕</span><label>原文<textarea id="karaoke-current-source" rows="3" placeholder="当前时间没有原文字幕" disabled></textarea></label><label>译文<textarea id="karaoke-current-translation" rows="3" placeholder="尚无译文" disabled></textarea></label></div>
-            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤销上次文字保存</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会原子写入 SQLite。</p></div>
+            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤销上次文字保存</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会自动保存。</p></div>
           </section>
         </section>
       </div>
@@ -819,7 +819,7 @@ app.innerHTML = `
       </section>
       <section id="workspace-translation-panel" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-translation" data-workspace-panel="translation">
         <div class="module-heading">
-          <div><p class="eyebrow">LANGUAGE WORKFLOW</p><h2>翻译与识别修正</h2><p>这里的操作会更新当前 SQLite 字幕工作区；原始识别快照保持不变。</p></div>
+          <div><p class="eyebrow">LANGUAGE WORKFLOW</p><h2>翻译与识别修正</h2><p>这里的操作会更新当前字幕工作区；原始识别快照保持不变。</p></div>
         </div>
         <section class="workspace-toolbar module-card" aria-label="翻译与词表">
           <div>
@@ -1042,7 +1042,7 @@ app.innerHTML = `
     <dialog id="settings-dialog" class="settings-dialog">
       <form id="settings-form">
         <div class="dialog-heading">
-          <div><p class="eyebrow">FIRST RUN & SETTINGS</p><h2>启动配置</h2></div>
+          <div><p class="eyebrow">SETTINGS</p><h2>启动配置</h2></div>
           <button id="close-settings" type="button" class="secondary">稍后再说</button>
         </div>
         <p class="dialog-help">媒体和模型默认保留在本机；选择云端翻译 provider 时，只有原文字幕和上下文会发送到对应服务。</p>
@@ -1094,7 +1094,7 @@ app.innerHTML = `
           <div class="settings-section-heading"><div><strong>4. 翻译 provider（可选）</strong><span>Hy-MT2 完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
           <label>翻译 provider
             <select id="settings-provider">
-              <option value="hy-mt2-local">Hy-MT2（本地实验）</option>
+              <option value="hy-mt2-local">Hy-MT2（本地翻译）</option>
               <option value="deepl">DeepL（传统翻译 API）</option>
               <option value="deepseek">DeepSeek（LLM API）</option>
               <option value="openai-compatible">OpenAI-compatible（高级）</option>
@@ -1129,7 +1129,7 @@ app.innerHTML = `
           <p id="dictionary-download-message" class="settings-message" role="status"></p>
           <div>
             <strong class="settings-subheading">在线词典 API</strong>
-            <p class="settings-message">每个来源独立配置；Key 只写入系统凭据库，不写入 SQLite、日志或任务目录。检查只验证凭据是否存在，不调用词典 API。</p>
+            <p class="settings-message">每个来源独立配置；Key 仅保存在系统凭据库，不写入日志或任务目录。检查只验证凭据是否存在，不调用词典 API。</p>
           </div>
           <div id="dictionary-credentials" class="dictionary-credentials">
             ${[
@@ -1423,6 +1423,7 @@ let karaokeSelectedJobId: string | null = null;
 let karaokeResumeMs = 0;
 let karaokeTimingDrag: KaraokeTimingDrag | null = null;
 let karaokePanDrag: KaraokePanDrag | null = null;
+let karaokePlayheadDrag: { pointerId: number; startMs: number; endMs: number } | null = null;
 let karaokeSuppressClick = false;
 let karaokeWaveformGain = 1;
 let karaokeWaveformReloadTimer: number | null = null;
@@ -1677,7 +1678,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
           ? settings.hyMt2ModelReady && settings.localTranslationRuntimeReady
             ? "本地 runtime 与模型已就绪；翻译文本不会离开设备"
             : "本地翻译尚未就绪；请确认当前 App 包含 runtime 并下载 Hy-MT2 模型"
-          : "尚未配置；Key 不会写入 SQLite 或任务目录";
+          : "尚未配置；Key 仅保存在系统凭据库";
     apiKeyStatus.textContent = settings.credentialError
       ? `${source}。系统凭据库提示：${settings.credentialError}`
       : source;
@@ -2679,7 +2680,7 @@ async function deleteJob(job: LocalJob): Promise<void> {
   if (!matchesTerminalStatus(job.status)) return;
   const confirmed = await confirmAction({
     title: "删除任务数据？",
-    message: `将删除“${displayName(job)}”在 Atogaki 中的音频、字幕、中间产物和 SQLite 记录。原始媒体文件不会被删除。`,
+    message: `将删除“${displayName(job)}”在 Atogaki 中的音频、字幕、中间产物和本地记录。原始媒体文件不会被删除。`,
     confirmLabel: "删除任务",
     danger: true,
   });
@@ -2765,6 +2766,7 @@ async function stopActivePlayback(): Promise<void> {
   }
   karaokeTimingDrag = null;
   karaokePanDrag = null;
+  karaokePlayheadDrag = null;
   karaokeGestureStart = null;
   karaokeTextDraftSegmentId = null;
   karaokeTextDraftDirty = false;
@@ -3464,7 +3466,7 @@ function useVisibleWindowForRetranscription(): void {
   if (!karaokeWaveformWindow || !retranscriptionStartInput || !retranscriptionEndInput) return;
   retranscriptionStartInput.value = formatPreciseTime(karaokeWaveformWindow.start_ms);
   retranscriptionEndInput.value = formatPreciseTime(karaokeWaveformWindow.end_ms);
-  setRetranscriptionMessage("已填写当前可视范围；若边界穿过字幕，请显式扩展到完整字幕块。");
+  setRetranscriptionMessage("已填写当前可视范围；若边界穿过字幕，请显式对齐到完整字幕块。");
 }
 
 function retranscriptionRange(): { startMs: number; endMs: number } | null {
@@ -3814,6 +3816,24 @@ function renderKaraokeTimeline(): void {
   }
 }
 
+function karaokePlayheadHandleAtPoint(clientX: number, clientY: number): boolean {
+  if (!karaokeWaveform || !karaokeWaveformWindow || !activeMedia) return false;
+  const bounds = karaokeWaveform.getBoundingClientRect();
+  return playheadHandleContains(clientX - bounds.left, clientY - bounds.top,
+    bounds.width, activeMedia.currentTime * 1000,
+    karaokeWaveformWindow.start_ms, karaokeWaveformWindow.end_ms);
+}
+
+function updateKaraokePlayheadDrag(clientX: number): void {
+  if (!karaokePlayheadDrag || !karaokeWaveform) return;
+  const bounds = karaokeWaveform.getBoundingClientRect();
+  const time = timelineTimeAtX(clientX - bounds.left, bounds.width,
+    karaokePlayheadDrag.startMs, karaokePlayheadDrag.endMs);
+  seekTo(time, false);
+  updateActiveSubtitle(time);
+  renderKaraokeTimeline();
+}
+
 function karaokeTimelineHitAtPoint(clientX: number, clientY: number): KaraokeTimelineHit | null {
   const canvas = karaokeWaveform;
   const waveform = karaokeWaveformWindow;
@@ -3857,7 +3877,7 @@ function syncKaraokeWaveformStatus(): void {
   if (!karaokeWaveformStatus || !karaokeWaveformWindow || !activeDetail) return;
   const waveform = karaokeWaveformWindow;
   const anomaly = karaokeTimingAnomalySummary(activeDetail.segments);
-  karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms${anomaly ? ` · ${anomaly}` : " · 单轨无重叠"}`;
+  karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms${anomaly ? ` · ${anomaly}` : " · 单轨无重叠"} · 拖动顶部红色把手定位；拖动波形背景平移`;
 }
 
 function updateKaraokeTimingDrag(clientX: number): void {
@@ -3983,7 +4003,7 @@ async function saveKaraokeTextDraft(): Promise<void> {
     syncKaraokeTextDraft(updated, true);
     updateStructureUndoButton();
     updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
-    setSubtitleEditAction(`第 ${updated.segment_index + 1} 段文字已保存到 SQLite。`);
+    setSubtitleEditAction(`第 ${updated.segment_index + 1} 段文字已保存到本地。`);
   } catch (error) {
     if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = false;
     setSubtitleEditAction(`文字保存失败：${String(error)}`, true);
@@ -4195,7 +4215,7 @@ async function openJob(jobId: string, initialSection: WorkspaceSection = "transl
   showWorkspace(true);
   showWorkspaceSection(initialSection);
   window.scrollTo({ top: 0, behavior: "auto" });
-  workspaceMessage.textContent = "正在读取 SQLite 字幕工作区…";
+  workspaceMessage.textContent = "正在读取 字幕工作区…";
   setWorkspaceAction("");
   if (subtitleList) subtitleList.innerHTML = `<div class="empty-state">正在读取字幕…</div>`;
   try {
@@ -4575,7 +4595,7 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
 }
 
 function savedSegmentState(segment: SubtitleSegment): string {
-  return segment.translation_stale ? "原文已改变，当前译文需要重译" : "已保存到本地 SQLite";
+  return segment.translation_stale ? "原文已改变，当前译文需要重译" : "已保存到本地";
 }
 
 function subtitleValueFingerprint(segment: SubtitleSegment): string {
@@ -4755,11 +4775,11 @@ async function translateSegment(
     try {
       await reloadTranslatedWorkspace(jobId);
       if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并从 SQLite 重新读取。`);
+        setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并刷新。`);
       }
     } catch (reloadError) {
       if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`翻译已经写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+        setWorkspaceAction(`翻译已经写入本地，但重新读取失败：${String(reloadError)}`, true);
       }
     }
   } catch (error) {
@@ -5107,12 +5127,12 @@ async function translateAllSubtitles(): Promise<void> {
             .map(({ segment, index }) => `第 ${index + 1} 段（${formatTime(segment.start_ms)}）`);
           setWorkspaceAction(`已保存 ${result.translated_count}/${result.requested_count} 段；${emptyLabels.join("、")}在单独重试后仍为空，已保留为待翻译。`, true);
         } else {
-          setWorkspaceAction(`${result.resumed ? "续译" : "翻译"}完成：${result.translated_count} 段已按批次写入 SQLite。`);
+          setWorkspaceAction(`${result.resumed ? "续译" : "翻译"}完成：${result.translated_count} 段已按批次写入本地。`);
         }
       }
     } catch (reloadError) {
       if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`翻译批次已经写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+        setWorkspaceAction(`翻译批次已经写入本地，但重新读取失败：${String(reloadError)}`, true);
       }
     }
   } catch (error) {
@@ -5547,7 +5567,7 @@ async function exportSubtitles(): Promise<void> {
       }
     }
 
-    setWorkspaceAction("正在从 SQLite 当前内容生成原文、译文和双语字幕…");
+    setWorkspaceAction("正在从 当前字幕内容生成原文、译文和双语字幕…");
     const exported = await invoke<SubtitleExport>("export_workspace_subtitles", {
       request: {
         jobId: activeDetail.job.job_id,
@@ -5823,7 +5843,7 @@ async function submitVideoRender(): Promise<void> {
   }
   videoRenderSubmitting = true;
   if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
-  if (videoRenderMessage) videoRenderMessage.textContent = "正在冻结 SQLite 字幕并创建烧录任务…";
+  if (videoRenderMessage) videoRenderMessage.textContent = "正在准备字幕并创建烧录任务…";
   try {
     const render = await invoke<VideoRender>("submit_video_render", {
       request: {
@@ -6172,7 +6192,7 @@ async function previewGlossaryApplication(): Promise<void> {
     return;
   }
   setWorkspaceBusy(true);
-  setWorkspaceAction("正在比较词表与 SQLite 原文字幕…");
+  setWorkspaceAction("正在比较词表与 原文字幕…");
   try {
     pendingGlossaryPreview = await invoke<GlossaryPreview>("preview_glossary_application", {
       jobId: activeDetail.job.job_id,
@@ -6211,7 +6231,7 @@ function renderGlossaryPreview(preview: GlossaryPreview): void {
 async function applyPreviewedGlossary(): Promise<void> {
   if (!activeDetail || !pendingGlossaryPreview || workspaceActionBusy) return;
   setWorkspaceBusy(true);
-  setWorkspaceAction("正在把词表修正写入 SQLite…");
+  setWorkspaceAction("正在把词表修正写入本地…");
   try {
     const applied = await invoke<GlossaryApplyResult>("apply_glossary_to_workspace", {
       jobId: activeDetail.job.job_id,
@@ -6222,7 +6242,7 @@ async function applyPreviewedGlossary(): Promise<void> {
     renderSubtitleListPreservingView(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
     setWorkspaceAction(
-      `已修正 ${applied.changed_segments} 段并保存到 SQLite；${applied.stale_translations} 段译文需要重译。`,
+      `已修正 ${applied.changed_segments} 段并保存到本地；${applied.stale_translations} 段译文需要重译。`,
     );
   } catch (error) {
     setWorkspaceAction(`应用词表失败：${String(error)}`, true);
@@ -6428,9 +6448,17 @@ karaokeWaveformGainInput?.addEventListener("input", () => {
   renderKaraokeTimeline();
 });
 karaokeWaveform?.addEventListener("pointerdown", (event) => {
-  if (!activeDetail || !karaokeWaveformWindow) return;
-  const hit = karaokeTimelineHitAtPoint(event.clientX, event.clientY);
-  if (hit) {
+  if (event.button !== 0 || !activeDetail || !karaokeWaveformWindow
+    || karaokeTimingDrag || karaokePanDrag || karaokePlayheadDrag) return;
+  const handleHit = karaokePlayheadHandleAtPoint(event.clientX, event.clientY);
+  const hit = handleHit ? null : karaokeTimelineHitAtPoint(event.clientX, event.clientY);
+  if (handleHit) {
+    activeMedia?.pause();
+    karaokePlayheadDrag = { pointerId: event.pointerId,
+      startMs: karaokeWaveformWindow.start_ms, endMs: karaokeWaveformWindow.end_ms };
+    karaokeSuppressClick = true;
+    karaokeWaveform.style.cursor = "ew-resize";
+  } else if (hit) {
     if (karaokeTextDraftDirty) {
       setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true);
       return;
@@ -6462,11 +6490,12 @@ karaokeWaveform?.addEventListener("pointerdown", (event) => {
   event.preventDefault();
 });
 karaokeWaveform?.addEventListener("pointermove", (event) => {
-  if (!karaokeTimingDrag && !karaokePanDrag) {
+  if (!karaokeTimingDrag && !karaokePanDrag && !karaokePlayheadDrag) {
     const hit = karaokeTimelineHitAtPoint(event.clientX, event.clientY);
-    karaokeWaveform.style.cursor = hit?.mode === "move" ? "grab" : hit ? "ew-resize" : "crosshair";
+    karaokeWaveform.style.cursor = karaokePlayheadHandleAtPoint(event.clientX, event.clientY) ? "ew-resize" : hit?.mode === "move" ? "grab" : hit ? "ew-resize" : "crosshair";
     return;
   }
+  if (karaokePlayheadDrag?.pointerId === event.pointerId) updateKaraokePlayheadDrag(event.clientX);
   if (karaokeTimingDrag?.pointerId === event.pointerId) updateKaraokeTimingDrag(event.clientX);
   if (karaokePanDrag?.pointerId === event.pointerId && karaokeWaveformWindow) {
     const bounds = karaokeWaveform.getBoundingClientRect();
@@ -6483,19 +6512,29 @@ karaokeWaveform?.addEventListener("pointermove", (event) => {
   event.preventDefault();
 });
 karaokeWaveform?.addEventListener("pointerup", (event) => {
+  if (karaokePlayheadDrag?.pointerId === event.pointerId) {
+    updateKaraokePlayheadDrag(event.clientX);
+    karaokePlayheadDrag = null;
+    karaokeSuppressClick = true;
+  }
   if (karaokeTimingDrag?.pointerId === event.pointerId) void commitKaraokeTimingDrag();
   if (karaokePanDrag?.pointerId === event.pointerId) {
     karaokeSuppressClick = karaokePanDrag.moved;
     karaokePanDrag = null;
   }
-  karaokeWaveform.releasePointerCapture(event.pointerId);
+  if (karaokeWaveform.hasPointerCapture(event.pointerId)) karaokeWaveform.releasePointerCapture(event.pointerId);
   event.preventDefault();
 });
 karaokeWaveform?.addEventListener("pointercancel", () => {
+  karaokePlayheadDrag = null;
   karaokePanDrag = null;
   cancelKaraokeTimingDrag();
 });
+karaokeWaveform?.addEventListener("lostpointercapture", () => {
+  karaokePlayheadDrag = null;
+});
 karaokeWaveform?.addEventListener("wheel", (event) => {
+  if (karaokePlayheadDrag) { event.preventDefault(); return; }
   if (!karaokeWaveformWindow || !karaokeZoomInput) return;
   const bounds = karaokeWaveform.getBoundingClientRect();
   if (event.ctrlKey || event.metaKey) {
@@ -7004,7 +7043,7 @@ function organizeTranslationCards(section: HTMLElement): void {
   const entries = [
     ["deepseek", "DeepSeek", "云端文本翻译；只发送字幕与上下文。"],
     ["deepl", "DeepL", "云端文本翻译；使用独立的 DeepL 凭据。"],
-    ["hy-mt2-local", "Hy-MT2 · 本地实验", "1.8B 与 7B 均保持实验档位，人工质量评审待完成。"],
+    ["hy-mt2-local", "Hy-MT2 · 本地翻译", "离线翻译，无需上传字幕。1.8B 占用较少，7B 需要更多内存和处理时间。"],
     ["openai-compatible", "OpenAI-compatible", "高级：自定义端点、模型与独立凭据。"],
   ];
   const advanced = document.createElement("details"); advanced.innerHTML = "<summary>高级：自定义兼容服务</summary>";
@@ -7315,7 +7354,7 @@ function addOfflineTools(): void {
   const taskChoice = document.createElement("div");
   taskChoice.className = "offline-tools";
   taskChoice.innerHTML =
-    '<label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地实验</option><option value="openai-compatible">高级兼容服务</option></select></label><button type="button" class="secondary">设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>';
+    '<label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地翻译</option><option value="openai-compatible">高级兼容服务</option></select></label><button type="button" class="secondary">设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>';
   document.querySelector("#workspace-translation-panel")?.prepend(taskChoice);
   taskChoice.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
     if (!activeDetail) return;

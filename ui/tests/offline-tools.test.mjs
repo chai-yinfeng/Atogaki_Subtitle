@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { matchesQuery, highlightSaved, candidateTextDiff } from "../src/offline-tools.ts";
+import { matchesQuery, highlightSaved, candidateTextDiff, playheadHandleContains, timelineTimeAtX } from "../src/offline-tools.ts";
 test("search covers normalized Japanese, English casing and empty queries", () => {
   assert.equal(matchesQuery("ＡＢＣ", [null, "abc podcast"]), true);
   assert.equal(matchesQuery("庭", ["湖吉の庭"]), true);
@@ -39,4 +39,17 @@ test("English saved words do not highlight inside a different word", () => {
 test('candidate diff preserves common Unicode text and escapes changes',()=>{
   assert.equal(candidateTextDiff('😀a<','😀b<'),'😀<del>a</del><ins>b</ins>&lt;');
   assert.equal(candidateTextDiff('<same>','<same>'),'&lt;same&gt;');
+});
+
+test("playhead handle does not steal waveform pan or subtitle trim gestures", () => {
+  assert.equal(playheadHandleContains(500, 24, 1000, 15000, 10000, 20000), true);
+  assert.equal(playheadHandleContains(500, 80, 1000, 15000, 10000, 20000), false);
+  assert.equal(playheadHandleContains(500, 230, 1000, 15000, 10000, 20000), false);
+  assert.equal(playheadHandleContains(520, 24, 1000, 15000, 10000, 20000), false);
+  assert.equal(playheadHandleContains(0, 24, 1000, 9000, 10000, 20000), false);
+  assert.equal(playheadHandleContains(0, 24, 1000, 10000, 10000, 20000), true);
+  assert.equal(playheadHandleContains(1000, 24, 1000, 20000, 10000, 20000), true);
+  assert.equal(timelineTimeAtX(-10, 1000, 10000, 20000), 10000);
+  assert.equal(timelineTimeAtX(1500, 1000, 10000, 20000), 20000);
+  assert.equal(timelineTimeAtX(300, 1000, 10000, 20000), 13000);
 });
