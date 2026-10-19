@@ -599,3 +599,10 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .candidate-diff p {white-space:pre-wrap;line-height:1.7;}
 .candidate-diff del {background:#f8d8d2;} .candidate-diff ins {background:#d8eddf;text-decoration:none;}
 .candidate-diff pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;}
+
+.asr-quality-review { grid-column: 1 / -1; }
+.asr-quality-review > summary { cursor: pointer; padding: 8px 0; color: #555f57; font-size: 12px; }
+.asr-quality-locate { display: grid; gap: 5px; width: 100%; padding: 4px; border: 0; border-radius: 3px; background: transparent; color: inherit; text-align: left; }
+.asr-quality-locate:hover { background: #edf3ee; }
+.asr-quality-locate:focus-visible { outline: 2px solid #2e5d52; outline-offset: 2px; }
+.asr-quality-locate .asr-quality-message { color: #30332d; font-size: 11px; line-height: 1.5; }

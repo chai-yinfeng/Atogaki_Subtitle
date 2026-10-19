@@ -743,7 +743,7 @@ app.innerHTML = `
               <label id="gemini-upload-consent" class="clear-secret hidden"><input id="authorize-gemini-upload" type="checkbox" /><span>允许将这次所选范围的音频上传给 Google；免费层数据可能用于改进产品</span></label>
               <div class="retranscription-actions"><button id="retranscription-use-window" type="button" class="secondary">使用当前波形范围</button><button id="retranscription-expand-segments" type="button" class="secondary">对齐到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
               <p id="retranscription-message" class="media-message">范围边界不能切穿已有字幕块；需要时请显式扩展。</p>
-              <div id="asr-quality-signals" class="asr-quality-signals"></div>
+              <details id="asr-quality-review" class="asr-quality-review"><summary id="asr-quality-summary">转录待复核提示</summary><div id="asr-quality-signals" class="asr-quality-signals"></div></details>
             </div>
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
@@ -3433,17 +3433,27 @@ async function saveAsrReviewDecision(
 
 async function loadAsrQualitySignals(jobId: string): Promise<void> {
   if (!asrQualitySignalsHost) return;
+  const disclosure = document.querySelector<HTMLDetailsElement>("#asr-quality-review");
+  const summary = document.querySelector<HTMLElement>("#asr-quality-summary");
+  if (disclosure && disclosure.dataset.jobId !== jobId) {
+    disclosure.open = false;
+    disclosure.dataset.jobId = jobId;
+    if (summary) summary.textContent = "转录待复核提示 · 正在读取";
+    asrQualitySignalsHost.innerHTML = "";
+  }
   try {
     const signals = await invoke<AsrQualitySignal[]>("list_asr_quality_signals", { jobId });
+    if (activeDetail?.job.job_id !== jobId) return;
+    if (summary) summary.textContent = `转录待复核提示 · ${signals.length} 项，${signals.filter(signal => signal.latest_decision === null).length} 项待复核`;
     if (signals.length === 0) {
-      asrQualitySignalsHost.innerHTML = '<p class="media-message">当前 run 没有自动可疑信号；仍可按听审结果手动选择范围重跑。</p>';
+      asrQualitySignalsHost.innerHTML = '<p class="media-message">未发现自动提示，仍可根据试听结果手动选择重新识别的范围。</p>';
       return;
     }
     const signalLabels: Record<AsrQualitySignal["signal_kind"], string> = {
       boundary_repetition: "边界文字重复", repeated_loop: "相邻字幕重复",
       abnormal_speech_rate: "文字与时长不匹配", speech_during_silence: "静音区出现文字", manual_concern: "接缝待复核",
     };
-    asrQualitySignalsHost.innerHTML = '<h4>转录待复核提示</h4><p class="media-message">以下提示由转录结果自动检查产生，不是重跑或翻译历史，也不代表一定识别错误。试听后可确认问题或标记误报；选取范围后，再点击“识别并预览”生成候选。</p>' + signals.map((signal) => {
+    asrQualitySignalsHost.innerHTML = '<p class="media-message">以下提示由转录结果自动检查产生，不是重跑或翻译历史，也不代表一定识别错误。点击提示可定位时间轴；试听后可确认问题或标记误报。选取范围后，再点击“识别并预览”生成候选。</p>' + signals.map((signal) => {
       const range = signal.start_ms === null || signal.end_ms === null
         ? "未指定范围"
         : `${formatPreciseTime(signal.start_ms)} → ${formatPreciseTime(signal.end_ms)}`;
@@ -3451,11 +3461,15 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
         : signal.latest_decision === "false_positive" ? "已标记误报"
           : signal.latest_decision === "resolved" ? "已修复" : "待审查";
       return `<article class="asr-quality-signal" data-severity="${signal.severity}">
-        <div><p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review}</span></div>
+        <div>${signal.start_ms === null || signal.end_ms === null
+          ? `<p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review}</span>`
+          : `<button type="button" class="asr-quality-locate" data-locate-signal="${signal.id}" data-job-id="${jobId}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}" aria-label="定位 ${range}：${escapeHtml(signal.message)}"><span class="asr-quality-message">${escapeHtml(signal.message)}</span><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review} · 点击定位</span></button>`}</div>
         <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">选取此范围</button>`}</div>
       </article>`;
     }).join("");
   } catch (error) {
+    if (activeDetail?.job.job_id !== jobId) return;
+    if (summary) summary.textContent = "转录待复核提示 · 读取失败";
     asrQualitySignalsHost.innerHTML = `<p class="media-message warning">无法读取 ASR 审查信号：${escapeHtml(String(error))}</p>`;
   }
 }
@@ -6624,8 +6638,25 @@ retranscriptionProvider?.addEventListener("change", () => {
   if (!cloud && authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
 });
 asrQualitySignalsHost?.addEventListener("click", (event) => {
-  const target = event.target;
+  const target = event.target instanceof Element ? event.target.closest("button") : null;
   if (!(target instanceof HTMLButtonElement)) return;
+  if (target.dataset.locateSignal) {
+    if (target.dataset.jobId !== activeDetail?.job.job_id || currentArea !== "karaoke") return;
+    const startMs = Number(target.dataset.startMs);
+    if (!Number.isFinite(startMs)) return;
+    activeMedia?.pause();
+    karaokeFollowPlayhead = false;
+    syncKaraokeFollowButton();
+    if (karaokeWaveformReloadTimer !== null) {
+      window.clearTimeout(karaokeWaveformReloadTimer);
+      karaokeWaveformReloadTimer = null;
+    }
+    seekTo(startMs, false);
+    updateActiveSubtitle(startMs);
+    void loadKaraokeWaveform(startMs);
+    karaokeWaveform?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
   const signalId = target.dataset.signalId ?? target.dataset.repairSignal;
   if (!signalId) return;
   if (target.dataset.asrReview) {

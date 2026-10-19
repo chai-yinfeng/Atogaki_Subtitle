@@ -147,3 +147,13 @@ Release 工具链：根 CLI 与 Tauri 的独立 Cargo manifest 设置 `[profile.
 视觉仅整理官方参考，未改整体样式或把官网图片加入发行包。构建期间格式器产生的三个无关文件变更已先完整备份，逐字节比较 rustfmt 规范化结果等于 HEAD 后清理；没有删除用户修改。
 
 Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，原有 13 个任务可见，原 Hy-MT2 默认选择保留。release 构建、四个 sidecar、深度签名与主程序一致性校验通过。最新 SQLite 一致性备份保存于 local-artifacts/install-backups/20261019-gemini/，完整性检查 ok；上一 App 保留为 /Applications/.Atogaki.previous.20261019-gemini。没有执行真实翻译、保存或删除用户 Key。新版本 Windows 原生窗口与新提交 CI 结果尚未验证，不能沿用旧提交的通过状态。
+
+## 2026-10-19：可疑提示折叠与时间轴定位
+
+辅助审查使用原生 details，初次／切换任务默认折叠，同任务审查刷新保留展开状态。摘要显示总数和待复核数。有范围的说明和时间构成可键盘操作的定位按钮；定位暂停播放、移动播放头、读取相应波形并滚动到时间轴，不改修复范围或 Gemini 音频授权，不运行 ASR。异步列表返回前核对当前任务，防止旧任务结果覆盖。
+
+前端 5 项测试、类型检查、生产构建、cargo fmt 和 diff 检查通过；debug 与 release App 构建通过。独立 bundle ID 配合 /private/tmp/atogaki-review-navigation（由旧隔离库一致性复制并注入一条 UI 测试信号，不改正式库）：初始 summary 为 off，展开为 on，点击 40–44 秒提示后播放头为 40.000 秒、可视波形 25.085–54.915 秒，保持暂停；字幕全部数据库行摘要与 ASR run 数量前后不变。没有运行识别、翻译或上传。
+
+主题仅补充官方参考与架构建议，没有实现主题配置或把官方素材放进 App。
+
+本次辅助审查交互已更新到 /Applications/Atogaki.app 并启动，原有 13 个任务与翻译选择保留；四个 sidecar、签名与主程序一致性检查通过。当前库一致性备份在 local-artifacts/install-backups/20261019-review/，前版本在 /Applications/.Atogaki.previous.20261019-review。没有改动主题、字幕内容、审查结论或任务执行状态。
