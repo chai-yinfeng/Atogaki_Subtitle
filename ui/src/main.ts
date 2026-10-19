@@ -620,7 +620,7 @@ app.innerHTML = `
           </div>
           <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
           <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
-          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>完整转录后自动翻译；云端只发送字幕文本和上下文。</span></label>
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>完整转录后自动翻译；云端只发送字幕文本和上下文。</span></label>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
@@ -1085,7 +1085,7 @@ app.innerHTML = `
         </section>
         <section class="settings-section">
           <div class="settings-section-heading"><div><strong>3. 云端 ASR（可选）</strong><span>Gemini Key 只存入系统凭据库。配置 Key 不会授权上传；每次运行仍需单独确认音频范围。</span></div><span id="asr-credential-store-label"></span></div>
-          <label>Gemini API Key<input id="settings-gemini-api-key" type="password" autocomplete="off" placeholder="从 Google AI Studio 创建；保存后立即清空" /></label>
+          <p>与翻译区 Gemini 共用同一把 Key；保存或删除会同时影响两项功能。音频上传仍需逐次授权。</p><label>Gemini API Key<input id="settings-gemini-api-key" type="password" autocomplete="off" placeholder="从 Google AI Studio 创建；保存后立即清空" /></label>
           <div class="credential-check-row"><button id="save-gemini-api-key" type="button">保存 Key</button><button id="check-gemini-api-key" type="button" class="secondary">检查</button><button id="clear-gemini-api-key" type="button" class="secondary">删除</button></div>
           <p id="gemini-api-key-status" class="settings-message">尚未读取配置。</p>
           <p class="settings-message">Atogaki 上传提取后的 WAV，并在转录请求完成后调用 Files API 删除上传文件。免费层价格为 $0，但存在项目级 rate limits，且免费层数据会用于改进 Google 产品。</p>
@@ -1096,7 +1096,7 @@ app.innerHTML = `
             <select id="settings-provider">
               <option value="hy-mt2-local">Hy-MT2（本地翻译）</option>
               <option value="deepl">DeepL（传统翻译 API）</option>
-              <option value="deepseek">DeepSeek（LLM API）</option>
+              <option value="deepseek">DeepSeek（LLM API）</option><option value="gemini">Gemini（文本翻译）</option>
               <option value="openai-compatible">OpenAI-compatible（高级）</option>
               <option value="none">不翻译／仅保留原文</option>
             </select>
@@ -1582,7 +1582,7 @@ function formatBytes(bytes: number): string {
 function syncProviderSettings(): void {
   const provider = settingsProvider?.value ?? "none";
   const cloudEnabled = provider !== "none" && provider !== "hy-mt2-local";
-  const llmEnabled = provider === "deepseek" || provider === "openai-compatible" || provider === "hy-mt2-local";
+  const llmEnabled = provider === "gemini" || provider === "deepseek" || provider === "openai-compatible" || provider === "hy-mt2-local";
   const customEndpoint = provider === "openai-compatible";
   document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !cloudEnabled);
   settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !cloudEnabled);
@@ -1591,7 +1591,7 @@ function syncProviderSettings(): void {
   document.querySelector<HTMLElement>("#provider-base-url-field")?.classList.toggle("hidden", !customEndpoint);
   document.querySelector<HTMLElement>("#provider-model-field")?.classList.toggle("hidden", provider === "hy-mt2-local");
   if (settingsProviderModel) settingsProviderModel.disabled = provider === "hy-mt2-local";
-  const providerLabel = provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
+  const providerLabel = provider === "gemini" ? "Gemini（与语音识别共用）" : provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
   const apiKeyLabel = document.querySelector<HTMLSpanElement>("#api-key-label");
   const clearApiKeyLabel = document.querySelector<HTMLSpanElement>("#clear-api-key-label");
   if (apiKeyLabel) apiKeyLabel.textContent = `${providerLabel} API Key`;
@@ -1838,6 +1838,8 @@ async function saveGeminiCredential(clear: boolean): Promise<void> {
       request: { apiKey: clear ? null : apiKey, clear },
     });
     renderAsrCredentialStatus(status);
+    await refreshProviderReadiness();
+    if (settingsApiKey && settingsProvider?.value === "gemini") settingsApiKey.value = "";
   } catch (error) {
     geminiApiKeyStatus.textContent = `操作失败：${String(error)}`;
     geminiApiKeyStatus.classList.add("warning");
@@ -3437,7 +3439,11 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
       asrQualitySignalsHost.innerHTML = '<p class="media-message">当前 run 没有自动可疑信号；仍可按听审结果手动选择范围重跑。</p>';
       return;
     }
-    asrQualitySignalsHost.innerHTML = signals.map((signal) => {
+    const signalLabels: Record<AsrQualitySignal["signal_kind"], string> = {
+      boundary_repetition: "边界文字重复", repeated_loop: "相邻字幕重复",
+      abnormal_speech_rate: "文字与时长不匹配", speech_during_silence: "静音区出现文字", manual_concern: "接缝待复核",
+    };
+    asrQualitySignalsHost.innerHTML = '<h4>转录待复核提示</h4><p class="media-message">以下提示由转录结果自动检查产生，不是重跑或翻译历史，也不代表一定识别错误。试听后可确认问题或标记误报；选取范围后，再点击“识别并预览”生成候选。</p>' + signals.map((signal) => {
       const range = signal.start_ms === null || signal.end_ms === null
         ? "未指定范围"
         : `${formatPreciseTime(signal.start_ms)} → ${formatPreciseTime(signal.end_ms)}`;
@@ -3445,8 +3451,8 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
         : signal.latest_decision === "false_positive" ? "已标记误报"
           : signal.latest_decision === "resolved" ? "已修复" : "待审查";
       return `<article class="asr-quality-signal" data-severity="${signal.severity}">
-        <div><p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signal.signal_kind)} · ${review}</span></div>
-        <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">按此范围重跑</button>`}</div>
+        <div><p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review}</span></div>
+        <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">选取此范围</button>`}</div>
       </article>`;
     }).join("");
   } catch (error) {
@@ -6326,13 +6332,16 @@ settingsProvider?.addEventListener("change", () => {
   if (settingsProvider.value === "deepseek") {
     if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.deepseek.com";
     if (settingsProviderModel) settingsProviderModel.value = "deepseek-v4-flash";
+  } else if (settingsProvider.value === "gemini") {
+    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://generativelanguage.googleapis.com/v1beta/openai";
+    if (settingsProviderModel) settingsProviderModel.value = "gemini-3.8-flash";
   } else if (settingsProvider.value === "openai-compatible") {
     if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.openai.com/v1";
     if (settingsProviderModel) settingsProviderModel.value = "";
   } else if (settingsProviderModel) {
     settingsProviderModel.value = "";
   }
-  if ((settingsProvider.value === "deepseek" || settingsProvider.value === "openai-compatible") && settingsTranslationStyle && !settingsTranslationStyle.value.trim()) {
+  if ((settingsProvider.value === "gemini" || settingsProvider.value === "deepseek" || settingsProvider.value === "openai-compatible") && settingsTranslationStyle && !settingsTranslationStyle.value.trim()) {
     settingsTranslationStyle.value = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
   }
   const draft = providerDrafts.get(settingsProvider.value);
@@ -6633,7 +6642,7 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
   if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
-  setRetranscriptionMessage("已载入可疑范围；可选择 Whisper 或 Gemini 生成独立候选 run。", false);
+  setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
 });
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
 document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());
@@ -7042,6 +7051,7 @@ function organizeTranslationCards(section: HTMLElement): void {
   const cards = document.createElement("div"); cards.className = "provider-cards";
   const entries = [
     ["deepseek", "DeepSeek", "云端文本翻译；只发送字幕与上下文。"],
+    ["gemini", "Gemini", "只发送字幕文本和上下文；与 Gemini 语音识别共用 Key。保存或删除 Key 会同时影响两处，音频上传仍需单独授权。"],
     ["deepl", "DeepL", "云端文本翻译；使用独立的 DeepL 凭据。"],
     ["hy-mt2-local", "Hy-MT2 · 本地翻译", "离线翻译，无需上传字幕。1.8B 占用较少，7B 需要更多内存和处理时间。"],
     ["openai-compatible", "OpenAI-compatible", "高级：自定义端点、模型与独立凭据。"],
@@ -7086,8 +7096,12 @@ function organizeTranslationCards(section: HTMLElement): void {
       if (settingsProvider?.value === id && settingsApiKey?.value === secret) settingsApiKey.value = "";
       if (settingsClearApiKey) settingsClearApiKey.checked = false;
       await refreshProviderReadiness();
+      if (id === "gemini") {
+        renderAsrCredentialStatus(await invoke<AsrCredentialStatus>("asr_credential_status"));
+        if (settingsGeminiApiKey) settingsGeminiApiKey.value = "";
+      }
       if (settingsProvider?.value === id && apiKeyStatus) apiKeyStatus.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；连接状态请查看卡片。`;
-      if (settingsMessage) settingsMessage.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；其他后端配置未改变。`;
+      if (settingsMessage) settingsMessage.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；${id === "gemini" ? "语音识别与翻译共用此 Key，音频上传仍需单独授权。" : "其他后端配置未改变。"}`;
     } catch (error) { if (settingsMessage) settingsMessage.textContent = String(error); }
     finally { button.disabled = false; }
   };
@@ -7354,7 +7368,7 @@ function addOfflineTools(): void {
   const taskChoice = document.createElement("div");
   taskChoice.className = "offline-tools";
   taskChoice.innerHTML =
-    '<label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地翻译</option><option value="openai-compatible">高级兼容服务</option></select></label><button type="button" class="secondary">设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>';
+    '<label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="gemini">Gemini</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地翻译</option><option value="openai-compatible">高级兼容服务</option></select></label><button type="button" class="secondary">设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>';
   document.querySelector("#workspace-translation-panel")?.prepend(taskChoice);
   taskChoice.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
     if (!activeDetail) return;

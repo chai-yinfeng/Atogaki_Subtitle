@@ -483,6 +483,74 @@ mod tests {
     };
 
     #[test]
+    fn gemini_text_translation_preserves_the_existing_response_contract() {
+        let provider = OpenAiCompatibleTranslationProvider::with_network_config(
+            OpenAiCompatibleConfig {
+                provider_id: "gemini".into(),
+                provider_name: "Gemini".into(),
+                api_key: Some("test-only-key".into()),
+                base_url: "https://generativelanguage.googleapis.com/v1beta/openai".into(),
+                model: "gemini-3.8-flash".into(),
+                style_instruction: "保留语气".into(),
+                disable_deepseek_thinking: false,
+                generation: Default::default(),
+            },
+            &NetworkClientConfig::new("direct", None).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            provider.base_url.join("chat/completions").unwrap().as_str(),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        let request = TranslationRequest {
+            options: Default::default(),
+            targets: vec![TranslationTargetSegment {
+                segment_id: "cue-1".into(),
+                source_text: "こんばんは".into(),
+            }],
+            before_context: vec![crate::application::TranslationContextSegment {
+                segment_id: "context-0".into(),
+                source_text: "suisです".into(),
+            }],
+            after_context: vec![],
+            style_instruction: None,
+        };
+        let prepared = vec![("cue-1".into(), protect_terms("こんばんは", &[]))];
+        let body = provider.build_request_body(&request, &prepared);
+        assert_eq!(body["model"], "gemini-3.8-flash");
+        assert!(body.get("thinking").is_none());
+        assert!(
+            body["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|m| m["content"].is_string())
+        );
+        let payload = body["messages"][1]["content"].as_str().unwrap();
+        assert!(payload.contains("context-0"));
+        let by_id = prepared.into_iter().collect();
+        let response = |content: serde_json::Value| {
+            json!({"choices":[{"message":{"content":content.to_string()}}]}).to_string()
+        };
+        let valid =
+            response(json!({"translations":[{"segment_id":"cue-1","translated_text":"晚上好"}]}));
+        assert_eq!(
+            provider
+                .decode_response(&valid, &by_id)
+                .unwrap()
+                .translations
+                .len(),
+            1
+        );
+        let extra = response(
+            json!({"translations":[{"segment_id":"context-0","translated_text":"我是 suis"}]}),
+        );
+        assert!(provider.decode_response(&extra, &by_id).is_err());
+        let missing = response(json!({"translations":[]}));
+        assert!(provider.decode_response(&missing, &by_id).is_err());
+    }
+
+    #[test]
     fn validates_cloud_https_and_loopback_http_only() {
         assert!(validate_openai_base_url("https://api.deepseek.com").is_ok());
         assert!(validate_openai_base_url("http://127.0.0.1:11434/v1").is_ok());

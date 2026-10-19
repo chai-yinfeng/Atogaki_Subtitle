@@ -7,7 +7,7 @@ _冻结日期：2026-09-18_
 | 层级 | 本地路线 | 云端路线 |
 | --- | --- | --- |
 | ASR | Whisper.cpp：新任务全片识别、selected-range 独立 run、VAD、词表提示、GPU→CPU 回退 | Gemini 3.5 Transcribe：selected-range 独立 run、真实 word timestamps、可选 speaker 数据、每次范围单独授权上传 |
-| Translation | Hy-MT2 1.8B／7B：App 管理模型，受管 loopback `llama-server`，translation groups 与结构门禁 | DeepL、DeepSeek、OpenAI-compatible：系统凭据、translation groups、上下文／revision 校验 |
+| Translation | Hy-MT2 1.8B／7B：App 管理模型，受管 loopback `llama-server`，translation groups 与结构门禁 | DeepL、DeepSeek、Gemini、OpenAI-compatible：系统凭据、translation groups、上下文／revision 校验 |
 
 因此当前可验证的组合是：
 

@@ -38,6 +38,10 @@ const MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED: &str = "dictionary.merriam_webster_k
 const MERRIAM_WEBSTER_REFERENCE: &str = "dictionary.merriam_webster_reference";
 const GEMINI_ASR_KEY_SAVED: &str = "recognition.gemini_key_saved";
 const GEMINI_ASR_CREDENTIAL_ID: &str = "asr.gemini-transcribe";
+const GEMINI_TRANSLATION_MODEL: &str = "translation.gemini_model";
+const GEMINI_PROVIDER_ID: &str = "gemini";
+const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
+const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 const DEEPSEEK_MODEL: &str = "translation.deepseek_model";
 const OPENAI_BASE_URL: &str = "translation.openai_base_url";
 const OPENAI_MODEL: &str = "translation.openai_model";
@@ -344,36 +348,17 @@ impl DesktopSettingsService {
         &self,
         request: SaveAsrCredentialRequest,
     ) -> Result<AsrCredentialStatus> {
-        let secret = normalized_secret(request.api_key);
-        if request.clear && secret.is_some() {
+        if request.clear && normalized_secret(request.api_key.clone()).is_some() {
             bail!("cannot save and clear the Gemini credential at the same time");
         }
-        if request.clear {
-            self.credentials.delete(GEMINI_ASR_CREDENTIAL_ID)?;
-            self.replace_cached_provider_key(GEMINI_ASR_CREDENTIAL_ID, None, None);
-            self.database.delete_setting(GEMINI_ASR_KEY_SAVED).await?;
-        } else if let Some(secret) = secret {
-            self.credentials.set(GEMINI_ASR_CREDENTIAL_ID, &secret)?;
-            self.replace_cached_provider_key(GEMINI_ASR_CREDENTIAL_ID, Some(secret), None);
-            self.database
-                .set_setting(GEMINI_ASR_KEY_SAVED, "true")
-                .await?;
-        } else {
-            bail!("Gemini API key cannot be empty");
-        }
+        self.save_translation_credential(GEMINI_PROVIDER_ID, request.api_key, request.clear)
+            .await?;
         self.asr_credential_status().await
     }
 
     pub async fn check_asr_credential(&self) -> Result<AsrCredentialStatus> {
-        let configured =
-            normalized_secret(self.credentials.get(GEMINI_ASR_CREDENTIAL_ID)?).is_some();
-        if configured {
-            self.database
-                .set_setting(GEMINI_ASR_KEY_SAVED, "true")
-                .await?;
-        } else {
-            self.database.delete_setting(GEMINI_ASR_KEY_SAVED).await?;
-        }
+        let checked = self.check_translation_api_key(GEMINI_PROVIDER_ID).await?;
+        let configured = checked.stored_in_system;
         Ok(AsrCredentialStatus {
             provider_id: "gemini-transcribe".into(),
             provider_name: "Gemini 3.5 Transcribe".into(),
@@ -541,6 +526,7 @@ impl DesktopSettingsService {
                     "none"
                         | DEEPL_PROVIDER_ID
                         | DEEPSEEK_PROVIDER_ID
+                        | GEMINI_PROVIDER_ID
                         | OPENAI_COMPATIBLE_PROVIDER_ID
                         | HY_MT2_LOCAL_PROVIDER_ID
                 )
@@ -553,6 +539,12 @@ impl DesktopSettingsService {
                     .await?
                     .unwrap_or_else(|| DEFAULT_DEEPSEEK_MODEL.to_string()),
             ),
+            GEMINI_PROVIDER_ID => Some(
+                self.database
+                    .get_setting(GEMINI_TRANSLATION_MODEL)
+                    .await?
+                    .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.into()),
+            ),
             OPENAI_COMPATIBLE_PROVIDER_ID => self.database.get_setting(OPENAI_MODEL).await?,
             HY_MT2_LOCAL_PROVIDER_ID => hy_mt2_model
                 .as_ref()
@@ -563,6 +555,7 @@ impl DesktopSettingsService {
         };
         let translation_base_url = match translation_provider_id.as_str() {
             DEEPSEEK_PROVIDER_ID => Some(DEFAULT_DEEPSEEK_BASE_URL.to_string()),
+            GEMINI_PROVIDER_ID => Some(DEFAULT_GEMINI_BASE_URL.to_string()),
             OPENAI_COMPATIBLE_PROVIDER_ID => Some(
                 self.database
                     .get_setting(OPENAI_BASE_URL)
@@ -682,6 +675,14 @@ impl DesktopSettingsService {
         self.database
             .set_setting(TRANSLATION_PROVIDER, &request.translation_provider_id)
             .await?;
+        if request.translation_provider_id == GEMINI_PROVIDER_ID {
+            self.database
+                .set_setting(
+                    GEMINI_TRANSLATION_MODEL,
+                    translation_model.as_deref().unwrap_or(DEFAULT_GEMINI_MODEL),
+                )
+                .await?;
+        }
         if request.translation_provider_id == DEEPSEEK_PROVIDER_ID {
             self.database
                 .set_setting(
@@ -768,7 +769,7 @@ impl DesktopSettingsService {
         if matches!(provider_id, "none" | HY_MT2_LOCAL_PROVIDER_ID) {
             bail!("select a translation provider before checking its API key");
         }
-        let secret = match self.credentials.get(provider_id) {
+        let secret = match self.credentials.get(credential_id(provider_id)) {
             Ok(secret) => normalized_secret(secret),
             Err(error) => {
                 self.replace_cached_provider_key(provider_id, None, Some(format!("{error:#}")));
@@ -1072,11 +1073,19 @@ impl DesktopSettingsService {
                     .await?
                     .unwrap_or_else(|| DEFAULT_DEEPSEEK_MODEL.into()),
             ),
+            GEMINI_PROVIDER_ID => Some(
+                self.database
+                    .get_setting(GEMINI_TRANSLATION_MODEL)
+                    .await?
+                    .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.into()),
+            ),
             OPENAI_COMPATIBLE_PROVIDER_ID => self.database.get_setting(OPENAI_MODEL).await?,
             _ => None,
         };
         let base_url = if id == OPENAI_COMPATIBLE_PROVIDER_ID {
             self.database.get_setting(OPENAI_BASE_URL).await?
+        } else if id == GEMINI_PROVIDER_ID {
+            Some(DEFAULT_GEMINI_BASE_URL.to_string())
         } else {
             None
         };
@@ -1095,13 +1104,13 @@ impl DesktopSettingsService {
         let marker = key_saved_setting(id)
             .ok_or_else(|| anyhow!("this provider does not use API credentials"))?;
         if clear {
-            self.credentials.delete(id)?;
+            self.credentials.delete(credential_id(id))?;
             self.replace_cached_provider_key(id, None, None);
             self.database.delete_setting(marker).await?;
         } else {
             let secret =
                 normalized_secret(api_key).ok_or_else(|| anyhow!("API Key cannot be empty"))?;
-            self.credentials.set(id, &secret)?;
+            self.credentials.set(credential_id(id), &secret)?;
             self.replace_cached_provider_key(id, Some(secret), None);
             self.database.set_setting(marker, "true").await?;
         }
@@ -1215,6 +1224,18 @@ impl DesktopSettingsService {
                 style_instruction: style_instruction.to_string(),
                 disable_deepseek_thinking: true,
             }),
+            GEMINI_PROVIDER_ID => Arc::new(DeferredOpenAiCompatibleTranslationProvider {
+                provider_id: GEMINI_PROVIDER_ID.to_string(),
+                provider_name: "Gemini".into(),
+                credentials: Arc::clone(&self.credentials),
+                credential_cache: Arc::clone(&self.credential_cache),
+                environment_key: None,
+                network: network.clone(),
+                base_url: DEFAULT_GEMINI_BASE_URL.into(),
+                model: model.unwrap_or(DEFAULT_GEMINI_MODEL).into(),
+                style_instruction: style_instruction.into(),
+                disable_deepseek_thinking: false,
+            }),
             OPENAI_COMPATIBLE_PROVIDER_ID => {
                 Arc::new(DeferredOpenAiCompatibleTranslationProvider {
                     provider_id: OPENAI_COMPATIBLE_PROVIDER_ID.to_string(),
@@ -1291,6 +1312,7 @@ impl DesktopSettingsService {
         &self,
         provider_id: &str,
     ) -> (Option<String>, Option<String>, bool) {
+        let provider_id = credential_id(provider_id);
         let cache = self
             .credential_cache
             .lock()
@@ -1307,6 +1329,7 @@ impl DesktopSettingsService {
         secret: Option<String>,
         error: Option<String>,
     ) {
+        let provider_id = credential_id(provider_id);
         let mut caches = self
             .credential_cache
             .lock()
@@ -1327,6 +1350,7 @@ fn cached_provider_key(
     credentials: &dyn CredentialStore,
     credential_cache: &Mutex<HashMap<String, CredentialCache>>,
 ) -> (Option<String>, Option<String>) {
+    let provider_id = credential_id(provider_id);
     let mut caches = credential_cache
         .lock()
         .expect("credential cache lock poisoned");
@@ -1345,6 +1369,7 @@ fn credential_cache_loaded(
     provider_id: &str,
     credential_cache: &Mutex<HashMap<String, CredentialCache>>,
 ) -> bool {
+    let provider_id = credential_id(provider_id);
     credential_cache
         .lock()
         .expect("credential cache lock poisoned")
@@ -1358,6 +1383,7 @@ fn validate_provider_id(provider_id: &str) -> Result<()> {
         "none"
             | DEEPL_PROVIDER_ID
             | DEEPSEEK_PROVIDER_ID
+            | GEMINI_PROVIDER_ID
             | OPENAI_COMPATIBLE_PROVIDER_ID
             | HY_MT2_LOCAL_PROVIDER_ID
     ) {
@@ -1367,10 +1393,19 @@ fn validate_provider_id(provider_id: &str) -> Result<()> {
     }
 }
 
+fn credential_id(id: &str) -> &str {
+    if id == GEMINI_PROVIDER_ID {
+        GEMINI_ASR_CREDENTIAL_ID
+    } else {
+        id
+    }
+}
+
 fn key_saved_setting(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         DEEPL_PROVIDER_ID => Some(DEEPL_KEY_SAVED),
         DEEPSEEK_PROVIDER_ID => Some(DEEPSEEK_KEY_SAVED),
+        GEMINI_PROVIDER_ID => Some(GEMINI_ASR_KEY_SAVED),
         OPENAI_COMPATIBLE_PROVIDER_ID => Some(OPENAI_COMPATIBLE_KEY_SAVED),
         _ => None,
     }
@@ -1380,6 +1415,7 @@ fn provider_display_name(provider_id: &str) -> &'static str {
     match provider_id {
         DEEPL_PROVIDER_ID => "DeepL",
         DEEPSEEK_PROVIDER_ID => "DeepSeek",
+        GEMINI_PROVIDER_ID => "Gemini",
         OPENAI_COMPATIBLE_PROVIDER_ID => "OpenAI-compatible",
         HY_MT2_LOCAL_PROVIDER_ID => "Hy-MT2（本地）",
         _ => "翻译服务",
@@ -1421,6 +1457,16 @@ fn validate_llm_settings(
             model: model.unwrap_or(DEFAULT_DEEPSEEK_MODEL).to_string(),
             style_instruction: style_instruction.to_string(),
             disable_deepseek_thinking: true,
+            generation: Default::default(),
+        }),
+        GEMINI_PROVIDER_ID => Some(OpenAiCompatibleConfig {
+            provider_id: provider_id.into(),
+            provider_name: "Gemini".into(),
+            api_key: Some("validation-only".into()),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
+            model: model.unwrap_or(DEFAULT_GEMINI_MODEL).into(),
+            style_instruction: style_instruction.into(),
+            disable_deepseek_thinking: false,
             generation: Default::default(),
         }),
         OPENAI_COMPATIBLE_PROVIDER_ID => Some(OpenAiCompatibleConfig {
@@ -1749,6 +1795,130 @@ mod tests {
 
         drop(service);
         drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[derive(Debug, Default)]
+    struct ScopedCredentials {
+        entries: Mutex<std::collections::HashMap<String, String>>,
+        reads: Mutex<usize>,
+    }
+    impl CredentialStore for ScopedCredentials {
+        fn backend_name(&self) -> &'static str {
+            "isolated scoped test store"
+        }
+        fn get(&self, id: &str) -> Result<Option<String>> {
+            *self.reads.lock().unwrap() += 1;
+            Ok(self.entries.lock().unwrap().get(id).cloned())
+        }
+        fn set(&self, id: &str, key: &str) -> Result<()> {
+            self.entries.lock().unwrap().insert(id.into(), key.into());
+            Ok(())
+        }
+        fn delete(&self, id: &str) -> Result<()> {
+            self.entries.lock().unwrap().remove(id);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn gemini_reuses_legacy_asr_key_and_rotates_shared_cache_and_validation() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-gemini-shared-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let db = LocalDatabase::open(root.join("state.sqlite"))
+            .await
+            .unwrap();
+        let credentials = Arc::new(ScopedCredentials::default());
+        credentials
+            .set(super::GEMINI_ASR_CREDENTIAL_ID, "legacy-test-key")
+            .unwrap();
+        db.set_setting(super::GEMINI_ASR_KEY_SAVED, "true")
+            .await
+            .unwrap();
+        let service = DesktopSettingsService::with_credentials(
+            db.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            credentials.clone(),
+        );
+        service.initialize().await.unwrap();
+        let profile = service.translation_profile("gemini").await.unwrap();
+        assert_eq!(profile["model"], super::DEFAULT_GEMINI_MODEL);
+        assert_eq!(profile["base_url"], super::DEFAULT_GEMINI_BASE_URL);
+        assert_eq!(
+            service.translation_readiness("gemini").await.unwrap(),
+            "unverified"
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+        let frozen = service.task_provider(&profile).await.unwrap();
+        service.gemini_asr_provider().await.unwrap();
+        assert_eq!(
+            service.cached_provider_key_snapshot("gemini").0.as_deref(),
+            Some("legacy-test-key")
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 1);
+        let fingerprint = service
+            .translation_validation_fingerprint("gemini")
+            .await
+            .unwrap();
+        service
+            .record_translation_validation("gemini", &fingerprint, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("gemini").await.unwrap(),
+            "verified"
+        );
+        service
+            .save_asr_credential(super::SaveAsrCredentialRequest {
+                api_key: Some("rotated-test-key".into()),
+                clear: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            service.cached_provider_key_snapshot("gemini").0.as_deref(),
+            Some("rotated-test-key")
+        );
+        assert_eq!(
+            service.translation_readiness("gemini").await.unwrap(),
+            "unverified"
+        );
+        assert_eq!(credentials.entries.lock().unwrap().len(), 1);
+        assert!(!credentials.entries.lock().unwrap().contains_key("gemini"));
+        assert_ne!(
+            service
+                .translation_validation_fingerprint("gemini")
+                .await
+                .unwrap(),
+            fingerprint
+        );
+        db.set_setting(super::GEMINI_TRANSLATION_MODEL, "gemini-custom-test-model")
+            .await
+            .unwrap();
+        assert_eq!(
+            frozen.status().model.as_deref(),
+            Some(super::DEFAULT_GEMINI_MODEL)
+        );
+        assert_eq!(
+            service.translation_profile("gemini").await.unwrap()["model"],
+            "gemini-custom-test-model"
+        );
+        service
+            .save_translation_credential("gemini", None, true)
+            .await
+            .unwrap();
+        assert!(!service.asr_credential_status().await.unwrap().configured);
+        assert!(service.gemini_asr_provider().await.is_err());
+        assert_eq!(
+            service.translation_readiness("gemini").await.unwrap(),
+            "unconfigured"
+        );
+        assert!(service.cached_provider_key_snapshot("gemini").0.is_none());
+        drop(frozen);
+        drop(service);
+        drop(db);
         fs::remove_dir_all(root).unwrap();
     }
 

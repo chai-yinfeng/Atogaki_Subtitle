@@ -1015,6 +1015,7 @@ async fn translation_profiles(
     for id in [
         "none",
         "deepseek",
+        "gemini",
         "deepl",
         "hy-mt2-local",
         "openai-compatible",
