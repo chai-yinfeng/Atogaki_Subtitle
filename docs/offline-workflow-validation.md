@@ -117,3 +117,13 @@ Release 工具链：根 CLI 与 Tauri 的独立 Cargo manifest 设置 `[profile.
 当前后续门禁：人工接缝听审、参考文本与翻译盲评由用户后补；Windows 继续只按 CI 共享核心／壳层结果记录，不代替原生窗口和 sidecar 实机回归。真实云端 Gemini 上传／删除及错误验收仍需另行授权样本。没有发布安装包，也没有将 MLX 或实验翻译模型设为桌面默认。
 
 最终窗口补测确认：未保存草稿阻止候选采用；显式重新对照后的 artifact 保存工作区 revision（测试值 86），采用后同 ID 文本即时刷新，ASR run 数量仍为 2。模型重新定位先验证冻结摘要，选错模型不会写坏原识别配置，随后定位相同内容仍能继续。
+
+## 2026-10-19：用户盲评与本机试用准备
+
+用户已完成 12 条盲评并修正第 11 条自然度为 5。按匿名映射，7B 可接受 12/12、明确偏好 4 条；1.8B 可接受 11/12、明确偏好 1 条；7 条无明确偏好。第 6 条 1.8B 对未完成句补充了与语境相反的含义。历史候选均为 null，属于评测材料缺失，不能视为翻译失败或有效云端基线。原始评审保留在 Git 忽略的 local-artifacts/mlx/translation-e3fe3956-4781-46f6-ab1b-ef995dcc5fe7/blind-review.json，不修改用户评价。
+
+用户授权将当前修改安装至 /Applications 直接试用，桌面维持 C++，MLX 暂缓。安装前重新执行格式、前端检查及 release App 构建、sidecar 与签名验证；安装与启动结果随后记录。正式数据库启动前通过 SQLite backup 保存一致性快照，保留旧 App 副本用于回退；数据库可能在首次启动时增量迁移，回退旧 App 时不得直接假设新 schema 兼容。
+
+本机安装完成：`cargo fmt --check`、`git diff --check`、前端 4 项测试、类型检查及生产构建通过；`cargo tauri build --config tauri.macos-complete.conf.json --bundles app` release 构建通过，四个 sidecar（ffmpeg、ffprobe、whisper-cli、llama-server）齐全，源 bundle 与安装 bundle 均通过 `codesign --verify --deep --strict`，主程序逐字节一致。未执行公证或公开发行。
+
+`/Applications/Atogaki.app` 已替换并通过原生窗口启动：正式数据目录和原有 12 个任务可见，新版任务预设／翻译选择／标题搜索及五个设置分区可见，窗口留在设置页供用户试用。旧 App 保留为 `/Applications/.Atogaki.previous.20261019`；另有 App 副本、完整性检查为 ok 的 SQLite 一致性备份与已完成盲评副本保留在 `local-artifacts/install-backups/20261019/`（Git 忽略）。不将启动检查视为完整人工功能验收。
