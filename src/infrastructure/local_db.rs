@@ -2480,6 +2480,24 @@ impl LocalDatabase {
         if segments != before {
             return Err(anyhow!("字幕已变化，请重新读取后再操作"));
         }
+        // Existing translations retain their frozen inputs on insertion. On deletion,
+        // only recorded consumers of the removed context can become stale.
+        let affected: HashSet<String> = if let Some(id) = remove_id {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT s.id FROM local_translation_dependency_edges e
+                 JOIN local_subtitle_segments s ON s.id = e.target_segment_id
+                 WHERE e.context_segment_id = ? AND s.job_id = ?
+                   AND s.translated_text IS NOT NULL AND s.translation_edited = 0",
+            )
+            .bind(id)
+            .bind(job_id)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .collect()
+        } else {
+            HashSet::new()
+        };
         match (remove_id, insertion) {
             (Some(id), None) => {
                 let index = segments
@@ -2512,15 +2530,12 @@ impl LocalDatabase {
             }
             _ => return Err(anyhow!("choose exactly one subtitle block operation")),
         }
-        // Adding/removing context invalidates machine translations, preserving human text.
         for s in &mut segments {
-            if s.translated_text.is_some() && !s.translation_edited {
+            if affected.contains(&s.id) {
                 s.translation_stale = true;
             }
         }
         persist_structure_segments(&mut tx, job_id, &mut segments).await?;
-        sqlx::query("UPDATE local_subtitle_provenance SET translation_dependency_stale = 1 WHERE segment_id IN (SELECT id FROM local_subtitle_segments WHERE job_id = ? AND translation_stale = 1)")
-            .bind(job_id).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(segments)
     }
@@ -4270,6 +4285,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn block_deletion_only_invalidates_recorded_machine_context_consumers() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-context-delete-{}", uuid::Uuid::new_v4()));
+        let job = Job::create_in(&root).unwrap();
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let segments = (0..4)
+            .map(|i| {
+                let mut cue = TranscriptSegment::new(i * 2000, i * 2000 + 1000, format!("cue {i}"));
+                cue.set_translation(Some(format!("translation {i}")));
+                cue
+            })
+            .collect();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments,
+            })
+            .await
+            .unwrap();
+        let initial = database.list_segments(&manifest.job_id).await.unwrap();
+        sqlx::query("UPDATE local_subtitle_segments SET translation_edited = 1 WHERE id = ?")
+            .bind(&initial[2].id)
+            .execute(&database.pool)
+            .await
+            .unwrap();
+        for target in [&initial[0].id, &initial[2].id] {
+            sqlx::query("INSERT INTO local_translation_dependency_edges VALUES (?,?,0)")
+                .bind(target)
+                .bind(&initial[3].id)
+                .execute(&database.pool)
+                .await
+                .unwrap();
+        }
+        let before = database.list_segments(&manifest.job_id).await.unwrap();
+        let provenance = database
+            .list_subtitle_provenance(&manifest.job_id)
+            .await
+            .unwrap();
+        let after = database
+            .edit_subtitle_block(&manifest.job_id, &before, Some(&before[3].id), None)
+            .await
+            .unwrap();
+        assert!(after[0].translation_stale);
+        assert_eq!(after[1], before[1]); // no dependency: absolutely unchanged
+        assert_eq!(after[2], before[2]); // manual translation: protected
+        for (a, b) in after.iter().zip(before.iter()) {
+            assert_eq!(a.source_text, b.source_text);
+            assert_eq!(a.source_edited, b.source_edited);
+            assert_eq!(a.start_ms, b.start_ms);
+            assert_eq!(a.end_ms, b.end_ms);
+        }
+        let after_provenance = database
+            .list_subtitle_provenance(&manifest.job_id)
+            .await
+            .unwrap();
+        for p in after_provenance {
+            assert_eq!(
+                Some(&p),
+                provenance.iter().find(|old| old.segment_id == p.segment_id)
+            );
+        }
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn splits_merges_restores_and_freezes_subtitle_structure() {
         let root = std::env::temp_dir().join(format!(
             "atogaki-local-structure-test-{}",
@@ -4319,7 +4406,10 @@ mod tests {
             .unwrap();
         assert_eq!(added.len(), 3);
         assert_eq!(added[1].id, inserted.id);
-        assert!(added[0].translation_stale);
+        assert_eq!(added[0], original[0]);
+        let mut unchanged_second = original[1].clone();
+        unchanged_second.segment_index = 2;
+        assert_eq!(added[2], unchanged_second);
         let link: Option<String> = sqlx::query_scalar(
             "SELECT segment_id FROM local_learning_occurrences WHERE id='test-occurrence'",
         )

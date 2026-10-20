@@ -4151,7 +4151,7 @@ async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSe
     if (activeDetail?.job.job_id === jobId) {
       applySubtitleStructure(after, insertion?.id ?? after[0]?.id);
       if (insertion) { seekTo(insertion.start_ms, false); updateActiveSubtitle(insertion.start_ms); }
-      setSubtitleEditAction("已保存，可用“撤销上次打轴”撤回；机器译文已标记需要核对，人工译文保留。");
+      setSubtitleEditAction("已保存，可用“撤销上次打轴”撤回；仅实际依赖被删除块的机器译文需要核对。");
     }
   } catch(error) { setSubtitleEditAction(`字幕块操作失败：${String(error)}`, true); }
   finally { workspaceActionBusy = false; }
@@ -4687,7 +4687,7 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
 }
 
 function savedSegmentState(segment: SubtitleSegment): string {
-  return segment.translation_stale ? "原文已改变，当前译文需要重译" : "已保存到本地";
+  return segment.translation_stale ? "原文或翻译上下文已变化，请核对当前译文" : "已保存到本地";
 }
 
 function subtitleValueFingerprint(segment: SubtitleSegment): string {

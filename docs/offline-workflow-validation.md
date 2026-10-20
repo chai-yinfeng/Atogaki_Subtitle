@@ -183,3 +183,11 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - 窗口工具对动态 dialog 的 AX 树偶尔为空，坐标操作偶有 noWindowsAvailable；使用可见窗口与键盘表单导航完成回归。一次坐标输入落到隔离字幕草稿，已明确放弃，未保存。正式数据未用于编辑测试。
 - 最后补齐无可用空白的提示、媒体时长就绪检查和标签悬停对比；Windows 原生窗口仍未实测。删除来源的 cue 外键解除后，即使撤销也仍可通过保留的任务时间／文本快照返回，不推测重新关联。
 - 已安装至 `/Applications/Atogaki.app`，旧版保留 `/Applications/.Atogaki.previous.20261019-blocks`，一致性数据库备份 `local-artifacts/install-backups/20261019-blocks/atogaki-before-install.sqlite`（integrity_check=ok）。更新后正式版 13 个任务仍在，已打开原任务校对页检查修正后的留白，未修改正式字幕。
+
+## 2026-10-20：修正块增删的全局译文误标
+
+- 原因：上次增删代码遍历全部机器译文设置 translation_stale，并全局标记 dependency stale；界面统一写成原文改变，造成全片原文被改的错觉。现改为插入保留现有冻结输入；删除只读取并失效实际记录的上下文消费者，保护无关块和人工译文。没有依赖证据的历史译文不猜测传播范围。
+- 新增定向回归验证无关段全部字段相同、人工译文保护、原文编辑标志及 provenance/source revision 完全不变；插入回归比较原有两段的完整值（仅后续序号随插入调整）。核心 127 通过、4 忽略；壳层 30 通过、4 忽略；前端 7 通过，类型检查／生产构建与完整 macOS App 构建通过。cargo fmt --check、git diff --check 通过。
+- 对用户当前任务按安装前 148 段备份审计当前 147 段，比较原文、时间、译文、人工标志、原文／译文 revision 和已记录上下文的存在／内容／revision。131 段满足恢复证据，撤回误标；16 段依赖已删除上下文或缺少充分恢复证据，保留待核对。仅改变两种过期标志，逐字段确认字幕其他字段、ID 和数量完全不变，未调用翻译。
+- 修复前一致性数据库备份和逐 ID 报告保留在忽略目录 local-artifacts/install-backups/20261020-invalidation/；备份 integrity_check=ok。未创建广泛自动迁移去清除所有过期状态。
+- 安装至 /Applications/Atogaki.app，旧版保留 /Applications/.Atogaki.previous.20261020-invalidation；正式窗口首页确认仍为 13 个任务，目标任务显示“待重译 16”。Windows 原生窗口未实机验证；本轮不更改主题图像，也不下载画集内容。
