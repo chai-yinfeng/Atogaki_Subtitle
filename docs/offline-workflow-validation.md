@@ -214,3 +214,9 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - 同轮用户反馈滚动内容穿过设置底栏：改为固定标题／说明／导航与底栏，仅中间 `.settings-content` 滚动裁剪；不影响其他复用 `.settings-dialog` 的只读原文弹窗。隔离窗口实际滚动确认上下边界不再透出内容，切换翻译分区回到顶部，展开原生下拉菜单确认 Gemini（LLM API）；未选择后端、保存凭据或调用服务。
 
 - 已安装并打开 `/Applications/Atogaki.app` 外观页；原有图片、12 色与显式选色保留，13 个任务及全部字幕表与安装前备份完全一致。旧 App 为 `/Applications/.Atogaki.previous.20261020-palette`，一致性备份位于 `local-artifacts/install-backups/20261020-palette/`（integrity_check=ok）。本轮未生成 DMG，原 v0.1.0 两个归档 SHA-256 再核对通过。
+
+## 2026-10-20：Hy-MT2 模型说明
+
+- 用户指定 1.8B 标为“本地翻译推荐”，7B 去掉括号说明；卡片说明改为速度／内存／耗时取舍，不保留开发候选、盲评门禁和单设备倍率。仅显示名称变化，模型 ID、URL、SHA-256、权重、量化和默认设置均未修改。
+- 壳层 32 项通过、4 忽略；前端类型检查／生产构建、cargo fmt --check、git diff --check 和完整 macOS App 构建通过。没有新增测试去重复验证静态文案。
+- 窗口工具读取 AX 缺失正文，截图及后续菜单操作分别在 30 秒／20 秒超时；未将这轮窗口检查描述为通过。保留当前运行窗口，采用已签名 App 暂存、校验和原子替换安装，需用户退出重开生效。旧版 `/Applications/.Atogaki.previous.20261020-model-labels`；一致性数据库备份 `local-artifacts/install-backups/20261020-model-labels/`，integrity_check=ok，所有字幕表完全一致。没有读取或写入凭据，没有模型下载，没有发布或改动既有 DMG。
