@@ -759,8 +759,6 @@ dialog, .settings-dialog, .glossary-dialog, .learning-dictionary-dialog,
 .image-theme-fields { display:grid; gap:10px; min-width:0; }
 .image-theme-fields > strong { overflow-wrap:anywhere; font-size:13px; }
 .image-theme-fields input[type="range"] { padding:0; accent-color:var(--accent); }
-.image-palette { display:flex; gap:6px; }
-.image-palette span { width:28px; height:22px; border:1px solid var(--line); border-radius:2px; }
 .image-theme-buttons { display:flex; flex-wrap:wrap; gap:7px; }
 .image-theme-buttons button { font-size:12px; padding:7px 10px; }
 :root[data-image-theme="contain"] body { background-image:var(--scene); background-size:contain; }
@@ -772,12 +770,41 @@ dialog, .settings-dialog, .glossary-dialog, .learning-dictionary-dialog,
 .image-theme-credit a { color:inherit; }
 @media(max-width:700px) { .image-theme-import,.image-theme-controls { grid-template-columns:1fr; } }
 
-.image-role-colors { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
-.image-role-colors fieldset { margin:0; padding:9px; border:1px solid var(--line); min-width:0; }
-.image-role-colors legend { font-size:12px; color:var(--ink); }
-.image-role-swatches { display:flex; flex-wrap:wrap; gap:7px; }
-.image-role-swatches button { width:26px; height:26px; padding:0; border:1px solid var(--line); border-radius:3px; }
-.image-role-swatches button[data-auto-color] { width:auto; padding:0 6px; color:var(--ink); background:var(--surface-soft); font-size:11px; }
-.image-role-swatches button[aria-pressed="true"] { outline:2px solid var(--accent); outline-offset:2px; }
+/* Shared role selector and palette: previews never change saved colors. */
+.image-role-colors { display:grid; gap:12px; }
+.theme-color-roles { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+.theme-color-roles .theme-color-role { display:grid; grid-template-columns:18px 1fr; gap:3px 6px; padding:8px; text-align:left; border:1px solid var(--line); border-radius:4px; background:var(--reading-fill); color:var(--ink); }
+.theme-color-role > span { width:16px; height:16px; border:1px solid var(--line); border-radius:50%; grid-row:span 2; }
+.theme-color-role strong { font-size:11px; font-weight:500; }
+.theme-color-role small { font-size:10px; color:var(--muted); }
+.theme-color-role[aria-pressed="true"] { outline:2px solid var(--accent); outline-offset:1px; }
+.theme-color-choices { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:7px; }
+.theme-color-choices .theme-color-choice { display:grid; gap:4px; padding:4px; color:var(--ink); background:var(--reading-fill); border:1px solid var(--line); border-radius:4px; }
+.theme-color-chip { height:30px; display:block; border-radius:2px; border:1px solid #0002; }
+.theme-color-choice small { min-height:12px; font-size:10px; white-space:nowrap; }
+.theme-color-choice[aria-pressed="true"],.theme-color-choice:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.theme-color-choice:hover .theme-color-chip { box-shadow:inset 0 0 0 2px #fff9; }
+.image-role-colors .theme-color-auto { justify-self:start; padding:5px 9px; font-size:11px; }
+.theme-color-preview { border-top:1px solid var(--line); padding-top:8px; display:grid; grid-template-columns:144px 1fr; gap:8px; }
+.theme-color-preview > p { grid-column:1/-1; margin:0; min-height:32px; font-size:11px; line-height:1.5; color:var(--muted); }
+.theme-color-pair { display:grid; grid-template-columns:1fr 1fr; gap:3px; }
+.theme-color-pair > div { display:grid; text-align:center; gap:3px; }
+.theme-color-pair span { height:52px; border:1px solid #0002; }
+.theme-color-pair small { color:var(--muted); font-size:10px; }
+.theme-color-sample { display:flex; align-items:center; justify-content:space-around; gap:8px; padding:8px; border:1px solid var(--line); border-radius:4px; font-size:12px; }
+.theme-color-sample > span:last-child { padding:6px 9px; border-radius:3px; }
 .image-role-help { font-size:11px; line-height:1.6; color:var(--muted); }
-@media(max-width:700px) { .image-role-colors { grid-template-columns:1fr; } }
+@media(max-width:700px) { .theme-color-choices { grid-template-columns:repeat(6,minmax(0,1fr)); } }
+
+.image-theme-palette-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.image-theme-palette-heading strong { font-size:13px; overflow-wrap:anywhere; }
+.image-theme-palette-heading button { padding:5px 8px; font-size:11px; }
+
+/* Keep navigation and actions outside the one clipped settings scrollport. */
+#settings-dialog { padding:0; overflow:hidden; height:min(820px,calc(100vh - 40px)); height:min(820px,calc(100dvh - 40px)); }
+#settings-form { display:flex; flex-direction:column; gap:0; height:100%; min-height:0; }
+#settings-form > .dialog-heading { flex-shrink:0; padding:18px 24px 10px; }
+#settings-form > .dialog-help { flex-shrink:0; margin:0; padding:0 24px 12px; }
+#settings-form > .settings-tabs { position:static; flex-shrink:0; margin:0; padding:12px 24px; }
+#settings-form > .settings-content { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:18px 24px; scroll-padding-block:18px; }
+#settings-form > .settings-footer { position:static; flex-shrink:0; margin:0; padding:14px 24px; }

@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { applyTheme, type AppTheme } from './themes';
-import { extractPalette, paletteVariables, hex, type ImagePalette, type ColorRoles } from './image-palette';
+import { createThemeColorPicker } from './theme-color-picker';
+import { extractPalette, paletteVariables, type ImagePalette, type ColorRoles } from './image-palette';
 
 type ImageTheme = {version:1; name:string; displayName:string; palette:ImagePalette; roles?:ColorRoles; template:AppTheme; fit:'contain'|'cover'; strength:number; credit:string; source:string; enabled:boolean};
 const KEY='atogaki.appearance.imageTheme';
@@ -22,7 +23,7 @@ export async function setupImageThemes(host:HTMLElement):Promise<void> {
     <div class="image-theme-import"><button type="button" data-import-image>选择图片并生成</button><input data-image-path aria-label="主题图片路径" placeholder="也可粘贴本机图片完整路径"><button type="button" class="secondary" data-import-path>从路径导入</button></div>
     <p class="image-theme-status" role="status"></p>
     <div class="image-theme-controls hidden"><img class="image-theme-preview" alt="导入的主题原图预览"><div class="image-theme-fields">
-      <strong data-image-name></strong><div class="image-palette" aria-label="提取的图片颜色"></div><button type="button" class="secondary" data-refresh-palette>重新提取配色</button><div class="image-role-colors"></div><p class="image-role-help">从最多 12 个提取色中分别选择场景底色、阅读面和按钮基色，可重复使用同一颜色；文字、边框、悬停与选中颜色自动派生，并调整明暗保证可读。警告与错误颜色保持独立。</p>
+      <div class="image-theme-palette-heading"><strong data-image-name></strong><button type="button" class="secondary" data-refresh-palette>重新提取配色</button></div><div class="image-role-colors"></div><p class="image-role-help">先选择用途，再从共享色盘选色；“底／面／钮”显示颜色已用于哪些位置，可重复使用。文字、边框、悬停与选中颜色自动派生，并调整明暗保证可读。警告与错误颜色保持独立。</p>
       <label>阅读面模板<select data-image-template><option value="moonlight">月夜 · 冷纸阅读面</option><option value="letter">来信 · 信笺阅读面</option></select></label>
       <label>背景显示<select data-image-fit><option value="contain">完整显示</option><option value="cover">铺满窗口（可能裁切）</option></select></label>
       <label>界面遮罩强度<input data-image-strength type="range" min="15" max="85" step="5"></label>
@@ -69,31 +70,11 @@ export async function setupImageThemes(host:HTMLElement):Promise<void> {
     config.strength=Number(find<HTMLInputElement>('[data-image-strength]').value)/100;
     config.credit=find<HTMLInputElement>('[data-image-credit]').value.trim();config.source=find<HTMLInputElement>('[data-image-source]').value.trim();
   };
-  const renderRoles=()=>{
-    const host=find<HTMLElement>('.image-role-colors');host.replaceChildren();
+  const colorPicker=createThemeColorPicker(find<HTMLElement>('.image-role-colors'),(role,color)=>{
     if(!config)return;
-    for(const [role,label] of [['ground','场景底色'],['reading','阅读面色'],['accent','按钮强调色']] as const){
-      const field=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent=label;field.append(legend);
-      const choices=document.createElement('div');choices.className='image-role-swatches';
-      const chosen=config.roles?.[role];
-      const colors=[...config.palette.swatches];
-      if(chosen&&!colors.some(color=>hex(color)===hex(chosen)))colors.push(chosen);
-      for(const color of [null,...colors]){
-        const button=document.createElement('button');button.type='button';
-        button.setAttribute('aria-label',`${label}：${color?hex(color):'自动'}`);
-        button.setAttribute('aria-pressed',String(color?!!chosen&&hex(chosen)===hex(color):!chosen));
-        if(color){button.style.backgroundColor=hex(color);button.title=hex(color);}
-        else{button.dataset.autoColor='true';button.textContent='自动';}
-        button.onclick=()=>{
-          if(!config)return;
-          config.roles={...config.roles,[role]:color??undefined};renderRoles();
-          if(config.enabled)void use().then(()=>message(`已更新${label}。`)).catch(e=>message(String(e),true));else save();
-        };
-        choices.append(button);
-      }
-      field.append(choices);host.append(field);
-    }
-  };
+    config.roles={...config.roles,[role]:color};
+    if(config.enabled)void use().then(()=>message('配色已应用并保存。')).catch(e=>message(String(e),true));else save();
+  });
   const render=async()=>{
     if(!config)return;
     find<HTMLElement>('.image-theme-controls').classList.remove('hidden');
@@ -102,9 +83,7 @@ export async function setupImageThemes(host:HTMLElement):Promise<void> {
     find<HTMLSelectElement>('[data-image-fit]').value=config.fit;
     find<HTMLInputElement>('[data-image-strength]').value=String(config.strength*100);
     find<HTMLInputElement>('[data-image-credit]').value=config.credit;find<HTMLInputElement>('[data-image-source]').value=config.source;
-    renderRoles();
-    const palette=find<HTMLElement>('.image-palette');palette.replaceChildren();
-    for(const color of config.palette.swatches){const swatch=document.createElement('span');swatch.style.backgroundColor=hex(color);swatch.title=hex(color);palette.append(swatch);}
+    colorPicker.update(config.palette,config.roles);
     const path=await invoke<string|null>('load_theme_image',{name:config.name});
     if(path)find<HTMLImageElement>('.image-theme-preview').src=convertFileSrc(path);
     else throw new Error('图片副本缺失，请重新导入；已恢复内置主题');

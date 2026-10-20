@@ -203,3 +203,12 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - PR #19 已合并，源码基线/tag `v0.1.0` 为 `f5d4d4027cfdca8b18a5445fa84622b0acc97bc5`，其 tree 与最终功能提交 `3b72d14` 完全一致。Windows 编译门禁通过：[CI 39445142814](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/39445142814)。不生成 Windows 包，不宣称原生实机验收。
 - 已覆盖安装 `/Applications/Atogaki.app`；旧版 `/Applications/.Atogaki.previous.20261020-v010`，一致性备份 `local-artifacts/install-backups/20261020-v010/atogaki-before-install.sqlite`，integrity_check=ok；安装前后所有字幕相关表完全一致，窗口仍显示 13 个任务。未调用云端、凭据、识别或翻译。
 - 用户在最终打包时要求“先别发布，打包好即可”。停止公开发布；不创建 Release、不上传资产。已推送 tag 保持不可变，后续如改源码使用新版本。长节目人工接缝听审与翻译质量门禁按用户既有决定后补；MLX 暂缓。
+
+## 2026-10-20：共享色盘交互
+
+- 从三份色盘改为三张用途卡与一份色盘；编号、显式用途标记、近似色名、当前／待选大色块、明暗比较及派生文字／按钮示例帮助辨色。指向／键盘聚焦仅预览，点击才更新原有角色；恢复自动只影响当前用途。
+- 前端 17 项通过、类型检查与生产构建通过，cargo fmt --check、git diff --check 通过；完整四 sidecar macOS App 构建及 ad-hoc 签名校验通过。仅 UI 改动，没有新增 Tauri API 或依赖，未重复运行共享 Rust 逻辑测试。
+- 隔离签名窗口验证：既有 12 色（含旧自选色）和角色恢复；键盘聚焦显示比较但阅读面保持自动；点击暖色仅更改阅读面；同色用于按钮后两处均保留；按钮恢复自动不改阅读面，重启保持。实际截图发现比较区易被底栏遮挡，已移至色盘上方并缩小重新提取入口，窗口确认比较色块／控件与色盘同屏。
+- 原 v0.1.0 tag、DMG 及 SHA-256 保持原样。继续不创建 Release、不上传安装包；本机 App 更新单独记录。近似色名只辅助辨识，不是专业色彩校准或原图风格复现。
+
+- 同轮用户反馈滚动内容穿过设置底栏：改为固定标题／说明／导航与底栏，仅中间 `.settings-content` 滚动裁剪；不影响其他复用 `.settings-dialog` 的只读原文弹窗。隔离窗口实际滚动确认上下边界不再透出内容，切换翻译分区回到顶部，展开原生下拉菜单确认 Gemini（LLM API）；未选择后端、保存凭据或调用服务。
