@@ -81,6 +81,15 @@ Windows 日常共享代码只在 PR／`main` 运行编译门禁；完整安装�
 
 DMG 为 45,697,660 字节，SHA-256 `fc7c1082354603b5d280df287a6b11a5b5075d32b380d29878aea1c06ec09b5c`；对应源码为 81,923,848 字节，SHA-256 `bccfcc0d4892f7084cd423591e60f0c2d0ec01d8b84e6afc608bbd07c976c3f0`。四项资产先上传草稿，再重新下载通过校验后公开，未替换公开资产。App 和 sidecar 采用 ad-hoc 签名、未公证，模型不在包内。
 
-## v0.1.2 macOS 候选准备
+## v0.1.2 macOS 候选准备（历史记录）
 
 包含长电影 VAD 右上下文越界修复、两路 ASR、云端请求限流和稳定前缀提前翻译。版本配置统一为 0.1.2；当前公开版与下载示例保持 v0.1.1，等用户本机测试完成后再切换。候选资产使用 `Atogaki-v0.1.2-macos-arm64.dmg` 及 `Atogaki-0.1.2-third-party-sources.tar.xz`，分别生成 SHA-256。候选打包不代表公开发布，不提前创建或推送 tag。
+
+
+## 2026-10-20：v0.1.2 macOS 稳定发行
+
+已公开 [v0.1.2](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.2)，annotated tag 固定到 `730f2e2462bebbeab237875136667a011ecc5e5d`，同提交已快进合入 main。Release 非草稿、非 prerelease，并已验证为 latest；仅 macOS arm64 的 DMG、对应源码包和各自 SHA-256，共四项资产，无 Windows 更新。先上传草稿、重新下载四项逐字节比较及校验，通过后公开；未替换已有公开资产。
+
+最终 DMG 为 45,876,757 字节，SHA-256 `db313f4ae10def142cbe009526279f459220ecb38f83a8d39424b37e6f54014c`；对应源码为 81,923,880 字节，SHA-256 `1ccc7daa28b29ecdb343668b4d4f05349d99487909a90a68cc34a3c7cdaf72cc`。完整 App 和四个 sidecar 通过 ad-hoc deep/strict 签名核对，未公证。最终 App 原生窗口及 DMG 的实际 Finder 左右图标布局通过；模型不在包内。
+
+英文 32 字符切分问题已记入发行限制，留到下一轮；本次没有改变语言分段参数或合并现有字幕。正式《教父》翻译仍在运行，发布过程只运行隔离测试窗口，未再次覆盖正在使用的 Application。
