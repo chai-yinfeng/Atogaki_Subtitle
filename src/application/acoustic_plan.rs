@@ -38,6 +38,10 @@ pub struct AcousticPlan {
 struct ChunkEvidence {
     chunk: AcousticChunk,
     units: Vec<TimedUnit>,
+    /// Original local timestamps, retained as evidence. These observations start
+    /// beyond the read window and belong to a later chunk's ownership interval.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    excluded_right_context_units: Vec<TimedUnit>,
     device: String,
     #[serde(default)]
     gpu_fallback: Option<serde_json::Value>,
@@ -223,6 +227,47 @@ impl AcousticPlan {
 fn evidence_path(root: &Path, index: usize) -> PathBuf {
     root.join(format!("chunk-{index:06}"))
 }
+
+fn map_chunk_timestamps(
+    chunk: &AcousticChunk,
+    units: Vec<TimedUnit>,
+) -> Result<(Vec<TimedUnit>, Vec<TimedUnit>)> {
+    let duration_ms = chunk.read_end_ms - chunk.read_start_ms;
+    let mut mapped = Vec::new();
+    let mut excluded = Vec::new();
+    for (index, mut unit) in units.into_iter().enumerate() {
+        let (Some(start), Some(end)) = (unit.start_ms, unit.end_ms) else {
+            bail!("ASR unit {index} returned missing timestamps")
+        };
+        if end <= start {
+            bail!(
+                "ASR unit {index} returned invalid chunk timestamps: {start}..{end} ms (read duration {duration_ms} ms)"
+            )
+        }
+        if start >= duration_ms {
+            // whisper.cpp with VAD can emit a short trailing observation just
+            // beyond the input duration. Limit this exclusion to the existing
+            // right-context margin, which a subsequent chunk owns. Larger
+            // corruption still fails; never invent timing or discard owned text.
+            let right_context_ms = chunk.read_end_ms - chunk.end_ms;
+            if right_context_ms > 0 && end - duration_ms <= right_context_ms {
+                excluded.push(unit);
+                continue;
+            }
+            bail!(
+                "ASR unit {index} starts outside the chunk read window: {start}..{end} ms (read duration {duration_ms} ms)"
+            )
+        }
+        if end > duration_ms {
+            unit.timing_source = crate::application::TimingSource::Unknown;
+        }
+        unit.start_ms = Some(chunk.read_start_ms + start);
+        unit.end_ms = Some(chunk.read_start_ms + end.min(duration_ms));
+        mapped.push(unit);
+    }
+    Ok((mapped, excluded))
+}
+
 fn read_evidence(root: &Path, chunk: &AcousticChunk) -> Result<ChunkEvidence> {
     let dir = evidence_path(root, chunk.index);
     let bytes = fs::read(dir.join("evidence.json"))?;
@@ -424,27 +469,24 @@ pub async fn execute_chunks(
                     "provider-managed".into()
                 }
             });
-            let mut units = response.timed_units;
-            for unit in &mut units {
-                let (Some(s), Some(e)) = (unit.start_ms, unit.end_ms) else {
-                    bail!("ASR returned missing timestamps")
-                };
-                if e <= s || s >= chunk.read_end_ms - chunk.read_start_ms {
-                    bail!("ASR returned invalid chunk timestamps")
-                };
-                if e > chunk.read_end_ms - chunk.read_start_ms {
-                    unit.timing_source = crate::application::TimingSource::Unknown;
-                }
-                unit.start_ms = Some(chunk.read_start_ms + s);
-                unit.end_ms = Some((chunk.read_start_ms + e).min(chunk.read_end_ms));
-            }
             let raw = attempt.join("provider-output.json");
             if response.raw_output_path != raw {
                 fs::copy(&response.raw_output_path, &raw)?;
             }
+            let (units, excluded_right_context_units) =
+                map_chunk_timestamps(chunk, response.timed_units).with_context(|| {
+                    format!(
+                        "音频块 {}（{}..{} ms）时间戳校验失败；原始输出：{}",
+                        chunk.index + 1,
+                        chunk.start_ms,
+                        chunk.end_ms,
+                        raw.display()
+                    )
+                })?;
             let evidence = ChunkEvidence {
                 chunk: chunk.clone(),
                 units,
+                excluded_right_context_units,
                 device,
                 gpu_fallback: if prefix.with_extension("gpu-failure.json").is_file() {
                     Some(serde_json::from_slice(&fs::read(
@@ -562,6 +604,87 @@ pub fn boundary_signals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn timed_unit(start: Option<u64>, end: Option<u64>) -> TimedUnit {
+        TimedUnit {
+            id: uuid::Uuid::new_v4().to_string(),
+            text: "test observation".into(),
+            kind: crate::application::TimedUnitKind::ProviderSegment,
+            start_ms: start,
+            end_ms: end,
+            timing_source: crate::application::TimingSource::Model,
+            provider_confidence: None,
+            speaker: None,
+        }
+    }
+
+    #[test]
+    fn vad_trailing_overrun_is_recorded_outside_ownership_without_blocking_next_chunk() {
+        let plan = AcousticPlan::new(12_172_700, "audio".into(), "config".into());
+        let chunk = &plan.chunks[71];
+        let trailing = timed_unit(Some(130_020), Some(130_120));
+        let (mapped, excluded) = map_chunk_timestamps(
+            chunk,
+            vec![
+                timed_unit(Some(123_980), Some(127_460)),
+                timed_unit(Some(127_460), Some(130_020)),
+                trailing.clone(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(excluded.len(), 1);
+        assert_eq!(excluded[0].id, trailing.id);
+        assert_eq!(excluded[0].start_ms, Some(130_020));
+        assert_eq!(mapped[1].end_ms, Some(chunk.read_end_ms));
+        assert_eq!(
+            mapped[1].timing_source,
+            crate::application::TimingSource::Unknown
+        );
+        // Both remaining observations lie in right context too; the next chunk
+        // supplies owned output rather than these being published twice.
+        assert!(owned_units(chunk, mapped).is_empty());
+        let next = &plan.chunks[72];
+        let (mapped, _) =
+            map_chunk_timestamps(next, vec![timed_unit(Some(10_020), Some(10_120))]).unwrap();
+        let owned = owned_units(next, mapped);
+        assert_eq!(owned.len(), 1);
+        assert_eq!(owned[0].start_ms, Some(chunk.read_end_ms + 20));
+    }
+
+    #[test]
+    fn timestamp_validation_still_rejects_invalid_owned_and_final_observations() {
+        let plan = AcousticPlan::new(240_000, "audio".into(), "config".into());
+        for (start, end) in [(None, Some(10)), (Some(10), Some(10)), (Some(20), Some(10))] {
+            assert!(map_chunk_timestamps(&plan.chunks[0], vec![timed_unit(start, end)]).is_err());
+        }
+        // Large timestamp corruption is not a context-only edge case.
+        assert!(
+            map_chunk_timestamps(
+                &plan.chunks[0],
+                vec![timed_unit(Some(180_000), Some(181_000))],
+            )
+            .is_err()
+        );
+        let final_chunk = &plan.chunks[1];
+        let duration = final_chunk.read_end_ms - final_chunk.read_start_ms;
+        let error = map_chunk_timestamps(
+            final_chunk,
+            vec![timed_unit(Some(duration + 20), Some(duration + 120))],
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("outside the chunk read window"));
+        let (mapped, excluded) = map_chunk_timestamps(
+            final_chunk,
+            vec![timed_unit(Some(duration - 20), Some(duration + 120))],
+        )
+        .unwrap();
+        assert!(excluded.is_empty());
+        assert_eq!(mapped[0].end_ms, Some(final_chunk.end_ms));
+        assert_eq!(
+            mapped[0].timing_source,
+            crate::application::TimingSource::Unknown
+        );
+    }
     #[test]
     fn syncing_external_output_preserves_bytes_on_all_platforms() {
         let path =
@@ -632,21 +755,27 @@ mod tests {
                     let raw = r.output_prefix.with_extension("json");
                     fs::write(&raw, b"{}")?;
                     let local = if r.scope.start_ms == 0 { 1000 } else { 6000 };
+                    let mut timed_units = vec![TimedUnit {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        text: format!("chunk {}", r.scope.start_ms),
+                        kind: TimedUnitKind::ProviderSegment,
+                        start_ms: Some(local),
+                        end_ms: Some(local + 1000),
+                        timing_source: TimingSource::Model,
+                        provider_confidence: None,
+                        speaker: None,
+                    }];
+                    if r.scope.start_ms == 2_035_000 {
+                        // Reproduce #21 on the first resumed block. Valid
+                        // checkpoints must remain reusable after this is excluded.
+                        timed_units.push(timed_unit(Some(130_020), Some(130_120)));
+                    }
                     Ok(AsrResponse {
                         provider_id: "fake".into(),
                         model_identity: "fake".into(),
                         raw_output_path: raw,
                         legacy_segments: vec![],
-                        timed_units: vec![TimedUnit {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            text: format!("chunk {}", r.scope.start_ms),
-                            kind: TimedUnitKind::ProviderSegment,
-                            start_ms: Some(local),
-                            end_ms: Some(local + 1000),
-                            timing_source: TimingSource::Model,
-                            provider_confidence: None,
-                            speaker: None,
-                        }],
+                        timed_units,
                     })
                 })
             }
@@ -688,6 +817,12 @@ mod tests {
             .unwrap();
         assert_eq!(fake.calls.load(Ordering::SeqCst), 31); // 30 successful chunks + failed call
         assert_eq!(response.timed_units.len(), 30);
+        let recovered = read_evidence(
+            &job.dir.join("asr-checkpoint"),
+            &AcousticPlan::new(3_600_000, "audio".into(), "config".into()).chunks[17],
+        )
+        .unwrap();
+        assert_eq!(recovered.excluded_right_context_units.len(), 1);
         assert_eq!(recovery_summary(&job).unwrap().completed_ms, 3600000);
         let cache = job.dir.join("asr-checkpoint/final-cues.json");
         fs::write(&cache, b"previously stitched cues").unwrap();

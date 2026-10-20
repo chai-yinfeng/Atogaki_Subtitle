@@ -2474,6 +2474,7 @@ function renderJobs(jobs: LocalJob[]): void {
             <button type="button" class="secondary" data-rename-job="${escapeHtml(job.job_id)}">重命名</button>
             <button type="button" class="danger" data-delete-job="${escapeHtml(job.job_id)}" ${matchesTerminalStatus(job.status) ? "" : "disabled"} title="${matchesTerminalStatus(job.status) ? "删除任务数据，但保留原始媒体" : "任务结束后才能删除"}">删除</button>
           </div>
+          ${job.status === "failed" && job.error_message && !job.error_message.includes("已暂停") ? `<details class="job-error"><summary>查看失败原因</summary><pre>${escapeHtml(job.error_message)}</pre><p>失败不会删除已保存的结果。${job.recovery?.can_resume ? "点击“继续”从未完成处重试。" : ""}</p></details>` : ""}
         </article>`,
     )
     .join("");

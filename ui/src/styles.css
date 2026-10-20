@@ -87,6 +87,9 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .job-progress { width: min(100%, 260px); height: 5px; margin-top: 8px; accent-color: var(--accent); }
 .job-actions { display: flex; gap: 7px; }
 .job-actions button { align-self: auto; padding: 8px 11px; font-size: 12px; }
+.job-error { grid-column: 1 / -1; min-width: 0; padding: 8px 12px; border-top: 1px solid var(--line); }
+.job-error summary { cursor: pointer; color: var(--accent); }
+.job-error pre { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 12px; }
 .job-management-message { min-height: 18px; margin: -10px 0 10px; color: #6e7068; font-size: 12px; }
 .job-statuses { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .status { border-radius: 999px; padding: 5px 9px; background: #e7e2d5; color: #55584f; font-size: 12px; text-transform: capitalize; white-space: nowrap; }
