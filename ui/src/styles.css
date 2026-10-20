@@ -767,3 +767,25 @@ dialog, .settings-dialog, .glossary-dialog, .learning-dictionary-dialog,
   color:var(--chrome-ink); background:var(--chrome-fill);
 }
 .personal-artwork-credit a { color:inherit; }
+
+.image-theme-editor { border-block:1px solid var(--line); padding:18px 0; }
+.image-theme-editor h4 { margin:0 0 8px; }
+.image-theme-editor > p { font-size:12px; line-height:1.6; color:var(--muted); }
+.image-theme-import { display:grid; grid-template-columns:auto minmax(140px,1fr) auto; gap:8px; }
+.image-theme-controls { display:grid; grid-template-columns:minmax(130px,.8fr) minmax(240px,1.2fr); gap:18px; align-items:start; }
+.image-theme-preview { width:100%; max-height:250px; object-fit:contain; background:var(--surface-soft); border:1px solid var(--line); padding:8px; }
+.image-theme-fields { display:grid; gap:10px; min-width:0; }
+.image-theme-fields > strong { overflow-wrap:anywhere; font-size:13px; }
+.image-theme-fields input[type="range"] { padding:0; accent-color:var(--accent); }
+.image-palette { display:flex; gap:6px; }
+.image-palette span { width:28px; height:22px; border:1px solid var(--line); border-radius:2px; }
+.image-theme-buttons { display:flex; flex-wrap:wrap; gap:7px; }
+.image-theme-buttons button { font-size:12px; padding:7px 10px; }
+:root[data-image-theme="contain"] body { background-image:var(--scene); background-size:contain; }
+:root[data-image-theme="cover"] body { background-image:var(--scene); background-size:cover; }
+:root[data-image-theme] .shell > header,
+:root[data-image-theme] .workspace-heading,
+:root[data-image-theme] .intro { background:var(--chrome-fill); padding:16px; border-radius:4px; }
+.image-theme-credit { display:flex; flex-wrap:wrap; justify-content:center; gap:6px 16px; margin:14px 24px 22px; padding:9px 14px; color:var(--chrome-ink); background:var(--chrome-fill); font-size:11px; }
+.image-theme-credit a { color:inherit; }
+@media(max-width:700px) { .image-theme-import,.image-theme-controls { grid-template-columns:1fr; } }

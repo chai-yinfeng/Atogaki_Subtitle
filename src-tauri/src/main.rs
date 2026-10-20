@@ -5,6 +5,7 @@ mod desktop_settings;
 mod dictionary_download;
 mod dictionary_lookup;
 mod model_download;
+mod theme_artwork;
 
 use std::{
     collections::HashMap,
@@ -2393,6 +2394,105 @@ fn personal_moonlight_artwork(
     allow_asset_file(&app, path.to_str())
 }
 
+#[tauri::command]
+async fn import_theme_image(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    path: Option<String>,
+) -> Result<Option<theme_artwork::ThemeImage>, String> {
+    let source = match path.filter(|value| !value.trim().is_empty()) {
+        Some(path) => Some(path),
+        None => {
+            pick_local_file(
+                &app,
+                "选择主题图片",
+                "图片",
+                &["png", "jpg", "jpeg", "webp"],
+                None,
+            )
+            .await?
+        }
+    };
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let data_dir = state.data_dir.clone();
+    let image = tauri::async_runtime::spawn_blocking(move || {
+        theme_artwork::import_image(&data_dir, Path::new(&source))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    allow_asset_file(&app, Some(&image.path))?;
+    Ok(Some(image))
+}
+
+#[tauri::command]
+fn load_theme_image(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    name: String,
+) -> Result<Option<String>, String> {
+    let path = theme_artwork::image_path(&state.data_dir, &name)?;
+    allow_asset_file(&app, path.to_str())
+}
+
+#[tauri::command]
+async fn theme_image_bytes(
+    state: State<'_, DesktopState>,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    let path = theme_artwork::image_path(&state.data_dir, &name)?;
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|e| format!("无法读取主题图片：{e}"))?;
+    if bytes.len() > 25 * 1024 * 1024 {
+        return Err("主题图片过大".into());
+    }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+fn reveal_theme_image(state: State<'_, DesktopState>, name: Option<String>) -> Result<(), String> {
+    let path = match name {
+        Some(name) => theme_artwork::image_path(&state.data_dir, &name)?,
+        None => {
+            let reference = state
+                .data_dir
+                .join("themes/references/tsukineko/images/bg02.jpg");
+            if reference.is_file() {
+                reference
+            } else {
+                state.data_dir.join("themes/moonlight/background.jpg")
+            }
+        }
+    };
+    reveal_in_file_manager(path.display().to_string(), "主题图片")
+}
+
+#[tauri::command]
+async fn open_external_url(url: String) -> Result<(), String> {
+    let url = theme_artwork::external_url(&url)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "macos")]
+        let mut command = std::process::Command::new("open");
+        #[cfg(target_os = "windows")]
+        let mut command = std::process::Command::new("explorer.exe");
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let mut command = std::process::Command::new("xdg-open");
+        let status = command
+            .arg(url)
+            .status()
+            .map_err(|e| format!("无法打开浏览器：{e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("浏览器打开失败：{status}"))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn register_playback_file(
     registry: &PlaybackMediaRegistry,
     path: Option<&str>,
@@ -2839,6 +2939,11 @@ fn main() {
             check_translation_api_key,
             data_directory,
             personal_moonlight_artwork,
+            import_theme_image,
+            load_theme_image,
+            theme_image_bytes,
+            reveal_theme_image,
+            open_external_url,
             desktop_settings,
             dictionary_catalog,
             dictionary_credential_statuses,

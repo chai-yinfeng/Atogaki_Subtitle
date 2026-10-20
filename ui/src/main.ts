@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { setupImageThemes } from "./appearance";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SubtitleDrafts, cueKey, type Draft } from "./subtitle-drafts";
 import { listen } from "@tauri-apps/api/event";
@@ -7272,6 +7273,7 @@ function organizeSettings(): void {
   const syncTheme = () => appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.appTheme === document.documentElement.dataset.theme)));
   appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.onclick = () => { applyTheme(button.dataset.appTheme as "moonlight"|"letter"); syncTheme(); });
   syncTheme();
+  window.addEventListener("atogaki-theme-change",syncTheme);
   models.querySelector("strong")!.textContent = "本地转录";
   const optionalAsr = document.createElement("details"); optionalAsr.className="onboarding-optional";
   optionalAsr.innerHTML='<summary>可选：Gemini 局部修复</summary>';
@@ -7657,7 +7659,21 @@ void invoke<string | null>("personal_moonlight_artwork").then(path => {
   credit.className = "personal-artwork-credit";
   credit.innerHTML = '<a href="https://sp.universal-music.co.jp/yorushika/tsukineko/" target="_blank" rel="noopener noreferrer">ヨルシカ LIVE「月と猫のダンス」特设</a><span>Copyright © 2024 UNIVERSAL MUSIC LLC All rights reserved.</span>';
   document.body.append(credit);
-}).catch(error => console.warn("Personal artwork could not be loaded", error));
+  const reveal = document.createElement("button"); reveal.type="button"; reveal.className="secondary"; reveal.textContent="定位本机原图";
+  reveal.onclick=()=>void invoke("reveal_theme_image",{name:null}).catch(error=>{if(settingsMessage)settingsMessage.textContent=String(error);});
+  section.append(reveal);
+}).catch(error => console.warn("Personal artwork could not be loaded", error)).finally(() => {
+  const host=document.querySelector<HTMLElement>(".appearance-settings");
+  if(host)void setupImageThemes(host).catch(error=>{if(settingsMessage)settingsMessage.textContent=String(error);});
+});
+
+// External websites are opened by the OS, rather than a blocked WebView popup.
+document.addEventListener("click", event => {
+  const link=(event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
+  if(!link||!/^https?:/i.test(link.href))return;
+  event.preventDefault();
+  void invoke("open_external_url",{url:link.href}).catch(error=>{if(settingsMessage)settingsMessage.textContent=String(error);});
+});
 
 try { subtitleDrafts.recover(localStorage.getItem("atogaki.subtitleDrafts") ?? "[]"); } catch { /* SQLite remains authoritative. */ }
 let subtitleCloseReady = false;
