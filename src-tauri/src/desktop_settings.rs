@@ -15,15 +15,14 @@ use atogaki_subtitle::{
         config::desktop_llama_server_path,
         deepl::DeepLTranslationProvider,
         gemini_asr::{GeminiAsrConfig, GeminiAsrProvider},
-        local_llama::{LocalLlamaConfig, LocalLlamaTranslationProvider},
         local_db::LocalDatabase,
+        local_llama::{LocalLlamaConfig, LocalLlamaTranslationProvider},
         network::{NetworkClientConfig, normalize_https_endpoint},
-        openai_compatible::{
-            OpenAiCompatibleConfig, OpenAiCompatibleTranslationProvider,
-        },
+        openai_compatible::{OpenAiCompatibleConfig, OpenAiCompatibleTranslationProvider},
     },
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::credential_store::{CredentialStore, SystemCredentialStore};
 
@@ -39,6 +38,10 @@ const MERRIAM_WEBSTER_DICTIONARY_KEY_SAVED: &str = "dictionary.merriam_webster_k
 const MERRIAM_WEBSTER_REFERENCE: &str = "dictionary.merriam_webster_reference";
 const GEMINI_ASR_KEY_SAVED: &str = "recognition.gemini_key_saved";
 const GEMINI_ASR_CREDENTIAL_ID: &str = "asr.gemini-transcribe";
+const GEMINI_TRANSLATION_MODEL: &str = "translation.gemini_model";
+const GEMINI_PROVIDER_ID: &str = "gemini";
+const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
+const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 const DEEPSEEK_MODEL: &str = "translation.deepseek_model";
 const OPENAI_BASE_URL: &str = "translation.openai_base_url";
 const OPENAI_MODEL: &str = "translation.openai_model";
@@ -53,7 +56,8 @@ const HY_MT2_LOCAL_PROVIDER_ID: &str = "hy-mt2-local";
 const DEFAULT_DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
 const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-const DEFAULT_LLM_STYLE: &str = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
+const DEFAULT_LLM_STYLE: &str =
+    "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,12 +204,11 @@ impl DeferredDeepLTranslationProvider {
     }
 
     fn resolve(&self) -> Result<DeepLTranslationProvider> {
-        let (stored_key, credential_error) =
-            cached_provider_key(
-                DEEPL_PROVIDER_ID,
-                self.credentials.as_ref(),
-                self.credential_cache.as_ref(),
-            );
+        let (stored_key, credential_error) = cached_provider_key(
+            DEEPL_PROVIDER_ID,
+            self.credentials.as_ref(),
+            self.credential_cache.as_ref(),
+        );
         let key = if let Some(key) = stored_key.or_else(|| self.environment_key.clone()) {
             key
         } else if let Some(error) = credential_error {
@@ -223,10 +226,7 @@ impl fmt::Debug for DeferredDeepLTranslationProvider {
             .debug_struct("DeferredDeepLTranslationProvider")
             .field(
                 "credential_loaded",
-                &credential_cache_loaded(
-                    DEEPL_PROVIDER_ID,
-                    self.credential_cache.as_ref(),
-                ),
+                &credential_cache_loaded(DEEPL_PROVIDER_ID, self.credential_cache.as_ref()),
             )
             .finish()
     }
@@ -348,35 +348,17 @@ impl DesktopSettingsService {
         &self,
         request: SaveAsrCredentialRequest,
     ) -> Result<AsrCredentialStatus> {
-        let secret = normalized_secret(request.api_key);
-        if request.clear && secret.is_some() {
+        if request.clear && normalized_secret(request.api_key.clone()).is_some() {
             bail!("cannot save and clear the Gemini credential at the same time");
         }
-        if request.clear {
-            self.credentials.delete(GEMINI_ASR_CREDENTIAL_ID)?;
-            self.replace_cached_provider_key(GEMINI_ASR_CREDENTIAL_ID, None, None);
-            self.database.delete_setting(GEMINI_ASR_KEY_SAVED).await?;
-        } else if let Some(secret) = secret {
-            self.credentials.set(GEMINI_ASR_CREDENTIAL_ID, &secret)?;
-            self.replace_cached_provider_key(
-                GEMINI_ASR_CREDENTIAL_ID,
-                Some(secret),
-                None,
-            );
-            self.database.set_setting(GEMINI_ASR_KEY_SAVED, "true").await?;
-        } else {
-            bail!("Gemini API key cannot be empty");
-        }
+        self.save_translation_credential(GEMINI_PROVIDER_ID, request.api_key, request.clear)
+            .await?;
         self.asr_credential_status().await
     }
 
     pub async fn check_asr_credential(&self) -> Result<AsrCredentialStatus> {
-        let configured = normalized_secret(self.credentials.get(GEMINI_ASR_CREDENTIAL_ID)?).is_some();
-        if configured {
-            self.database.set_setting(GEMINI_ASR_KEY_SAVED, "true").await?;
-        } else {
-            self.database.delete_setting(GEMINI_ASR_KEY_SAVED).await?;
-        }
+        let checked = self.check_translation_api_key(GEMINI_PROVIDER_ID).await?;
+        let configured = checked.stored_in_system;
         Ok(AsrCredentialStatus {
             provider_id: "gemini-transcribe".into(),
             provider_name: "Gemini 3.5 Transcribe".into(),
@@ -445,6 +427,50 @@ impl DesktopSettingsService {
         }
     }
 
+    pub async fn task_presets(&self) -> Result<Vec<serde_json::Value>> {
+        self.database
+            .get_setting("desktop.task_presets")
+            .await?
+            .map(|value| serde_json::from_str(&value).map_err(Into::into))
+            .unwrap_or_else(|| Ok(vec![]))
+    }
+    pub async fn save_task_preset(
+        &self,
+        name: &str,
+        configuration: &serde_json::Value,
+    ) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 64 {
+            bail!("预设名称须为 1–64 字")
+        }
+        let mut safe = serde_json::Map::new();
+        for key in [
+            "modelPath",
+            "vadModelPath",
+            "sourceLanguage",
+            "glossaryId",
+            "selectedContentGroups",
+            "translationProviderId",
+        ] {
+            if let Some(value) = configuration.get(key) {
+                safe.insert(key.into(), value.clone());
+            }
+        }
+        let mut presets = self.task_presets().await?;
+        presets.retain(|p| p["name"] != name);
+        presets.push(serde_json::json!({"name":name,"configuration":safe}));
+        if presets.len() > 50 {
+            bail!("最多保存 50 个预设")
+        }
+        let value = serde_json::to_string(&presets)?;
+        if value.len() > 65536 {
+            bail!("预设内容过大")
+        }
+        self.database
+            .set_setting("desktop.task_presets", &value)
+            .await
+    }
+
     pub async fn initialize(&self) -> Result<DesktopSettings> {
         std::fs::create_dir_all(&self.models_directory)?;
         let settings = self.load().await?;
@@ -500,6 +526,7 @@ impl DesktopSettingsService {
                     "none"
                         | DEEPL_PROVIDER_ID
                         | DEEPSEEK_PROVIDER_ID
+                        | GEMINI_PROVIDER_ID
                         | OPENAI_COMPATIBLE_PROVIDER_ID
                         | HY_MT2_LOCAL_PROVIDER_ID
                 )
@@ -512,6 +539,12 @@ impl DesktopSettingsService {
                     .await?
                     .unwrap_or_else(|| DEFAULT_DEEPSEEK_MODEL.to_string()),
             ),
+            GEMINI_PROVIDER_ID => Some(
+                self.database
+                    .get_setting(GEMINI_TRANSLATION_MODEL)
+                    .await?
+                    .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.into()),
+            ),
             OPENAI_COMPATIBLE_PROVIDER_ID => self.database.get_setting(OPENAI_MODEL).await?,
             HY_MT2_LOCAL_PROVIDER_ID => hy_mt2_model
                 .as_ref()
@@ -522,6 +555,7 @@ impl DesktopSettingsService {
         };
         let translation_base_url = match translation_provider_id.as_str() {
             DEEPSEEK_PROVIDER_ID => Some(DEFAULT_DEEPSEEK_BASE_URL.to_string()),
+            GEMINI_PROVIDER_ID => Some(DEFAULT_GEMINI_BASE_URL.to_string()),
             OPENAI_COMPATIBLE_PROVIDER_ID => Some(
                 self.database
                     .get_setting(OPENAI_BASE_URL)
@@ -533,8 +567,9 @@ impl DesktopSettingsService {
         };
         let translation_style_instruction = self
             .database
-            .get_setting(LLM_STYLE_INSTRUCTION)
+            .get_setting(&format!("translation.{translation_provider_id}.style"))
             .await?
+            .or(self.database.get_setting(LLM_STYLE_INSTRUCTION).await?)
             .unwrap_or_else(|| DEFAULT_LLM_STYLE.to_string());
         let key_saved = if let Some(key) = key_saved_setting(&translation_provider_id) {
             self.database.get_setting(key).await?.as_deref() == Some("true")
@@ -552,13 +587,13 @@ impl DesktopSettingsService {
             if translation_provider_id == HY_MT2_LOCAL_PROVIDER_ID {
                 (true, Some("local".to_string()))
             } else if stored_key.is_some() {
-            (true, Some("system".to_string()))
-        } else if environment_key.is_some() {
-            (true, Some("environment".to_string()))
-        } else if key_saved {
-            (true, Some("saved".to_string()))
-        } else if translation_provider_id != "none" && !credential_loaded {
-            (false, Some("deferred".to_string()))
+                (true, Some("system".to_string()))
+            } else if environment_key.is_some() {
+                (true, Some("environment".to_string()))
+            } else if key_saved {
+                (true, Some("saved".to_string()))
+            } else if translation_provider_id != "none" && !credential_loaded {
+                (false, Some("deferred".to_string()))
             } else {
                 (false, None)
             };
@@ -640,6 +675,14 @@ impl DesktopSettingsService {
         self.database
             .set_setting(TRANSLATION_PROVIDER, &request.translation_provider_id)
             .await?;
+        if request.translation_provider_id == GEMINI_PROVIDER_ID {
+            self.database
+                .set_setting(
+                    GEMINI_TRANSLATION_MODEL,
+                    translation_model.as_deref().unwrap_or(DEFAULT_GEMINI_MODEL),
+                )
+                .await?;
+        }
         if request.translation_provider_id == DEEPSEEK_PROVIDER_ID {
             self.database
                 .set_setting(
@@ -669,6 +712,12 @@ impl DesktopSettingsService {
                 .await?;
         }
         self.database
+            .set_setting(
+                &format!("translation.{}.style", request.translation_provider_id),
+                &translation_style_instruction,
+            )
+            .await?;
+        self.database
             .set_setting(LLM_STYLE_INSTRUCTION, &translation_style_instruction)
             .await?;
         self.database
@@ -690,29 +739,12 @@ impl DesktopSettingsService {
                 "none" | HY_MT2_LOCAL_PROVIDER_ID
             )
         {
-            self.credentials.delete(&request.translation_provider_id)?;
-            self.replace_cached_provider_key(&request.translation_provider_id, None, None);
-            if let Some(key) = key_saved_setting(&request.translation_provider_id) {
-                self.database.delete_setting(key).await?;
-            }
+            self.save_translation_credential(&request.translation_provider_id, None, true)
+                .await?;
         }
         if let Some(secret) = normalized_secret(request.api_key) {
-            if matches!(
-                request.translation_provider_id.as_str(),
-                "none" | HY_MT2_LOCAL_PROVIDER_ID
-            ) {
-                bail!("cannot save an API key for this translation provider");
-            }
-            self.credentials
-                .set(&request.translation_provider_id, &secret)?;
-            self.replace_cached_provider_key(
-                &request.translation_provider_id,
-                Some(secret),
-                None,
-            );
-            if let Some(key) = key_saved_setting(&request.translation_provider_id) {
-                self.database.set_setting(key, "true").await?;
-            }
+            self.save_translation_credential(&request.translation_provider_id, Some(secret), false)
+                .await?;
         }
 
         self.replace_provider(
@@ -737,7 +769,7 @@ impl DesktopSettingsService {
         if matches!(provider_id, "none" | HY_MT2_LOCAL_PROVIDER_ID) {
             bail!("select a translation provider before checking its API key");
         }
-        let secret = match self.credentials.get(provider_id) {
+        let secret = match self.credentials.get(credential_id(provider_id)) {
             Ok(secret) => normalized_secret(secret),
             Err(error) => {
                 self.replace_cached_provider_key(provider_id, None, Some(format!("{error:#}")));
@@ -861,7 +893,10 @@ impl DesktopSettingsService {
             self.credential_cache.as_ref(),
         );
         if let Some(error) = error {
-            bail!("读取 {} API Key 失败：{error}", dictionary_provider_display_name(provider_id)?);
+            bail!(
+                "读取 {} API Key 失败：{error}",
+                dictionary_provider_display_name(provider_id)?
+            );
         }
         secret.ok_or_else(|| {
             anyhow!(
@@ -995,6 +1030,180 @@ impl DesktopSettingsService {
         base_url: Option<&str>,
         style_instruction: &str,
     ) -> Result<()> {
+        let provider = self
+            .make_provider(
+                provider_id,
+                network,
+                model,
+                base_url,
+                style_instruction,
+                None,
+            )
+            .await?;
+        self.provider.replace(provider);
+        Ok(())
+    }
+
+    pub async fn task_provider(
+        &self,
+        profile: &serde_json::Value,
+    ) -> Result<Arc<dyn TranslationProvider>> {
+        let network = self.download_network_settings().await?;
+        let id = profile["provider_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("task provider missing"))?;
+        self.make_provider(
+            id,
+            &network.client,
+            profile["model"].as_str(),
+            profile["base_url"].as_str(),
+            profile["style"].as_str().unwrap_or(DEFAULT_LLM_STYLE),
+            profile["local_model"].as_str(),
+        )
+        .await
+    }
+
+    pub async fn translation_profile(&self, id: &str) -> Result<serde_json::Value> {
+        validate_provider_id(id)?;
+        let settings = self.load().await?;
+        let model = match id {
+            DEEPSEEK_PROVIDER_ID => Some(
+                self.database
+                    .get_setting(DEEPSEEK_MODEL)
+                    .await?
+                    .unwrap_or_else(|| DEFAULT_DEEPSEEK_MODEL.into()),
+            ),
+            GEMINI_PROVIDER_ID => Some(
+                self.database
+                    .get_setting(GEMINI_TRANSLATION_MODEL)
+                    .await?
+                    .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.into()),
+            ),
+            OPENAI_COMPATIBLE_PROVIDER_ID => self.database.get_setting(OPENAI_MODEL).await?,
+            _ => None,
+        };
+        let base_url = if id == OPENAI_COMPATIBLE_PROVIDER_ID {
+            self.database.get_setting(OPENAI_BASE_URL).await?
+        } else if id == GEMINI_PROVIDER_ID {
+            Some(DEFAULT_GEMINI_BASE_URL.to_string())
+        } else {
+            None
+        };
+        Ok(
+            serde_json::json!({"provider_id":id,"model":model,"base_url":base_url,"style":self.database.get_setting(&format!("translation.{id}.style")).await?.unwrap_or(settings.translation_style_instruction),"local_model":if id==HY_MT2_LOCAL_PROVIDER_ID {settings.hy_mt2_model_path}else{None},"automatic":id!="none"}),
+        )
+    }
+
+    pub async fn save_translation_credential(
+        &self,
+        id: &str,
+        api_key: Option<String>,
+        clear: bool,
+    ) -> Result<()> {
+        validate_provider_id(id)?;
+        let marker = key_saved_setting(id)
+            .ok_or_else(|| anyhow!("this provider does not use API credentials"))?;
+        if clear {
+            self.credentials.delete(credential_id(id))?;
+            self.replace_cached_provider_key(id, None, None);
+            self.database.delete_setting(marker).await?;
+        } else {
+            let secret =
+                normalized_secret(api_key).ok_or_else(|| anyhow!("API Key cannot be empty"))?;
+            self.credentials.set(credential_id(id), &secret)?;
+            self.replace_cached_provider_key(id, Some(secret), None);
+            self.database.set_setting(marker, "true").await?;
+        }
+        self.database
+            .set_setting(
+                &format!("translation.{id}.credential_revision"),
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn translation_validation_fingerprint(&self, id: &str) -> Result<String> {
+        let value = serde_json::json!({
+            "profile": self.translation_profile(id).await?,
+            "network_mode": self.database.get_setting(NETWORK_PROXY_MODE).await?,
+            "proxy": self.database.get_setting(NETWORK_PROXY_URL).await?,
+            "credential_revision": self.database.get_setting(&format!("translation.{id}.credential_revision")).await?,
+        });
+        Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&value)?)))
+    }
+
+    pub async fn record_translation_validation(
+        &self,
+        id: &str,
+        fingerprint: &str,
+        success: bool,
+    ) -> Result<()> {
+        validate_provider_id(id)?;
+        self.database
+            .set_setting(
+                &format!("translation.{id}.validation"),
+                &serde_json::json!({"fingerprint": fingerprint, "success": success}).to_string(),
+            )
+            .await
+    }
+
+    /// Only persisted metadata is read here. Listing cards must never open Keychain.
+    pub async fn translation_readiness(&self, id: &str) -> Result<&'static str> {
+        validate_provider_id(id)?;
+        if id == "none" {
+            return Ok("disabled");
+        }
+        if id == HY_MT2_LOCAL_PROVIDER_ID {
+            let settings = self.load().await?;
+            if !settings.hy_mt2_model_ready || !settings.local_translation_runtime_ready {
+                return Ok("resources_missing");
+            }
+        } else {
+            let saved = if let Some(key) = key_saved_setting(id) {
+                self.database.get_setting(key).await?.as_deref() == Some("true")
+            } else {
+                false
+            };
+            let environment = (id == DEEPL_PROVIDER_ID && self.environment_deepl_key.is_some())
+                || (id == DEEPSEEK_PROVIDER_ID && self.environment_deepseek_key.is_some());
+            if !saved && !environment {
+                return Ok("unconfigured");
+            }
+            if id == OPENAI_COMPATIBLE_PROVIDER_ID
+                && self.database.get_setting(OPENAI_MODEL).await?.is_none()
+            {
+                return Ok("configuration_missing");
+            }
+        }
+        if let Some(record) = self
+            .database
+            .get_setting(&format!("translation.{id}.validation"))
+            .await?
+            .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+        {
+            if record["fingerprint"].as_str()
+                == Some(self.translation_validation_fingerprint(id).await?.as_str())
+            {
+                return Ok(if record["success"].as_bool() == Some(true) {
+                    "verified"
+                } else {
+                    "validation_failed"
+                });
+            }
+        }
+        Ok("unverified")
+    }
+
+    async fn make_provider(
+        &self,
+        provider_id: &str,
+        network: &NetworkClientConfig,
+        model: Option<&str>,
+        base_url: Option<&str>,
+        style_instruction: &str,
+        local_model: Option<&str>,
+    ) -> Result<Arc<dyn TranslationProvider>> {
         let provider: Arc<dyn TranslationProvider> = match provider_id {
             "none" => Arc::new(UnconfiguredTranslationProvider),
             DEEPL_PROVIDER_ID => Arc::new(DeferredDeepLTranslationProvider::new(
@@ -1015,6 +1224,18 @@ impl DesktopSettingsService {
                 style_instruction: style_instruction.to_string(),
                 disable_deepseek_thinking: true,
             }),
+            GEMINI_PROVIDER_ID => Arc::new(DeferredOpenAiCompatibleTranslationProvider {
+                provider_id: GEMINI_PROVIDER_ID.to_string(),
+                provider_name: "Gemini".into(),
+                credentials: Arc::clone(&self.credentials),
+                credential_cache: Arc::clone(&self.credential_cache),
+                environment_key: None,
+                network: network.clone(),
+                base_url: DEFAULT_GEMINI_BASE_URL.into(),
+                model: model.unwrap_or(DEFAULT_GEMINI_MODEL).into(),
+                style_instruction: style_instruction.into(),
+                disable_deepseek_thinking: false,
+            }),
             OPENAI_COMPATIBLE_PROVIDER_ID => {
                 Arc::new(DeferredOpenAiCompatibleTranslationProvider {
                     provider_id: OPENAI_COMPATIBLE_PROVIDER_ID.to_string(),
@@ -1032,22 +1253,26 @@ impl DesktopSettingsService {
                 })
             }
             HY_MT2_LOCAL_PROVIDER_ID => {
-                let model_path = self
-                    .database
-                    .get_setting(HY_MT2_MODEL_PATH)
-                    .await?
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| self.models_directory.join("missing-hy-mt2-model.gguf"));
-                Arc::new(LocalLlamaTranslationProvider::new(LocalLlamaConfig::hy_mt2(
-                    self.llama_server_path.clone(),
-                    model_path,
-                    style_instruction.to_string(),
-                ))?)
+                let model_path = if let Some(path) = local_model {
+                    PathBuf::from(path)
+                } else {
+                    self.database
+                        .get_setting(HY_MT2_MODEL_PATH)
+                        .await?
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| self.models_directory.join("missing-hy-mt2-model.gguf"))
+                };
+                Arc::new(LocalLlamaTranslationProvider::new(
+                    LocalLlamaConfig::hy_mt2(
+                        self.llama_server_path.clone(),
+                        model_path,
+                        style_instruction.to_string(),
+                    ),
+                )?)
             }
             _ => return Err(anyhow!("unsupported translation provider: {provider_id}")),
         };
-        self.provider.replace(provider);
-        Ok(())
+        Ok(provider)
     }
 
     async fn refresh_active_provider(&self) -> Result<()> {
@@ -1087,6 +1312,7 @@ impl DesktopSettingsService {
         &self,
         provider_id: &str,
     ) -> (Option<String>, Option<String>, bool) {
+        let provider_id = credential_id(provider_id);
         let cache = self
             .credential_cache
             .lock()
@@ -1103,6 +1329,7 @@ impl DesktopSettingsService {
         secret: Option<String>,
         error: Option<String>,
     ) {
+        let provider_id = credential_id(provider_id);
         let mut caches = self
             .credential_cache
             .lock()
@@ -1123,6 +1350,7 @@ fn cached_provider_key(
     credentials: &dyn CredentialStore,
     credential_cache: &Mutex<HashMap<String, CredentialCache>>,
 ) -> (Option<String>, Option<String>) {
+    let provider_id = credential_id(provider_id);
     let mut caches = credential_cache
         .lock()
         .expect("credential cache lock poisoned");
@@ -1141,6 +1369,7 @@ fn credential_cache_loaded(
     provider_id: &str,
     credential_cache: &Mutex<HashMap<String, CredentialCache>>,
 ) -> bool {
+    let provider_id = credential_id(provider_id);
     credential_cache
         .lock()
         .expect("credential cache lock poisoned")
@@ -1154,6 +1383,7 @@ fn validate_provider_id(provider_id: &str) -> Result<()> {
         "none"
             | DEEPL_PROVIDER_ID
             | DEEPSEEK_PROVIDER_ID
+            | GEMINI_PROVIDER_ID
             | OPENAI_COMPATIBLE_PROVIDER_ID
             | HY_MT2_LOCAL_PROVIDER_ID
     ) {
@@ -1163,10 +1393,19 @@ fn validate_provider_id(provider_id: &str) -> Result<()> {
     }
 }
 
+fn credential_id(id: &str) -> &str {
+    if id == GEMINI_PROVIDER_ID {
+        GEMINI_ASR_CREDENTIAL_ID
+    } else {
+        id
+    }
+}
+
 fn key_saved_setting(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         DEEPL_PROVIDER_ID => Some(DEEPL_KEY_SAVED),
         DEEPSEEK_PROVIDER_ID => Some(DEEPSEEK_KEY_SAVED),
+        GEMINI_PROVIDER_ID => Some(GEMINI_ASR_KEY_SAVED),
         OPENAI_COMPATIBLE_PROVIDER_ID => Some(OPENAI_COMPATIBLE_KEY_SAVED),
         _ => None,
     }
@@ -1176,6 +1415,7 @@ fn provider_display_name(provider_id: &str) -> &'static str {
     match provider_id {
         DEEPL_PROVIDER_ID => "DeepL",
         DEEPSEEK_PROVIDER_ID => "DeepSeek",
+        GEMINI_PROVIDER_ID => "Gemini",
         OPENAI_COMPATIBLE_PROVIDER_ID => "OpenAI-compatible",
         HY_MT2_LOCAL_PROVIDER_ID => "Hy-MT2（本地）",
         _ => "翻译服务",
@@ -1217,6 +1457,16 @@ fn validate_llm_settings(
             model: model.unwrap_or(DEFAULT_DEEPSEEK_MODEL).to_string(),
             style_instruction: style_instruction.to_string(),
             disable_deepseek_thinking: true,
+            generation: Default::default(),
+        }),
+        GEMINI_PROVIDER_ID => Some(OpenAiCompatibleConfig {
+            provider_id: provider_id.into(),
+            provider_name: "Gemini".into(),
+            api_key: Some("validation-only".into()),
+            base_url: DEFAULT_GEMINI_BASE_URL.into(),
+            model: model.unwrap_or(DEFAULT_GEMINI_MODEL).into(),
+            style_instruction: style_instruction.into(),
+            disable_deepseek_thinking: false,
             generation: Default::default(),
         }),
         OPENAI_COMPATIBLE_PROVIDER_ID => Some(OpenAiCompatibleConfig {
@@ -1301,8 +1551,7 @@ mod tests {
     use anyhow::Result;
     use atogaki_subtitle::application::{
         MutableTranslationProvider, TranslationOptions, TranslationProvider, TranslationRequest,
-        TranslationTargetSegment,
-        UnconfiguredTranslationProvider,
+        TranslationTargetSegment, UnconfiguredTranslationProvider,
     };
 
     use super::{DesktopSettingsService, SaveDesktopSettingsRequest};
@@ -1461,7 +1710,10 @@ mod tests {
             models,
             credentials.clone(),
         );
-        service.set_downloaded_model("hy-mt2", &model).await.unwrap();
+        service
+            .set_downloaded_model("hy-mt2", &model)
+            .await
+            .unwrap();
 
         let saved = service
             .save(SaveDesktopSettingsRequest {
@@ -1483,7 +1735,10 @@ mod tests {
             .unwrap();
 
         assert!(saved.hy_mt2_model_ready);
-        assert_eq!(saved.hy_mt2_model_path.as_deref(), Some(model.to_str().unwrap()));
+        assert_eq!(
+            saved.hy_mt2_model_path.as_deref(),
+            Some(model.to_str().unwrap())
+        );
         assert_eq!(saved.translation_api_key_source.as_deref(), Some("local"));
         assert_eq!(*credentials.reads.lock().unwrap(), 0);
         assert_eq!(provider.status().id, "hy-mt2-local");
@@ -1543,6 +1798,234 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[derive(Debug, Default)]
+    struct ScopedCredentials {
+        entries: Mutex<std::collections::HashMap<String, String>>,
+        reads: Mutex<usize>,
+    }
+    impl CredentialStore for ScopedCredentials {
+        fn backend_name(&self) -> &'static str {
+            "isolated scoped test store"
+        }
+        fn get(&self, id: &str) -> Result<Option<String>> {
+            *self.reads.lock().unwrap() += 1;
+            Ok(self.entries.lock().unwrap().get(id).cloned())
+        }
+        fn set(&self, id: &str, key: &str) -> Result<()> {
+            self.entries.lock().unwrap().insert(id.into(), key.into());
+            Ok(())
+        }
+        fn delete(&self, id: &str) -> Result<()> {
+            self.entries.lock().unwrap().remove(id);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn gemini_reuses_legacy_asr_key_and_rotates_shared_cache_and_validation() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-gemini-shared-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let db = LocalDatabase::open(root.join("state.sqlite"))
+            .await
+            .unwrap();
+        let credentials = Arc::new(ScopedCredentials::default());
+        credentials
+            .set(super::GEMINI_ASR_CREDENTIAL_ID, "legacy-test-key")
+            .unwrap();
+        db.set_setting(super::GEMINI_ASR_KEY_SAVED, "true")
+            .await
+            .unwrap();
+        let service = DesktopSettingsService::with_credentials(
+            db.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            credentials.clone(),
+        );
+        service.initialize().await.unwrap();
+        let profile = service.translation_profile("gemini").await.unwrap();
+        assert_eq!(profile["model"], super::DEFAULT_GEMINI_MODEL);
+        assert_eq!(profile["base_url"], super::DEFAULT_GEMINI_BASE_URL);
+        assert_eq!(
+            service.translation_readiness("gemini").await.unwrap(),
+            "unverified"
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+        let frozen = service.task_provider(&profile).await.unwrap();
+        service.gemini_asr_provider().await.unwrap();
+        assert_eq!(
+            service.cached_provider_key_snapshot("gemini").0.as_deref(),
+            Some("legacy-test-key")
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 1);
+        let fingerprint = service
+            .translation_validation_fingerprint("gemini")
+            .await
+            .unwrap();
+        service
+            .record_translation_validation("gemini", &fingerprint, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("gemini").await.unwrap(),
+            "verified"
+        );
+        service
+            .save_asr_credential(super::SaveAsrCredentialRequest {
+                api_key: Some("rotated-test-key".into()),
+                clear: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            service.cached_provider_key_snapshot("gemini").0.as_deref(),
+            Some("rotated-test-key")
+        );
+        assert_eq!(
+            service.translation_readiness("gemini").await.unwrap(),
+            "unverified"
+        );
+        assert_eq!(credentials.entries.lock().unwrap().len(), 1);
+        assert!(!credentials.entries.lock().unwrap().contains_key("gemini"));
+        assert_ne!(
+            service
+                .translation_validation_fingerprint("gemini")
+                .await
+                .unwrap(),
+            fingerprint
+        );
+        db.set_setting(super::GEMINI_TRANSLATION_MODEL, "gemini-custom-test-model")
+            .await
+            .unwrap();
+        assert_eq!(
+            frozen.status().model.as_deref(),
+            Some(super::DEFAULT_GEMINI_MODEL)
+        );
+        assert_eq!(
+            service.translation_profile("gemini").await.unwrap()["model"],
+            "gemini-custom-test-model"
+        );
+        service
+            .save_translation_credential("gemini", None, true)
+            .await
+            .unwrap();
+        assert!(!service.asr_credential_status().await.unwrap().configured);
+        assert!(service.gemini_asr_provider().await.is_err());
+        assert_eq!(
+            service.translation_readiness("gemini").await.unwrap(),
+            "unconfigured"
+        );
+        assert!(service.cached_provider_key_snapshot("gemini").0.is_none());
+        drop(frozen);
+        drop(service);
+        drop(db);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn validation_status_is_scoped_to_configuration_and_never_reads_secrets() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-provider-validation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let database = LocalDatabase::open(root.join("state.sqlite"))
+            .await
+            .unwrap();
+        let credentials = Arc::new(MemoryCredentialStore::default());
+        let service = DesktopSettingsService::with_credentials(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            credentials.clone(),
+        );
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unconfigured"
+        );
+        service
+            .save_translation_credential("deepseek", Some("test-only-key".into()), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.load().await.unwrap().translation_provider_id,
+            "none",
+            "saving a provider credential does not change the default"
+        );
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unverified"
+        );
+        let original = service
+            .translation_validation_fingerprint("deepseek")
+            .await
+            .unwrap();
+        service
+            .record_translation_validation("deepseek", &original, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "verified"
+        );
+        assert_eq!(
+            service.translation_readiness("deepl").await.unwrap(),
+            "unconfigured"
+        );
+        database
+            .set_setting(super::DEEPSEEK_MODEL, "another-model")
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unverified"
+        );
+        let current = service
+            .translation_validation_fingerprint("deepseek")
+            .await
+            .unwrap();
+        service
+            .record_translation_validation("deepseek", &current, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "validation_failed"
+        );
+        // A late successful response for old settings must not validate new settings.
+        service
+            .record_translation_validation("deepseek", &original, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unverified"
+        );
+        service
+            .record_translation_validation("deepseek", &current, true)
+            .await
+            .unwrap();
+        service
+            .save_translation_credential("deepseek", Some("replacement-test-key".into()), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unverified"
+        );
+        service
+            .save_translation_credential("deepseek", None, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.translation_readiness("deepseek").await.unwrap(),
+            "unconfigured"
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+        database.close().await;
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn saves_deepseek_configuration_without_putting_the_secret_in_sqlite() {
         let nonce = SystemTime::now()
@@ -1592,7 +2075,10 @@ mod tests {
             Some("https://api.deepseek.com")
         );
         assert_eq!(provider.status().id, "deepseek");
-        assert_eq!(provider.status().model.as_deref(), Some("deepseek-v4-flash"));
+        assert_eq!(
+            provider.status().model.as_deref(),
+            Some("deepseek-v4-flash")
+        );
         assert_eq!(
             credentials.secret.lock().unwrap().as_deref(),
             Some("deepseek-test-secret")
@@ -1646,10 +2132,7 @@ mod tests {
             credentials.clone(),
         );
 
-        let checked = service
-            .check_translation_api_key("deepseek")
-            .await
-            .unwrap();
+        let checked = service.check_translation_api_key("deepseek").await.unwrap();
 
         assert!(checked.stored_in_system);
         assert!(!checked.available_from_environment);
@@ -1705,7 +2188,13 @@ mod tests {
                 .as_deref(),
             Some("true")
         );
-        assert!(database.get_setting("dictionary-secret").await.unwrap().is_none());
+        assert!(
+            database
+                .get_setting("dictionary-secret")
+                .await
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(*credentials.reads.lock().unwrap(), 0);
         assert_eq!(
             service.dictionary_api_key("merriam-webster").unwrap(),

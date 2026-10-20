@@ -2,35 +2,41 @@
 
 Atogaki 是一个面向中文使用者的、本地优先的外语音视频理解与学习工作台。它通过识别、翻译、字幕校对、词典与可回看的媒体时间轴，把用户本机已有的节目整理成可以理解、复习和导出的双语资料。项目最初用于整理ヨルシカ「後書き」电台；字幕编辑、样式和烧录是建立可信资料的基础能力，但 Atogaki 目前不以替代完整视频字幕制作软件为目标。
 
-项目目前处于预发布阶段。macOS Apple Silicon 是日常开发和完整体验基线，当前版本为 [`v0.1.0-alpha.9`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.9)，采用 ad-hoc 签名且尚未公证。Windows 11 x86_64 当前版本为未签名的 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，已同步学习区、词典、字幕样式、可恢复翻译、局部重新识别、长视频播放和视频质量档；Windows 悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+macOS Apple Silicon 是日常开发和完整体验基线，稳定版为 [`v0.1.0`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0)，采用 ad-hoc 签名且尚未公证。Windows 11 x86_64 当前版本为未签名的 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，已同步学习区、词典、字幕样式、可恢复翻译、局部重新识别、长视频播放和视频质量档；Windows 悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
 ## 能做什么
 
 - 导入本机音频或视频，用内置 `whisper-cli` 和用户下载的 Whisper 模型在本地识别日语、英语或韩语。
 - 使用 Silero VAD 过滤静音、音乐和环境声，并通过词表提高人名与作品名的一致性。
 - 在播放器中按时间轴查看、跳转和编辑字幕；原文修改后会标记对应译文为待重译。
-- 可选使用 DeepL 或 DeepSeek 将日语、英语或韩语翻译为简体中文；也可填写自定义 OpenAI-compatible Base URL 与模型。
+- 可选使用 Hy-MT2 本地翻译、DeepL、DeepSeek 或 Gemini 将日语、英语或韩语翻译为简体中文；也可填写自定义 OpenAI-compatible Base URL 与模型。
 - 在任务内字幕编辑器中用波形调整时间、切分／合并字幕，并保留会话撤销。
 - 为原文和译文设置字体、字号、颜色、描边、背景、位置与边距；FFmpeg/libass 真实预览、双语 ASS 和视频烧录共享同一套样式。
 - 在“收听”中连续阅读并按当前句跟随播放；选择词、短语、语法或整句保存到按语言分册的“学习”区域，并返回原节目时间。
 - 查询用户自行下载的 JMdict、Tomoshi、ECDICT 离线词典，或使用用户配置的 Merriam-Webster API；可选择词典释义作为学习条目的简明译义。
 - 按需导出原文、简体中文或双语 SRT/ASS，或把原文、译文、双语字幕烧录到 MP4。
-- 记录任务、失败阶段、重试来源和烧录历史；重启后会识别被中断的任务，并允许从冻结参数创建新任务重试。
+- 记录任务、失败阶段、重试来源和烧录历史；重启后会识别被中断的任务，并允许在同任务内从已提交检查点继续；无检查点的历史任务保留原重试入口。
 - 持久化工作台任务顺序；模型下载中断后可在下次启动通过 HTTP Range 安全续传。
 
-媒体、模型、词典包、任务、学习资料和编辑结果默认保留在设备上。只有启用云端字幕翻译时，待翻译的原文字幕及有限的相邻上下文会发送给所选 provider；只有用户主动查询在线词典时，所选文本才会发送给对应词典 API。
+媒体、模型、词典包、任务、学习资料和编辑结果默认保留在设备上。只有启用云端字幕翻译时，待翻译的原文字幕及有限的相邻上下文会发送给所选 provider；Gemini 局部识别需另行确认确切音频上传范围；只有用户主动查询在线词典时，所选文本才会发送给对应词典 API。
+
+## v0.1.0 离线工作流
+
+v0.1.0 增加两分钟识别检查点、同任务暂停／继续和只读部分原文；任务可明确选择仅转录或 Hy-MT2／DeepSeek／DeepL／Gemini 翻译，完整识别后自动进入独立翻译阶段。翻译中断只补未完成或过期部分。设置、任务级后端、持久候选、全文检索、循环试听、批量导入、预设、学习来源和 Anki TSV 一并整理。
+
+macOS 稳定版包含上述能力、字幕自动保存和本机图片主题；MLX 暂缓，桌面继续使用 C++ / Metal。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
 
 ## 安装与首次配置
 
 当前提供 Apple Silicon macOS DMG 和 Windows 11 x86_64 NSIS 安装器。普通测试者应从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。
 
-macOS 测试版没有 Developer ID 签名或公证。核对下载来源与 SHA-256 后，首次打开若被 Gatekeeper 阻止，可在 Finder 中右键 App 选择“打开”。Windows `alpha.10` 安装包同样没有商业代码签名，SmartScreen 可能显示“未知发布者”；不要为运行测试版而全局关闭系统安全功能。
+macOS 版本没有 Developer ID 签名或公证。核对下载来源与 SHA-256 后，首次打开若被 Gatekeeper 阻止，可在 Finder 中右键 App 选择“打开”。Windows `alpha.10` 安装包同样没有商业代码签名，SmartScreen 可能显示“未知发布者”；不要为运行测试版而全局关闭系统安全功能。
 
 首次打开 App 时，启动配置会引导完成三部分；学习词典可在进入 App 后按需配置：
 
 1. **本地模型。** 选择已有 `ggml-*.bin`，或下载 Whisper 与 Silero VAD。App 管理的默认目录通常是 `~/Library/Application Support/com.chai-yinfeng.atogaki/models/`，界面会显示本机的实际路径。
 2. **网络。** 选择跟随启动环境、强制直连或自定义 HTTP/HTTPS 代理；也可以填写 HTTPS 模型镜像。连接测试使用当前输入；点击下载会自动保存当前网络草稿。
-3. **云端翻译。** 可选择 DeepL、DeepSeek 或高级 OpenAI-compatible 入口。不配置仍可完成本地识别、编辑和原文字幕导出；启动时不访问 Keychain，首次翻译才读取当前 provider 的已有 Key。LLM 入口还可配置模型与口语风格。
+3. **翻译方式。** 可选择仅转录、Hy-MT2 本地翻译、DeepL、DeepSeek、Gemini 或高级 OpenAI-compatible 入口。不配置仍可完成本地识别、编辑和原文字幕导出；启动时不访问 Keychain，首次翻译才读取当前 provider 的已有 Key。LLM 入口还可配置模型与口语风格。
 
 学习词典与字幕翻译相互独立。JMdict、Tomoshi 和 ECDICT 由用户在设置页明确下载到 `dictionaries/`；Merriam-Webster Key 单独保存到系统凭据库。Collins 未取得可测试的 API 账户，Cambridge API 当前不可用，两者均不出现在产品路径中。
 
@@ -167,7 +173,7 @@ Atogaki_Sub/
 ## 开发准则与当前边界
 
 - 正确性、可编辑性和可回看性优先于实时性；实时辅助属于后续阶段。
-- 时间轴和人工修正是一等数据，重新识别与重试应派生新任务而非覆盖旧结果。
+- 时间轴和人工修正是一等数据；识别候选明确比较后采用，任务恢复复用已提交检查点。
 - 首批语言组合是日语、英语或韩语识别、简体中文翻译；任务会持久化语言对，provider 与领域接口不写死某一种组合。
 - macOS Apple Silicon 是当前主要质量基线；Windows 11 x86_64 已通过独立许可证审计、安装门禁和选定候选实机回归发布 `alpha.10`，后续仍按稳定候选集中更新。Windows 悬浮字幕不稳定且不建议使用；x86_64 macOS 尚未列入当前主线。
 - 当前没有账号、云端文件托管、跨设备同步或自动媒体下载。

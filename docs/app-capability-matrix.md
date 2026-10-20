@@ -7,7 +7,7 @@ _冻结日期：2026-09-18_
 | 层级 | 本地路线 | 云端路线 |
 | --- | --- | --- |
 | ASR | Whisper.cpp：新任务全片识别、selected-range 独立 run、VAD、词表提示、GPU→CPU 回退 | Gemini 3.5 Transcribe：selected-range 独立 run、真实 word timestamps、可选 speaker 数据、每次范围单独授权上传 |
-| Translation | Hy-MT2 1.8B／7B：App 管理模型，受管 loopback `llama-server`，translation groups 与结构门禁 | DeepL、DeepSeek、OpenAI-compatible：系统凭据、translation groups、上下文／revision 校验 |
+| Translation | Hy-MT2 1.8B／7B：App 管理模型，受管 loopback `llama-server`，translation groups 与结构门禁 | DeepL、DeepSeek、Gemini、OpenAI-compatible：系统凭据、translation groups、上下文／revision 校验 |
 
 因此当前可验证的组合是：
 
@@ -23,3 +23,15 @@ _冻结日期：2026-09-18_
 ## 桌面晋升门禁
 
 CLI 实验进入 App 前必须给出固定输入、配置快照、质量对比、性能和资源数据、失败恢复、隐私边界及迁移方案。结构合同测试不能替代真实质量结论。晋升需要单独的产品决策，不因 core 已实现 provider 就自动增加 UI 入口。
+
+## 2026-10-18 开发分支扩展
+
+本轮由用户明确批准，按 [0045](decisions/0045-resumable-offline-workflows.md) 扩展稳定工作流；不表示既有公开安装包已包含这些能力。
+
+- 长音频约 120 秒归属区间、前后最多 5 秒音频上下文，完成块经摘要校验后原子提交；失败／暂停在同任务内手动继续。进度轮询独立于执行，避免 SQLite 事务互相等待。
+- 只读部分原文、任务级翻译配置、独立自动翻译阶段、后端配置草稿隔离与不可变执行快照。
+- 持久 ASR 候选重开／比较／采用、完整本地候选、范围授权和取消；Gemini 取消先等待上传清理，不声称能撤回已发送的数据。
+- 任务与字幕搜索、学习检索及来源筛选、循环／衔接试听、多文件导入、命名预设、完整来源例句、收藏高亮和 Anki 文本 TSV。
+- MLX Whisper 仅 CLI 可选；Hy-MT2 MLX 仅 evaluation harness。没有通过结构合同的结果不会写入正式字幕。
+
+模型、真实长节目接缝、人工翻译盲评、Windows 实机与公开发行的验收边界见 [离线工作流验证](offline-workflow-validation.md)。

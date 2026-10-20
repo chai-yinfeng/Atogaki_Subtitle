@@ -155,6 +155,14 @@ impl LocalWorkspaceService {
         }
     }
 
+    pub fn using_provider(&self, provider: Arc<dyn TranslationProvider>) -> Self {
+        Self {
+            database: self.database.clone(),
+            translation_provider: provider,
+            translation_locks: Arc::clone(&self.translation_locks),
+        }
+    }
+
     pub async fn playback_position(&self, job_id: &str) -> Result<i64> {
         self.database
             .get_job(job_id)
@@ -318,6 +326,30 @@ impl LocalWorkspaceService {
             .await
     }
 
+    pub async fn edit_subtitle_block(
+        &self,
+        job_id: &str,
+        before: &[LocalSubtitleSegmentRecord],
+        remove_id: Option<&str>,
+        insertion: Option<LocalSubtitleSegmentRecord>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        if let Some(block) = &insertion {
+            let record = self
+                .database
+                .get_job(job_id)
+                .await?
+                .ok_or_else(|| anyhow!("task not found"))?;
+            let job = Job::open(record.storage_dir.into())?;
+            let duration = crate::application::acoustic_plan::wav_duration(&job.audio_wav)?;
+            if block.end_ms < 0 || block.end_ms as u64 > duration {
+                return Err(anyhow!("字幕范围超过媒体时长"));
+            }
+        }
+        self.database
+            .edit_subtitle_block(job_id, before, remove_id, insertion)
+            .await
+    }
+
     pub async fn restore_subtitle_structure(
         &self,
         job_id: &str,
@@ -370,6 +402,16 @@ impl LocalWorkspaceService {
     }
 
     pub async fn translate_all(&self, job_id: &str) -> Result<LocalBatchTranslationResult> {
+        self.translate_batch(job_id, false).await
+    }
+    pub async fn translate_pending(&self, job_id: &str) -> Result<LocalBatchTranslationResult> {
+        self.translate_batch(job_id, true).await
+    }
+    async fn translate_batch(
+        &self,
+        job_id: &str,
+        only_pending: bool,
+    ) -> Result<LocalBatchTranslationResult> {
         let translation_lock = self.translation_lock_for_job(job_id).await;
         let _guard = translation_lock.lock().await;
         let segments = self.database.list_segments(job_id).await?;
@@ -398,12 +440,17 @@ impl LocalWorkspaceService {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let resumed = !pending.is_empty() && pending.len() < segments.len();
-        let targets = if pending.is_empty() {
-            &segments
-        } else {
-            &pending
-        };
+        if only_pending && pending.is_empty() {
+            return Ok(LocalBatchTranslationResult {
+                segments,
+                requested_count: 0,
+                translated_count: 0,
+                empty_segment_ids: vec![],
+                resumed: true,
+            });
+        }
+        let resumed = only_pending;
+        let targets = if !only_pending { &segments } else { &pending };
         let requested_count = targets.len();
         let (segments, empty_segment_ids) =
             self.translate_records(job_id, &segments, targets).await?;
@@ -663,7 +710,11 @@ impl LocalWorkspaceService {
         context_segments: &[LocalSubtitleSegmentRecord],
         segments_to_translate: &[LocalSubtitleSegmentRecord],
     ) -> Result<(Vec<LocalSubtitleSegmentRecord>, Vec<String>)> {
-        let provider = self.translation_provider.status();
+        let frozen = self
+            .translation_provider
+            .execution_snapshot()
+            .unwrap_or_else(|| Arc::clone(&self.translation_provider));
+        let provider = frozen.status();
         if !provider.configured {
             return Err(anyhow!(
                 "{} is not configured. {}",
@@ -753,19 +804,15 @@ impl LocalWorkspaceService {
                         .unwrap_or_default(),
                 })
                 .collect::<Vec<_>>();
-            let response = execute_translation_group(
-                self.translation_provider.as_ref(),
-                options.clone(),
-                group.clone(),
-                None,
-            )
-            .await
-            .map_err(|error| {
-                anyhow!(
-                    "failed to translate SQLite subtitle workspace with {}: {error:#}",
-                    provider.name
-                )
-            })?;
+            let response =
+                execute_translation_group(frozen.as_ref(), options.clone(), group.clone(), None)
+                    .await
+                    .map_err(|error| {
+                        anyhow!(
+                            "failed to translate SQLite subtitle workspace with {}: {error:#}",
+                            provider.name
+                        )
+                    })?;
             let response_model = response.model.clone().or_else(|| provider.model.clone());
             let response_usage = response.usage.clone();
             let (updates, empty) =
@@ -824,7 +871,7 @@ impl LocalWorkspaceService {
                     })
                     .collect::<Vec<_>>();
                 let retry_response = execute_translation_group(
-                    self.translation_provider.as_ref(),
+                    frozen.as_ref(),
                     options.clone(),
                     retry_group.clone(),
                     Some(retry_style.to_string()),
@@ -1919,7 +1966,7 @@ mod tests {
 
         let provider = Arc::new(FakeTranslationProvider::new(false));
         let resumed = LocalWorkspaceService::with_provider(database.clone(), provider.clone())
-            .translate_all(&manifest.job_id)
+            .translate_pending(&manifest.job_id)
             .await
             .unwrap();
         assert!(resumed.resumed);
@@ -1931,6 +1978,44 @@ mod tests {
                 .iter()
                 .all(|segment| segment.translated_text.is_some())
         );
+
+        let records = database.list_segments(&manifest.job_id).await.unwrap();
+        let first = &records[0];
+        database
+            .update_segment(
+                &manifest.job_id,
+                &first.id,
+                "修改后的原文".into(),
+                first.translated_text.clone(),
+                first.start_ms,
+                first.end_ms,
+            )
+            .await
+            .unwrap();
+        provider.requests.lock().unwrap().clear();
+        let full = LocalWorkspaceService::with_provider(database.clone(), provider.clone())
+            .translate_all(&manifest.job_id)
+            .await
+            .unwrap();
+        assert!(!full.resumed);
+        assert_eq!(full.requested_count, 13);
+        assert_eq!(
+            provider
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|request| request.targets.len())
+                .sum::<usize>(),
+            13
+        );
+        provider.requests.lock().unwrap().clear();
+        let pending = LocalWorkspaceService::with_provider(database.clone(), provider.clone())
+            .translate_pending(&manifest.job_id)
+            .await
+            .unwrap();
+        assert_eq!(pending.requested_count, 0);
+        assert!(provider.requests.lock().unwrap().is_empty());
 
         database.close().await;
         drop(database);

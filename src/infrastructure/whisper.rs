@@ -66,6 +66,7 @@ pub async fn transcribe_response(
         eprintln!("whisper-cli: requesting GPU device 0 when supported by this build");
     }
 
+    let mut effective_cpu = config.no_gpu;
     let first = run_whisper(
         whisper_cli,
         options,
@@ -85,6 +86,17 @@ pub async fn transcribe_response(
             "whisper-cli failed in GPU mode; retrying with --no-gpu. Original failure: {}",
             error.summary()
         );
+        crate::application::acoustic_plan::write_json(
+            &output_prefix.with_extension("gpu-failure.json"),
+            &serde_json::json!({
+                "from_device": "gpu",
+                "to_device": "cpu",
+                "reason": error.summary(),
+                "stdout": error.stdout,
+                "stderr": error.stderr,
+            }),
+        )?;
+        effective_cpu = true;
         run_whisper(
             whisper_cli,
             options,
@@ -97,6 +109,10 @@ pub async fn transcribe_response(
         .map_err(anyhow::Error::from)?;
     }
 
+    crate::application::acoustic_plan::atomic_write(
+        &output_prefix.with_extension("device"),
+        if effective_cpu { b"cpu" } else { b"gpu" },
+    )?;
     let json_path = json_path(output_prefix);
     let data =
         fs::read(&json_path).with_context(|| format!("failed to read {}", json_path.display()))?;
@@ -380,5 +396,76 @@ mod tests {
         .collect::<Vec<_>>();
 
         assert!(args.windows(2).any(|pair| pair == ["--max-context", "0"]));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn gpu_retry_preserves_failure_evidence_and_stops_after_one_cpu_attempt() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+        let root = std::env::temp_dir().join(format!("atogaki-gpu-retry-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let cli = root.join("whisper");
+        fs::write(
+            &cli,
+            r##"#!/bin/sh
+cpu=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -of) output="$2"; shift ;;
+    --no-gpu) cpu=true ;;
+  esac
+  shift
+done
+printf '%s\n' "$cpu" >> "$output.calls"
+if [ "$cpu" = false ]; then
+  echo 'Metal GPU allocation failed' >&2
+  exit 1
+fi
+if [ -f "$output.fail-cpu" ]; then
+  echo 'CPU failure' >&2
+  exit 2
+fi
+printf '%s' '{"transcription":[{"offsets":{"from":0,"to":1000},"text":"test"}]}' > "$output.json"
+"##,
+        )
+        .unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        let model = root.join("model");
+        fs::write(&model, b"fixture").unwrap();
+        let options = TranscriptionOptions::japanese(model);
+        let prefix = root.join("output");
+        super::transcribe_response(&cli, &options, Path::new("unused.wav"), &prefix)
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(prefix.with_extension("calls")).unwrap(),
+            "false\ntrue\n"
+        );
+        assert_eq!(
+            fs::read_to_string(prefix.with_extension("device")).unwrap(),
+            "cpu"
+        );
+        let evidence: serde_json::Value =
+            serde_json::from_slice(&fs::read(prefix.with_extension("gpu-failure.json")).unwrap())
+                .unwrap();
+        assert!(
+            evidence["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("Metal GPU allocation failed")
+        );
+        let failed = root.join("failed");
+        fs::write(failed.with_extension("fail-cpu"), b"").unwrap();
+        assert!(
+            super::transcribe_response(&cli, &options, Path::new("unused.wav"), &failed)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(failed.with_extension("calls")).unwrap(),
+            "false\ntrue\n"
+        );
+        assert!(!failed.with_extension("device").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }

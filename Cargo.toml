@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 
+# Rust/LLVM debug-info stripping can misalign proc-macro dylibs on newer macOS.
+# Retain build-time debug information; final binaries keep normal release optimization.
+# https://github.com/rust-lang/rust/issues/157750
+[profile.release.build-override]
+debug = 2
+
 [dependencies]
 anyhow = "1.0.100"
 axum = { version = "0.8.6", features = ["multipart"] }

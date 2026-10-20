@@ -29,6 +29,8 @@ pub async fn translate_transcript(
     options: &TranslationOptions,
     segments: &mut [TranscriptSegment],
 ) -> Result<TranslationExecutionSummary> {
+    let frozen = provider.execution_snapshot();
+    let provider = frozen.as_deref().unwrap_or(provider);
     let timeline = segments
         .iter()
         .enumerate()

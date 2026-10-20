@@ -125,6 +125,16 @@ async fn main() -> Result<()> {
         }
         Command::Serve(args) => interface::web::serve(args).await,
         Command::Transcribe(args) => {
+            let runner = if args.engine == "mlx-whisper" {
+                runner.with_asr_provider(std::sync::Arc::new(
+                    atogaki_subtitle::infrastructure::mlx_asr::MlxWhisperProvider {
+                        python: args.python,
+                        model: args.whisper.model.clone(),
+                    },
+                ))
+            } else {
+                runner
+            };
             let job = runner
                 .transcribe(TranscribeSpec {
                     input: args.input,

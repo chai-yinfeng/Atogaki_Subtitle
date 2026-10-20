@@ -7,6 +7,8 @@ SOURCE_CACHE=${ATOGAKI_SIDECAR_SOURCE_CACHE:-${TMPDIR:-/tmp}/atogaki-sidecar-sou
 OUTPUT_DIR=${1:-$PROJECT_DIR/src-tauri/target/release/bundle/sources}
 MANIFEST="$PROJECT_DIR/src-tauri/third-party/build-manifest.txt"
 source "$SCRIPT_DIR/sidecar-versions.zsh"
+source "$SCRIPT_DIR/hy-mt2-versions.zsh"
+LLAMA_MANIFEST="$PROJECT_DIR/src-tauri/third-party/llama-server-build-manifest.txt"
 
 for command_name in curl node shasum tar; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -68,6 +70,22 @@ require_binary_sha256 ffmpeg prebundle_ffmpeg_binary_sha256
 require_binary_sha256 ffprobe prebundle_ffprobe_binary_sha256
 require_binary_sha256 whisper-cli prebundle_whisper_binary_sha256
 
+if [[ ! -f "$LLAMA_MANIFEST" ]]; then
+  print -u2 "missing llama-server build manifest"; exit 1
+fi
+for key in llama_cpp_version llama_cpp_commit llama_cpp_source_sha256; do
+  case "$key" in
+    llama_cpp_version) expected="$LLAMA_CPP_VERSION" ;;
+    llama_cpp_commit) expected="$LLAMA_CPP_COMMIT" ;;
+    llama_cpp_source_sha256) expected="$LLAMA_CPP_SOURCE_SHA256" ;;
+  esac
+  actual=$(sed -n "s/^$key=//p" "$LLAMA_MANIFEST")
+  [[ "$actual" == "$expected" ]] || { print -u2 "llama manifest mismatch: $key"; exit 1; }
+done
+llama_binary="$PROJECT_DIR/src-tauri/binaries/llama-server-$TARGET_TRIPLE"
+llama_hash=$(sed -n 's/^prebundle_llama_server_binary_sha256=//p' "$LLAMA_MANIFEST")
+print "$llama_hash  $llama_binary" | shasum -a 256 --check
+
 FFMPEG_CONFIGURATION=$(sed -n 's/^ffmpeg_configuration=//p' "$MANIFEST")
 if [[ "$FFMPEG_CONFIGURATION" != *"--disable-gpl"* || "$FFMPEG_CONFIGURATION" != *"--disable-nonfree"* ]]; then
   print -u2 "FFmpeg manifest is missing the required LGPL distribution flags"
@@ -116,6 +134,7 @@ collect_source() {
 }
 
 collect_source "whisper.cpp-$WHISPER_COMMIT.tar.gz" "$WHISPER_SOURCE_URL" "$WHISPER_SOURCE_SHA256"
+collect_source "llama.cpp-$LLAMA_CPP_COMMIT.tar.gz" "$LLAMA_CPP_SOURCE_URL" "$LLAMA_CPP_SOURCE_SHA256"
 collect_source "ffmpeg-$FFMPEG_VERSION.tar.xz" "$FFMPEG_SOURCE_URL" "$FFMPEG_SHA256"
 collect_source "libass-$LIBASS_VERSION.tar.xz" "$LIBASS_SOURCE_URL" "$LIBASS_SHA256"
 collect_source "libunibreak-$LIBUNIBREAK_VERSION.tar.gz" "$LIBUNIBREAK_SOURCE_URL" "$LIBUNIBREAK_SHA256"
@@ -126,6 +145,9 @@ collect_source "harfbuzz-$HARFBUZZ_VERSION.tar.xz" "$HARFBUZZ_SOURCE_URL" "$HARF
 cp "$PROJECT_DIR/LICENSE" "$PACKAGE_ROOT/ATOGAKI-LICENSE"
 cp "$SCRIPT_DIR/build-sidecars-macos.sh" "$PACKAGE_ROOT/build/"
 cp "$SCRIPT_DIR/sidecar-versions.zsh" "$PACKAGE_ROOT/build/"
+cp "$SCRIPT_DIR/hy-mt2-versions.zsh" "$PACKAGE_ROOT/build/"
+cp "$SCRIPT_DIR/validate-hy-mt2.zsh" "$PACKAGE_ROOT/build/"
+cp "$LLAMA_MANIFEST" "$PACKAGE_ROOT/build/"
 cp "$MANIFEST" "$PACKAGE_ROOT/build/"
 cp "$PROJECT_DIR/src-tauri/third-party/README.md" "$PACKAGE_ROOT/README.md"
 cp -R "$PROJECT_DIR/src-tauri/third-party/licenses/." "$PACKAGE_ROOT/licenses/"
@@ -145,7 +167,9 @@ build manifest, checksums, and license texts.
 The FFmpeg sidecar is an LGPL v2.1-or-later build without GPL, nonfree, or
 libx264 components. Its statically linked subtitle stack sources are included:
 libass, libunibreak, FriBidi, FreeType, and HarfBuzz. whisper.cpp is included
-for the separately distributed MIT-licensed whisper-cli sidecar.
+for the separately distributed MIT-licensed whisper-cli sidecar. The pinned
+llama.cpp archive and llama-server build manifest are included for the local
+Hy-MT2 translation runtime. Model weights are not included.
 
 Run build/build-sidecars-macos.sh from the root of the Atogaki source tree to
 rebuild the target recorded in build/build-manifest.txt. The script expects the

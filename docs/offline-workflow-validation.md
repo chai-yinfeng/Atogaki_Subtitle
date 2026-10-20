@@ -1,0 +1,193 @@
+# 离线工作流验证与使用边界
+
+日期：2026-10-18。本文记录当前开发分支，不表示公开安装包已更新。
+
+## 工作流
+
+任务在约 120 秒音频区间提交检查点，前后各最多 5 秒作为读取上下文。文件证据先校验、同步并原子提交，SQLite 索引随后写入；恢复重新验证完成块并重建索引。模型身份按内容摘要冻结，只有模型路径缺失时才允许从设置重新定位相同内容。未完成块重新执行，已完成块保持原样。旧任务没有检查点时只能显式重新运行。
+
+暂停使用任务控制信号取消当前 future，Whisper／FFmpeg 配置 kill-on-drop；新运行继承成功块的 CPU 回退状态。重启不自动启动工作。队列等待从本次排队时间计算；任务卡的“任务历时”沿用首次处理到结束的跨度，包含暂停间隔，不作为纯推理耗时。部分原文在只读窗口中定位试听，完整识别完成后才进入编辑。完成块和 ASR 发布标记分开，翻译失败或导出失败不需要重做识别；批量翻译恢复只处理缺失或过期的 group。
+
+候选保留当前字幕快照、实际 provider／模型、时间粒度和配置，重启后可以重开。采用始终重新检查快照，不能覆盖候选生成后的人工修改。Gemini 授权只用于当次确切范围；取消云端候选先等待 provider 完成上传文件清理，本地 Whisper 取消会终止当前子进程。
+
+## 自动回归
+
+- Rust 核心：覆盖一小时模拟音频的中断恢复、只重做损坏块、模型移动／内容变化、原子文件发布、暂停终止解码器、源媒体删除后继续及重复继续。
+- 持久候选：重建 service 后重开，原文改变后拒绝采用，新候选可以采用，重复采用不会再次覆盖。
+- 翻译：执行快照不受全局 provider 替换影响；原文、上下文和人工译文的 revision 校验沿用既有回归。
+- 学习：Anki TSV 保留引号、制表符、换行、全部来源及原任务删除后的快照。前端覆盖 NFKC 搜索、UTF-16 选区高亮、HTML 转义和英语词边界。
+- 桌面：生产前端构建、Tauri 编译／测试和标准 Atogaki.app 调试构建；窗口使用 `/private/tmp` 隔离数据库，正式安装与正式资料不被覆盖。
+
+检查命令：
+
+```sh
+cargo fmt --check
+cargo test --lib
+npm --prefix ui run test
+npm --prefix ui run build
+cargo test --manifest-path src-tauri/Cargo.toml
+git diff --check
+```
+
+## 真实长节目与故障注入
+
+可使用以下工具对至少一小时的本地节目复验。它创建独立目录和一次性 Whisper wrapper，故意让指定块失败，再恢复；随后制造字幕输出路径故障，确认导出恢复不运行 ASR、cue ID 不变化。完成证据在恢复前后进行摘要比较，原媒体与模型只读。
+
+```sh
+python3 scripts/verify-asr-recovery.py --input /absolute/program.wav \
+  --model /absolute/ggml-medium.bin
+```
+
+2026-10-18 在 62 分 26 秒真实节目上完成 32 块验证：第 18 块注入解码失败，恢复时只重做该未提交块；此前 17 块的 51 个证据文件摘要完全不变。随后注入字幕导出路径失败，恢复未调用 ASR，cue ID 保持一致。独立报告保存在 Git 忽略的 `local-artifacts/recovery/6679d1d5-3201-4cd4-b1da-102ed97fee23/report.json`；四项恢复断言全部通过。模拟回归不能代替所有接缝的人工听审。时间证据超过读取音频时明确限制在真实边界并标记 `unknown`，原始输出保留，并生成待复核质量信号；不伪造词级精度。
+
+## MLX 对照
+
+在 Apple Silicon 开发机的隔离 Python 3.14 环境验证 `mlx 0.32.4`、`mlx-whisper 0.4.3`、`mlx-lm 0.32.2`。模型 revision 与完整目录摘要固定在 `scripts/mlx-models.json`，实验依赖固定在 `scripts/mlx-requirements.lock.txt`。不进入桌面 Bundle，不改变桌面最低系统版本。
+
+```sh
+python3 -m venv local-artifacts/mlx/env
+local-artifacts/mlx/env/bin/pip install -r scripts/mlx-requirements.lock.txt
+local-artifacts/mlx/env/bin/python scripts/prepare-mlx-models.py --download
+local-artifacts/mlx/env/bin/python scripts/compare-local-engines.py probe
+local-artifacts/mlx/env/bin/python scripts/compare-local-engines.py asr \
+  --input /absolute/sample.wav --model local-artifacts/mlx/models/whisper-medium \
+  --baseline-model /absolute/ggml-medium.bin
+local-artifacts/mlx/env/bin/python scripts/compare-local-engines.py translation \
+  --input /absolute/source-cues.json --model local-artifacts/mlx/models/Hy-MT2-1.8B-4bit \
+  --baseline-model /absolute/Hy-MT2-1.8B-Q4_K_M.gguf
+```
+
+CLI 也可以直接运行 `transcribe --engine mlx-whisper --python <env-python> --model <local-MLX-directory>`。推理桥接强制离线，使用与 Whisper.cpp 相同的检查点执行器。模型必须预先存在，不会在转录中下载。
+
+本次 60 秒日语片段，Whisper.cpp medium 与 MLX medium 均完成。Whisper.cpp 的块识别约 6.14 秒；MLX 记录的模型加载与识别约 8.09 秒。两侧时间戳模式、Python 导入和测量边界不同，不能据此断言哪条路线更快；调试 CLI 的完整时间还包含模型摘要校验。MLX 记录的 allocator 峰值约 1.11 GiB，RSS 与 GPU allocator 指标不能直接互换。没有人工 reference，不报告 CER／WER 或准确率收益。
+
+12 条冻结 source cues 的本地翻译结构测试：llama.cpp 的 1.8B 与 7B 均通过，共用 TranslationPlanner／stable cue ID／术语和 JSON 校验；对应请求运行约 10.61／45.05 秒，server 进程树采样峰值约 1.87／5.53 GiB。该小样本不代表完整长节目的峰值。
+
+**Hy-MT2 MLX 未通过当前产品合同。** 同一输入经 mlx-lm server 返回多于目标数的译文，并在重试后出现 JSON 尾部额外内容。结果被拒绝，未放宽校验或写入工作区。模型能加载和输出中文，不代表能可靠替代现有翻译后端。1.8B／7B／历史译文已生成独立匿名材料和答案，人工评分待完成；不修改模型推荐档位。
+
+## 仍需验收
+
+- 完整真实长节目接缝听审与少量人工 reference；翻译盲评仍需人工判断。
+- Windows 本机的暂停／继续、原子文件替换、路径和窗口行为；本机未宣称 Windows 通过。
+- 公开发行、签名与公证未执行。优化 CLI 的 sqlx proc-macro LINKEDIT 阻塞已通过编译时依赖 profile 修正，见下方恢复工作记录；这不等同于安装包发行验收。
+
+## 2026-10-18 暂停 checkpoint
+
+用户因 5h 额度即将用尽要求在稳定节点暂停。产品实现 checkpoint 为 `4c7da20`，评测工具 checkpoint 为 `66b2b4a`；此前三个实现提交保留在同一分支历史。当前分支为 `codex/offline-workflow-recovery`，没有合入 main，也没有发布安装包。旧 `codex/docs-product-refresh` 已确认被 main 包含，并删除本地与远端分支。
+
+本轮实现已具备长音频恢复、任务翻译快照、持久候选、搜索／循环试听／批量预设与学习导出的主要代码。Rust 核心 120 项通过、4 项忽略；Tauri 28 项通过、4 项忽略；前端 4 项通过，类型检查及生产构建通过。真实隔离打包窗口已确认新任务创建、暂停、重启后同一任务继续并完成；未完成全部交互验收，不将代码实现等同于全量验收完成。
+
+恢复工作时先读取 `git status`、`git log`、本文件与路线图，不重复真实长节目识别。按以下顺序继续：
+
+1. 审查当前提交并补完整隔离窗口回归：候选重开／对照／revision 冲突、设置草稿与任务级翻译、批量任务与预设、搜索与循环、同收藏多来源及 Anki 保存面板。已有测试数据库 `/private/tmp/atogaki-offline-window-20261018`、测试输入 `/private/tmp/atogaki-window-fixtures` 可复用；不操作正式数据。
+2. 对 62 分钟结果的全部切块接缝听审，补人工 reference；核对发布／拼接／磁盘提交故障注入覆盖。现有真实故障覆盖解码与导出，其他故障主要依赖自动化模拟，不能宣称完整真实验收。
+3. MLX ASR 已跑通 CLI；Hy-MT2 MLX 因输出结构合同失败继续保持实验。复查评测边界，完成人工盲评、取消／恢复与完整任务资源报告，再决定实验里程碑是否完成。不得改桌面默认 runtime 或降低 JSON 校验。
+4. 解决 release CLI 的 sqlx proc-macro LINKEDIT 工具链问题，再做正式构建；Windows 需要独立实机验收。无需自动发布安装包或执行新的云端上传。
+
+本机模型和评测输入、输出位于 Git 忽略目录，未提交媒体、模型、凭据。评测 Python 环境 `/private/tmp/atogaki-mlx-validation-env` 与临时数据库可能被系统清理；脚本、锁定依赖和模型 revision 已入库，可按本文件重建。
+
+## checkpoint 恢复后的工程验证（2026-10-18）
+
+用户已确认先完成工程验证，接缝人工听审、reference 与翻译盲评后补。核心新增回归通过后为 125 项通过／4 项忽略，Tauri 为 29 项通过／4 项忽略；前端 4 项通过，类型检查与生产构建通过，标准调试 App 构建通过。
+
+修正与结构：
+
+- 重做损坏块前失效旧的 final-cues 缓存；完整证据不变时保留缓存和稳定 cue ID。增加拼接输出路径故障的断言，恢复只重新拼接、不调用 ASR。
+- GPU 失败保留原始 stdout／stderr、原因与实际设备；这些内容进入摘要保护的块证据。故障注入验证仅尝试一次 CPU，CPU 再失败即停止。
+- 任务音频与原始输出用可写句柄同步，满足 Windows `FlushFileBuffers` 要求；增加跨平台保留文件内容的同步测试。[Microsoft API 合同](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)。
+- 从完整 ASR run 首次重开时使用真实 WAV 总时长，包含尾部静音；时间粒度从持久 TimedUnit 恢复。采用冲突仍检查冻结工作区，不自动刷新对照快照。
+- 修正预设跨语言词表重载、内容包清空和流水线摘要过期；新的可疑范围清除旧 Gemini 授权。搜索空结果与真正空单词本分开显示，候选预览改为通用标题并保留可见采用按钮。
+- 翻译设置提供独立后端卡片；兼容服务折叠到高级项，Hy-MT2 两档保持实验，可从卡片下载所需模型。凭据独立保存／删除不改变全局默认后端。就绪状态区分未配置、资源缺失、未验证、已验证与失败。验证结果绑定配置和凭据版本摘要，晚到的旧配置响应不能验证新配置；列卡片不读取系统凭据。测试只在显式点击后发送固定 `Hello.`，本轮未执行真实云端请求。
+
+真实窗口记录（全部使用 `/private/tmp/atogaki-offline-window-20261018`）：
+
+- 从两个已翻译测试任务收藏同一句，合并为一个条目、两个来源；展开全部例句，并从第二个来源返回正确任务播放。重启后条目与来源保留。
+- 原生 Anki 保存面板成功导出 UTF-8 TSV，校验一行八列与两个任务来源。学习检索命中／无命中及总数文案通过。
+- 当前句循环与 A/B 区间状态、关闭循环和恢复普通播放通过；全文搜索命中定位通过。
+- 预设跨重启保留，从空词表恢复到指定词表后仍保留勾选的内容包，翻译摘要同步。
+- 原生多选导入坏 WAV 与有效 WAV，同时排队两个任务。坏文件提取失败后有效文件继续识别并完成；未上传媒体或自动切云端。
+- 历史候选可以重开并显示双栏原文、模型、范围和差异入口。原生自动化在部分 HTML 模态弹窗内缺失 AX 控件树，坐标点击返回 `noWindowsAvailable`；使用可见键盘焦点与截图继续完成候选采用冲突、显式重新对照及采用。确认冲突保留人工修改，重新对照不新增 ASR run。设置卡片中 DeepSeek 模型草稿保留，切到 DeepL 再切回时两侧 Key 草稿均为空；输入不中断。未保存测试 Key，也未调用连接测试。
+
+MLX：130 秒真实节目片段的两块识别经同一 CLI 执行器完成。第二块故意失败，恢复仅重做未提交块；导出故障恢复未调用 ASR，cue ID 与第一块全部证据摘要保持一致。报告在 Git 忽略的 `local-artifacts/mlx/recovery/a7a3152a-0acb-4fcc-8f5a-edd2e6887afd/report.json`。该短样本补 MLX runtime 恢复证据，不替代上一轮 Whisper.cpp 62 分钟验收。MLX 显式拒绝尚未实现的 Silero VAD、CPU 和有限 token context 参数；no-speech threshold 传入真实 runtime。恢复 harness 固定 CLI 副本及摘要，保留 venv 启动路径，不把符号链接解析为系统 Python。Hy-MT2 MLX 的输出结构失败结论保持不变。
+
+Release 工具链：根 CLI 与 Tauri 的独立 Cargo manifest 设置 `[profile.release.build-override] debug = 2`，仅对编译时依赖保留调试信息，最终二进制维持 release 优化。普通 `cargo build --release --bin atogaki-subtitle --offline` 与 `cargo check --release --manifest-path src-tauri/Cargo.toml --offline` 已通过；无需修改系统工具链。原因与 [Rust 上游 LINKEDIT 记录](https://github.com/rust-lang/rust/issues/157750) 一致。
+
+额外的发布与采用保护：采用绑定 SQLite 工作区 revision 的事务快照，自动化包含改动后还原为相同内容的 ABA 冲突。历史 artifact 缺少 revision 时允许重开，但必须显式重新对照后才能采用，不伪造生成时版本。恢复补记初始 ASR 来源仅修改未编辑的 legacy 行，不覆盖人工来源、时间修改或 stale 对齐。旧 schema 使用原 SQLx 迁移及校验历史构建，升级并重复打开后验证人工字幕、cue ID、学习来源和 TSV 导出保留。翻译阶段恢复不再要求已完成 ASR 的模型／媒体仍存在；注入全部识别资源缺失后仅翻译待完成 group，并保留人工译文。
+
+当前后续门禁：人工接缝听审、参考文本与翻译盲评由用户后补；Windows 继续只按 CI 共享核心／壳层结果记录，不代替原生窗口和 sidecar 实机回归。真实云端 Gemini 上传／删除及错误验收仍需另行授权样本。没有发布安装包，也没有将 MLX 或实验翻译模型设为桌面默认。
+
+最终窗口补测确认：未保存草稿阻止候选采用；显式重新对照后的 artifact 保存工作区 revision（测试值 86），采用后同 ID 文本即时刷新，ASR run 数量仍为 2。模型重新定位先验证冻结摘要，选错模型不会写坏原识别配置，随后定位相同内容仍能继续。
+
+## 2026-10-19：用户盲评与本机试用准备
+
+用户已完成 12 条盲评并修正第 11 条自然度为 5。按匿名映射，7B 可接受 12/12、明确偏好 4 条；1.8B 可接受 11/12、明确偏好 1 条；7 条无明确偏好。第 6 条 1.8B 对未完成句补充了与语境相反的含义。历史候选均为 null，属于评测材料缺失，不能视为翻译失败或有效云端基线。原始评审保留在 Git 忽略的 local-artifacts/mlx/translation-e3fe3956-4781-46f6-ab1b-ef995dcc5fe7/blind-review.json，不修改用户评价。
+
+用户授权将当前修改安装至 /Applications 直接试用，桌面维持 C++，MLX 暂缓。安装前重新执行格式、前端检查及 release App 构建、sidecar 与签名验证；安装与启动结果随后记录。正式数据库启动前通过 SQLite backup 保存一致性快照，保留旧 App 副本用于回退；数据库可能在首次启动时增量迁移，回退旧 App 时不得直接假设新 schema 兼容。
+
+本机安装完成：`cargo fmt --check`、`git diff --check`、前端 4 项测试、类型检查及生产构建通过；`cargo tauri build --config tauri.macos-complete.conf.json --bundles app` release 构建通过，四个 sidecar（ffmpeg、ffprobe、whisper-cli、llama-server）齐全，源 bundle 与安装 bundle 均通过 `codesign --verify --deep --strict`，主程序逐字节一致。未执行公证或公开发行。
+
+`/Applications/Atogaki.app` 已替换并通过原生窗口启动：正式数据目录和原有 12 个任务可见，新版任务预设／翻译选择／标题搜索及五个设置分区可见，窗口留在设置页供用户试用。旧 App 保留为 `/Applications/.Atogaki.previous.20261019`；另有 App 副本、完整性检查为 ok 的 SQLite 一致性备份与已完成盲评副本保留在 `local-artifacts/install-backups/20261019/`（Git 忽略）。不将启动检查视为完整人工功能验收。
+
+## 2026-10-19：首轮界面反馈
+
+去除桌面 Hy-MT2 与 Whisper 模型目录中的实验标签，普通文案不再暴露 SQLite 实现。高级编辑以顶部红色播放头把手为独立拖动目标，优先于波形背景平移／字幕块修剪，暂停播放并使用拖动开始时的可视范围映射时间；保留字幕草稿。局部修复按钮及说明改用范围、字幕边界、对照后替换的用户措辞。整体视觉风格本轮仅讨论，不改配色或布局。
+
+验证：共享核心 125 项通过／4 项忽略，壳层模型目录 6 项通过；前端 5 项测试（含播放头命中不能占用波形／字幕轨道与越界定位）通过，类型检查、生产构建、cargo fmt 和 diff 检查通过。独立 bundle ID 的临时 App 使用 /private/tmp/atogaki-offline-window-20261018：顶部把手从 0 秒拖至 6.692 秒，可视窗口不变；背景拖动将窗口改为 4.253–34.083 秒，播放位置不变。全部字幕数据库行前后摘要一致。未发送音频或调用云端服务。
+
+上述修改已完成 release App 构建并更新 /Applications/Atogaki.app，四个 sidecar 与签名检查通过，安装主程序与构建产物一致。原生启动可见 Hy-MT2「本地翻译」与正式目录现有 13 个任务；本轮未切换翻译设置或运行真实任务。替换前版本保留为 /Applications/.Atogaki.previous.20261019-ui。
+
+## 2026-10-19：Gemini 文本翻译与自动待复核提示
+
+新增 Gemini 翻译卡片、新任务及任务后续后端选择；固定 Google 官方兼容端点，模型默认 gemini-3.8-flash，复用字幕结构合同、术语保护、冻结执行与续译。沿用原有 ASR 系统凭据槽，配置展示不读取秘密；共享保存／删除与缓存同步，凭据 revision 更新使旧连接验证失效。保留逐次 ASR 音频上传授权。普通启动不调用 Google，不更改用户全局翻译设置。
+
+截图中的列表属于首次转录也会产生的自动质量检查，不是历史候选或翻译历史。“确认问题／误报”只记审查决定；原“按此范围重跑”仅填范围，现改名“选取此范围”，新增区块标题、来源说明及中文类型。没有自动重跑、删词或改写现有字幕。
+
+验证：共享核心 126 项通过／4 项忽略（新增 Gemini 文本结构与错误 ID／缺失响应拒绝）；壳层 30 项通过／4 项忽略（新增原 ASR Key 复用、不额外访问凭据、共享缓存更新／删除、旧连接验证失效及冻结模型）；前端 5 项、类型检查和生产构建通过。隔离原生窗口确认 Gemini 卡片及默认模型；编辑模型草稿后切换 DeepSeek 再切回，模型草稿保留、Key 草稿清空。没有点击保存 Key、连接测试或真实翻译，无音频／文本上传。真实 Google 连接、配额／计费错误及译文质量仍未验收。
+
+视觉仅整理官方参考，未改整体样式或把官网图片加入发行包。构建期间格式器产生的三个无关文件变更已先完整备份，逐字节比较 rustfmt 规范化结果等于 HEAD 后清理；没有删除用户修改。
+
+Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，原有 13 个任务可见，原 Hy-MT2 默认选择保留。release 构建、四个 sidecar、深度签名与主程序一致性校验通过。最新 SQLite 一致性备份保存于 local-artifacts/install-backups/20261019-gemini/，完整性检查 ok；上一 App 保留为 /Applications/.Atogaki.previous.20261019-gemini。没有执行真实翻译、保存或删除用户 Key。新版本 Windows 原生窗口与新提交 CI 结果尚未验证，不能沿用旧提交的通过状态。
+
+## 2026-10-19：可疑提示折叠与时间轴定位
+
+辅助审查使用原生 details，初次／切换任务默认折叠，同任务审查刷新保留展开状态。摘要显示总数和待复核数。有范围的说明和时间构成可键盘操作的定位按钮；定位暂停播放、移动播放头、读取相应波形并滚动到时间轴，不改修复范围或 Gemini 音频授权，不运行 ASR。异步列表返回前核对当前任务，防止旧任务结果覆盖。
+
+前端 5 项测试、类型检查、生产构建、cargo fmt 和 diff 检查通过；debug 与 release App 构建通过。独立 bundle ID 配合 /private/tmp/atogaki-review-navigation（由旧隔离库一致性复制并注入一条 UI 测试信号，不改正式库）：初始 summary 为 off，展开为 on，点击 40–44 秒提示后播放头为 40.000 秒、可视波形 25.085–54.915 秒，保持暂停；字幕全部数据库行摘要与 ASR run 数量前后不变。没有运行识别、翻译或上传。
+
+主题仅补充官方参考与架构建议，没有实现主题配置或把官方素材放进 App。
+
+本次辅助审查交互已更新到 /Applications/Atogaki.app 并启动，原有 13 个任务与翻译选择保留；四个 sidecar、签名与主程序一致性检查通过。当前库一致性备份在 local-artifacts/install-backups/20261019-review/，前版本在 /Applications/.Atogaki.previous.20261019-review。没有改动主题、字幕内容、审查结论或任务执行状态。
+
+## 2026-10-19：整体主题、编辑层级与候选清理
+
+- 核心 `cargo test --lib`：126 通过、4 忽略；壳层 `cargo test --manifest-path src-tauri/Cargo.toml`：30 通过、4 忽略。候选回归覆盖已采用 marker 丢失仍受 ledger 保护、原始结果重开后仍不可清理、互斥锁等待、共享缓存最后引用释放、重复清理、已清理结果禁止重开／采用、越界指针拒绝及字幕内容不变。
+- 前端 `npm test`：7 通过；`npm run build` 类型检查和生产构建通过；`cargo fmt --check`、`git diff --check` 通过。完整 macOS release app 构建、四个 sidecar 和 ad-hoc 签名校验通过。
+- 隔离目录 `/private/tmp/atogaki-theme-window` 真实窗口：月夜／来信即时切换，重启保留来信；高级编辑默认只展示时间轴和当前字幕，复核及候选折叠；人工注入的测试提示定位到 10 秒，标记误报后摘要折叠且待复核数从 1 变 0；候选显示原始／全片、模型简称、时间及短 ID，采用记录无清理按钮；本地配置只展示已安装模型选择，模型列表包含 1.8B／7B。未进行真实数据清理，清理的破坏性操作由临时 artifact 自动化测试覆盖。
+- 已安装至 `/Applications/Atogaki.app`，保留 `/Applications/.Atogaki.previous.20261019-themes`；安装前 SQLite 一致性备份在忽略目录 `local-artifacts/install-backups/20261019-themes/atogaki-before-install.sqlite`，integrity_check=ok。更新后真实窗口仍显示 13 个正式任务。
+- 原创 SVG 场景只用于主题，不包含官网素材；未读取／改写 Key，未发起云端请求，未改正式字幕或清理用户候选。Windows 原生视觉和完整接缝人工听审仍待后续验收。
+
+## 2026-10-19：两套主题材质深化
+
+- 用户批准只深化月夜／来信；替换旧几何 SVG，新增绘画场景、文具场景和细纸肌理三张生成 PNG。来源、完整提示词、实际尺寸与约 8.7 MiB 体积见 `theme-material-assets.md`。
+- 外围透出场景，导航有稳定透明底；面板、字幕输入与波形使用主题色阅读面。月夜采用青灰纸面和暖金边，来信用页边线与轻微纸张错层。降低正文纹理强度；减少透明度偏好有不透明降级。保留原有主题 ID 和用户选择。
+- `npm test` 7 项通过；`npm run build` 类型检查及生产构建通过；`cargo fmt --check`、`git diff --check` 通过。macOS 完整 debug／release app 构建及四个 sidecar、ad-hoc 签名校验通过。本轮未改 Rust 逻辑或 Tauri API，未重复执行共享核心测试。
+- `/private/tmp/atogaki-theme-window` 隔离窗口实看两套主题的高级编辑、波形、输入区、设置与主题选择；切换即时更新画面与 Canvas 配色。根据窗口检查修正月夜说明文字对比不足及设置底栏遗留黄白色。未编辑／保存字幕，未调用识别、翻译、下载或凭据操作。
+- 安装至 `/Applications/Atogaki.app`；旧版保留在 `/Applications/.Atogaki.previous.20261019-materials`；安装前一致性 SQLite 备份 `local-artifacts/install-backups/20261019-materials/atogaki-before-install.sqlite`，integrity_check=ok。正式版启动仍显示 13 个任务，外观页显示两张新材质预览。
+- 视觉风格是否达到预期等待用户判断；Windows 原生外观、旧版 WebKit 和减少透明度系统选项未实机验证。新增位图加载／内存未作专项性能基准，不宣称零开销。其他作品主题不扩展。
+
+## 2026-10-19：分页边距、字幕块增删与审查过滤
+
+- 核心 `cargo test --lib` 126 通过、4 忽略；壳层 30 通过、4 忽略；前端 7 通过，类型检查及生产构建通过。`cargo fmt --check`、`git diff --check` 通过。
+- 增量扩展结构测试：空白插入、重叠拒绝、旧快照冲突拒绝、机器译文过期、删除／撤销、删空后恢复、学习来源外键保留与被删除来源的文本快照保留。同一秒内的两次审查决定按 rowid 顺序读取最新值。
+- 隔离窗口 `/private/tmp/atogaki-theme-window`：确认分页标题已离开纸面边缘；插入表单正确提示范围，59.000–59.500 秒插入英文测试块后定位到新块；删除、撤销删除、撤销插入完整通过，最后恢复原始 21 段。误报默认不可见，勾选“显示已处理（1）”找回原摘要。未调用 ASR、翻译、下载或凭据操作。
+- 窗口工具对动态 dialog 的 AX 树偶尔为空，坐标操作偶有 noWindowsAvailable；使用可见窗口与键盘表单导航完成回归。一次坐标输入落到隔离字幕草稿，已明确放弃，未保存。正式数据未用于编辑测试。
+- 最后补齐无可用空白的提示、媒体时长就绪检查和标签悬停对比；Windows 原生窗口仍未实测。删除来源的 cue 外键解除后，即使撤销也仍可通过保留的任务时间／文本快照返回，不推测重新关联。
+- 已安装至 `/Applications/Atogaki.app`，旧版保留 `/Applications/.Atogaki.previous.20261019-blocks`，一致性数据库备份 `local-artifacts/install-backups/20261019-blocks/atogaki-before-install.sqlite`（integrity_check=ok）。更新后正式版 13 个任务仍在，已打开原任务校对页检查修正后的留白，未修改正式字幕。
+
+## 2026-10-20：修正块增删的全局译文误标
+
+- 原因：上次增删代码遍历全部机器译文设置 translation_stale，并全局标记 dependency stale；界面统一写成原文改变，造成全片原文被改的错觉。现改为插入保留现有冻结输入；删除只读取并失效实际记录的上下文消费者，保护无关块和人工译文。没有依赖证据的历史译文不猜测传播范围。
+- 新增定向回归验证无关段全部字段相同、人工译文保护、原文编辑标志及 provenance/source revision 完全不变；插入回归比较原有两段的完整值（仅后续序号随插入调整）。核心 127 通过、4 忽略；壳层 30 通过、4 忽略；前端 7 通过，类型检查／生产构建与完整 macOS App 构建通过。cargo fmt --check、git diff --check 通过。
+- 对用户当前任务按安装前 148 段备份审计当前 147 段，比较原文、时间、译文、人工标志、原文／译文 revision 和已记录上下文的存在／内容／revision。131 段满足恢复证据，撤回误标；16 段依赖已删除上下文或缺少充分恢复证据，保留待核对。仅改变两种过期标志，逐字段确认字幕其他字段、ID 和数量完全不变，未调用翻译。
+- 修复前一致性数据库备份和逐 ID 报告保留在忽略目录 local-artifacts/install-backups/20261020-invalidation/；备份 integrity_check=ok。未创建广泛自动迁移去清除所有过期状态。
+- 安装至 /Applications/Atogaki.app，旧版保留 /Applications/.Atogaki.previous.20261020-invalidation；正式窗口首页确认仍为 13 个任务，目标任务显示“待重译 16”。Windows 原生窗口未实机验证；本轮不更改主题图像，也不下载画集内容。

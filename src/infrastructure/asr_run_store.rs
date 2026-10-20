@@ -96,8 +96,7 @@ impl AsrRunArtifacts {
 }
 
 fn write_json(path: &std::path::Path, value: &(impl serde::Serialize + ?Sized)) -> Result<()> {
-    let data = serde_json::to_vec_pretty(value)?;
-    fs::write(path, data).with_context(|| format!("failed to write {}", path.display()))
+    crate::application::acoustic_plan::write_json(path, value)
 }
 
 #[cfg(test)]

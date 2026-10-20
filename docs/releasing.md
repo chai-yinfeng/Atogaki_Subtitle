@@ -1,6 +1,6 @@
 # 发布说明
 
-_最后更新：2026-09-18_
+_最后更新：2026-10-20_
 
 macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 已建立未签名预发布基线，按选定稳定候选集中构建和实机回归；两个平台共享产品代码，但不要求每次 macOS 开发提交都同步生成 Windows 安装包。
 
@@ -12,26 +12,26 @@ DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后�
 
 日常开发不再为每个提交生成 Test App 或测试 DMG。桌面范围内的稳定改动完成提交与回归后，按需运行 `./scripts/install-current-macos-app.sh`，以包含 FFmpeg、FFprobe、whisper.cpp 和 `llama-server` 的完整配置覆盖 `/Applications/Atogaki.app`。模型和 pipeline 实验先在 CLI／evaluation harness 验证，不触发桌面打包。公开候选仍必须按下述流程生成、校验和实测 DMG；本机覆盖安装不能替代发行门禁。
 
-当前 Apple Silicon 预发布资产约定为：
+当前 Apple Silicon 稳定版资产约定为（预发布保留 alpha 后缀）：
 
-- `Atogaki-v0.1.0-alpha.N-macos-arm64.dmg`
-- `Atogaki-v0.1.0-alpha.N-macos-arm64.dmg.sha256`
+- `Atogaki-v0.1.0-macos-arm64.dmg`
+- `Atogaki-v0.1.0-macos-arm64.dmg.sha256`
 - `Atogaki-0.1.0-third-party-sources.tar.xz`
 - `Atogaki-0.1.0-third-party-sources.tar.xz.sha256`
 
 `src-tauri/third-party/` 中的项目依赖声明、sidecar 构建清单和许可证材料已经随 `.app` 进入 DMG；对应源码包单独上传，避免每个普通用户重复下载约数十 MiB 的源码。
 
-GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpeg、whisper.cpp 与静态依赖的对应源码材料。
+GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpeg、whisper.cpp、llama.cpp 与静态依赖的对应源码材料。
 
-### 手工预发布
+### 手工发布
 
 1. 在干净提交上完成 Rust、前端、打包 App、模型下载和真实窗口回归。凡本版本新增或修改的交互，必须在**最终 ad-hoc 签名 App**中逐项完成对应 `docs/desktop-testing.md` 场景并记录结果；仅通过单元测试、前端构建、Tauri 编译，或仅验证窗口能创建，均不得创建公开 Release。
 2. 运行 `./scripts/generate-rust-licenses.sh` 与 `node ./scripts/generate-frontend-licenses.mjs`，审阅并提交生成声明。详细范围见 `docs/third-party-license-audit.md`。
-3. 用固定 sidecar 构建 DMG。`CI=true tauri build --bundles dmg` 只用于结构 smoke，会跳过 Finder 图标布局，不能作为最终发布产物；最终 DMG 必须在非 CI 环境运行 `tauri build --bundles dmg`，挂载后确认 App 位于左侧、Applications 位于右侧，两个图标在 660×400 窗口中居中并充分分隔。若 Finder 美化脚本挂起，应阻止发布并单独排查，不能回退发布左上角堆叠的 CI 产物。当前配置使用不需要 Apple Developer 账号的 ad-hoc identity `-`，发布时必须明确标注“ad-hoc 签名、未公证”，供知情测试者使用。
+3. 用固定 sidecar 构建完整 DMG：在 `src-tauri/` 运行 `cargo tauri build --config tauri.macos-complete.conf.json --bundles app,dmg`。构建输入必须为与清单匹配的独立原始二进制，不能符号链接到 `/Applications` 中的已签名副本。`CI=true tauri build --bundles dmg` 只用于结构 smoke，会跳过 Finder 图标布局，不能作为最终发布产物；最终 DMG 必须在非 CI 环境运行 `tauri build --bundles dmg`，挂载后确认 App 位于左侧、Applications 位于右侧，两个图标在 660×400 窗口中居中并充分分隔。若 Finder 美化脚本挂起，应阻止发布并单独排查，不能回退发布左上角堆叠的 CI 产物。当前配置使用不需要 Apple Developer 账号的 ad-hoc identity `-`，发布时必须明确标注“ad-hoc 签名、未公证”，供知情测试者使用。
 4. 运行 `./scripts/package-sidecar-sources-macos.sh`。进入输出目录执行 `shasum -a 256 -c Atogaki-0.1.0-third-party-sources.tar.xz.sha256`，并抽查归档的 `SOURCES.md`、`sources/SHA256SUMS` 和 `build/build-manifest.txt`。
-5. 为最终 DMG 生成 SHA-256，并挂载确认 App、Applications 链接、三个 sidecar、根许可证和 `third-party/` 声明都存在。
+5. 为最终 DMG 生成 SHA-256，并挂载确认 App、Applications 链接、四个 sidecar、根许可证和 `third-party/` 声明都存在。
 6. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.N`，并把 tag 推送到 GitHub。
-7. 在 GitHub 的 Releases 页面从该 tag 创建 prerelease，填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值、模型不内置和第三方许可证说明。
+7. 在 GitHub 的 Releases 页面从该 tag 创建 Release（alpha tag 标记 prerelease，稳定 tag 不标记），填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值、模型不内置和第三方许可证说明。
 8. 上传 DMG、两个 SHA-256 文件与对应源码包，而不是把这些大产物 `git add` 到仓库。
 
 已经推送的 tag 不移动、不复用。若在公开 Release 创建前取消候选，保留该 tag、不创建 Release，并使用新的版本号；若公开预发布后发现功能描述不成立，应撤下 Release，并同样使用新的版本号重新发布。不得替换已公开 tag 下的资产，也不要假定下载计数为零就没有外部副本。
@@ -40,8 +40,8 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 
 ```bash
 gh release create v0.1.0-alpha.N \
-  path/to/Atogaki-v0.1.0-alpha.N-macos-arm64.dmg \
-  path/to/Atogaki-v0.1.0-alpha.N-macos-arm64.dmg.sha256 \
+  path/to/Atogaki-v0.1.0-macos-arm64.dmg \
+  path/to/Atogaki-v0.1.0-macos-arm64.dmg.sha256 \
   src-tauri/target/release/bundle/sources/Atogaki-0.1.0-third-party-sources.tar.xz \
   src-tauri/target/release/bundle/sources/Atogaki-0.1.0-third-party-sources.tar.xz.sha256 \
   --prerelease --title "Atogaki v0.1.0-alpha.N" --notes-file path/to/release-notes.md
@@ -51,7 +51,7 @@ gh release create v0.1.0-alpha.N \
 
 macOS 当前继续手工发布，以保留本机最终 Finder 布局和真实窗口门禁。取得 Apple Developer Program 资格后，再让 GitHub Actions 在版本 tag 上构建、签名、公证、装订 notarization ticket、生成 DMG 和校验文件，并上传到同一个 Release。签名证书、App Store Connect API key 等只放 GitHub Actions encrypted secrets，不进入仓库。
 
-当前 Apple Silicon App 使用 ad-hoc 签名并声明最低 macOS 12.0；这可以保证 Bundle 完整性，但不能代替 Developer ID 签名与公证，也不会消除外部下载时的 Gatekeeper 提示。DMG 已在本机用 `hdiutil verify` 通过结构校验，并确认包含 `.app`、Applications 链接、三个 sidecar、Apache-2.0 项目许可证和第三方构建清单。Tauri 配置现已固定 660×400 Finder 窗口及“App 左、Applications 右”的图标位置；`CI=true` 的无美化产物仍只用于结构校验。当前 macOS 26 环境的非 CI Finder 美化脚本仍需在最终发布前实机构建并复核，自动化不能用无布局产物替代这项发布门禁。
+当前 Apple Silicon App 使用 ad-hoc 签名并声明最低 macOS 12.0；这可以保证 Bundle 完整性，但不能代替 Developer ID 签名与公证，也不会消除外部下载时的 Gatekeeper 提示。DMG 已在本机用 `hdiutil verify` 通过结构校验，并确认包含 `.app`、Applications 链接、四个 sidecar、Apache-2.0 项目许可证和第三方构建清单。Tauri 配置现已固定 660×400 Finder 窗口及“App 左、Applications 右”的图标位置；`CI=true` 的无美化产物仍只用于结构校验。当前 macOS 26 环境的非 CI Finder 美化脚本仍需在最终发布前实机构建并复核，自动化不能用无布局产物替代这项发布门禁。
 
 2026-09-08 已发布 macOS Apple Silicon 预发布版 `v0.1.0-alpha.9`：集中修复日语节目词表／转录、可恢复翻译、局部重新识别和长视频播放，并补充视频导出规格预览。固定 tag 的最终 App 已完成真实窗口回归，DMG、DMG 校验文件、对应源码包和源码包校验文件均已核对后上传。该版本不包含 Windows 资产；Windows 对应功能随后由 `v0.1.0-alpha.10` 单独发布。
 

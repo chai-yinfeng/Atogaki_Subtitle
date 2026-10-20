@@ -131,3 +131,9 @@ Merriam-Webster 是用户自带 Key 的非商业网络服务，不随 App 分发
 - Apple 签名、公证和未来应用商店条款；
 - 模型本身的逐版本法律审查；
 - 用户导入媒体、字幕及云端翻译内容的权利。
+
+## 2026-10-20 macOS 稳定版复核
+
+本次锁定 macOS arm64 完整四 sidecar 配置。重新生成 Rust 与前端声明无内容变化；对应源码脚本新增 llama.cpp 固定版本源码、SHA-256、构建清单及重建脚本，拒绝清单或签名前二进制不匹配。FFmpeg 继续为 LGPL 构建，不含 GPL/nonfree/libx264。模型权重、用户媒体、词典数据与官方艺术素材不随安装包分发。Windows 不生成新安装包或对应源码资产。
+
+同日复核 [Merriam-Webster API 条款](https://dictionaryapi.com/info/terms-of-service)：非商业用途、每日每 reference 1,000 次、最多两个 reference，以及禁止自动查询和比较／基准测试的限制仍在。本轮不更改该服务入口、不调用 API。

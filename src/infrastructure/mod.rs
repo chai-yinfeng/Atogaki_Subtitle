@@ -13,3 +13,5 @@ pub mod openai_compatible;
 pub mod waveform;
 pub mod whisper;
 pub mod whisper_asr;
+
+pub mod mlx_asr;

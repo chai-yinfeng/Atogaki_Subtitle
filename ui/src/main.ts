@@ -1,12 +1,26 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { setupImageThemes } from "./appearance";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { SubtitleDrafts, cueKey, type Draft } from "./subtitle-drafts";
 import { listen } from "@tauri-apps/api/event";
 import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
+import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
+applyTheme(readTheme());
+import { matchesQuery, highlightSaved, candidateTextDiff, playheadHandleContains, timelineTimeAtX } from "./offline-tools";
+let selectedMediaFiles: string[] = [];
+let playbackLoop: {startMs:number;endMs:number;repeat:boolean} | null = null;
+let loopStartMs: number | null = null;
+let taskTitleQuery = "";
+let learningQuery = "";
+let learningTaskFilter = "";
 
 type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
 type LearningLanguage = "ja" | "en" | "ko";
 
+type RecoverySummary = { phase: string; completed_ms: number; duration_ms: number; completed_ranges: [number, number][]; can_resume: boolean; blocked_reason: string | null };
 type LocalJob = {
+  recovery?: RecoverySummary;
   job_id: string;
   display_name: string | null;
   storage_dir: string;
@@ -117,13 +131,19 @@ type RetranscriptionCandidate = {
 };
 
 type RetranscriptionPreview = {
+  comparison_id?: string | null;
+  workspace_revision?: number | null;
   preview_id: string;
   job_id: string;
   start_ms: number;
   end_ms: number;
   original_segments: SubtitleSegment[];
   candidate_segments: RetranscriptionCandidate[];
-  context_mode: "isolated";
+  context_mode: "isolated" | "provider-managed";
+  provider_name?: string;
+  model_identity?: string;
+  timing_granularities?: string[];
+  configuration?: Record<string, unknown>;
 };
 
 type BatchTranslationResult = {
@@ -146,6 +166,7 @@ type SubtitleStructureUndoEntry = {
 };
 
 type JobDetail = {
+  translation_context_stale_ids: string[];
   job: LocalJob;
   segments: SubtitleSegment[];
   translation_runs: TranslationRun[];
@@ -587,7 +608,7 @@ app.innerHTML = `
     <div id="home-view">
       <section class="intro">
         <h2>离线理解，保留在本机。</h2>
-        <p>选择节目语言、本地媒体与 Whisper 模型后，任务会先写入本地 SQLite，再在后台开始转写。</p>
+        <p>选择节目语言、本地媒体与 Whisper 模型，保存任务后即可在后台转写。</p>
         <p class="data-path" id="data-path">正在读取本地数据目录…</p>
       </section>
       <section class="create-task" aria-labelledby="create-heading">
@@ -605,6 +626,7 @@ app.innerHTML = `
           </div>
           <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
           <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>完整转录后自动翻译；云端只发送字幕文本和上下文。</span></label>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
@@ -718,21 +740,21 @@ app.innerHTML = `
               <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-follow-playhead" type="button" class="secondary active">跟随播放头</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销上次打轴</button></div>
             </div>
             <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。拖动字幕块可移动，拖动左右边缘可单独修剪；空白合法，同轨不能重叠。</div>
-            <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="可点击定位的声音波形与字幕时间轴"></canvas>
+            <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="声音波形与字幕时间轴：拖动顶部播放头定位，拖动波形背景平移"></canvas>
             <div class="retranscription-range" aria-labelledby="retranscription-heading">
-              <div><p class="eyebrow">RECOGNIZE SELECTED RANGE</p><h4 id="retranscription-heading">局部重新识别</h4><p>只识别明确填写的范围，并隔离前文识别上下文。生成候选后不会自动覆盖字幕。</p></div>
+              <div><p class="eyebrow">RECOGNIZE SELECTED RANGE</p><h4 id="retranscription-heading">局部重新识别</h4><p>选一段音频重新识别，先对照原字幕，再决定是否替换。</p></div>
               <label>开始<input id="retranscription-start" inputmode="decimal" placeholder="00:49:00.000" /></label>
               <label>结束<input id="retranscription-end" inputmode="decimal" placeholder="00:55:00.000" /></label>
               <label>识别 provider<select id="retranscription-provider"><option value="whisper.cpp">Whisper.cpp（本地）</option><option value="gemini-transcribe">Gemini 3.5 Transcribe（云端）</option></select></label>
               <label id="gemini-upload-consent" class="clear-secret hidden"><input id="authorize-gemini-upload" type="checkbox" /><span>允许将这次所选范围的音频上传给 Google；免费层数据可能用于改进产品</span></label>
-              <div class="retranscription-actions"><button id="retranscription-use-window" type="button" class="secondary">使用当前可视范围</button><button id="retranscription-expand-segments" type="button" class="secondary">扩展到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
+              <div class="retranscription-actions"><button id="retranscription-use-current" type="button" class="secondary">使用播放头所在字幕段</button><button id="retranscription-use-window" type="button" class="secondary">使用当前波形范围</button><button id="retranscription-expand-segments" type="button" class="secondary">对齐到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
               <p id="retranscription-message" class="media-message">范围边界不能切穿已有字幕块；需要时请显式扩展。</p>
-              <div id="asr-quality-signals" class="asr-quality-signals"></div>
+              <details id="asr-quality-review" class="asr-quality-review"><summary id="asr-quality-summary">转录待复核提示</summary><div id="asr-quality-signals" class="asr-quality-signals"></div></details>
             </div>
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
             <div class="karaoke-text-editor"><span id="karaoke-segment-time">当前没有字幕</span><label>原文<textarea id="karaoke-current-source" rows="3" placeholder="当前时间没有原文字幕" disabled></textarea></label><label>译文<textarea id="karaoke-current-translation" rows="3" placeholder="尚无译文" disabled></textarea></label></div>
-            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤销上次文字保存</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会原子写入 SQLite。</p></div>
+            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>立即保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤回上次文字编辑</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><button id="karaoke-insert-block" type="button" class="secondary">插入字幕块</button><button id="karaoke-delete-block" type="button" class="secondary">删除当前块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会自动保存。</p></div>
           </section>
         </section>
       </div>
@@ -803,7 +825,7 @@ app.innerHTML = `
       </section>
       <section id="workspace-translation-panel" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-translation" data-workspace-panel="translation">
         <div class="module-heading">
-          <div><p class="eyebrow">LANGUAGE WORKFLOW</p><h2>翻译与识别修正</h2><p>这里的操作会更新当前 SQLite 字幕工作区；原始识别快照保持不变。</p></div>
+          <div><p class="eyebrow">LANGUAGE WORKFLOW</p><h2>翻译与识别修正</h2><p>这里的操作会更新当前字幕工作区；原始识别快照保持不变。</p></div>
         </div>
         <section class="workspace-toolbar module-card" aria-label="翻译与词表">
           <div>
@@ -812,7 +834,8 @@ app.innerHTML = `
             <span id="translation-run-status" class="muted"></span>
           </div>
           <div class="workspace-action-buttons">
-            <button id="translate-all" type="button">全部翻译／重译</button>
+            <button id="translate-pending" type="button">补译缺失／过期段</button>
+            <button id="translate-all" class="secondary" type="button">全体翻译／重译</button>
           </div>
           <div class="workspace-glossary-row">
             <div>
@@ -931,7 +954,7 @@ app.innerHTML = `
     </dialog>
     <dialog id="retranscription-dialog" class="retranscription-dialog">
       <div class="dialog-heading">
-        <div><p class="eyebrow">RETRANSCRIPTION PREVIEW</p><h2>局部识别候选</h2></div>
+        <div><p class="eyebrow">ASR CANDIDATE PREVIEW</p><h2>识别候选对照</h2></div>
         <button id="close-retranscription-preview" type="button" class="secondary">关闭</button>
       </div>
       <p id="retranscription-preview-summary" class="dialog-help"></p>
@@ -1026,7 +1049,7 @@ app.innerHTML = `
     <dialog id="settings-dialog" class="settings-dialog">
       <form id="settings-form">
         <div class="dialog-heading">
-          <div><p class="eyebrow">FIRST RUN & SETTINGS</p><h2>启动配置</h2></div>
+          <div><p class="eyebrow">SETTINGS</p><h2>启动配置</h2></div>
           <button id="close-settings" type="button" class="secondary">稍后再说</button>
         </div>
         <p class="dialog-help">媒体和模型默认保留在本机；选择云端翻译 provider 时，只有原文字幕和上下文会发送到对应服务。</p>
@@ -1069,7 +1092,7 @@ app.innerHTML = `
         </section>
         <section class="settings-section">
           <div class="settings-section-heading"><div><strong>3. 云端 ASR（可选）</strong><span>Gemini Key 只存入系统凭据库。配置 Key 不会授权上传；每次运行仍需单独确认音频范围。</span></div><span id="asr-credential-store-label"></span></div>
-          <label>Gemini API Key<input id="settings-gemini-api-key" type="password" autocomplete="off" placeholder="从 Google AI Studio 创建；保存后立即清空" /></label>
+          <p>与翻译区 Gemini 共用同一把 Key；保存或删除会同时影响两项功能。音频上传仍需逐次授权。</p><label>Gemini API Key<input id="settings-gemini-api-key" type="password" autocomplete="off" placeholder="从 Google AI Studio 创建；保存后立即清空" /></label>
           <div class="credential-check-row"><button id="save-gemini-api-key" type="button">保存 Key</button><button id="check-gemini-api-key" type="button" class="secondary">检查</button><button id="clear-gemini-api-key" type="button" class="secondary">删除</button></div>
           <p id="gemini-api-key-status" class="settings-message">尚未读取配置。</p>
           <p class="settings-message">Atogaki 上传提取后的 WAV，并在转录请求完成后调用 Files API 删除上传文件。免费层价格为 $0，但存在项目级 rate limits，且免费层数据会用于改进 Google 产品。</p>
@@ -1078,11 +1101,11 @@ app.innerHTML = `
           <div class="settings-section-heading"><div><strong>4. 翻译 provider（可选）</strong><span>Hy-MT2 完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
           <label>翻译 provider
             <select id="settings-provider">
-              <option value="hy-mt2-local">Hy-MT2（本地实验）</option>
+              <option value="hy-mt2-local">Hy-MT2（本地翻译）</option>
               <option value="deepl">DeepL（传统翻译 API）</option>
-              <option value="deepseek">DeepSeek（LLM API）</option>
+              <option value="deepseek">DeepSeek（LLM API）</option><option value="gemini">Gemini（文本翻译）</option>
               <option value="openai-compatible">OpenAI-compatible（高级）</option>
-              <option value="none">关闭云端翻译</option>
+              <option value="none">不翻译／仅保留原文</option>
             </select>
           </label>
           <div id="llm-provider-fields" class="settings-grid hidden">
@@ -1113,7 +1136,7 @@ app.innerHTML = `
           <p id="dictionary-download-message" class="settings-message" role="status"></p>
           <div>
             <strong class="settings-subheading">在线词典 API</strong>
-            <p class="settings-message">每个来源独立配置；Key 只写入系统凭据库，不写入 SQLite、日志或任务目录。检查只验证凭据是否存在，不调用词典 API。</p>
+            <p class="settings-message">每个来源独立配置；Key 仅保存在系统凭据库，不写入日志或任务目录。检查只验证凭据是否存在，不调用词典 API。</p>
           </div>
           <div id="dictionary-credentials" class="dictionary-credentials">
             ${[
@@ -1237,6 +1260,7 @@ const learningProviderTabs = document.querySelector<HTMLElement>("#learning-prov
 const learningProviderPanel = document.querySelector<HTMLElement>("#learning-provider-panel");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translationRunStatusText = document.querySelector<HTMLSpanElement>("#translation-run-status");
+const translatePendingButton = document.querySelector<HTMLButtonElement>("#translate-pending");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
 const openSubtitleOverlayButton = document.querySelector<HTMLButtonElement>("#open-subtitle-overlay");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
@@ -1350,6 +1374,14 @@ let activeSegmentId: string | null = null;
 let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
 const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
+const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(async (before, value) => {
+  if (!value.source.trim()) throw new Error("原文不能为空；草稿已保留");
+  return invoke<SubtitleSegment>("update_subtitle", { request: {
+    jobId: before.job_id, segmentId: before.id, sourceText: value.source,
+    translatedText: value.translation.trim() || null, startMs: before.start_ms, endMs: before.end_ms,
+  } });
+}, updateSubtitleDraftUI);
+
 const subtitleStructureUndoHistory = new Map<string, SubtitleStructureUndoEntry[]>();
 let workspaceActionBusy = false;
 let lastExportedSubtitlePath: string | null = null;
@@ -1407,6 +1439,7 @@ let karaokeSelectedJobId: string | null = null;
 let karaokeResumeMs = 0;
 let karaokeTimingDrag: KaraokeTimingDrag | null = null;
 let karaokePanDrag: KaraokePanDrag | null = null;
+let karaokePlayheadDrag: { pointerId: number; startMs: number; endMs: number } | null = null;
 let karaokeSuppressClick = false;
 let karaokeWaveformGain = 1;
 let karaokeWaveformReloadTimer: number | null = null;
@@ -1481,16 +1514,16 @@ function formatElapsed(seconds: number): string {
   return `${remainingSeconds}秒`;
 }
 
-function jobTimingLabel(job: Pick<LocalJob, "status" | "created_at_unix" | "started_at_unix" | "completed_at_unix">): string {
+function jobTimingLabel(job: Pick<LocalJob, "status" | "created_at_unix" | "started_at_unix" | "completed_at_unix"> & Partial<Pick<LocalJob,"updated_at_unix">>): string {
   const now = Math.floor(Date.now() / 1_000);
-  if (job.status === "queued") return `排队 ${formatElapsed(now - job.created_at_unix)}`;
+  if (job.status === "queued") return `排队 ${formatElapsed(now - (job.updated_at_unix ?? job.created_at_unix))}`;
   if (matchesTerminalStatus(job.status)) {
     if (job.started_at_unix !== null && job.completed_at_unix !== null && job.completed_at_unix >= job.started_at_unix) {
-      return `处理用时 ${formatElapsed(job.completed_at_unix - job.started_at_unix)}`;
+      return `任务历时 ${formatElapsed(job.completed_at_unix - job.started_at_unix)}`;
     }
     return "历史任务未记录处理用时";
   }
-  if (job.started_at_unix !== null) return `已运行 ${formatElapsed(now - job.started_at_unix)}`;
+  if (job.started_at_unix !== null) return `任务历时 ${formatElapsed(now - job.started_at_unix)}`;
   return `准备中 ${formatElapsed(now - job.created_at_unix)}`;
 }
 
@@ -1503,6 +1536,7 @@ function updateVisibleJobTimings(): void {
     if (!Number.isFinite(createdAt)) return;
     element.textContent = jobTimingLabel({
       created_at_unix: createdAt,
+      updated_at_unix: Number(element.dataset.updatedAt) || createdAt,
       started_at_unix: startedAt,
       completed_at_unix: completedAt,
       status,
@@ -1564,7 +1598,7 @@ function formatBytes(bytes: number): string {
 function syncProviderSettings(): void {
   const provider = settingsProvider?.value ?? "none";
   const cloudEnabled = provider !== "none" && provider !== "hy-mt2-local";
-  const llmEnabled = provider === "deepseek" || provider === "openai-compatible" || provider === "hy-mt2-local";
+  const llmEnabled = provider === "gemini" || provider === "deepseek" || provider === "openai-compatible";
   const customEndpoint = provider === "openai-compatible";
   document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !cloudEnabled);
   settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !cloudEnabled);
@@ -1573,11 +1607,13 @@ function syncProviderSettings(): void {
   document.querySelector<HTMLElement>("#provider-base-url-field")?.classList.toggle("hidden", !customEndpoint);
   document.querySelector<HTMLElement>("#provider-model-field")?.classList.toggle("hidden", provider === "hy-mt2-local");
   if (settingsProviderModel) settingsProviderModel.disabled = provider === "hy-mt2-local";
-  const providerLabel = provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
+  const providerLabel = provider === "gemini" ? "Gemini（与语音识别共用）" : provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
   const apiKeyLabel = document.querySelector<HTMLSpanElement>("#api-key-label");
   const clearApiKeyLabel = document.querySelector<HTMLSpanElement>("#clear-api-key-label");
   if (apiKeyLabel) apiKeyLabel.textContent = `${providerLabel} API Key`;
   if (clearApiKeyLabel) clearApiKeyLabel.textContent = `删除系统凭据库中已保存的 ${providerLabel} Key`;
+  settingsHyMt2Model?.closest(".settings-path-row")?.classList.remove("hidden");
+  renderProviderCards();
 }
 
 async function checkSelectedApiKey(): Promise<void> {
@@ -1617,6 +1653,9 @@ function overwriteSettingsField<T extends HTMLInputElement | HTMLSelectElement>(
 
 function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
+  settingsDialog?.classList.toggle("onboarding",settings.needsOnboarding);
+  const title=settingsDialog?.querySelector("h2");if(title)title.textContent=settings.needsOnboarding ? "首次配置" : "设置";
+  if (!settingsDirtyFields.has("settings-provider")) lastSettingsProvider = settings.translationProviderId;
   overwriteSettingsField(settingsWhisperModel, settings.whisperModelPath ?? "");
   overwriteSettingsField(settingsVadModel, settings.vadModelPath ?? "");
   overwriteSettingsField(settingsHyMt2Model, settings.hyMt2ModelPath ?? "");
@@ -1624,9 +1663,10 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   overwriteSettingsField(settingsProxyUrl, settings.networkProxyUrl ?? "");
   overwriteSettingsField(settingsModelMirror, settings.modelMirrorUrl ?? "");
   overwriteSettingsField(settingsProvider, settings.translationProviderId);
-  overwriteSettingsField(settingsProviderModel, settings.translationModel ?? "");
-  overwriteSettingsField(settingsProviderBaseUrl, settings.translationBaseUrl ?? "");
-  overwriteSettingsField(settingsTranslationStyle, settings.translationStyleInstruction);
+  const profile = providerDrafts.get(settingsProvider?.value ?? settings.translationProviderId);
+  overwriteSettingsField(settingsProviderModel, profile?.model ?? settings.translationModel ?? "");
+  overwriteSettingsField(settingsProviderBaseUrl, profile?.endpoint ?? settings.translationBaseUrl ?? "");
+  overwriteSettingsField(settingsTranslationStyle, profile?.style ?? settings.translationStyleInstruction);
   overwriteSettingsField(settingsApiKey, "");
   overwriteSettingsField(settingsClearApiKey, false);
   if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
@@ -1654,14 +1694,17 @@ function renderDesktopSettings(settings: DesktopSettings): void {
           ? settings.hyMt2ModelReady && settings.localTranslationRuntimeReady
             ? "本地 runtime 与模型已就绪；翻译文本不会离开设备"
             : "本地翻译尚未就绪；请确认当前 App 包含 runtime 并下载 Hy-MT2 模型"
-          : "尚未配置；Key 不会写入 SQLite 或任务目录";
+          : "尚未配置；Key 仅保存在系统凭据库";
     apiKeyStatus.textContent = settings.credentialError
       ? `${source}。系统凭据库提示：${settings.credentialError}`
       : source;
     apiKeyStatus.classList.toggle("warning", Boolean(settings.credentialError));
   }
+  const taskProvider = document.querySelector<HTMLSelectElement>("#task-translation-provider");
+  if (taskProvider && !taskProvider.value && settings.translationProviderId !== "none") taskProvider.value = settings.translationProviderId;
   if (modelPath && settings.whisperModelPath) modelPath.value = settings.whisperModelPath;
   if (vadModelPath && settings.vadModelPath) vadModelPath.value = settings.vadModelPath;
+  updateTaskPipelineSummary();
   syncProviderSettings();
   syncNetworkSettings();
   renderModelCatalog();
@@ -1713,6 +1756,7 @@ function renderModelCatalog(): void {
       else void startModelDownload(modelId);
     });
   });
+  renderProviderCards();
 }
 
 function renderDictionaryCatalog(): void {
@@ -1810,6 +1854,8 @@ async function saveGeminiCredential(clear: boolean): Promise<void> {
       request: { apiKey: clear ? null : apiKey, clear },
     });
     renderAsrCredentialStatus(status);
+    await refreshProviderReadiness();
+    if (settingsApiKey && settingsProvider?.value === "gemini") settingsApiKey.value = "";
   } catch (error) {
     geminiApiKeyStatus.textContent = `操作失败：${String(error)}`;
     geminiApiKeyStatus.classList.add("warning");
@@ -1912,15 +1958,17 @@ async function checkDictionaryCredential(providerId: string): Promise<void> {
 
 async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
   try {
-    const [settings, catalog, downloads] = await Promise.all([
+    const [settings, catalog, downloads, profiles] = await Promise.all([
       invoke<DesktopSettings>("desktop_settings"),
       availableModels.length ? Promise.resolve(availableModels) : invoke<ModelCatalogItem[]>("model_catalog"),
       invoke<ModelDownloadState[]>("model_download_states"),
+      invoke<TranslationProfileSummary[]>("translation_profiles"),
     ]);
+    updateProviderProfiles(profiles);
     availableModels = catalog;
     modelDownloads = downloads;
     renderDesktopSettings(settings);
-    await Promise.all([loadDictionarySettings(), loadAsrCredentialStatus()]);
+    await loadDictionarySettings();
     if (openWhenNeeded && settings.needsOnboarding && !settingsDialog?.open) settingsDialog?.showModal();
   } catch (error) {
     if (settingsMessage) settingsMessage.textContent = `无法读取启动配置：${String(error)}`;
@@ -1929,7 +1977,12 @@ async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
 
 async function refreshTranslationStatus(): Promise<void> {
   try {
-    translationStatus = await invoke<TranslationStatus>("translation_status");
+    const jobId = activeDetail?.job.job_id ?? null;
+    const status = await invoke<TranslationStatus>("translation_status",{jobId});
+    if (jobId !== (activeDetail?.job.job_id ?? null)) return;
+    translationStatus = status;
+    const choice=document.querySelector<HTMLSelectElement>("#task-provider-choice");
+    if(choice)choice.value=status.provider_id;
     updateTranslationControls();
   } catch (error) {
     setWorkspaceAction(`无法读取翻译配置：${String(error)}`, true);
@@ -1963,6 +2016,8 @@ async function saveSettings(finishOnboarding: boolean): Promise<void> {
       },
     });
     settingsDirtyFields.clear();
+    providerDirtyDrafts.delete(settingsProvider.value);
+    updateProviderProfiles(await invoke<TranslationProfileSummary[]>("translation_profiles"));
     renderDesktopSettings(settings);
     await refreshTranslationStatus();
     if (settingsMessage) settingsMessage.textContent = "配置已保存；如提供密钥，只会写入系统凭据库。";
@@ -2291,6 +2346,10 @@ function updateTranslationControls(): void {
       translationRunStatusText.textContent = `最近批次：${latest.provider_name}${model} · ${latest.segment_count} 段${tokens} · ${new Date(latest.completed_at_unix * 1_000).toLocaleString()}`;
     }
   }
+  if (translatePendingButton) {
+    translatePendingButton.disabled = taskBusy || !hasSegments || !translationStatus.configured ||
+      !activeDetail?.segments.some(segment => segmentNeedsTranslation(segment));
+  }
   if (translateAllButton) {
     translateAllButton.disabled = taskBusy || !hasSegments || !translationStatus.configured;
   }
@@ -2383,10 +2442,11 @@ function setWorkspaceBusy(busy: boolean): void {
 }
 
 function hasUnsavedSubtitleEdits(): boolean {
-  return karaokeTextDraftDirty || Boolean(subtitleList?.querySelector<HTMLElement>('[data-dirty="true"]'));
+  return [...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && subtitleDrafts.pending(draft));
 }
 
 function renderJobs(jobs: LocalJob[]): void {
+  jobs = jobs.filter(job => matchesQuery(taskTitleQuery,[displayName(job)]));
   if (!jobList || !jobCount) return;
   jobCount.textContent = `${jobs.length} 个任务`;
   if (jobs.length === 0) {
@@ -2400,23 +2460,39 @@ function renderJobs(jobs: LocalJob[]): void {
         <article class="job-card" data-job-card="${escapeHtml(job.job_id)}">
           <button class="job-drag-handle" type="button" aria-label="拖动调整${escapeHtml(displayName(job))}的顺序" title="拖动排序；聚焦后也可用上下方向键">⠿</button>
           <button class="job-open" data-job-id="${escapeHtml(job.job_id)}" type="button">
-            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-started-at="${job.started_at_unix ?? ""}" data-completed-at="${job.completed_at_unix ?? ""}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
+            <div><h3>${escapeHtml(displayName(job))}</h3><p>${escapeHtml(job.message)} · <span data-job-timing data-created-at="${job.created_at_unix}" data-updated-at="${job.updated_at_unix}" data-started-at="${job.started_at_unix ?? ""}" data-completed-at="${job.completed_at_unix ?? ""}" data-status="${escapeHtml(job.status)}">${escapeHtml(jobTimingLabel(job))}</span></p>${runningJob(job) ? '<progress class="job-progress"></progress>' : ""}</div>
             <span class="job-statuses">
-              <span class="status status-${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+              <span class="status status-${escapeHtml(job.status)}">${escapeHtml(job.error_message?.includes("已暂停") ? "已暂停" : statusLabel(job.status))}</span>
               <span class="status translation-status translation-status-${escapeHtml(job.translation_status)}">${escapeHtml(translationStatusLabel(job))}</span>
             </span>
           </button>
           <div class="job-actions">
-            ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重试</button>` : ""}
+            ${job.recovery?.duration_ms ? `<span>${job.status==="failed" ? `${escapeHtml(statusLabel(job.recovery.phase))} · ` : ""}${formatTime(job.recovery.completed_ms)} / ${formatTime(job.recovery.duration_ms)}</span><button type="button" class="secondary" data-partial-job="${escapeHtml(job.job_id)}">查看已保存原文</button>` : ""}
+            ${job.status === "failed" && job.recovery?.can_resume ? `<button type="button" data-resume-job="${escapeHtml(job.job_id)}">继续</button>` : ""}
+            ${runningJob(job) ? `<button type="button" class="secondary" data-pause-job="${escapeHtml(job.job_id)}">暂停</button>` : ""}
+            ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重新运行</button>` : ""}
             <button type="button" class="secondary" data-rename-job="${escapeHtml(job.job_id)}">重命名</button>
             <button type="button" class="danger" data-delete-job="${escapeHtml(job.job_id)}" ${matchesTerminalStatus(job.status) ? "" : "disabled"} title="${matchesTerminalStatus(job.status) ? "删除任务数据，但保留原始媒体" : "任务结束后才能删除"}">删除</button>
           </div>
         </article>`,
     )
     .join("");
-  enableJobOrdering();
+  if (!taskTitleQuery.trim()) enableJobOrdering();
+  for (const [attribute, command] of [["resume", "resume_task"], ["pause", "pause_task"]]) {
+    jobList.querySelectorAll<HTMLButtonElement>(`[data-${attribute}-job]`).forEach(button => button.addEventListener("click", async () => {
+      button.disabled = true;
+      try { await invoke(command, {jobId: button.getAttribute(`data-${attribute}-job`)}); await refresh(); }
+      catch (error) { if (jobManagementMessage) jobManagementMessage.textContent = String(error); }
+      finally { button.disabled = false; }
+    }));
+  }
+  jobList.querySelectorAll<HTMLButtonElement>("[data-partial-job]").forEach(button => button.addEventListener("click", () => void showPartialTranscript(button.dataset.partialJob ?? "")));
   jobList.querySelectorAll<HTMLButtonElement>("[data-job-id]").forEach((button) => {
-    button.addEventListener("click", () => void openJob(button.dataset.jobId ?? ""));
+    button.addEventListener("click", () => {
+      const job = jobs.find(j => j.job_id === button.dataset.jobId);
+      if (job && job.status !== "done" && job.recovery?.duration_ms && (job.recovery.completed_ms < job.recovery.duration_ms || job.segment_count === 0)) void showPartialTranscript(job.job_id);
+      else void openJob(button.dataset.jobId ?? "");
+    });
   });
   jobList.querySelectorAll<HTMLButtonElement>("[data-rename-job]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2626,14 +2702,17 @@ async function deleteJob(job: LocalJob): Promise<void> {
   if (!matchesTerminalStatus(job.status)) return;
   const confirmed = await confirmAction({
     title: "删除任务数据？",
-    message: `将删除“${displayName(job)}”在 Atogaki 中的音频、字幕、中间产物和 SQLite 记录。原始媒体文件不会被删除。`,
+    message: `将删除“${displayName(job)}”在 Atogaki 中的音频、字幕、中间产物和本地记录。原始媒体文件不会被删除。`,
     confirmLabel: "删除任务",
     danger: true,
   });
   if (!confirmed) return;
   if (jobManagementMessage) jobManagementMessage.textContent = "正在删除任务数据…";
   try {
+    await subtitleDrafts.flushAll();
     await invoke("delete_job", { jobId: job.job_id });
+    subtitleDrafts.forgetJob(job.job_id);
+    try { localStorage.setItem("atogaki.subtitleDrafts", subtitleDrafts.snapshot()); } catch { /* Session state was cleared. */ }
     if (jobManagementMessage) jobManagementMessage.textContent = "任务已删除，原始媒体文件未改变。";
     await refresh();
   } catch (error) {
@@ -2698,6 +2777,10 @@ function showWorkspace(show: boolean): void {
 }
 
 async function stopActivePlayback(): Promise<void> {
+  await subtitleDrafts.flushAll();
+  playbackLoop = null; loopStartMs = null;
+  document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
+
   const media = activeMedia;
   const detail = activeDetail;
   const area = currentArea;
@@ -2709,6 +2792,7 @@ async function stopActivePlayback(): Promise<void> {
   }
   karaokeTimingDrag = null;
   karaokePanDrag = null;
+  karaokePlayheadDrag = null;
   karaokeGestureStart = null;
   karaokeTextDraftSegmentId = null;
   karaokeTextDraftDirty = false;
@@ -2788,6 +2872,8 @@ async function openListeningJob(
       invoke<number>("get_playback_position", { jobId }),
     ]);
     if (requestId !== navigationRequestId || currentArea !== "listening") return;
+    await refreshLearningItems();
+    if (requestId !== navigationRequestId) return;
     activeDetail = detail;
     activeSegmentId = null;
     if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
@@ -2811,7 +2897,7 @@ function renderListeningSubtitles(segments: SubtitleSegment[]): void {
     <article class="listening-subtitle" data-segment-id="${escapeHtml(segment.id)}">
       <button type="button" class="listening-time" data-listen-time="${segment.start_ms}" aria-label="跳转到 ${escapeHtml(formatTime(segment.start_ms))}">${escapeHtml(formatTime(segment.start_ms))}</button>
       <div class="listening-text">
-        <p class="listening-source" data-learning-source title="选择词语、短语或语法表达后收藏">${escapeHtml(segment.source_text)}</p>
+        <p class="listening-source" data-learning-source title="选择词语、短语或语法表达后收藏">${highlightSaved(segment.source_text,learningItems.filter(d=>d.item.source_language===activeDetail?.job.source_language).map(d=>d.item.source_text), learningItems.flatMap(d=>d.occurrences.filter(o=>o.job_id===activeDetail?.job.job_id && o.segment_id===segment.id && o.segment_source_snapshot===segment.source_text).map(o=>[o.selection_start_utf16,o.selection_end_utf16] as [number,number])), activeDetail?.job.source_language)}</p>
         <p class="listening-translation">${escapeHtml(segment.translated_text ?? "")}</p>
       </div>
       <button type="button" class="collect-learning-sentence secondary" data-collect-sentence="${escapeHtml(segment.id)}">收藏整句</button>
@@ -2969,9 +3055,16 @@ async function refreshLearningItems(): Promise<void> {
 
 function renderLearningItems(): void {
   if (!learningItemList) return;
-  const languageItems = learningItems.filter(
-    (detail) => detail.item.source_language === activeLearningLanguage,
-  );
+  const allLanguageItems = learningItems.filter(detail => detail.item.source_language === activeLearningLanguage);
+  const languageItems = allLanguageItems.filter(detail =>
+    matchesQuery(learningQuery,[detail.item.source_text,detail.item.meaning_text,...detail.occurrences.map(o=>o.segment_source_snapshot)])
+    && (!learningTaskFilter || detail.occurrences.some(o=>o.job_id===learningTaskFilter)));
+  const taskFilter = document.querySelector<HTMLSelectElement>("#learning-task-filter");
+  if (taskFilter) {
+    const sources = new Map(learningItems.flatMap(d=>d.occurrences.filter(o=>o.job_id).map(o=>[o.job_id!,o.job_display_name_snapshot] as const)));
+    taskFilter.innerHTML = '<option value="">全部来源任务</option>' + Array.from(sources).map(([id,title])=>`<option value="${escapeHtml(id)}">${escapeHtml(title)}</option>`).join("");
+    taskFilter.value = learningTaskFilter;
+  }
   const languageName = languageLabel(activeLearningLanguage);
   learningLanguageTabs?.querySelectorAll<HTMLButtonElement>("[data-learning-language]").forEach((button) => {
     const language = button.dataset.learningLanguage as LearningLanguage;
@@ -2983,14 +3076,16 @@ function renderLearningItems(): void {
     if (countHost) countHost.textContent = String(count);
   });
   if (learningLanguageSummary) {
-    learningLanguageSummary.textContent = `${languageName} · ${languageItems.length} 个条目`;
+    learningLanguageSummary.textContent = `${languageName} · ${languageItems.length} 个条目${learningQuery.trim() || learningTaskFilter ? `（共 ${allLanguageItems.length} 个）` : ""}`;
   }
   if (learningItems.length === 0) {
     learningItemList.innerHTML = '<div class="empty-state"><strong>单词本还是空的。</strong><span>到收听区选择词语、短语或语法表达；也可以直接收藏整句。</span></div>';
     return;
   }
   if (languageItems.length === 0) {
-    learningItemList.innerHTML = `<div class="empty-state"><strong>${escapeHtml(languageName)}单词本还是空的。</strong><span>打开一项${escapeHtml(languageName)}任务，在收听区选择词语、短语或语法表达。</span></div>`;
+    learningItemList.innerHTML = allLanguageItems.length
+      ? '<div class="empty-state"><strong>没有匹配的学习条目。</strong><span>请调整搜索文字或来源任务筛选。</span></div>'
+      : `<div class="empty-state"><strong>${escapeHtml(languageName)}单词本还是空的。</strong><span>打开一项${escapeHtml(languageName)}任务，在收听区选择词语、短语或语法表达。</span></div>`;
     return;
   }
   learningItemList.innerHTML = languageItems.map((detail) => {
@@ -3010,6 +3105,7 @@ function renderLearningItems(): void {
       <label>学习译义${detail.item.meaning_source_label ? `<span class="learning-meaning-source">当前来自 ${escapeHtml(detail.item.meaning_source_label)}</span>` : ""}<input class="learning-meaning" value="${escapeHtml(detail.item.meaning_text ?? "")}" placeholder="可手工填写，或从词典详情选择一条释义" /></label>
       <div class="learning-source-meta">${sourceMeta}</div>
       ${context}
+      <details><summary>全部 ${detail.occurrences.length} 个来源例句</summary>${detail.occurrences.map(o=>`<blockquote><p>${escapeHtml(o.segment_source_snapshot)}</p><p>${escapeHtml(o.segment_translation_snapshot ?? "")}</p><span>${escapeHtml(o.job_display_name_snapshot)} · ${formatTime(o.start_ms)}</span>${o.job_id ? `<button type="button" class="secondary" data-play-occurrence="${escapeHtml(o.id)}">回到原句</button>` : '<span>原任务已删除；保留收藏快照</span>'}</blockquote>`).join("")}</details>
       <div class="learning-card-actions">
         <button type="button" data-save-learning-meaning="${escapeHtml(detail.item.id)}">保存译义</button>
         <button type="button" class="secondary" data-open-learning-dictionary="${escapeHtml(detail.item.id)}">查看词典</button>
@@ -3018,6 +3114,10 @@ function renderLearningItems(): void {
       </div>
     </article>`;
   }).join("");
+  learningItemList.querySelectorAll<HTMLButtonElement>("[data-play-occurrence]").forEach(button => button.onclick = async () => {
+    const occurrence = learningItems.flatMap(d=>d.occurrences).find(o=>o.id===button.dataset.playOccurrence);
+    if (occurrence?.job_id) { await showTopLevelArea("listening"); await openListeningJob(occurrence.job_id,occurrence.start_ms,true); }
+  });
   learningItemList.querySelectorAll<HTMLButtonElement>("[data-save-learning-meaning]").forEach((button) => {
     button.addEventListener("click", () => void saveLearningMeaning(button.dataset.saveLearningMeaning ?? ""));
   });
@@ -3304,7 +3404,11 @@ async function openKaraokeJob(jobId: string): Promise<void> {
   await stopActivePlayback();
   if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
   karaokeSelectedJobId = jobId;
-  if (!reopeningSelectedJob) karaokeResumeMs = 0;
+  if (!reopeningSelectedJob) {
+    karaokeResumeMs = 0;
+    const drawer = document.querySelector<HTMLDetailsElement>(".karaoke-repair-drawer");
+    if (drawer) drawer.open = false;
+  }
   activeDetail = null;
   karaokeWaveformWindow = null;
   karaokeTextDraftSegmentId = null;
@@ -3331,7 +3435,7 @@ async function openKaraokeJob(jobId: string): Promise<void> {
     updateStructureUndoButton();
     setSubtitleEditAction("拖动字幕块可整体移动，拖动左右边缘可单独修剪；按 10 ms 吸附，空白合法，同轨不能重叠。");
     await loadKaraokeWaveform(karaokeResumeMs, true);
-    useVisibleWindowForRetranscription();
+    usePlayheadSubtitleForRetranscription(false);
     await loadAsrQualitySignals(jobId);
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
@@ -3355,27 +3459,51 @@ async function saveAsrReviewDecision(
   }
 }
 
+let showProcessedSignals = false;
 async function loadAsrQualitySignals(jobId: string): Promise<void> {
   if (!asrQualitySignalsHost) return;
+  const disclosure = document.querySelector<HTMLDetailsElement>("#asr-quality-review");
+  const summary = document.querySelector<HTMLElement>("#asr-quality-summary");
+  if (disclosure && disclosure.dataset.jobId !== jobId) {
+    disclosure.open = false;
+    disclosure.dataset.jobId = jobId;
+    showProcessedSignals = false;
+    if (summary) summary.textContent = "转录待复核提示 · 正在读取";
+    asrQualitySignalsHost.innerHTML = "";
+  }
   try {
-    const signals = await invoke<AsrQualitySignal[]>("list_asr_quality_signals", { jobId });
+    const allSignals = await invoke<AsrQualitySignal[]>("list_asr_quality_signals", { jobId });
+    const processedCount = allSignals.filter(s => s.latest_decision === "false_positive" || s.latest_decision === "resolved").length;
+    const signals = allSignals.filter(s => showProcessedSignals || (s.latest_decision !== "false_positive" && s.latest_decision !== "resolved"));
+    if (activeDetail?.job.job_id !== jobId) return;
+    if (summary) summary.textContent = `转录待复核提示 · ${signals.length} 项，${signals.filter(signal => signal.latest_decision === null).length} 项待复核${!showProcessedSignals && processedCount ? ` · 已隐藏 ${processedCount} 项` : ""}`;
+    const filterBar = `<label class="asr-review-filter"><input type="checkbox" data-show-processed ${showProcessedSignals ? "checked" : ""}>显示已处理（${processedCount}）</label>`;
     if (signals.length === 0) {
-      asrQualitySignalsHost.innerHTML = '<p class="media-message">当前 run 没有自动可疑信号；仍可按听审结果手动选择范围重跑。</p>';
+      asrQualitySignalsHost.innerHTML = filterBar + `<p class="media-message">${processedCount ? '误报和已解决提示已隐藏。可勾选“显示已处理”找回。' : '未发现自动提示，仍可根据试听结果手动选择重新识别的范围。'}</p>`;
       return;
     }
-    asrQualitySignalsHost.innerHTML = signals.map((signal) => {
+    const signalLabels: Record<AsrQualitySignal["signal_kind"], string> = {
+      boundary_repetition: "边界文字重复", repeated_loop: "相邻字幕重复",
+      abnormal_speech_rate: "文字与时长不匹配", speech_during_silence: "静音区出现文字", manual_concern: "接缝待复核",
+    };
+    asrQualitySignalsHost.innerHTML = filterBar + '<p class="media-message">以下提示由转录结果自动检查产生，不是重跑或翻译历史，也不代表一定识别错误。点击提示可定位时间轴；试听后可确认问题或标记误报。选取范围后，再点击“识别并预览”生成候选。</p>' + signals.map((signal) => {
       const range = signal.start_ms === null || signal.end_ms === null
         ? "未指定范围"
         : `${formatPreciseTime(signal.start_ms)} → ${formatPreciseTime(signal.end_ms)}`;
       const review = signal.latest_decision === "confirmed_problem" ? "已确认问题"
         : signal.latest_decision === "false_positive" ? "已标记误报"
           : signal.latest_decision === "resolved" ? "已修复" : "待审查";
-      return `<article class="asr-quality-signal" data-severity="${signal.severity}">
-        <div><p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signal.signal_kind)} · ${review}</span></div>
-        <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">按此范围重跑</button>`}</div>
-      </article>`;
+      const checked = signal.latest_decision !== null;
+      return `${checked ? `<details class="reviewed-signal"><summary>${range} · ${escapeHtml(signalLabels[signal.signal_kind])} · ${review}</summary>` : ""}<article class="asr-quality-signal" data-severity="${signal.severity}">
+        <div>${signal.start_ms === null || signal.end_ms === null
+          ? `<p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review}</span>`
+          : `<button type="button" class="asr-quality-locate" data-locate-signal="${signal.id}" data-job-id="${jobId}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}" aria-label="定位 ${range}：${escapeHtml(signal.message)}"><span class="asr-quality-message">${escapeHtml(signal.message)}</span><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review} · 点击定位</span></button>`}</div>
+        <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button><button type="button" class="secondary" data-asr-review="resolved" data-signal-id="${signal.id}">已解决</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">选取此范围</button>`}</div>
+      </article>${checked ? "</details>" : ""}`;
     }).join("");
   } catch (error) {
+    if (activeDetail?.job.job_id !== jobId) return;
+    if (summary) summary.textContent = "转录待复核提示 · 读取失败";
     asrQualitySignalsHost.innerHTML = `<p class="media-message warning">无法读取 ASR 审查信号：${escapeHtml(String(error))}</p>`;
   }
 }
@@ -3386,11 +3514,28 @@ function setRetranscriptionMessage(message: string, isError = false): void {
   retranscriptionMessage.classList.toggle("warning", isError);
 }
 
+function usePlayheadSubtitleForRetranscription(reportGap = true): void {
+  const position = (activeMedia?.currentTime ?? 0) * 1_000;
+  const segment = activeDetail?.segments.find(cue => cue.start_ms <= position && position < cue.end_ms);
+  if (!segment) {
+    if (reportGap) setRetranscriptionMessage("播放头位于字幕空白处。请移动到字幕段，或手动选择要补识别的范围。", true);
+    return;
+  }
+  if (!retranscriptionStartInput || !retranscriptionEndInput) return;
+  if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
+  activeRepairSignalId = null;
+  retranscriptionStartInput.value = formatPreciseTime(segment.start_ms);
+  retranscriptionEndInput.value = formatPreciseTime(segment.end_ms);
+  setRetranscriptionMessage(`已选第 ${segment.segment_index + 1} 段完整字幕。选择识别方式后预览候选；Gemini 仍需本次上传授权。`);
+}
+
 function useVisibleWindowForRetranscription(): void {
+  if(authorizeGeminiUpload)authorizeGeminiUpload.checked=false;
+  activeRepairSignalId=null;
   if (!karaokeWaveformWindow || !retranscriptionStartInput || !retranscriptionEndInput) return;
   retranscriptionStartInput.value = formatPreciseTime(karaokeWaveformWindow.start_ms);
   retranscriptionEndInput.value = formatPreciseTime(karaokeWaveformWindow.end_ms);
-  setRetranscriptionMessage("已填写当前可视范围；若边界穿过字幕，请显式扩展到完整字幕块。");
+  setRetranscriptionMessage("已填写当前可视范围；若边界穿过字幕，请显式对齐到完整字幕块。");
 }
 
 function retranscriptionRange(): { startMs: number; endMs: number } | null {
@@ -3404,6 +3549,8 @@ function retranscriptionRange(): { startMs: number; endMs: number } | null {
 }
 
 function expandRetranscriptionRangeToSegments(): void {
+  if(authorizeGeminiUpload)authorizeGeminiUpload.checked=false;
+  activeRepairSignalId=null;
   if (!activeDetail || !retranscriptionStartInput || !retranscriptionEndInput) return;
   const range = retranscriptionRange();
   if (!range) return;
@@ -3448,12 +3595,22 @@ function renderRetranscriptionItems(
 function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
   activeRetranscriptionPreview = preview;
   if (retranscriptionPreviewSummary) {
-    retranscriptionPreviewSummary.textContent = `${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)} · 当前 ${preview.original_segments.length} 段 · 候选 ${preview.candidate_segments.length} 段 · 已隔离前文文字上下文`;
+    retranscriptionPreviewSummary.textContent = `${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)} · 当前 ${preview.original_segments.length} 段 · 候选 ${preview.candidate_segments.length} 段 · ${preview.provider_name ?? "识别候选"} · ${preview.model_identity ?? ""} · ${preview.context_mode === "isolated" ? "前文文字已隔离" : "独立识别候选"}`;
   }
   renderRetranscriptionItems(retranscriptionOriginalList, preview.original_segments);
   renderRetranscriptionItems(retranscriptionCandidateList, preview.candidate_segments);
   if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "";
-  retranscriptionDialog?.showModal();
+  if(retranscriptionDialog) {
+    retranscriptionDialog.querySelector(".candidate-diff")?.remove();
+    retranscriptionDialog.querySelector(".refresh-comparison")?.remove();
+    const refresh=document.createElement("button");refresh.type="button";refresh.className="secondary refresh-comparison";refresh.textContent="以当前字幕重新对照（不重跑识别）";
+    refresh.onclick=async()=>{try{showRetranscriptionPreview(await invoke<RetranscriptionPreview>("refresh_asr_comparison",{jobId:preview.job_id,runId:preview.preview_id}));}catch(e){if(retranscriptionConfirmMessage)retranscriptionConfirmMessage.textContent=String(e);}};
+    retranscriptionDialog.querySelector(".retranscription-comparison")?.before(refresh);
+    const diff=document.createElement("details");diff.className="candidate-diff";
+    diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")||"未知")} · 工作区版本：${preview.workspace_revision ?? "历史候选，采用前需重新对照"}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
+    retranscriptionDialog.querySelector(".retranscription-comparison")?.after(diff);
+  }
+  if(!retranscriptionDialog?.open)retranscriptionDialog?.showModal();
 }
 
 async function previewSelectedRange(): Promise<void> {
@@ -3470,6 +3627,7 @@ async function previewSelectedRange(): Promise<void> {
     setRetranscriptionMessage("使用 Gemini 前，请确认只上传当前所选范围并勾选音频上传授权。", true);
     return;
   }
+  if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
   retranscriptionBusy = true;
   if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = true;
   setRetranscriptionMessage(providerId === "gemini-transcribe"
@@ -3499,6 +3657,10 @@ async function previewSelectedRange(): Promise<void> {
 
 async function confirmSelectedRangeReplacement(): Promise<void> {
   if (!activeDetail || !activeRetranscriptionPreview || retranscriptionBusy) return;
+  if (hasUnsavedSubtitleEdits()) {
+    if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "采用候选前请先保存或放弃当前文字草稿。";
+    return;
+  }
   const preview = activeRetranscriptionPreview;
   const repairSignalId = activeRepairSignalId;
   const before = cloneSubtitleSegments(activeDetail.segments);
@@ -3507,7 +3669,7 @@ async function confirmSelectedRangeReplacement(): Promise<void> {
   if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "正在原子替换所选范围…";
   try {
     const after = await invoke<SubtitleSegment[]>("confirm_retranscription", {
-      request: { jobId: activeDetail.job.job_id, previewId: preview.preview_id },
+      request: { jobId: activeDetail.job.job_id, previewId: preview.preview_id, comparisonId: preview.comparison_id ?? null },
     });
     rememberStructureEdit(before, after, `局部重新识别 ${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)}`);
     applySubtitleStructure(after, preview.candidate_segments[0]?.id);
@@ -3603,13 +3765,16 @@ function renderKaraokeTimeline(): void {
     canvas.width = width;
     canvas.height = height;
   }
+  const theme = getComputedStyle(document.documentElement);
+  const accent = theme.getPropertyValue("--accent").trim();
+  const accentSoft = theme.getPropertyValue("--accent-soft").trim();
   const context = canvas.getContext("2d");
   if (!context) return;
   context.setTransform(scale, 0, 0, scale, 0, 0);
   const cssWidth = width / scale;
   const cssHeight = height / scale;
   context.clearRect(0, 0, cssWidth, cssHeight);
-  context.fillStyle = "#f8f5ec";
+  context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--surface-soft").trim() || "#f8f5ec";
   context.fillRect(0, 0, cssWidth, cssHeight);
   const waveform = karaokeWaveformWindow;
   if (!waveform || waveform.peaks.length === 0) {
@@ -3631,7 +3796,7 @@ function renderKaraokeTimeline(): void {
   context.moveTo(0, centerY);
   context.lineTo(cssWidth, centerY);
   context.stroke();
-  context.strokeStyle = "#4f766a";
+  context.strokeStyle = accent;
   context.lineWidth = Math.max(1, cssWidth / waveform.peaks.length);
   context.beginPath();
   waveform.peaks.forEach((peak, index) => {
@@ -3665,15 +3830,15 @@ function renderKaraokeTimeline(): void {
     const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
     const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
     const active = segment.id === (karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId);
-    context.fillStyle = active ? "#2e5d52" : "#dfe9e2";
-    context.strokeStyle = active ? "#173f36" : "#8ca89c";
+    context.fillStyle = active ? accent : accentSoft;
+    context.strokeStyle = accent;
     context.lineWidth = active ? 2 : 1;
     context.beginPath();
     context.roundRect(left + 1, trackTop, Math.max(3, right - left - 2), trackHeight, 5);
     context.fill();
     context.stroke();
     const dragged = karaokeTimingDrag?.segmentIndex === segment.segment_index;
-    context.strokeStyle = dragged ? "#b34b36" : "#587c70";
+    context.strokeStyle = dragged ? "#b34b36" : accent;
     context.lineWidth = dragged ? 3 : 2;
     context.beginPath();
     context.moveTo(left + 3, trackTop + 5);
@@ -3686,7 +3851,7 @@ function renderKaraokeTimeline(): void {
       context.beginPath();
       context.rect(left + 5, trackTop + 2, Math.max(1, right - left - 10), trackHeight - 4);
       context.clip();
-      context.fillStyle = active ? "#fffaf1" : "#36564d";
+      context.fillStyle = active ? "#fffaf1" : theme.getPropertyValue("--ink").trim();
       context.font = "11px system-ui";
       context.textAlign = "left";
       context.fillText(segment.source_text, left + 7, trackTop + trackHeight / 2 + 4);
@@ -3721,6 +3886,24 @@ function renderKaraokeTimeline(): void {
     context.closePath();
     context.fill();
   }
+}
+
+function karaokePlayheadHandleAtPoint(clientX: number, clientY: number): boolean {
+  if (!karaokeWaveform || !karaokeWaveformWindow || !activeMedia) return false;
+  const bounds = karaokeWaveform.getBoundingClientRect();
+  return playheadHandleContains(clientX - bounds.left, clientY - bounds.top,
+    bounds.width, activeMedia.currentTime * 1000,
+    karaokeWaveformWindow.start_ms, karaokeWaveformWindow.end_ms);
+}
+
+function updateKaraokePlayheadDrag(clientX: number): void {
+  if (!karaokePlayheadDrag || !karaokeWaveform) return;
+  const bounds = karaokeWaveform.getBoundingClientRect();
+  const time = timelineTimeAtX(clientX - bounds.left, bounds.width,
+    karaokePlayheadDrag.startMs, karaokePlayheadDrag.endMs);
+  seekTo(time, false);
+  updateActiveSubtitle(time);
+  renderKaraokeTimeline();
 }
 
 function karaokeTimelineHitAtPoint(clientX: number, clientY: number): KaraokeTimelineHit | null {
@@ -3766,7 +3949,7 @@ function syncKaraokeWaveformStatus(): void {
   if (!karaokeWaveformStatus || !karaokeWaveformWindow || !activeDetail) return;
   const waveform = karaokeWaveformWindow;
   const anomaly = karaokeTimingAnomalySummary(activeDetail.segments);
-  karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms${anomaly ? ` · ${anomaly}` : " · 单轨无重叠"}`;
+  karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms${anomaly ? ` · ${anomaly}` : " · 单轨无重叠"} · 拖动顶部红色把手定位；拖动波形背景平移`;
 }
 
 function updateKaraokeTimingDrag(clientX: number): void {
@@ -3853,17 +4036,20 @@ function syncKaraokeTextDraft(segment: SubtitleSegment | undefined, force = fals
   if (!karaokeCurrentSource || !karaokeCurrentTranslation) return;
   if (karaokeTextDraftDirty && !force) return;
   karaokeTextDraftSegmentId = segment?.id ?? null;
-  karaokeTextDraftDirty = false;
-  karaokeCurrentSource.value = segment?.source_text ?? "";
-  karaokeCurrentTranslation.value = segment?.translated_text ?? "";
+  const draft = segment ? subtitleDrafts.ensure(segment) : undefined;
+  karaokeTextDraftDirty = !!draft && subtitleDrafts.pending(draft);
+  const source = draft?.value.source ?? "", translation = draft?.value.translation ?? "";
+  if (karaokeCurrentSource.value !== source) karaokeCurrentSource.value = source;
+  if (karaokeCurrentTranslation.value !== translation) karaokeCurrentTranslation.value = translation;
   karaokeCurrentSource.disabled = !segment;
   karaokeCurrentTranslation.disabled = !segment;
-  if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = true;
-  if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = true;
-  if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = !segment || !canUndoSegment(segment);
+  if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = !karaokeTextDraftDirty || !!draft?.saving;
+  if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = !karaokeTextDraftDirty || !!draft?.saving;
+  if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = karaokeTextDraftDirty || !segment || !canUndoSegment(segment);
+  if (draft?.error) setSubtitleEditAction(draft.error, true);
 }
 
-function markKaraokeTextDirty(): void {
+function markKaraokeTextDirty(event?: Event): void {
   const segment = karaokeDraftSegment();
   if (!segment) return;
   activeMedia?.pause();
@@ -3872,35 +4058,18 @@ function markKaraokeTextDirty(): void {
   if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = false;
   if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = false;
   if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = true;
-  setSubtitleEditAction(`第 ${segment.segment_index + 1} 段有尚未保存的文字修改。`);
+  subtitleDrafts.edit(segment, {source: karaokeCurrentSource?.value ?? "", translation: karaokeCurrentTranslation?.value ?? ""}, (event as InputEvent | undefined)?.isComposing);
+
 }
 
 async function saveKaraokeTextDraft(): Promise<void> {
-  if (!activeDetail || !karaokeCurrentSource || !karaokeCurrentTranslation || !karaokeTextDraftSegmentId || !karaokeTextDraftDirty) return;
-  const before = activeDetail.segments.find((item) => item.id === karaokeTextDraftSegmentId);
-  if (!before) return;
-  if (!karaokeCurrentSource.value.trim()) {
-    setSubtitleEditAction("原文不能为空。", true);
-    return;
-  }
-  if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = true;
-  try {
-    const updated = await persistSegment(before.id, karaokeCurrentSource.value, karaokeCurrentTranslation.value);
-    rememberSubtitleSave(before, updated);
-    replaceActiveSegment(updated);
-    karaokeTextDraftDirty = false;
-    syncKaraokeTextDraft(updated, true);
-    updateStructureUndoButton();
-    updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
-    setSubtitleEditAction(`第 ${updated.segment_index + 1} 段文字已保存到 SQLite。`);
-  } catch (error) {
-    if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = false;
-    setSubtitleEditAction(`文字保存失败：${String(error)}`, true);
-  }
+  const segment = karaokeDraftSegment();
+  if (segment) await subtitleDrafts.flush(cueKey(segment), true).catch(() => {});
 }
 
 function discardKaraokeTextDraft(): void {
   const saved = activeDetail?.segments.find((item) => item.id === karaokeTextDraftSegmentId);
+  if (saved) subtitleDrafts.discard(saved);
   syncKaraokeTextDraft(saved, true);
   setSubtitleEditAction("已放弃当前字幕尚未保存的文字修改。");
 }
@@ -3942,7 +4111,11 @@ function updateKaraokePosition(milliseconds: number): void {
       ? `${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)} · #${segment.segment_index + 1}`
       : "当前没有字幕";
   }
-  if (!karaokeTextDraftDirty && karaokeTextDraftSegmentId !== segment?.id) syncKaraokeTextDraft(segment);
+  if (!karaokeTextDraftDirty && (
+    karaokeTextDraftSegmentId !== segment?.id
+    || karaokeCurrentSource?.value !== (segment?.source_text ?? "")
+    || karaokeCurrentTranslation?.value !== (segment?.translated_text ?? "")
+  )) syncKaraokeTextDraft(segment);
   const segmentIndex = segment ? activeDetail?.segments.findIndex((item) => item.id === segment.id) ?? -1 : -1;
   const playhead = Math.round(milliseconds);
   if (karaokeCutSegmentButton) {
@@ -3988,6 +4161,64 @@ function seekKaraokeBy(milliseconds: number): void {
   const durationMs = Number.isFinite(activeMedia.duration) ? activeMedia.duration * 1_000 : Number.MAX_SAFE_INTEGER;
   seekTo(Math.max(0, Math.min(durationMs, activeMedia.currentTime * 1_000 + milliseconds)), false);
   updateKaraokePosition(activeMedia.currentTime * 1_000);
+}
+
+async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSegment | null): Promise<void> {
+  if (!activeDetail || workspaceActionBusy) return;
+  const jobId = activeDetail.job.job_id;
+  const before = cloneSubtitleSegments(activeDetail.segments);
+  workspaceActionBusy = true;
+  try {
+    const after = await invoke<SubtitleSegment[]>("edit_subtitle_block", {request:{jobId, beforeSegments:before, removeId, insertion}});
+    rememberStructureEdit(before, after, removeId ? "删除字幕块" : "插入字幕块", jobId);
+    if (activeDetail?.job.job_id === jobId) {
+      applySubtitleStructure(after, insertion?.id ?? after[0]?.id);
+      if (insertion) { seekTo(insertion.start_ms, false); updateActiveSubtitle(insertion.start_ms); }
+      setSubtitleEditAction("已保存，可用“撤销上次打轴”撤回；仅实际依赖被删除块的机器译文需要核对。");
+    }
+  } catch(error) { setSubtitleEditAction(`字幕块操作失败：${String(error)}`, true); }
+  finally { workspaceActionBusy = false; }
+}
+function openInsertSubtitleBlock(): void {
+  if (!activeDetail || workspaceActionBusy) return;
+  if (karaokeTextDraftDirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
+  if (!activeMedia || !Number.isFinite(activeMedia.duration) || activeMedia.duration <= 0) { setSubtitleEditAction("媒体时长尚未就绪，请等待加载或重新定位媒体。", true); return; }
+  activeMedia.pause();
+  const jobId = activeDetail.job.job_id;
+  const position = Math.round((activeMedia?.currentTime ?? 0) * 1000 / 10) * 10;
+  const current = activeDetail.segments.find(s=>s.start_ms <= position && s.end_ms > position);
+  const start = current?.end_ms ?? position;
+  const next = activeDetail.segments.find(s=>s.start_ms >= start);
+  const duration = Number.isFinite(activeMedia?.duration) ? Math.round(activeMedia!.duration*1000) : start+2000;
+  const end = Math.min(start+2000, next?.start_ms ?? duration, duration);
+  const dialog = document.createElement("dialog"); dialog.className="rename-job-dialog insert-block-dialog";
+  dialog.innerHTML='<form><h2>插入字幕块</h2><p>在空白区间新增字幕，不移动已有块。</p><label>开始<input name="start" required></label><label>结束<input name="end" required></label><label>原文<textarea name="source" rows="3" required></textarea></label><label>译文（可选）<textarea name="translation" rows="2"></textarea></label><p role="status"></p><div class="confirmation-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit">插入</button></div></form>';
+  const field = (name:string)=>dialog.querySelector<HTMLInputElement|HTMLTextAreaElement>(`[name="${name}"]`)!;
+  field("start").value=formatPreciseTime(start); field("end").value=formatPreciseTime(Math.max(start,end));
+  if (end <= start) dialog.querySelector('[role="status"]')!.textContent="当前位置后方没有空白，请手动选择其他空白区间，或先修剪已有字幕边界。";
+  dialog.querySelector("[data-close]")!.addEventListener("click",()=>dialog.close());
+  dialog.addEventListener("close",()=>dialog.remove());
+  dialog.querySelector("form")!.onsubmit=async event=>{
+    event.preventDefault();
+    const startMs=parseTimecode(field("start").value), endMs=parseTimecode(field("end").value), source=field("source").value.trim();
+    if (activeDetail?.job.job_id !== jobId) { dialog.close(); return; }
+    if (startMs===null || endMs===null || startMs<0 || endMs<=startMs || endMs>duration || !source || activeDetail.segments.some(s=>s.start_ms<endMs && s.end_ms>startMs)) {
+      dialog.querySelector('[role="status"]')!.textContent="请输入有效原文和媒体范围内的空白区间，不能与已有字幕重叠。"; return;
+    }
+    const insertion:SubtitleSegment={id:crypto.randomUUID(),job_id:jobId,segment_index:0,start_ms:startMs,end_ms:endMs,source_text:source,translated_text:field("translation").value.trim()||null,source_edited:true,translation_edited:!!field("translation").value.trim(),translation_stale:false,timing_edited:true};
+    dialog.close(); await changeKaraokeBlock(null,insertion);
+  };
+  document.body.append(dialog); dialog.showModal();
+}
+async function deleteCurrentSubtitleBlock(): Promise<void> {
+  if (!activeDetail || workspaceActionBusy) return;
+  if (karaokeTextDraftDirty) { setSubtitleEditAction("删除前请先保存或放弃文字修改。", true); return; }
+  const jobId=activeDetail.job.job_id;
+  const id=activeSegmentId;
+  if (!id || !activeDetail.segments.some(s=>s.id===id)) { setSubtitleEditAction("请先选择要删除的字幕块。",true); return; }
+  activeMedia?.pause();
+  if (!await confirmAction({title:"删除当前字幕块？",message:"删除原文、译文及此块时间范围；不会移动其他字幕。学习收藏保留来源快照。当前会话可用“撤销上次打轴”恢复。",confirmLabel:"删除字幕块",danger:true})) return;
+  if (activeDetail?.job.job_id===jobId) await changeKaraokeBlock(id,null);
 }
 
 async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
@@ -4100,13 +4331,14 @@ async function openJob(jobId: string, initialSection: WorkspaceSection = "transl
   showWorkspace(true);
   showWorkspaceSection(initialSection);
   window.scrollTo({ top: 0, behavior: "auto" });
-  workspaceMessage.textContent = "正在读取 SQLite 字幕工作区…";
+  workspaceMessage.textContent = "正在读取 字幕工作区…";
   setWorkspaceAction("");
   if (subtitleList) subtitleList.innerHTML = `<div class="empty-state">正在读取字幕…</div>`;
   try {
     activeDetail = await invoke<JobDetail>("get_job_detail", { jobId });
     if (requestId !== navigationRequestId || currentArea !== "workspace") return;
     renderWorkspace(activeDetail);
+    await refreshTranslationStatus();
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "workspace") return;
     activeDetail = null;
@@ -4305,9 +4537,8 @@ function updateStructureUndoButton(): void {
     : "当前会话还没有可撤销的打轴或结构修改";
 }
 
-function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment[], label: string): void {
-  if (!activeDetail) return;
-  const jobId = activeDetail.job.job_id;
+function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment[], label: string, jobId = activeDetail?.job.job_id): void {
+  if (!jobId) return;
   const history = subtitleStructureUndoHistory.get(jobId) ?? [];
   history.push({ before: cloneSubtitleSegments(before), after: cloneSubtitleSegments(after), label });
   if (history.length > 10) history.shift();
@@ -4370,6 +4601,41 @@ async function undoSubtitleStructure(): Promise<void> {
   }
 }
 
+function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleSegment): void {
+  try { localStorage.setItem("atogaki.subtitleDrafts", subtitleDrafts.snapshot()); } catch { /* SQLite autosave still runs. */ }
+  const saved = draft.saved;
+  if (before) rememberSubtitleSave(before, saved);
+  if (activeDetail?.job.job_id !== saved.job_id) return;
+  if (before) activeDetail.segments = activeDetail.segments.map(cue => cue.id === saved.id ? saved : cue);
+  const pending = subtitleDrafts.pending(draft);
+  const status = draft.error ? `保存失败，草稿已保留：${draft.error}`
+    : draft.saving ? "正在自动保存…" : pending ? "等待自动保存…" : savedSegmentState(saved);
+  const card = subtitleList?.querySelector<HTMLElement>(`[data-segment-id="${CSS.escape(saved.id)}"]`);
+  if (card) {
+    card.dataset.dirty = String(pending);
+    const state = card.querySelector<HTMLElement>(".subtitle-save-state");
+    if (state) { state.textContent = status; state.classList.toggle("warning", !!draft.error || saved.translation_stale); }
+    const save = card.querySelector<HTMLButtonElement>("[data-save-draft]");
+    const discard = card.querySelector<HTMLButtonElement>("[data-discard-draft]");
+    const undo = card.querySelector<HTMLButtonElement>("[data-undo-draft]");
+    if (save) save.disabled = !pending || draft.saving;
+    if (discard) discard.disabled = !pending || draft.saving;
+    if (undo) undo.disabled = pending || !canUndoSegment(saved);
+    const flags = card.querySelector<HTMLElement>(".edit-flags");
+    if (flags) flags.textContent = editFlags(saved);
+  }
+  if (karaokeTextDraftSegmentId === saved.id) {
+    karaokeTextDraftDirty = pending;
+    if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = !pending || draft.saving;
+    if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = !pending || draft.saving;
+    if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = pending || !canUndoSegment(saved);
+    if (!pending) syncKaraokeTextDraft(saved, true);
+    setSubtitleEditAction(status, !!draft.error);
+  }
+  updateTranslationControls();
+  if (before) { updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000); updateStructureUndoButton(); }
+}
+
 function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: string): void {
   if (!subtitleList) return;
   subtitleList.replaceChildren();
@@ -4382,7 +4648,8 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     const card = document.createElement("article");
     card.className = "subtitle-card";
     card.dataset.segmentId = segment.id;
-    card.dataset.dirty = "false";
+    const draft = subtitleDrafts.ensure(segment);
+    card.dataset.dirty = String(subtitleDrafts.pending(draft));
 
     const meta = document.createElement("div");
     meta.className = "subtitle-meta";
@@ -4401,7 +4668,7 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     const sourceInput = document.createElement("textarea");
     sourceInput.className = "subtitle-input source-input";
     sourceInput.rows = 2;
-    sourceInput.value = segment.source_text;
+    sourceInput.value = draft.value.source;
     sourceLabel.append(sourceInput);
 
     const translationLabel = document.createElement("label");
@@ -4410,27 +4677,31 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     translationInput.className = "subtitle-input translation-input";
     translationInput.rows = 2;
     translationInput.placeholder = "尚无翻译";
-    translationInput.value = segment.translated_text ?? "";
+    translationInput.value = draft.value.translation;
     translationLabel.append(translationInput);
 
     const footer = document.createElement("div");
     footer.className = "subtitle-footer";
     const state = document.createElement("span");
-    state.textContent = savedSegmentState(segment);
+    state.className = "subtitle-save-state";
+    state.textContent = draft.error ? `保存失败，草稿已保留：${draft.error}` : subtitleDrafts.pending(draft) ? "等待自动保存…" : savedSegmentState(segment);
     if (segment.translation_stale) state.classList.add("warning");
     const save = document.createElement("button");
     save.type = "button";
-    save.textContent = "保存本段";
-    save.disabled = true;
+    save.textContent = "立即保存";
+    save.dataset.saveDraft = "true";
+    save.disabled = !subtitleDrafts.pending(draft);
     const discard = document.createElement("button");
     discard.type = "button";
     discard.className = "secondary";
     discard.textContent = "放弃修改";
-    discard.disabled = true;
+    discard.dataset.discardDraft = "true";
+    discard.disabled = !subtitleDrafts.pending(draft) || draft.saving;
     const undo = document.createElement("button");
     undo.type = "button";
     undo.className = "secondary";
-    undo.textContent = "撤销上次保存";
+    undo.textContent = "撤回上次编辑";
+    undo.dataset.undoDraft = "true";
     undo.disabled = !canUndoSegment(segment);
     const translate = document.createElement("button");
     translate.type = "button";
@@ -4440,28 +4711,22 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     capture.type = "button";
     capture.className = "capture-glossary-term secondary";
     capture.textContent = "修正加入词表";
-    const markDirty = (): void => {
-      card.dataset.dirty = "true";
-      save.disabled = false;
-      discard.disabled = false;
-      state.textContent = "有未保存的修改";
-      state.classList.remove("warning");
+    const markDirty = (event: Event): void => {
+      const current = activeDetail?.segments.find(cue => cue.id === segment.id) ?? segment;
+      subtitleDrafts.edit(current, {source: sourceInput.value, translation: translationInput.value}, (event as InputEvent).isComposing);
     };
-    sourceInput.addEventListener("input", markDirty);
-    translationInput.addEventListener("input", markDirty);
-
+    for (const input of [sourceInput, translationInput]) {
+      input.addEventListener("input", markDirty);
+      input.addEventListener("compositionend", markDirty);
+      input.addEventListener("blur", () => void subtitleDrafts.flush(cueKey(segment)).catch(() => {}));
+    }
     discard.addEventListener("click", () => {
-      const saved = activeDetail?.segments.find((item) => item.id === segment.id) ?? segment;
-      sourceInput.value = saved.source_text;
-      translationInput.value = saved.translated_text ?? "";
-      card.dataset.dirty = "false";
-      save.disabled = true;
-      discard.disabled = true;
-      state.textContent = savedSegmentState(saved);
-      state.classList.toggle("warning", saved.translation_stale);
+      subtitleDrafts.discard(segment);
+      sourceInput.value = draft.value.source;
+      translationInput.value = draft.value.translation;
     });
 
-    save.addEventListener("click", () => void saveSegment(segment, sourceInput, translationInput, save, state));
+    save.addEventListener("click", () => void saveSegment(segment));
     undo.addEventListener("click", () => void undoSegment(segment, undo, state));
     translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, state));
     capture.addEventListener("click", () => void captureGlossaryCorrection(segment, sourceInput, state));
@@ -4479,7 +4744,7 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
 }
 
 function savedSegmentState(segment: SubtitleSegment): string {
-  return segment.translation_stale ? "原文已改变，当前译文需要重译" : "已保存到本地 SQLite";
+  return segment.translation_stale ? "原文或翻译上下文已变化，请核对当前译文" : "已保存到本地";
 }
 
 function subtitleValueFingerprint(segment: SubtitleSegment): string {
@@ -4523,29 +4788,10 @@ function renderSubtitleListPreservingView(segments: SubtitleSegment[], expandedS
   requestAnimationFrame(restoreScroll);
 }
 
-async function saveSegment(
-  segment: SubtitleSegment,
-  sourceInput: HTMLTextAreaElement,
-  translationInput: HTMLTextAreaElement,
-  button: HTMLButtonElement,
-  state: HTMLSpanElement,
-): Promise<void> {
-  if (!activeDetail) return;
-  button.disabled = true;
-  state.textContent = "正在保存…";
-  try {
-    const before = activeDetail.segments.find((item) => item.id === segment.id) ?? segment;
-    const updated = await persistSegment(segment.id, sourceInput.value, translationInput.value);
-    rememberSubtitleSave(before, updated);
-    replaceActiveSegment(updated);
-    renderSubtitleListPreservingView(activeDetail.segments, segment.id);
-    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
-  } catch (error) {
-    state.textContent = `保存失败：${String(error)}`;
-    state.classList.add("warning");
-    button.disabled = false;
-  }
+async function saveSegment(segment: SubtitleSegment): Promise<void> {
+  await subtitleDrafts.flush(cueKey(segment), true).catch(() => {});
 }
+
 
 async function undoSegment(
   segment: SubtitleSegment,
@@ -4553,6 +4799,8 @@ async function undoSegment(
   state: HTMLSpanElement,
 ): Promise<void> {
   if (!activeDetail) return;
+  const draft = subtitleDrafts.entries.get(cueKey(segment));
+  if (draft && subtitleDrafts.pending(draft)) return;
   const key = subtitleUndoKey(segment);
   const history = subtitleUndoHistory.get(key);
   const entry = history?.at(-1);
@@ -4573,7 +4821,7 @@ async function undoSegment(
     replaceActiveSegment(restored);
     renderSubtitleListPreservingView(activeDetail.segments, segment.id);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
-    setWorkspaceAction("已撤销该段上一次手动保存；此撤销历史仅在当前 App 会话内保留。");
+    setWorkspaceAction("已撤回该段上一次文字编辑；此撤回历史仅在当前 App 会话内保留。");
   } catch (error) {
     state.textContent = `撤销失败：${String(error)}`;
     state.classList.add("warning");
@@ -4585,31 +4833,12 @@ async function restoreSegment(snapshot: SubtitleSegment): Promise<SubtitleSegmen
   return invoke<SubtitleSegment>("restore_subtitle", { snapshot });
 }
 
-async function persistSegment(
-  segmentId: string,
-  sourceText: string,
-  translatedText: string,
-  startMs?: number,
-  endMs?: number,
-): Promise<SubtitleSegment> {
-  if (!activeDetail) throw new Error("没有打开的字幕任务");
-  const current = activeDetail.segments.find((segment) => segment.id === segmentId);
-  if (!current) throw new Error("字幕段已经不存在");
-  return invoke<SubtitleSegment>("update_subtitle", {
-    request: {
-      jobId: activeDetail.job.job_id,
-      segmentId,
-      sourceText,
-      translatedText: translatedText.trim() || null,
-      startMs: startMs ?? current.start_ms,
-      endMs: endMs ?? current.end_ms,
-    },
-  });
-}
 
 function replaceActiveSegment(updated: SubtitleSegment): void {
   if (!activeDetail) return;
+  if (activeDetail.job.job_id !== updated.job_id) return;
   activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
+  subtitleDrafts.ensure(updated);
 }
 
 async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
@@ -4618,6 +4847,7 @@ async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
   activeDetail.job = detail.job;
   activeDetail.segments = detail.segments;
   activeDetail.translation_runs = detail.translation_runs;
+  activeDetail.translation_context_stale_ids = detail.translation_context_stale_ids;
   renderSubtitleListPreservingView(activeDetail.segments);
   updateTranslationControls();
   updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
@@ -4636,17 +4866,7 @@ async function translateSegment(
   state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
   state.classList.remove("warning");
   try {
-    const saved = await invoke<SubtitleSegment>("update_subtitle", {
-      request: {
-        jobId,
-        segmentId: segment.id,
-        sourceText: sourceInput.value,
-        translatedText: translationInput.value.trim() || null,
-        startMs: segment.start_ms,
-        endMs: segment.end_ms,
-      },
-    });
-    if (activeDetail?.job.job_id === jobId) replaceActiveSegment(saved);
+    await subtitleDrafts.flush(cueKey(segment));
     const translated = await invoke<SubtitleSegment>("translate_subtitle", {
       jobId,
       segmentId: segment.id,
@@ -4659,11 +4879,11 @@ async function translateSegment(
     try {
       await reloadTranslatedWorkspace(jobId);
       if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并从 SQLite 重新读取。`);
+        setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并刷新。`);
       }
     } catch (reloadError) {
       if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`翻译已经写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+        setWorkspaceAction(`翻译已经写入本地，但重新读取失败：${String(reloadError)}`, true);
       }
     }
   } catch (error) {
@@ -4883,6 +5103,11 @@ function hideSubtitleOverlay(): void {
 }
 
 function updateActiveSubtitle(milliseconds: number): void {
+  if (activeMedia && playbackLoop && activeMedia.currentTime * 1000 >= playbackLoop.endMs) {
+    if (playbackLoop.repeat) activeMedia.currentTime = playbackLoop.startMs / 1000;
+    else { activeMedia.pause(); playbackLoop = null; }
+  }
+
   const segment = subtitleAt(milliseconds);
   const nextId = segment?.id ?? null;
   if (currentSource) currentSource.textContent = segment?.source_text ?? "当前时间没有字幕。";
@@ -4957,7 +5182,12 @@ function highlightSegment(segmentId: string | null): void {
   });
 }
 
-async function translateAllSubtitles(): Promise<void> {
+function segmentNeedsTranslation(segment: SubtitleSegment): boolean {
+  return segment.translation_stale || !segment.translated_text?.trim() ||
+    !!activeDetail?.translation_context_stale_ids.includes(segment.id);
+}
+
+async function translateAllSubtitles(onlyPending: boolean): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
   const jobId = activeDetail.job.job_id;
   if (taskTranslationActivities.has(jobId)) return;
@@ -4966,10 +5196,11 @@ async function translateAllSubtitles(): Promise<void> {
     return;
   }
   const pendingSegments = activeDetail.segments.filter(
-    (segment) => segment.translation_stale || !segment.translated_text?.trim(),
+    (segment) => segmentNeedsTranslation(segment),
   );
-  const isResume = pendingSegments.length > 0 && pendingSegments.length < activeDetail.segments.length;
-  const requestCount = pendingSegments.length || activeDetail.segments.length;
+  const isResume = onlyPending;
+  const requestCount = onlyPending ? pendingSegments.length : activeDetail.segments.length;
+  if (requestCount === 0) return;
   const confirmed = await confirmAction({
     title: isResume ? "继续翻译未完成字幕？" : "全部翻译／重译？",
     message: isResume
@@ -4989,6 +5220,7 @@ async function translateAllSubtitles(): Promise<void> {
   try {
     const result = await invoke<BatchTranslationResult>("translate_all_subtitles", {
       jobId,
+      onlyPending,
     });
     if (activeDetail?.job.job_id === jobId) {
       activeDetail.segments = result.segments;
@@ -5006,19 +5238,19 @@ async function translateAllSubtitles(): Promise<void> {
             .map(({ segment, index }) => `第 ${index + 1} 段（${formatTime(segment.start_ms)}）`);
           setWorkspaceAction(`已保存 ${result.translated_count}/${result.requested_count} 段；${emptyLabels.join("、")}在单独重试后仍为空，已保留为待翻译。`, true);
         } else {
-          setWorkspaceAction(`${result.resumed ? "续译" : "翻译"}完成：${result.translated_count} 段已按批次写入 SQLite。`);
+          setWorkspaceAction(`${result.resumed ? "续译" : "翻译"}完成：${result.translated_count} 段已按批次写入本地。`);
         }
       }
     } catch (reloadError) {
       if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`翻译批次已经写入 SQLite，但重新读取失败：${String(reloadError)}`, true);
+        setWorkspaceAction(`翻译批次已经写入本地，但重新读取失败：${String(reloadError)}`, true);
       }
     }
   } catch (error) {
     if (activeDetail?.job.job_id === jobId) {
       try {
         await reloadTranslatedWorkspace(jobId);
-        setWorkspaceAction(`翻译在后续批次停止，之前成功的批次已经保留；再次点击会从缺失或过期段继续。错误：${String(error)}`, true);
+        setWorkspaceAction(`翻译在后续批次停止，之前成功的批次已经保留。${onlyPending ? "点击“补译缺失／过期段”可以继续。" : "未完成重译的段落保留原译文；补译只处理缺失／过期段，再次全体重译会重新处理所有段落。"}错误：${String(error)}`, true);
       } catch (reloadError) {
         setWorkspaceAction(`翻译停止：${String(error)}；已完成批次可能已保存，但重新读取失败：${String(reloadError)}`, true);
       }
@@ -5446,7 +5678,7 @@ async function exportSubtitles(): Promise<void> {
       }
     }
 
-    setWorkspaceAction("正在从 SQLite 当前内容生成原文、译文和双语字幕…");
+    setWorkspaceAction("正在从 当前字幕内容生成原文、译文和双语字幕…");
     const exported = await invoke<SubtitleExport>("export_workspace_subtitles", {
       request: {
         jobId: activeDetail.job.job_id,
@@ -5722,7 +5954,7 @@ async function submitVideoRender(): Promise<void> {
   }
   videoRenderSubmitting = true;
   if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
-  if (videoRenderMessage) videoRenderMessage.textContent = "正在冻结 SQLite 字幕并创建烧录任务…";
+  if (videoRenderMessage) videoRenderMessage.textContent = "正在准备字幕并创建烧录任务…";
   try {
     const render = await invoke<VideoRender>("submit_video_render", {
       request: {
@@ -6071,7 +6303,7 @@ async function previewGlossaryApplication(): Promise<void> {
     return;
   }
   setWorkspaceBusy(true);
-  setWorkspaceAction("正在比较词表与 SQLite 原文字幕…");
+  setWorkspaceAction("正在比较词表与 原文字幕…");
   try {
     pendingGlossaryPreview = await invoke<GlossaryPreview>("preview_glossary_application", {
       jobId: activeDetail.job.job_id,
@@ -6110,7 +6342,7 @@ function renderGlossaryPreview(preview: GlossaryPreview): void {
 async function applyPreviewedGlossary(): Promise<void> {
   if (!activeDetail || !pendingGlossaryPreview || workspaceActionBusy) return;
   setWorkspaceBusy(true);
-  setWorkspaceAction("正在把词表修正写入 SQLite…");
+  setWorkspaceAction("正在把词表修正写入本地…");
   try {
     const applied = await invoke<GlossaryApplyResult>("apply_glossary_to_workspace", {
       jobId: activeDetail.job.job_id,
@@ -6121,7 +6353,7 @@ async function applyPreviewedGlossary(): Promise<void> {
     renderSubtitleListPreservingView(activeDetail.segments);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
     setWorkspaceAction(
-      `已修正 ${applied.changed_segments} 段并保存到 SQLite；${applied.stale_translations} 段译文需要重译。`,
+      `已修正 ${applied.changed_segments} 段并保存到本地；${applied.stale_translations} 段译文需要重译。`,
     );
   } catch (error) {
     setWorkspaceAction(`应用词表失败：${String(error)}`, true);
@@ -6176,24 +6408,59 @@ settingsForm?.addEventListener("change", (event) => {
 document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
 document.querySelector<HTMLButtonElement>("#settings-choose-hy-mt2")?.addEventListener("click", () => void chooseSettingsModel("hy-mt2"));
+const providerDrafts = new Map<string, { model: string; endpoint: string; style: string }>();
+const providerDirtyDrafts = new Set<string>();
+const providerReadiness = new Map<string, string>();
+type TranslationProfileSummary = { provider_id: string; model: string | null; base_url: string | null; style: string; readiness: string };
+function updateProviderProfiles(profiles: TranslationProfileSummary[]): void {
+  for (const profile of profiles) {
+    providerReadiness.set(profile.provider_id, profile.readiness);
+    if (!providerDirtyDrafts.has(profile.provider_id)) providerDrafts.set(profile.provider_id, {
+      model: profile.model ?? "", endpoint: profile.base_url ?? (profile.provider_id === "openai-compatible" ? "https://api.openai.com/v1" : "https://api.deepseek.com"), style: profile.style,
+    });
+  }
+}
+for (const input of [settingsProviderModel, settingsProviderBaseUrl, settingsTranslationStyle]) input?.addEventListener("input", () => {
+  if (settingsProvider) {
+    providerDirtyDrafts.add(settingsProvider.value);
+    providerDrafts.set(settingsProvider.value, { model: settingsProviderModel?.value ?? "", endpoint: settingsProviderBaseUrl?.value ?? "", style: settingsTranslationStyle?.value ?? "" });
+  }
+  renderProviderCards();
+});
+let lastSettingsProvider = "none";
 settingsProvider?.addEventListener("change", () => {
+  // Never carry a secret or delete intent into another provider.
+  if (settingsApiKey) settingsApiKey.value = "";
+  if (settingsClearApiKey) settingsClearApiKey.checked = false;
+  providerDrafts.set(lastSettingsProvider, { model: settingsProviderModel?.value ?? "", endpoint: settingsProviderBaseUrl?.value ?? "", style: settingsTranslationStyle?.value ?? "" });
+  lastSettingsProvider = settingsProvider.value;
   if (settingsProvider.value === "deepseek") {
     if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.deepseek.com";
     if (settingsProviderModel) settingsProviderModel.value = "deepseek-v4-flash";
+  } else if (settingsProvider.value === "gemini") {
+    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://generativelanguage.googleapis.com/v1beta/openai";
+    if (settingsProviderModel) settingsProviderModel.value = "gemini-3.8-flash";
   } else if (settingsProvider.value === "openai-compatible") {
     if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.openai.com/v1";
     if (settingsProviderModel) settingsProviderModel.value = "";
   } else if (settingsProviderModel) {
     settingsProviderModel.value = "";
   }
-  if ((settingsProvider.value === "deepseek" || settingsProvider.value === "openai-compatible") && settingsTranslationStyle && !settingsTranslationStyle.value.trim()) {
+  if ((settingsProvider.value === "gemini" || settingsProvider.value === "deepseek" || settingsProvider.value === "openai-compatible") && settingsTranslationStyle && !settingsTranslationStyle.value.trim()) {
     settingsTranslationStyle.value = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
+  }
+  const draft = providerDrafts.get(settingsProvider.value);
+  if (draft) {
+    if (settingsProviderModel) settingsProviderModel.value = draft.model;
+    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = draft.endpoint;
+    if (settingsTranslationStyle) settingsTranslationStyle.value = draft.style;
   }
   syncProviderSettings();
   if (apiKeyStatus && settingsProvider.value !== "none") {
     apiKeyStatus.textContent = "尚未检查当前 provider；可点击“检查所选 Key”确认系统凭据是否存在。";
     apiKeyStatus.classList.remove("warning");
   }
+  renderProviderCards();
 });
 checkApiKeyButton?.addEventListener("click", () => void checkSelectedApiKey());
 document.querySelector("#dictionary-credentials")?.addEventListener("click", (event) => {
@@ -6247,7 +6514,8 @@ workspaceSectionTabs.forEach((tab) => {
     event.preventDefault();
   });
 });
-translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
+translatePendingButton?.addEventListener("click", () => void translateAllSubtitles(true));
+translateAllButton?.addEventListener("click", () => void translateAllSubtitles(false));
 openSubtitleOverlayButton?.addEventListener("click", () => void openSubtitleOverlay());
 previousSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(-1));
 rewindMediaButton?.addEventListener("click", () => seekRelative(-5));
@@ -6295,9 +6563,17 @@ karaokeWaveformGainInput?.addEventListener("input", () => {
   renderKaraokeTimeline();
 });
 karaokeWaveform?.addEventListener("pointerdown", (event) => {
-  if (!activeDetail || !karaokeWaveformWindow) return;
-  const hit = karaokeTimelineHitAtPoint(event.clientX, event.clientY);
-  if (hit) {
+  if (event.button !== 0 || !activeDetail || !karaokeWaveformWindow
+    || karaokeTimingDrag || karaokePanDrag || karaokePlayheadDrag) return;
+  const handleHit = karaokePlayheadHandleAtPoint(event.clientX, event.clientY);
+  const hit = handleHit ? null : karaokeTimelineHitAtPoint(event.clientX, event.clientY);
+  if (handleHit) {
+    activeMedia?.pause();
+    karaokePlayheadDrag = { pointerId: event.pointerId,
+      startMs: karaokeWaveformWindow.start_ms, endMs: karaokeWaveformWindow.end_ms };
+    karaokeSuppressClick = true;
+    karaokeWaveform.style.cursor = "ew-resize";
+  } else if (hit) {
     if (karaokeTextDraftDirty) {
       setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true);
       return;
@@ -6329,11 +6605,12 @@ karaokeWaveform?.addEventListener("pointerdown", (event) => {
   event.preventDefault();
 });
 karaokeWaveform?.addEventListener("pointermove", (event) => {
-  if (!karaokeTimingDrag && !karaokePanDrag) {
+  if (!karaokeTimingDrag && !karaokePanDrag && !karaokePlayheadDrag) {
     const hit = karaokeTimelineHitAtPoint(event.clientX, event.clientY);
-    karaokeWaveform.style.cursor = hit?.mode === "move" ? "grab" : hit ? "ew-resize" : "crosshair";
+    karaokeWaveform.style.cursor = karaokePlayheadHandleAtPoint(event.clientX, event.clientY) ? "ew-resize" : hit?.mode === "move" ? "grab" : hit ? "ew-resize" : "crosshair";
     return;
   }
+  if (karaokePlayheadDrag?.pointerId === event.pointerId) updateKaraokePlayheadDrag(event.clientX);
   if (karaokeTimingDrag?.pointerId === event.pointerId) updateKaraokeTimingDrag(event.clientX);
   if (karaokePanDrag?.pointerId === event.pointerId && karaokeWaveformWindow) {
     const bounds = karaokeWaveform.getBoundingClientRect();
@@ -6350,19 +6627,29 @@ karaokeWaveform?.addEventListener("pointermove", (event) => {
   event.preventDefault();
 });
 karaokeWaveform?.addEventListener("pointerup", (event) => {
+  if (karaokePlayheadDrag?.pointerId === event.pointerId) {
+    updateKaraokePlayheadDrag(event.clientX);
+    karaokePlayheadDrag = null;
+    karaokeSuppressClick = true;
+  }
   if (karaokeTimingDrag?.pointerId === event.pointerId) void commitKaraokeTimingDrag();
   if (karaokePanDrag?.pointerId === event.pointerId) {
     karaokeSuppressClick = karaokePanDrag.moved;
     karaokePanDrag = null;
   }
-  karaokeWaveform.releasePointerCapture(event.pointerId);
+  if (karaokeWaveform.hasPointerCapture(event.pointerId)) karaokeWaveform.releasePointerCapture(event.pointerId);
   event.preventDefault();
 });
 karaokeWaveform?.addEventListener("pointercancel", () => {
+  karaokePlayheadDrag = null;
   karaokePanDrag = null;
   cancelKaraokeTimingDrag();
 });
+karaokeWaveform?.addEventListener("lostpointercapture", () => {
+  karaokePlayheadDrag = null;
+});
 karaokeWaveform?.addEventListener("wheel", (event) => {
+  if (karaokePlayheadDrag) { event.preventDefault(); return; }
   if (!karaokeWaveformWindow || !karaokeZoomInput) return;
   const bounds = karaokeWaveform.getBoundingClientRect();
   if (event.ctrlKey || event.metaKey) {
@@ -6435,6 +6722,7 @@ karaokeWaveform?.addEventListener("click", (event) => {
 });
 karaokeCutSegmentButton?.addEventListener("click", () => void cutKaraokeSegmentAtPlayhead());
 karaokeJoinSegmentButton?.addEventListener("click", () => void joinKaraokeSegmentWithNext());
+document.querySelector("#retranscription-use-current")?.addEventListener("click", () => usePlayheadSubtitleForRetranscription());
 retranscriptionUseWindowButton?.addEventListener("click", useVisibleWindowForRetranscription);
 retranscriptionExpandSegmentsButton?.addEventListener("click", expandRetranscriptionRangeToSegments);
 retranscriptionProvider?.addEventListener("change", () => {
@@ -6443,8 +6731,25 @@ retranscriptionProvider?.addEventListener("change", () => {
   if (!cloud && authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
 });
 asrQualitySignalsHost?.addEventListener("click", (event) => {
-  const target = event.target;
+  const target = event.target instanceof Element ? event.target.closest("button") : null;
   if (!(target instanceof HTMLButtonElement)) return;
+  if (target.dataset.locateSignal) {
+    if (target.dataset.jobId !== activeDetail?.job.job_id || currentArea !== "karaoke") return;
+    const startMs = Number(target.dataset.startMs);
+    if (!Number.isFinite(startMs)) return;
+    activeMedia?.pause();
+    karaokeFollowPlayhead = false;
+    syncKaraokeFollowButton();
+    if (karaokeWaveformReloadTimer !== null) {
+      window.clearTimeout(karaokeWaveformReloadTimer);
+      karaokeWaveformReloadTimer = null;
+    }
+    seekTo(startMs, false);
+    updateActiveSubtitle(startMs);
+    void loadKaraokeWaveform(startMs);
+    karaokeWaveform?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
   const signalId = target.dataset.signalId ?? target.dataset.repairSignal;
   if (!signalId) return;
   if (target.dataset.asrReview) {
@@ -6458,9 +6763,12 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
   const endMs = Number(target.dataset.endMs);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || !retranscriptionStartInput || !retranscriptionEndInput) return;
   activeRepairSignalId = signalId;
+  if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
-  setRetranscriptionMessage("已载入可疑范围；可选择 Whisper 或 Gemini 生成独立候选 run。", false);
+  setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
+  const drawer = document.querySelector<HTMLDetailsElement>(".karaoke-repair-drawer");
+  if (drawer) { drawer.open = true; drawer.scrollIntoView({behavior:"smooth", block:"start"}); }
 });
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
 document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());
@@ -6471,6 +6779,10 @@ clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredenti
 checkGeminiApiKeyButton?.addEventListener("click", () => void checkGeminiCredential());
 karaokeCurrentSource?.addEventListener("input", markKaraokeTextDirty);
 karaokeCurrentTranslation?.addEventListener("input", markKaraokeTextDirty);
+for (const input of [karaokeCurrentSource, karaokeCurrentTranslation]) {
+  input?.addEventListener("compositionend", markKaraokeTextDirty);
+  input?.addEventListener("blur", () => { const cue = karaokeDraftSegment(); if (cue) void subtitleDrafts.flush(cueKey(cue)).catch(() => {}); });
+}
 karaokeSaveTextButton?.addEventListener("click", () => void saveKaraokeTextDraft());
 karaokeDiscardTextButton?.addEventListener("click", discardKaraokeTextDraft);
 karaokeUndoTextButton?.addEventListener("click", () => void undoKaraokeTextSave());
@@ -6662,11 +6974,13 @@ async function chooseFile(kind: "media" | "model" | "vad"): Promise<void> {
   if (taskMessage) taskMessage.textContent = `正在打开${label}选择器…`;
   try {
     const command = kind === "media" ? "pick_media_file" : kind === "model" ? "pick_model_file" : "pick_vad_model_file";
-    const path = await invoke<string | null>(command);
+    const selected = kind === "media" ? await invoke<string[]>("pick_media_files") : null;
+    const path = selected ? selected[0] : await invoke<string | null>(command);
+    if (kind === "media") selectedMediaFiles = selected ?? [];
     if (typeof path === "string") {
       const input = kind === "media" ? mediaPath : kind === "model" ? modelPath : vadModelPath;
       if (input) input.value = path;
-      if (taskMessage) taskMessage.textContent = `已选择${label}。`;
+      if (taskMessage) taskMessage.textContent = `已选择${label}${kind === "media" && selectedMediaFiles.length > 1 ? ` ${selectedMediaFiles.length} 个文件` : ""}。`;
     } else if (taskMessage) {
       taskMessage.textContent = "已取消选择。";
     }
@@ -6707,26 +7021,26 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
   }
   submitButton.disabled = true;
   taskMessage.textContent = "正在创建本地任务…";
-  void invoke<string>("submit_transcription", {
-    request: {
+  const request = {
       inputPath: mediaPath.value,
       modelPath: modelPath.value,
       sourceLanguage: selectedSourceLanguage(),
+      translationProviderId: (document.querySelector<HTMLSelectElement>("#task-translation-provider")?.value || "none"),
       vadModelPath: vadEnabled?.checked ? vadModelPath?.value.trim() || null : null,
       glossaryId: taskGlossary?.value || null,
       selectedContentGroups: taskGlossary?.value ? Array.from(selectedTaskContentGroups) : [],
-    },
-  })
-    .then((jobId) => {
-      taskMessage.textContent = `已排队：${jobId}`;
-      void refresh();
-    })
-    .catch((error) => {
-      taskMessage.textContent = `创建失败：${String(error)}`;
-    })
-    .finally(() => {
-      submitButton.disabled = false;
-    });
+    };
+  const inputs = selectedMediaFiles.length && selectedMediaFiles[0] === mediaPath.value ? [...selectedMediaFiles] : [mediaPath.value];
+  void (async () => {
+    let succeeded = 0; const failures: string[] = [];
+    for (const inputPath of inputs) {
+      taskMessage.textContent = `正在排队 ${succeeded + failures.length + 1}/${inputs.length}…`;
+      try { await invoke<string>("submit_transcription", {request: {...request,inputPath}}); succeeded++; }
+      catch(error) { failures.push(`${inputPath}: ${String(error)}`); }
+      await refresh();
+    }
+    taskMessage.textContent = `已排队 ${succeeded} 个任务${failures.length ? `；${failures.length} 个失败：${failures.join("；")}` : ""}`;
+  })().finally(() => { submitButton.disabled = false; });
 });
 
 registerSubtitleFollowHost(subtitleList);
@@ -6768,3 +7082,587 @@ window.setInterval(() => {
     void refreshVideoRenders();
   }
 }, 1_000);
+
+async function showPartialTranscript(jobId: string): Promise<void> {
+  const dialog = document.createElement("dialog");
+  dialog.className = "settings-dialog";
+  dialog.innerHTML =
+    '<div class="dialog-heading"><h2>已保存原文 · 只读</h2><button type="button">关闭</button></div><p>完整识别完成后开放校对、翻译、收藏和导出。只显示通过校验的完成块。</p><div class="partial-media"></div><div class="partial-text">正在读取…</div>';
+  document.body.append(dialog);
+  dialog.querySelector("button")!.onclick = () => dialog.close();
+  dialog.addEventListener("close", () => {
+    dialog.querySelector("audio")?.pause();
+    dialog.remove();
+  });
+  dialog.showModal();
+  try {
+    const [segments, detail] = await Promise.all([
+      invoke<SubtitleSegment[]>("partial_transcript", { jobId }),
+      invoke<JobDetail>("get_job_detail", { jobId }),
+    ]);
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.src = detail.audio_fallback_path ?? detail.playback_path ?? "";
+    dialog.querySelector(".partial-media")!.append(audio);
+    dialog.querySelector(".partial-text")!.innerHTML =
+      segments
+        .map(
+          (segment) =>
+            `<p><button type="button" data-time="${segment.start_ms}" class="secondary">${formatTime(segment.start_ms)}</button> ${escapeHtml(segment.source_text)}</p>`,
+        )
+        .join("") || "还没有已完成的音频块。";
+    dialog.querySelectorAll<HTMLButtonElement>("[data-time]").forEach(
+      (button) =>
+        (button.onclick = () => {
+          audio.currentTime = Number(button.dataset.time) / 1000;
+          void audio.play();
+        }),
+    );
+  } catch (error) {
+    dialog.querySelector(".partial-text")!.textContent = String(error);
+  }
+}
+
+// Keep the existing typed controls; reorganize their ownership without duplicate forms.
+const repairPanel = document.querySelector<HTMLElement>(".retranscription-range");
+const editorSurface = document.querySelector<HTMLElement>(".karaoke-editor");
+const reviewPanel = document.querySelector<HTMLDetailsElement>("#asr-quality-review");
+if (repairPanel && editorSurface) {
+  const drawer = document.createElement("details"); drawer.className = "karaoke-repair-drawer";
+  drawer.innerHTML = "<summary>重新识别与候选</summary>";
+  drawer.append(repairPanel); editorSurface.append(drawer);
+  if (reviewPanel) editorSurface.insertBefore(reviewPanel, drawer);
+}
+window.addEventListener("atogaki-theme-change", () => renderKaraokeTimeline());
+let providerEditor: HTMLDivElement | null = null;
+function renderProviderCards(): void {
+  const selected = settingsProvider?.value ?? "none";
+  const labels: Record<string, string> = {
+    disabled: "仅转录", unconfigured: "未配置凭据", resources_missing: "本地资源缺失",
+    unverified: "凭据已配置，尚未验证连接", verified: "上次连接测试通过", validation_failed: "上次连接验证失败", configuration_missing: "配置不完整，请保存模型与端点",
+  };
+  for (const card of document.querySelectorAll<HTMLElement>("[data-provider-card]")) {
+    const id = card.dataset.providerCard!;
+    card.classList.toggle("active", selected === id);
+    const status = card.querySelector<HTMLElement>("[data-provider-readiness]");
+    if (status) status.textContent = id === "hy-mt2-local" && providerReadiness.get(id) === "unverified" ? "本地资源就绪，尚未验证" : labels[providerReadiness.get(id) ?? ""] ?? "正在读取配置状态…";
+    if (status && providerDirtyDrafts.has(id)) status.textContent += "（当前草稿未保存）";
+    const body = card.querySelector<HTMLElement>("[data-provider-editor]");
+    if (selected === id && body && providerEditor) {
+      if (providerEditor.parentElement !== body) body.append(providerEditor);
+      providerEditor.classList.remove("hidden");
+      const advanced = card.closest("details");
+      if (advanced) advanced.open = true;
+    }
+  }
+  if (selected === "none" || selected === "hy-mt2-local") providerEditor?.classList.add("hidden");
+  document.querySelector("[data-save-provider-key]")?.classList.toggle("hidden", selected === "none" || selected === "hy-mt2-local");
+  document.querySelector("[data-delete-provider-key]")?.classList.toggle("hidden", selected === "none" || selected === "hy-mt2-local");
+  const selector = document.querySelector<HTMLSelectElement>("#local-translation-model-choice");
+  if (selector) {
+    const installed = modelDownloads.filter(state => state.status === "done" && state.path && availableModels.some(m => m.id === state.modelId && m.kind === "hy-mt2"));
+    const current = settingsHyMt2Model?.value ?? "";
+    const entries = installed.map(state => ({path:state.path!, name:availableModels.find(m=>m.id===state.modelId)!.name.replace(/（本地翻译候选）/g, "")}));
+    if (current && !entries.some(e=>e.path===current)) entries.unshift({path:current,name:current.split(/[\\/]/).pop() ?? "当前模型"});
+    selector.innerHTML = '<option value="">选择已安装模型</option>'+entries.map(e=>`<option value="${escapeHtml(e.path)}">${escapeHtml(e.name)}</option>`).join("");
+    selector.value = current;
+  }
+}
+
+async function refreshProviderReadiness(): Promise<void> {
+  updateProviderProfiles(await invoke<TranslationProfileSummary[]>("translation_profiles"));
+  renderProviderCards();
+}
+
+function organizeTranslationCards(section: HTMLElement): void {
+  const heading = section.querySelector(".settings-section-heading");
+  const selector = settingsProvider?.closest("label");
+  if (!selector) return;
+  // Card actions replace the older shared check/delete controls.
+  settingsClearApiKey?.closest("label")?.remove();
+  checkApiKeyButton?.closest("div")?.remove();
+  selector.firstChild!.textContent = "下次新任务的默认翻译方式（保存后生效）";
+  providerEditor = document.createElement("div");
+  providerEditor.className = "provider-editor hidden";
+  for (const child of Array.from(section.children)) if (child !== heading && child !== selector) providerEditor.append(child);
+  const cards = document.createElement("div"); cards.className = "provider-cards";
+  const entries = [
+    ["deepseek", "DeepSeek", "云端文本翻译；只发送字幕与上下文。"],
+    ["gemini", "Gemini", "只发送字幕文本和上下文；与 Gemini 语音识别共用 Key。保存或删除 Key 会同时影响两处，音频上传仍需单独授权。"],
+    ["deepl", "DeepL", "云端文本翻译；使用独立的 DeepL 凭据。"],
+    ["hy-mt2-local", "Hy-MT2 · 本地翻译", "离线翻译，无需上传字幕。1.8B 占用较少，7B 需要更多内存和处理时间。"],
+    ["openai-compatible", "OpenAI-compatible", "高级：自定义端点、模型与独立凭据。"],
+  ];
+  const advanced = document.createElement("details"); advanced.innerHTML = "<summary>高级：自定义兼容服务</summary>";
+  for (const [id, title, description] of entries) {
+    const card = document.createElement("article"); card.className = "provider-card"; card.dataset.providerCard = id;
+    card.innerHTML = `<h4>${escapeHtml(title)}</h4><p>${escapeHtml(description)}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<label class="local-model-choice">翻译模型<select id="local-translation-model-choice"></select></label><p>模型详情与下载位于“模型与存储”。</p>' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div>`;
+    if (id === "hy-mt2-local") card.querySelector("[data-test-provider]")?.classList.add("hidden");
+    card.querySelector<HTMLButtonElement>("[data-configure-provider]")!.onclick = () => {
+      if (!settingsProvider) return;
+      if (settingsProvider.value !== id) { settingsProvider.value = id; settingsProvider.dispatchEvent(new Event("change", { bubbles: true })); }
+      renderProviderCards();
+    };
+    card.querySelector<HTMLButtonElement>("[data-test-provider]")!.onclick = async (event) => {
+      const button = event.currentTarget as HTMLButtonElement; button.disabled = true;
+      try { await invoke<string>("test_translation_connection", { providerId: id }); }
+      catch (error) { if (settingsMessage) settingsMessage.textContent = `连接测试失败：${String(error)}`; }
+      finally { button.disabled = false; await refreshProviderReadiness().catch(() => {}); }
+    };
+    const check = card.querySelector<HTMLButtonElement>("[data-check-provider]");
+    if (check) check.onclick = async () => {
+      check.disabled = true;
+      try {
+        const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", { providerId: id });
+        if (settingsMessage) settingsMessage.textContent = `${result.providerName}：${result.storedInSystem || result.availableFromEnvironment ? "凭据存在，尚不代表连接已通过" : "未找到凭据"}；本次未调用翻译 API。`;
+        await refreshProviderReadiness();
+      } catch (error) { if (settingsMessage) settingsMessage.textContent = String(error); }
+      finally { check.disabled = false; }
+    };
+    if (id === "openai-compatible") advanced.append(card); else cards.append(card);
+  }
+  cards.append(advanced); section.append(cards);
+  document.querySelector<HTMLSelectElement>("#local-translation-model-choice")?.addEventListener("change", event => {
+    if (settingsHyMt2Model) { settingsHyMt2Model.value = (event.target as HTMLSelectElement).value; settingsHyMt2Model.dispatchEvent(new Event("input", {bubbles:true})); }
+  });
+  const actions = document.createElement("div"); actions.className = "offline-tools";
+  actions.innerHTML = '<button type="button" data-save-provider-key>保存此后端凭据</button><button type="button" class="secondary" data-delete-provider-key>删除此后端凭据</button>';
+  providerEditor.append(actions);
+  for (const button of actions.querySelectorAll<HTMLButtonElement>("button")) button.onclick = async () => {
+    const id = settingsProvider?.value, secret = settingsApiKey?.value ?? "";
+    if (!id) return;
+    button.disabled = true;
+    try {
+      await invoke("save_translation_credential", { providerId: id, apiKey: button.hasAttribute("data-save-provider-key") ? secret : null, clear: button.hasAttribute("data-delete-provider-key") });
+      if (settingsProvider?.value === id && settingsApiKey?.value === secret) settingsApiKey.value = "";
+      if (settingsClearApiKey) settingsClearApiKey.checked = false;
+      await refreshProviderReadiness();
+      if (id === "gemini") {
+        renderAsrCredentialStatus(await invoke<AsrCredentialStatus>("asr_credential_status"));
+        if (settingsGeminiApiKey) settingsGeminiApiKey.value = "";
+      }
+      if (settingsProvider?.value === id && apiKeyStatus) apiKeyStatus.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；连接状态请查看卡片。`;
+      if (settingsMessage) settingsMessage.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；${id === "gemini" ? "语音识别与翻译共用此 Key，音频上传仍需单独授权。" : "其他后端配置未改变。"}`;
+    } catch (error) { if (settingsMessage) settingsMessage.textContent = String(error); }
+    finally { button.disabled = false; }
+  };
+  renderProviderCards();
+}
+
+function organizeSettings(): void {
+  const form = document.querySelector<HTMLFormElement>("#settings-form");
+  if (!form) return;
+  const sections = Array.from(form.querySelectorAll<HTMLElement>(":scope > .settings-section"));
+  const models = sections[0],
+    network = sections[1],
+    asr = sections[2],
+    translation = sections[3],
+    dictionaries = sections[4];
+  if (!models || !network || !asr || !translation || !dictionaries) return;
+  const downloads = document.createElement("section");
+  downloads.className = "settings-section";
+  downloads.innerHTML = "<h3>模型与存储</h3><p>统一下载、校验与卸载。模型按需安装。</p>";
+  for (const selector of ["#models-directory", "#model-catalog", "#model-download-message"]) {
+    const item = form.querySelector(selector);
+    if (item) downloads.append(item);
+  }
+  const localModel = document.querySelector("#settings-hy-mt2-model")?.closest(".settings-path-row");
+  if (localModel) downloads.append(localModel);
+  const appearance = document.createElement("section"); appearance.className = "settings-section appearance-settings";
+  appearance.innerHTML = '<h3>外观</h3><p>选择页面主题，即时生效并自动保存。字幕导出样式保持独立。</p><div class="theme-options"><button type="button" data-app-theme="moonlight"><span class="theme-swatch moonlight-swatch"></span><strong>月夜</strong><span>颜料笔触、月光与青灰纸面</span></button><button type="button" data-app-theme="letter"><span class="theme-swatch letter-swatch"></span><strong>来信</strong><span>纸纤维、折痕与信笺层次</span></button></div>';
+  const syncTheme = () => appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.appTheme === document.documentElement.dataset.theme)));
+  appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.onclick = () => { applyTheme(button.dataset.appTheme as "moonlight"|"letter"); syncTheme(); });
+  syncTheme();
+  window.addEventListener("atogaki-theme-change",syncTheme);
+  models.querySelector("strong")!.textContent = "本地转录";
+  const optionalAsr = document.createElement("details"); optionalAsr.className="onboarding-optional";
+  optionalAsr.innerHTML='<summary>可选：Gemini 局部修复</summary>';
+  optionalAsr.append(asr); models.append(optionalAsr);
+  translation.querySelector("strong")!.textContent = "翻译";
+  organizeTranslationCards(translation);
+  network.querySelector("strong")!.textContent = "网络与高级";
+  dictionaries.querySelector("strong")!.textContent = "词典";
+  const nav = document.createElement("nav");
+  nav.className = "settings-tabs";
+  nav.setAttribute("aria-label", "设置分区");
+  const pages = [
+    ["appearance", "外观", appearance],
+    ["transcription", "转录", models],
+    ["translation", "翻译", translation],
+    ["models", "模型与存储", downloads],
+    ["dictionary", "词典", dictionaries],
+    ["network", "网络与高级", network],
+  ] as const;
+  const footer = form.querySelector(".settings-footer");
+  pages.forEach(([key, label, page]) => {
+    page.dataset.settingsPage = key;
+    if (page === downloads || page === appearance) form.insertBefore(page, footer);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = label;
+    button.dataset.settingsTab = key;
+    button.onclick = () => {
+      pages.forEach(([candidate, , section]) => section.classList.toggle("hidden", candidate !== key));
+      nav.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
+    };
+    nav.append(button);
+    page.classList.toggle("hidden", key !== "transcription");
+  });
+  form.querySelector(".dialog-help")?.after(nav);
+  const heading = form.querySelector("h2");
+  if (heading) heading.textContent = "设置";
+  const advanced = document.createElement("details");
+  advanced.innerHTML = "<summary>高级：模型路径与 VAD 参数</summary>";
+  const taskForm = document.querySelector("#task-form");
+  for (const selector of ["#model-path", "#choose-model", "#vad-model-path", "#choose-vad-model"]) {
+    const control = document.querySelector(selector);
+    if (control) advanced.append(control.tagName === "INPUT" ? control.closest("label")! : control);
+  }
+  taskForm?.querySelector(".form-footer")?.before(advanced);
+}
+organizeSettings();
+
+function addOfflineTools(): void {
+  const jobsSearch = document.createElement("input");
+  jobsSearch.type = "search";
+  jobsSearch.placeholder = "搜索任务标题";
+  jobsSearch.setAttribute("aria-label", "搜索任务标题");
+  jobsSearch.oninput = () => {
+    taskTitleQuery = jobsSearch.value;
+    renderJobs(latestJobs);
+  };
+  jobList?.before(jobsSearch);
+  const learningBar = document.createElement("div");
+  learningBar.className = "offline-tools";
+  learningBar.innerHTML =
+    '<input id="learning-search" type="search" aria-label="搜索学习条目" placeholder="搜索词句、释义、例句"/><select id="learning-task-filter" aria-label="按来源任务筛选"><option value="">全部来源任务</option></select><button id="export-anki" type="button" class="secondary">导出当前单词本到 Anki</button>';
+  learningItemList?.before(learningBar);
+  learningBar.querySelector<HTMLInputElement>("input")!.oninput = (event) => {
+    learningQuery = (event.target as HTMLInputElement).value;
+    renderLearningItems();
+  };
+  learningBar.querySelector<HTMLSelectElement>("select")!.onchange = (event) => {
+    learningTaskFilter = (event.target as HTMLSelectElement).value;
+    renderLearningItems();
+  };
+  learningBar.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
+    try {
+      const path = await invoke<string | null>("export_learning_anki", { language: activeLearningLanguage });
+      if (learningMessage)
+        learningMessage.textContent = path
+          ? `已导出 ${path}；在 Anki 中导入 TSV 并按列映射。`
+          : "已取消导出。";
+    } catch (error) {
+      if (learningMessage) learningMessage.textContent = String(error);
+    }
+  };
+  const search = document.createElement("section");
+  search.className = "subtitle-search";
+  search.innerHTML =
+    '<input type="search" aria-label="搜索当前字幕" placeholder="搜索当前任务的原文或译文"/><div class="subtitle-search-results"></div>';
+  subtitleList?.before(search);
+  search.querySelector("input")!.oninput = (event) => {
+    const query = (event.target as HTMLInputElement).value;
+    const results = query.trim()
+      ? (activeDetail?.segments.filter((segment) =>
+          matchesQuery(query, [segment.source_text, segment.translated_text]),
+        ) ?? [])
+      : [];
+    const host = search.querySelector("div")!;
+    host.innerHTML = results
+      .map(
+        (segment) =>
+          `<button type="button" class="secondary" data-search-time="${segment.start_ms}">${formatTime(segment.start_ms)} · ${escapeHtml(segment.source_text)}</button>`,
+      )
+      .join("");
+    host
+      .querySelectorAll<HTMLButtonElement>("[data-search-time]")
+      .forEach((button) => (button.onclick = () => seekTo(Number(button.dataset.searchTime))));
+  };
+  for (const host of document.querySelectorAll(".playback-tools")) {
+    const tools = document.createElement("div");
+    tools.className = "offline-tools loop-tools";
+    tools.innerHTML =
+      '<button type="button" class="secondary" data-loop="sentence">循环当前句</button><button type="button" class="secondary" data-loop="a">设置 A</button><button type="button" class="secondary" data-loop="b">设置 B 并循环</button><button type="button" class="secondary" data-loop="head">试听句首衔接</button><button type="button" class="secondary" data-loop="tail">试听句尾衔接</button><button type="button" class="secondary" data-loop="off">关闭循环</button><span class="loop-state">循环已关闭</span>';
+    host.after(tools);
+    tools.querySelectorAll<HTMLButtonElement>("[data-loop]").forEach(
+      (button) =>
+        (button.onclick = () => {
+          if (!activeMedia) return;
+          const time = activeMedia.currentTime * 1000,
+            cue = subtitleAt(time),
+            action = button.dataset.loop;
+          if (action === "off") {
+            playbackLoop = null;
+            loopStartMs = null;
+          } else if (action === "a") {
+            loopStartMs = time;
+            playbackLoop = null;
+          } else if (action === "b") {
+            if (loopStartMs === null || time <= loopStartMs) {
+              tools.querySelector("span")!.textContent = "请先设置早于 B 的 A 点";
+              return;
+            }
+            playbackLoop = { startMs: loopStartMs, endMs: time, repeat: true };
+          } else if (cue) {
+            playbackLoop =
+              action === "sentence"
+                ? { startMs: cue.start_ms, endMs: cue.end_ms, repeat: true }
+                : action === "head"
+                  ? {
+                      startMs: Math.max(0, cue.start_ms - 500),
+                      endMs: Math.min(cue.end_ms, cue.start_ms + 1000),
+                      repeat: false,
+                    }
+                  : {
+                      startMs: Math.max(cue.start_ms, cue.end_ms - 1000),
+                      endMs: Math.min(
+                        Number.isFinite(activeMedia.duration)
+                          ? activeMedia.duration * 1000
+                          : cue.end_ms + 500,
+                        cue.end_ms + 500,
+                      ),
+                      repeat: false,
+                    };
+          }
+          if (playbackLoop) {
+            activeMedia.currentTime = playbackLoop.startMs / 1000;
+            void activeMedia.play();
+          }
+          document
+            .querySelectorAll<HTMLElement>(".loop-state")
+            .forEach(
+              (e) =>
+                (e.textContent = playbackLoop
+                  ? `${playbackLoop.repeat ? "循环" : "试听"} ${formatPreciseTime(playbackLoop.startMs)} → ${formatPreciseTime(playbackLoop.endMs)}`
+                  : loopStartMs !== null
+                    ? `A: ${formatPreciseTime(loopStartMs)}`
+                    : "循环已关闭"),
+            );
+        }),
+    );
+  }
+  for (const input of [retranscriptionStartInput, retranscriptionEndInput])
+    input?.addEventListener("input", () => {
+      if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
+    });
+  const candidateTools = document.createElement("div");
+  candidateTools.className = "offline-tools";
+  candidateTools.innerHTML =
+    '<button type="button" class="secondary" data-full-candidate>生成全片本地候选</button><button type="button" class="secondary" data-candidate-history>历史候选</button><button type="button" class="secondary" data-cancel-candidate>取消候选运行</button><div class="candidate-history"></div>';
+  repairPanel?.append(candidateTools);
+  candidateTools.querySelector<HTMLButtonElement>("[data-full-candidate]")!.onclick = async () => {
+    if (!activeDetail || retranscriptionBusy) return;
+    activeRepairSignalId=null;
+    retranscriptionBusy = true;
+    setRetranscriptionMessage("正在生成全片候选；不会覆盖当前工作区。", false);
+    try {
+      showRetranscriptionPreview(
+        await invoke<RetranscriptionPreview>("preview_full_retranscription", {
+          jobId: activeDetail.job.job_id,
+        }),
+      );
+    } catch (e) {
+      setRetranscriptionMessage(String(e), true);
+    } finally {
+      retranscriptionBusy = false;
+    }
+  };
+  candidateTools.querySelector<HTMLButtonElement>("[data-cancel-candidate]")!.onclick = async () => {
+    if (!activeDetail) return;
+    try {
+      await invoke("cancel_asr_candidate", { jobId: activeDetail.job.job_id });
+      setRetranscriptionMessage("已请求取消；云端请求会先完成上传文件清理。", false);
+    } catch (e) {
+      setRetranscriptionMessage(String(e), true);
+    }
+  };
+  candidateTools.querySelector<HTMLButtonElement>("[data-candidate-history]")!.onclick = async () => {
+    if (!activeDetail) return;
+    const jobId = activeDetail.job.job_id;
+    try {
+      const runs = await invoke<
+        Array<CandidateLabelInput & { status:string; reopenable?:boolean; released?:boolean; cleanable?:boolean; adopted?:boolean }>
+      >("list_asr_runs", { jobId });
+      const host = candidateTools.querySelector(".candidate-history")!;
+      host.innerHTML =
+        runs
+          .map((r) => `<article class="candidate-history-row"><div><strong>${escapeHtml(candidateLabel(r))}</strong><span>${r.released ? "产物已清理" : r.adopted ? "已采用，保留来源" : r.is_candidate === false ? "原始识别，保留来源" : ({succeeded:"可对照",failed:"运行失败",running:"识别中",queued:"排队中"} as Record<string,string>)[r.status] ?? r.status}</span></div>${r.status === "succeeded" && r.reopenable ? `<button type="button" class="secondary" data-reopen-run="${escapeHtml(r.id)}">对照</button>` : ""}${r.cleanable ? `<button type="button" class="secondary" data-release-run="${escapeHtml(r.id)}">${r.released ? "再次清理残留" : "清理产物"}</button>` : ""}</article>`)
+          .join("") || "还没有成功候选。";
+      host.querySelectorAll<HTMLButtonElement>("[data-release-run]").forEach(button => button.onclick = async () => {
+        const runId = button.dataset.releaseRun!;
+        if (!await confirmAction({title:"清理这个未采用候选？", message:"释放候选的音频缓存和识别产物，保留运行摘要。清理后无法再打开该候选；当前字幕不变。", confirmLabel:"清理产物", danger:true})) return;
+        button.disabled = true;
+        try {
+          const bytes = await invoke<number>("release_asr_candidate", {jobId, runId});
+          if (activeRetranscriptionPreview?.preview_id === runId) { activeRetranscriptionPreview = null; retranscriptionDialog?.close(); }
+          setRetranscriptionMessage(`已清理候选产物，本次释放 ${formatBytes(bytes)}。`);
+          candidateTools.querySelector<HTMLButtonElement>("[data-candidate-history]")?.click();
+        } catch(error) { setRetranscriptionMessage(String(error), true); button.disabled = false; }
+      });
+      host.querySelectorAll<HTMLButtonElement>("[data-reopen-run]").forEach(
+        (button) =>
+          (button.onclick = async () => {
+            try {
+              showRetranscriptionPreview(
+                await invoke<RetranscriptionPreview>("reopen_asr_candidate", {
+                  jobId,
+                  runId: button.dataset.reopenRun,
+                }),
+              );
+            } catch (e) {
+              setRetranscriptionMessage(`此运行没有可重开的候选：${String(e)}`, true);
+            }
+          }),
+      );
+    } catch (e) {
+      setRetranscriptionMessage(String(e), true);
+    }
+  };
+  const taskChoice = document.createElement("div");
+  taskChoice.className = "offline-tools";
+  taskChoice.innerHTML =
+    '<label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="gemini">Gemini</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地翻译</option><option value="openai-compatible">高级兼容服务</option></select></label><button type="button" class="secondary">设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>';
+  document.querySelector("#workspace-translation-panel")?.prepend(taskChoice);
+  taskChoice.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
+    if (!activeDetail) return;
+    try {
+      await invoke("set_task_translation", {
+        jobId: activeDetail.job.job_id,
+        providerId: taskChoice.querySelector("select")!.value,
+      });
+      await refreshTranslationStatus();
+      setWorkspaceAction("本任务后端已更新；已有字幕未改变。");
+    } catch (e) {
+      setWorkspaceAction(String(e), true);
+    }
+  };
+}
+addOfflineTools();
+
+mediaPath?.addEventListener("input", () => {
+  selectedMediaFiles = [];
+});
+const presetTools = document.createElement("div");
+presetTools.className = "offline-tools";
+presetTools.innerHTML =
+  '<select aria-label="任务预设"><option value="">选择任务预设</option></select><input aria-label="预设名称" placeholder="预设名称" maxlength="64"/><button type="button" class="secondary">保存当前配置为预设</button><span>预设不保存媒体路径或 API Key。</span>';
+document.querySelector("#task-form")?.prepend(presetTools);
+let taskPresets: Array<{
+  name: string;
+  configuration: {
+    modelPath: string;
+    vadModelPath: string | null;
+    sourceLanguage: LanguageCode;
+    glossaryId: string | null;
+    selectedContentGroups: string[];
+    translationProviderId: string;
+  };
+}> = [];
+async function loadTaskPresets(): Promise<void> {
+  try {
+    taskPresets = await invoke("task_presets");
+    presetTools.querySelector("select")!.innerHTML =
+      '<option value="">选择任务预设</option>' +
+      taskPresets.map((p, i) => `<option value="${i}">${escapeHtml(p.name)}</option>`).join("");
+  } catch (e) {
+    if (taskMessage) taskMessage.textContent = `预设读取失败：${String(e)}`;
+  }
+}
+presetTools.querySelector<HTMLSelectElement>("select")!.onchange = async (event) => {
+  const value = (event.target as HTMLSelectElement).value;
+  if (!value) return;
+  const config = taskPresets[Number(value)]?.configuration;
+  if (!config) return;
+  if (modelPath) modelPath.value = config.modelPath;
+  if (sourceLanguage) sourceLanguage.value = config.sourceLanguage;
+  renderGlossaryOptions();
+  if (vadEnabled) vadEnabled.checked = Boolean(config.vadModelPath);
+  if (vadModelPath) vadModelPath.value = config.vadModelPath ?? "";
+  if (taskGlossary) taskGlossary.value = config.glossaryId ?? "";
+  taskGlossaryConfigurationId = taskGlossary?.value || null;
+  const provider = document.querySelector<HTMLSelectElement>("#task-translation-provider");
+  if (provider) provider.value = config.translationProviderId;
+  selectedTaskContentGroups.clear();
+  config.selectedContentGroups.forEach((g) => selectedTaskContentGroups.add(g));
+  syncVadControls();
+  await refreshTaskGlossaryConfiguration();
+  updateTaskPipelineSummary();
+};
+presetTools.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
+  try {
+    await invoke("save_task_preset", {
+      name: presetTools.querySelector("input")!.value,
+      configuration: {
+        modelPath: modelPath?.value,
+        vadModelPath: vadEnabled?.checked ? vadModelPath?.value : null,
+        sourceLanguage: selectedSourceLanguage(),
+        glossaryId: taskGlossary?.value || null,
+        selectedContentGroups: Array.from(selectedTaskContentGroups),
+        translationProviderId:
+          document.querySelector<HTMLSelectElement>("#task-translation-provider")?.value || "none",
+      },
+    });
+    await loadTaskPresets();
+    if (taskMessage) taskMessage.textContent = "预设已保存。";
+  } catch (e) {
+    if (taskMessage) taskMessage.textContent = String(e);
+  }
+};
+void loadTaskPresets();
+
+function updateTaskPipelineSummary():void {
+  const summary=document.querySelector<HTMLElement>("#task-pipeline-summary");
+  if(!summary)return;
+  const provider=document.querySelector<HTMLSelectElement>("#task-translation-provider");
+  const model=(modelPath?.value??"").split(/[\\/]/).at(-1)||"未选择模型";
+  summary.textContent=`转录：Whisper · ${model} · 本地；翻译：${provider?.selectedOptions[0]?.textContent??"未选择"}`;
+}
+const pipelineSummary=document.createElement("p");pipelineSummary.id="task-pipeline-summary";pipelineSummary.className="settings-message";
+document.querySelector("#task-form")?.before(pipelineSummary);
+for(const input of [modelPath,document.querySelector<HTMLSelectElement>("#task-translation-provider")])input?.addEventListener("change",updateTaskPipelineSummary);
+updateTaskPipelineSummary();
+
+window.setInterval(async()=>{
+  if(!retranscriptionBusy||!activeDetail)return;
+  const jobId=activeDetail.job.job_id;
+  try{
+    const progress=await invoke<{phase:string;completed_ms?:number;duration_ms?:number}|null>("asr_candidate_progress",{jobId});
+    if(!progress||!retranscriptionBusy||activeDetail?.job.job_id!==jobId)return;
+    const phase=({extracting_audio:"提取音频",transcribing:"识别",refining_segments:"生成字幕候选",candidate_ready:"候选已就绪",failed:"候选失败"} as Record<string,string>)[progress.phase]??progress.phase;
+    setRetranscriptionMessage(`${phase}${progress.duration_ms?` · ${formatTime(progress.completed_ms??0)} / ${formatTime(progress.duration_ms)}`:""}`,false);
+  }catch{/* Preserve the active operation's result or actionable error. */}
+},1000);
+
+document.querySelector("#karaoke-insert-block")?.addEventListener("click",openInsertSubtitleBlock);
+document.querySelector("#karaoke-delete-block")?.addEventListener("click",()=>void deleteCurrentSubtitleBlock());
+asrQualitySignalsHost?.addEventListener("change",event=>{
+  const input=event.target as HTMLInputElement;
+  if (input.matches("[data-show-processed]")) { showProcessedSignals=input.checked; if(activeDetail) void loadAsrQualitySignals(activeDetail.job.job_id); }
+});
+
+const appearanceHost = document.querySelector<HTMLElement>(".appearance-settings");
+if (appearanceHost) void setupImageThemes(appearanceHost).catch(error => { if(settingsMessage) settingsMessage.textContent=String(error); });
+
+// External websites are opened by the OS, rather than a blocked WebView popup.
+document.addEventListener("click", event => {
+  const link=(event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
+  if(!link||!/^https?:/i.test(link.href))return;
+  event.preventDefault();
+  void invoke("open_external_url",{url:link.href}).catch(error=>{if(settingsMessage)settingsMessage.textContent=String(error);});
+});
+
+try { subtitleDrafts.recover(localStorage.getItem("atogaki.subtitleDrafts") ?? "[]"); } catch { /* SQLite remains authoritative. */ }
+let subtitleCloseReady = false;
+void getCurrentWindow().onCloseRequested(async event => {
+  if (subtitleCloseReady) return;
+  event.preventDefault();
+  try {
+    await subtitleDrafts.flushAll();
+    subtitleCloseReady = true;
+    await getCurrentWindow().close();
+  } catch (error) {
+    setSubtitleEditAction(`保存失败，窗口保持打开；草稿已保留：${String(error)}`, true);
+  }
+});

@@ -5,6 +5,7 @@ mod desktop_settings;
 mod dictionary_download;
 mod dictionary_lookup;
 mod model_download;
+mod theme_artwork;
 
 use std::{
     collections::HashMap,
@@ -17,12 +18,12 @@ use std::{
 
 use atogaki_subtitle::{
     application::{
-        LocalGlossaryApplyResult, LocalGlossaryPreview, LocalGlossaryPromptPreview,
-        LocalBatchTranslationResult, LocalGlossaryService, LocalGlossaryTermDraft,
+        LocalBatchTranslationResult, LocalGlossaryApplyResult, LocalGlossaryPreview,
+        LocalGlossaryPromptPreview, LocalGlossaryService, LocalGlossaryTermDraft,
         LocalLearningService, LocalRenderEstimate, LocalRenderQuality, LocalRenderRequest,
         LocalRenderService, LocalRetranscriptionPreview, LocalRetranscriptionService,
-        LocalSubtitleExport, LocalSubtitleExportArtifact,
-        LocalSubtitleExportPlan, LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
+        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
+        LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
         MutableTranslationProvider, RepairAttempt, RepairAttemptStatus, ReviewDecision,
         ReviewDecisionKind, SubtitleFontFamily, SubtitleFontService, SubtitleStylePreview,
         SubtitleStyleService, SubtitleStyleState, TranscriptionOptions,
@@ -35,10 +36,10 @@ use atogaki_subtitle::{
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
-            LocalAsrQualitySignalRecord, LocalAsrRunRecord, LocalDatabase, LocalGlossaryDetail,
-            LocalGlossaryRecord,
-            LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail, LocalRenderJobRecord,
-            LocalSubtitleSegmentRecord, LocalTranslationRunRecord, NewLocalLearningSelection,
+            LocalAsrQualitySignalRecord, LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord,
+            LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail,
+            LocalRenderJobRecord, LocalSubtitleSegmentRecord, LocalTranslationRunRecord,
+            NewLocalLearningSelection,
         },
         media::MediaCapabilities,
         waveform::WaveformWindow,
@@ -86,9 +87,9 @@ struct PlaybackMediaRegistry {
 
 impl PlaybackMediaRegistry {
     fn register(&self, path: &Path) -> Result<String, String> {
-        let path = path
-            .canonicalize()
-            .map_err(|error| format!("failed to resolve local media {}: {error}", path.display()))?;
+        let path = path.canonicalize().map_err(|error| {
+            format!("failed to resolve local media {}: {error}", path.display())
+        })?;
         let mut hasher = Sha256::new();
         hasher.update(path.to_string_lossy().as_bytes());
         let token = format!("{:x}", hasher.finalize());
@@ -392,6 +393,8 @@ async fn get_subtitle_style_state(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubmitTranscriptionRequest {
+    #[serde(default)]
+    translation_provider_id: Option<String>,
     input_path: String,
     model_path: String,
     source_language: LanguageCode,
@@ -450,6 +453,15 @@ struct UpdateSubtitleRequest {
     translated_text: Option<String>,
     start_ms: i64,
     end_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EditSubtitleBlockRequest {
+    job_id: String,
+    before_segments: Vec<LocalSubtitleSegmentRecord>,
+    remove_id: Option<String>,
+    insertion: Option<LocalSubtitleSegmentRecord>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -519,6 +531,7 @@ fn default_whisper_provider() -> String {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ConfirmRetranscriptionRequest {
+    comparison_id: Option<String>,
     job_id: String,
     preview_id: String,
 }
@@ -615,6 +628,7 @@ struct VideoOutputSelection {
 
 #[derive(Debug, Serialize)]
 struct DesktopJobDetail {
+    translation_context_stale_ids: Vec<String>,
     job: LocalJobRecord,
     segments: Vec<LocalSubtitleSegmentRecord>,
     translation_runs: Vec<LocalTranslationRunRecord>,
@@ -626,6 +640,7 @@ struct DesktopJobDetail {
 struct DesktopJobSummary {
     #[serde(flatten)]
     job: LocalJobRecord,
+    recovery: Option<atogaki_subtitle::application::acoustic_plan::TaskRecoverySummary>,
     translation_status: &'static str,
     segment_count: i64,
     translated_segment_count: i64,
@@ -651,7 +666,14 @@ impl DesktopJobSummary {
         } else {
             "translated"
         };
+        let recovery =
+            atogaki_subtitle::infrastructure::job_store::Job::open(PathBuf::from(&job.storage_dir))
+                .ok()
+                .and_then(|j| {
+                    atogaki_subtitle::application::acoustic_plan::recovery_summary(&j).ok()
+                });
         Self {
+            recovery,
             job,
             translation_status,
             segment_count: stats.segment_count,
@@ -689,12 +711,68 @@ async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopJobSumma
 async fn list_asr_runs(
     state: State<'_, DesktopState>,
     job_id: String,
-) -> Result<Vec<LocalAsrRunRecord>, String> {
-    state
+) -> Result<Vec<serde_json::Value>, String> {
+    let detail = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let job = atogaki_subtitle::infrastructure::job_store::Job::open(detail.job.storage_dir.into())
+        .map_err(|e| e.to_string())?;
+    let runs = state
         .task_service
         .list_persisted_asr_runs(&job_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|e| e.to_string())?;
+    let mut protected = std::collections::HashSet::new();
+    for run in &runs {
+        if state
+            .task_service
+            .asr_run_is_protected(&run.id)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            protected.insert(run.id.clone());
+        }
+    }
+    runs.into_iter()
+        .map(|run| {
+            let artifacts = atogaki_subtitle::infrastructure::asr_run_store::AsrRunArtifacts::open(
+                &job, &run.id,
+            )
+            .ok();
+            let progress = artifacts
+                .as_ref()
+                .and_then(|a| std::fs::read(a.dir.join("checkpoints.json")).ok())
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+            let released = artifacts
+                .as_ref()
+                .is_some_and(|a| a.dir.join("released.json").exists());
+            let adopted = protected.contains(&run.id)
+                || artifacts
+                    .as_ref()
+                    .is_some_and(|a| a.dir.join("adopted.json").exists());
+            let candidate = artifacts.as_ref().is_some_and(|a| {
+                a.dir.join("candidate.json").exists()
+                    || a.dir.join("progress.json").exists()
+                    || released
+            });
+            let reopenable = !released
+                && artifacts.as_ref().is_some_and(|a| {
+                    a.dir.join("preview.json").is_file() || a.candidate_cues_json.is_file()
+                });
+            let cleanable =
+                candidate && !adopted && !matches!(run.status.as_str(), "running" | "queued");
+            let mut output = serde_json::to_value(run).map_err(|e| e.to_string())?;
+            output["checkpoint_progress"] = progress.unwrap_or(serde_json::Value::Null);
+            output["reopenable"] = reopenable.into();
+            output["released"] = released.into();
+            output["adopted"] = adopted.into();
+            output["is_candidate"] = candidate.into();
+            output["cleanable"] = cleanable.into();
+            Ok(output)
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -782,11 +860,7 @@ async fn use_learning_dictionary_definition(
 ) -> Result<LocalLearningItemDetail, String> {
     state
         .learning_service
-        .use_lookup_definition(
-            &request.item_id,
-            &request.provider_id,
-            &request.definition,
-        )
+        .use_lookup_definition(&request.item_id, &request.provider_id, &request.definition)
         .await
         .map_err(|error| error.to_string())
 }
@@ -801,6 +875,89 @@ async fn delete_learning_item(
         .delete_item(&item_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn pause_task(state: State<'_, DesktopState>, job_id: String) -> Result<(), String> {
+    state
+        .task_service
+        .pause(&job_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn resume_task(state: State<'_, DesktopState>, job_id: String) -> Result<String, String> {
+    let detail = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = PathBuf::from(detail.job.storage_dir).join("task-preferences.json");
+    if path.is_file() {
+        let profile: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        if profile["automatic"].as_bool() == Some(true) {
+            let provider = state
+                .settings_service
+                .task_provider(&profile)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            state
+                .task_service
+                .configure_task_translation(&job_id, provider)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    let settings = state
+        .settings_service
+        .load()
+        .await
+        .map_err(|e| e.to_string())?;
+    state
+        .task_service
+        .resume_with_models(
+            &job_id,
+            settings.whisper_model_path.map(PathBuf::from),
+            settings.vad_model_path.map(PathBuf::from),
+        )
+        .await
+        .map(|s| s.manifest.job_id)
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn task_recovery_status(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<atogaki_subtitle::application::acoustic_plan::TaskRecoverySummary, String> {
+    state
+        .task_service
+        .recovery(&job_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn partial_transcript(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Vec<atogaki_subtitle::domain::TranscriptSegment>, String> {
+    let record = state
+        .task_service
+        .list_persisted_jobs()
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|j| j.job_id == job_id)
+        .ok_or("task not found")?;
+    let job = atogaki_subtitle::infrastructure::job_store::Job::open(record.storage_dir.into())
+        .map_err(|e| e.to_string())?;
+    atogaki_subtitle::application::acoustic_plan::partial_units(&job)
+        .map(|units| {
+            atogaki_subtitle::application::acoustic_plan::candidate_cues(&units)
+                .transcript_segments()
+        })
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -836,10 +993,7 @@ async fn rename_job(
 }
 
 #[tauri::command]
-async fn reorder_jobs(
-    state: State<'_, DesktopState>,
-    job_ids: Vec<String>,
-) -> Result<(), String> {
+async fn reorder_jobs(state: State<'_, DesktopState>, job_ids: Vec<String>) -> Result<(), String> {
     state
         .task_service
         .reorder_persisted_jobs(&job_ids)
@@ -895,14 +1049,118 @@ async fn delete_job(state: State<'_, DesktopState>, job_id: String) -> Result<()
 }
 
 #[tauri::command]
+async fn translation_profiles(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut profiles = vec![];
+    for id in [
+        "none",
+        "deepseek",
+        "gemini",
+        "deepl",
+        "hy-mt2-local",
+        "openai-compatible",
+    ] {
+        let mut profile = state
+            .settings_service
+            .translation_profile(id)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        profile["readiness"] = serde_json::json!(
+            state
+                .settings_service
+                .translation_readiness(id)
+                .await
+                .map_err(|e| format!("{e:#}"))?
+        );
+        profiles.push(profile);
+    }
+    Ok(profiles)
+}
+async fn task_workspace(
+    state: &DesktopState,
+    job_id: &str,
+) -> Result<LocalWorkspaceService, String> {
+    let detail = state
+        .workspace_service
+        .get_job(job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = PathBuf::from(detail.job.storage_dir).join("task-preferences.json");
+    if !path.is_file() {
+        return Ok(state.workspace_service.clone());
+    }
+    let profile: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    let provider = state
+        .settings_service
+        .task_provider(&profile)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(state.workspace_service.using_provider(provider))
+}
+#[tauri::command]
+async fn set_task_translation(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    provider_id: String,
+) -> Result<(), String> {
+    let detail = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !matches!(detail.job.status.as_str(), "done" | "failed") {
+        return Err("请等待当前任务停止后更改后端".into());
+    }
+    let profile = state
+        .settings_service
+        .translation_profile(&provider_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    atogaki_subtitle::application::acoustic_plan::write_json(
+        &PathBuf::from(detail.job.storage_dir).join("task-preferences.json"),
+        &profile,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn submit_transcription(
     state: State<'_, DesktopState>,
     request: SubmitTranscriptionRequest,
 ) -> Result<String, String> {
     let transcription = desktop_transcription_options(&request)?;
+    let settings = state
+        .settings_service
+        .load()
+        .await
+        .map_err(|e| e.to_string())?;
+    let id = request
+        .translation_provider_id
+        .as_deref()
+        .unwrap_or(&settings.translation_provider_id);
+    let profile = state
+        .settings_service
+        .translation_profile(id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let translation = if id != "none" {
+        Some((
+            state
+                .settings_service
+                .task_provider(&profile)
+                .await
+                .map_err(|e| format!("{e:#}"))?,
+            profile,
+        ))
+    } else {
+        None
+    };
     let snapshot = state
         .task_service
-        .submit_transcription_with_glossary(
+        .submit_with_translation(
             TranscribeSpec {
                 input: request.input_path.into(),
                 output_dir: None,
@@ -910,6 +1168,7 @@ async fn submit_transcription(
             },
             request.glossary_id.as_deref(),
             &request.selected_content_groups,
+            translation,
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -1047,6 +1306,12 @@ async fn get_job_detail(
     let audio_fallback_path = register_playback_file(&media_registry, fallback.to_str())?;
 
     Ok(DesktopJobDetail {
+        translation_context_stale_ids: detail
+            .cue_provenance
+            .iter()
+            .filter(|cue| cue.translation_dependency_stale)
+            .map(|cue| cue.segment_id.clone())
+            .collect(),
         job: detail.job,
         segments: detail.segments,
         translation_runs: detail.translation_runs,
@@ -1084,6 +1349,23 @@ async fn restore_subtitle(
         .restore_subtitle(&snapshot)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn edit_subtitle_block(
+    state: State<'_, DesktopState>,
+    request: EditSubtitleBlockRequest,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .workspace_service
+        .edit_subtitle_block(
+            &request.job_id,
+            &request.before_segments,
+            request.remove_id.as_deref(),
+            request.insertion,
+        )
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1157,8 +1439,15 @@ async fn save_subtitle_timing(
 }
 
 #[tauri::command]
-fn translation_status(state: State<'_, DesktopState>) -> LocalTranslationStatus {
-    state.workspace_service.translation_status()
+async fn translation_status(
+    state: State<'_, DesktopState>,
+    job_id: Option<String>,
+) -> Result<LocalTranslationStatus, String> {
+    if let Some(job_id) = job_id {
+        Ok(task_workspace(&state, &job_id).await?.translation_status())
+    } else {
+        Ok(state.workspace_service.translation_status())
+    }
 }
 
 #[tauri::command]
@@ -1167,8 +1456,8 @@ async fn translate_subtitle(
     job_id: String,
     segment_id: String,
 ) -> Result<LocalSubtitleSegmentRecord, String> {
-    state
-        .workspace_service
+    task_workspace(&state, &job_id)
+        .await?
         .translate_segment(&job_id, &segment_id)
         .await
         .map_err(|error| format!("{error:#}"))
@@ -1178,12 +1467,15 @@ async fn translate_subtitle(
 async fn translate_all_subtitles(
     state: State<'_, DesktopState>,
     job_id: String,
+    only_pending: bool,
 ) -> Result<LocalBatchTranslationResult, String> {
-    state
-        .workspace_service
-        .translate_all(&job_id)
-        .await
-        .map_err(|error| format!("{error:#}"))
+    let workspace = task_workspace(&state, &job_id).await?;
+    let result = if only_pending {
+        workspace.translate_pending(&job_id).await
+    } else {
+        workspace.translate_all(&job_id).await
+    };
+    result.map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -1261,6 +1553,188 @@ async fn get_waveform_window(
 }
 
 #[tauri::command]
+async fn asr_candidate_progress(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    let detail = state
+        .workspace_service
+        .get_job(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let job = atogaki_subtitle::infrastructure::job_store::Job::open(detail.job.storage_dir.into())
+        .map_err(|e| e.to_string())?;
+    let runs = state
+        .task_service
+        .list_persisted_asr_runs(&job_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(run) = runs
+        .into_iter()
+        .find(|r| r.status == "running" || r.status == "queued")
+    else {
+        return Ok(None);
+    };
+    let artifacts =
+        atogaki_subtitle::infrastructure::asr_run_store::AsrRunArtifacts::open(&job, &run.id)
+            .map_err(|e| e.to_string())?;
+    let mut progress: serde_json::Value = std::fs::read(artifacts.dir.join("progress.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_else(|| serde_json::json!({"phase":"transcribing"}));
+    if let Ok(bytes) = std::fs::read(artifacts.dir.join("checkpoint-root.json")) {
+        if let Ok(root) = serde_json::from_slice::<PathBuf>(&bytes) {
+            if let (Ok(root), Ok(allowed)) = (
+                root.canonicalize(),
+                job.dir.join("candidate-checkpoints").canonicalize(),
+            ) {
+                if root.starts_with(allowed) {
+                    if let Ok(scratch) =
+                        atogaki_subtitle::infrastructure::job_store::Job::open(root)
+                    {
+                        if let Ok(summary) =
+                            atogaki_subtitle::application::acoustic_plan::recovery_summary(&scratch)
+                        {
+                            progress["completed_ms"] = summary.completed_ms.into();
+                            progress["duration_ms"] = summary.duration_ms.into();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(Some(progress))
+}
+
+#[tauri::command]
+async fn cancel_asr_candidate(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<(), String> {
+    state
+        .retranscription_service
+        .cancel(&job_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn save_translation_credential(
+    state: State<'_, DesktopState>,
+    provider_id: String,
+    api_key: Option<String>,
+    clear: bool,
+) -> Result<(), String> {
+    state
+        .settings_service
+        .save_translation_credential(&provider_id, api_key, clear)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn test_translation_connection(
+    state: State<'_, DesktopState>,
+    provider_id: String,
+) -> Result<String, String> {
+    let fingerprint = state
+        .settings_service
+        .translation_validation_fingerprint(&provider_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let result = async {
+        let profile = state
+            .settings_service
+            .translation_profile(&provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let provider = state
+            .settings_service
+            .task_provider(&profile)
+            .await
+            .map_err(|e| e.to_string())?;
+        let response = provider
+            .translate(atogaki_subtitle::application::TranslationRequest {
+                options: atogaki_subtitle::application::TranslationOptions::new(
+                    LanguageCode::English,
+                    LanguageCode::SimplifiedChinese,
+                ),
+                before_context: vec![],
+                after_context: vec![],
+                style_instruction: None,
+                targets: vec![atogaki_subtitle::application::TranslationTargetSegment {
+                    segment_id: "connection-check".into(),
+                    source_text: "Hello.".into(),
+                }],
+            })
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        if response.translations.len() != 1
+            || response.translations[0].segment_id != "connection-check"
+            || response.translations[0].translated_text.trim().is_empty()
+        {
+            return Err("连接成功，但翻译合同未通过".into());
+        }
+        Ok(format!("{} 已验证", provider.status().name))
+    }
+    .await;
+    state
+        .settings_service
+        .record_translation_validation(&provider_id, &fingerprint, result.is_ok())
+        .await
+        .map_err(|e| e.to_string())?;
+    result
+}
+
+#[tauri::command]
+async fn refresh_asr_comparison(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    run_id: String,
+) -> Result<LocalRetranscriptionPreview, String> {
+    state
+        .retranscription_service
+        .refresh_comparison(&job_id, &run_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn release_asr_candidate(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    run_id: String,
+) -> Result<u64, String> {
+    state
+        .retranscription_service
+        .release_candidate(&job_id, &run_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn reopen_asr_candidate(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    run_id: String,
+) -> Result<LocalRetranscriptionPreview, String> {
+    state
+        .retranscription_service
+        .reopen(&job_id, &run_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn preview_full_retranscription(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<LocalRetranscriptionPreview, String> {
+    state
+        .retranscription_service
+        .preview_full(&job_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
 async fn preview_retranscription(
     state: State<'_, DesktopState>,
     request: PreviewRetranscriptionRequest,
@@ -1273,7 +1747,8 @@ async fn preview_retranscription(
                 .gemini_asr_provider()
                 .await
                 .map_err(|error| format!("{error:#}"))?,
-        ) as Arc<dyn atogaki_subtitle::application::AsrProvider>),
+        )
+            as Arc<dyn atogaki_subtitle::application::AsrProvider>),
         provider => return Err(format!("unsupported ASR provider: {provider}")),
     };
     let preview = if let Some(provider) = provider {
@@ -1322,7 +1797,11 @@ async fn confirm_retranscription(
 ) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
     state
         .retranscription_service
-        .confirm(&request.job_id, &request.preview_id)
+        .confirm_comparison(
+            &request.job_id,
+            &request.preview_id,
+            request.comparison_id.as_deref(),
+        )
         .await
         .map_err(|error| format!("{error:#}"))
 }
@@ -1411,6 +1890,81 @@ async fn cancel_video_render(
         .cancel(&render_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn pick_media_files(app: AppHandle) -> Result<Vec<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("选择音频或视频（可多选）")
+        .add_filter("媒体", &["mp3", "m4a", "wav", "mp4", "mkv", "webm", "mov"])
+        .pick_files(move |selection| {
+            let _ = sender.send(selection);
+        });
+    receiver
+        .await
+        .map_err(|_| "文件选择器已关闭".to_string())?
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| {
+            p.into_path()
+                .map(|p| p.display().to_string())
+                .map_err(|e| e.to_string())
+        })
+        .collect()
+}
+#[tauri::command]
+async fn export_learning_anki(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    language: String,
+) -> Result<Option<String>, String> {
+    if !matches!(language.as_str(), "ja" | "en" | "ko") {
+        return Err("不支持的单词本语言".into());
+    }
+    let items = state
+        .learning_service
+        .list_items()
+        .await
+        .map_err(|e| e.to_string())?;
+    let output = atogaki_subtitle::application::local_learning_service::anki_tsv(&items, &language);
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("导出 Anki 文本资料")
+        .add_filter("TSV", &["tsv"])
+        .set_file_name(format!("Atogaki-{language}.tsv"))
+        .save_file(move |selection| {
+            let _ = sender.send(selection);
+        });
+    let Some(selection) = receiver.await.map_err(|_| "保存窗口已关闭".to_string())? else {
+        return Ok(None);
+    };
+    let path = selection.into_path().map_err(|e| e.to_string())?;
+    atogaki_subtitle::application::acoustic_plan::atomic_write(&path, output.as_bytes())
+        .map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+#[tauri::command]
+async fn task_presets(state: State<'_, DesktopState>) -> Result<Vec<serde_json::Value>, String> {
+    state
+        .settings_service
+        .task_presets()
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn save_task_preset(
+    state: State<'_, DesktopState>,
+    name: String,
+    configuration: serde_json::Value,
+) -> Result<(), String> {
+    state
+        .settings_service
+        .save_task_preset(&name, &configuration)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1763,10 +2317,7 @@ async fn cancel_model_download(
 }
 
 #[tauri::command]
-async fn uninstall_model(
-    state: State<'_, DesktopState>,
-    model_id: String,
-) -> Result<(), String> {
+async fn uninstall_model(state: State<'_, DesktopState>, model_id: String) -> Result<(), String> {
     state
         .model_download_service
         .uninstall(&model_id)
@@ -1831,6 +2382,93 @@ async fn test_network_connection(
 #[tauri::command]
 fn data_directory(state: State<'_, DesktopState>) -> String {
     state.data_dir.display().to_string()
+}
+
+#[tauri::command]
+async fn import_theme_image(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    path: Option<String>,
+) -> Result<Option<theme_artwork::ThemeImage>, String> {
+    let source = match path.filter(|value| !value.trim().is_empty()) {
+        Some(path) => Some(path),
+        None => {
+            pick_local_file(
+                &app,
+                "选择主题图片",
+                "图片",
+                &["png", "jpg", "jpeg", "webp"],
+                None,
+            )
+            .await?
+        }
+    };
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let data_dir = state.data_dir.clone();
+    let image = tauri::async_runtime::spawn_blocking(move || {
+        theme_artwork::import_image(&data_dir, Path::new(&source))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    allow_asset_file(&app, Some(&image.path))?;
+    Ok(Some(image))
+}
+
+#[tauri::command]
+fn load_theme_image(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    name: String,
+) -> Result<Option<String>, String> {
+    let path = theme_artwork::image_path(&state.data_dir, &name)?;
+    allow_asset_file(&app, path.to_str())
+}
+
+#[tauri::command]
+async fn theme_image_bytes(
+    state: State<'_, DesktopState>,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    let path = theme_artwork::image_path(&state.data_dir, &name)?;
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|e| format!("无法读取主题图片：{e}"))?;
+    if bytes.len() > 25 * 1024 * 1024 {
+        return Err("主题图片过大".into());
+    }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+fn reveal_theme_image(state: State<'_, DesktopState>, name: String) -> Result<(), String> {
+    let path = theme_artwork::image_path(&state.data_dir, &name)?;
+    reveal_in_file_manager(path.display().to_string(), "主题图片")
+}
+
+#[tauri::command]
+async fn open_external_url(url: String) -> Result<(), String> {
+    let url = theme_artwork::external_url(&url)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "macos")]
+        let mut command = std::process::Command::new("open");
+        #[cfg(target_os = "windows")]
+        let mut command = std::process::Command::new("explorer.exe");
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let mut command = std::process::Command::new("xdg-open");
+        let status = command
+            .arg(url)
+            .status()
+            .map_err(|e| format!("无法打开浏览器：{e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("浏览器打开失败：{status}"))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn register_playback_file(
@@ -1981,7 +2619,10 @@ fn playback_media_response(
             return base
                 .status(StatusCode::PARTIAL_CONTENT)
                 .header(header::CONTENT_TYPE, content_type)
-                .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{length}"))
+                .header(
+                    header::CONTENT_RANGE,
+                    format!("bytes {start}-{end}/{length}"),
+                )
                 .header(header::CONTENT_LENGTH, body.len())
                 .body(body)
                 .expect("valid partial media response");
@@ -2275,6 +2916,11 @@ fn main() {
             check_dictionary_credential,
             check_translation_api_key,
             data_directory,
+            import_theme_image,
+            load_theme_image,
+            theme_image_bytes,
+            reveal_theme_image,
+            open_external_url,
             desktop_settings,
             dictionary_catalog,
             dictionary_credential_statuses,
@@ -2291,6 +2937,14 @@ fn main() {
             get_subtitle_style_state,
             get_waveform_window,
             preview_retranscription,
+            reopen_asr_candidate,
+            release_asr_candidate,
+            refresh_asr_comparison,
+            cancel_asr_candidate,
+            asr_candidate_progress,
+            test_translation_connection,
+            save_translation_credential,
+            preview_full_retranscription,
             confirm_retranscription,
             list_glossaries,
             list_asr_quality_signals,
@@ -2304,6 +2958,10 @@ fn main() {
             model_download_states,
             media_capabilities,
             pick_media_file,
+            pick_media_files,
+            export_learning_anki,
+            task_presets,
+            save_task_preset,
             pick_model_file,
             pick_hy_mt2_model_file,
             pick_subtitle_export_directory,
@@ -2323,6 +2981,10 @@ fn main() {
             rename_job,
             reorder_jobs,
             retry_job,
+            pause_task,
+            resume_task,
+            task_recovery_status,
+            partial_transcript,
             save_download_network_settings,
             save_asr_credential,
             save_dictionary_credential,
@@ -2334,6 +2996,8 @@ fn main() {
             save_subtitle_styles,
             select_model,
             submit_transcription,
+            translation_profiles,
+            set_task_translation,
             start_model_download,
             start_dictionary_download,
             test_network_connection,
@@ -2351,6 +3015,7 @@ fn main() {
             update_subtitle,
             restore_subtitle,
             split_subtitle,
+            edit_subtitle_block,
             merge_subtitles,
             restore_subtitle_structure,
             save_subtitle_timing
@@ -2439,6 +3104,7 @@ mod tests {
     #[test]
     fn desktop_request_keeps_vad_disabled_when_no_model_is_selected() {
         let request = SubmitTranscriptionRequest {
+            translation_provider_id: None,
             input_path: "audio.wav".to_string(),
             model_path: "whisper.bin".to_string(),
             source_language: LanguageCode::Japanese,
@@ -2463,6 +3129,7 @@ mod tests {
         let vad_model = root.join("ggml-silero.bin");
         fs::write(&vad_model, b"test model placeholder").unwrap();
         let request = SubmitTranscriptionRequest {
+            translation_provider_id: None,
             input_path: "audio.wav".to_string(),
             model_path: "whisper.bin".to_string(),
             source_language: LanguageCode::English,
@@ -2525,11 +3192,13 @@ mod tests {
             &registry,
         );
         let multipart_text = String::from_utf8(multipart.body().clone()).unwrap();
-        assert_eq!(
-            multipart.status(),
-            tauri::http::StatusCode::PARTIAL_CONTENT
+        assert_eq!(multipart.status(), tauri::http::StatusCode::PARTIAL_CONTENT);
+        assert!(
+            multipart.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .starts_with("multipart/byteranges")
         );
-        assert!(multipart.headers()["content-type"].to_str().unwrap().starts_with("multipart/byteranges"));
         assert!(multipart_text.contains("Content-Range: bytes 0-1/10\r\n\r\n01\r\n"));
         assert!(multipart_text.contains("Content-Range: bytes 8-9/10\r\n\r\n89\r\n"));
         assert!(multipart_text.ends_with("--atogaki-media-boundary--\r\n"));

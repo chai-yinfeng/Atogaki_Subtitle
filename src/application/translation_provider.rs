@@ -66,6 +66,11 @@ pub struct TranslationResponse {
 pub trait TranslationProvider: Debug + Send + Sync {
     fn status(&self) -> TranslationProviderStatus;
 
+    /// Freeze mutable provider selection for an entire multi-group execution.
+    fn execution_snapshot(&self) -> Option<Arc<dyn TranslationProvider>> {
+        None
+    }
+
     /// Translate the target segments while preserving their stable IDs.
     ///
     /// The application supplies semantic before/after context. Each adapter
@@ -115,6 +120,9 @@ impl Debug for MutableTranslationProvider {
 }
 
 impl TranslationProvider for MutableTranslationProvider {
+    fn execution_snapshot(&self) -> Option<Arc<dyn TranslationProvider>> {
+        Some(self.current())
+    }
     fn status(&self) -> TranslationProviderStatus {
         self.current().status()
     }
@@ -187,6 +195,15 @@ mod tests {
                 })
             })
         }
+    }
+
+    #[test]
+    fn execution_snapshot_survives_later_provider_replacement() {
+        let selection = MutableTranslationProvider::new(Arc::new(EchoProvider));
+        let frozen = selection.execution_snapshot().unwrap();
+        selection.replace(Arc::new(UnconfiguredTranslationProvider));
+        assert_eq!(frozen.status().id, "echo");
+        assert_eq!(selection.status().id, "none");
     }
 
     #[tokio::test]

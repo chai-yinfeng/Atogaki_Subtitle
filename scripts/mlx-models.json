@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "repo": "mlx-community/whisper-medium",
+      "revision": "29c89182c8557049c004210f96febc8b5ee97c89",
+      "tree_sha256": "cf87d03c4cabb85b7b1f0854e201797e1476649cecbb703c78ff296374314949"
+    },
+    {
+      "repo": "mlx-community/Hy-MT2-1.8B-4bit",
+      "revision": "e5c6fe56c7b3bc77fae5ae92db31f2178f1e6912",
+      "tree_sha256": "cc02d71510b55d6d683d184e98d6a7f05599d5e934ff196d6a656c5fa9aa6e07"
+    }
+  ]
+}
