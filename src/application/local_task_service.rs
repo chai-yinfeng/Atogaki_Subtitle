@@ -33,6 +33,7 @@ const DEFAULT_QUEUE_CAPACITY: usize = 8;
 #[derive(Clone)]
 pub struct LocalTaskService {
     sender: mpsc::Sender<QueuedTask>,
+    scheduler: Arc<crate::application::stage_scheduler::StageScheduler>,
     controls: Arc<Mutex<HashMap<String, TaskControl>>>,
     automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
     jobs_dir: PathBuf,
@@ -40,12 +41,14 @@ pub struct LocalTaskService {
 }
 
 struct TaskControl {
+    finished: watch::Sender<bool>,
     sender: watch::Sender<bool>,
     started: bool,
 }
 impl TaskControl {
     fn new() -> Self {
         Self {
+            finished: watch::channel(false).0,
             sender: watch::channel(false).0,
             started: false,
         }
@@ -64,6 +67,13 @@ enum QueuedTask {
 }
 
 impl LocalTaskService {
+    pub fn schedule_translation_provider(
+        &self,
+        provider: Arc<dyn crate::application::TranslationProvider>,
+    ) -> Arc<dyn crate::application::TranslationProvider> {
+        self.scheduler.translation_provider(provider)
+    }
+
     pub async fn configure_task_translation(
         &self,
         job_id: &str,
@@ -75,15 +85,22 @@ impl LocalTaskService {
             .ok_or_else(|| anyhow!("translation requires SQLite"))?;
         self.automatic.lock().await.insert(
             job_id.into(),
-            crate::application::LocalWorkspaceService::with_provider(db.clone(), provider),
+            crate::application::LocalWorkspaceService::with_provider(
+                db.clone(),
+                self.scheduler.translation_provider(provider),
+            ),
         );
         Ok(())
     }
 
-    /// Starts a single worker. One is the safe default because local Whisper
-    /// models usually compete for the same CPU, memory, or GPU resources.
+    /// Starts the desktop stage scheduler with two concurrent ASR jobs.
     pub fn start(config: AppConfig, jobs_dir: impl Into<PathBuf>) -> Result<Self> {
-        Self::with_workers(config, jobs_dir, 1, DEFAULT_QUEUE_CAPACITY)
+        Self::with_workers(
+            config,
+            jobs_dir,
+            crate::application::stage_scheduler::DEFAULT_ASR_CONCURRENCY,
+            DEFAULT_QUEUE_CAPACITY,
+        )
     }
 
     /// Opens the SQLite-backed variant used by the desktop application.
@@ -101,7 +118,13 @@ impl LocalTaskService {
         jobs_dir: impl Into<PathBuf>,
         database: LocalDatabase,
     ) -> Result<Self> {
-        Self::with_workers_and_database(config, jobs_dir, 1, DEFAULT_QUEUE_CAPACITY, Some(database))
+        Self::with_workers_and_database(
+            config,
+            jobs_dir,
+            crate::application::stage_scheduler::DEFAULT_ASR_CONCURRENCY,
+            DEFAULT_QUEUE_CAPACITY,
+            Some(database),
+        )
     }
 
     /// Starts a bounded queue with an explicit number of workers.
@@ -135,17 +158,18 @@ impl LocalTaskService {
         let controls = Arc::new(Mutex::new(HashMap::new()));
         let automatic = Arc::new(Mutex::new(HashMap::new()));
 
-        for _ in 0..workers {
-            handle.spawn(run_worker(
-                config.clone(),
-                Arc::clone(&receiver),
-                database.clone(),
-                Arc::clone(&controls),
-                Arc::clone(&automatic),
-            ));
-        }
+        let scheduler = crate::application::stage_scheduler::StageScheduler::new(workers);
+        handle.spawn(run_worker(
+            config.clone(),
+            receiver,
+            database.clone(),
+            controls.clone(),
+            automatic.clone(),
+            scheduler.clone(),
+        ));
 
         Ok(Self {
+            scheduler,
             sender,
             controls,
             automatic,
@@ -821,7 +845,9 @@ impl LocalTaskService {
             .get(job_id)
             .ok_or_else(|| anyhow!("task is not running or queued"))?;
         control.sender.send_replace(true);
-        if !control.started {
+        let mut finished = control.finished.subscribe();
+        let started = control.started;
+        if !started {
             let db = self
                 .database
                 .as_ref()
@@ -837,6 +863,10 @@ impl LocalTaskService {
             manifest.fail("已暂停（等待处理）；可继续原排队项");
             job.write_manifest(&manifest)?;
             db.sync_snapshot(&JobSnapshot::load(&job.dir)?).await?;
+        }
+        drop(controls);
+        if started && !*finished.borrow() {
+            let _ = finished.changed().await;
         }
         Ok(())
     }
@@ -983,12 +1013,8 @@ async fn run_worker(
     database: Option<LocalDatabase>,
     controls: Arc<Mutex<HashMap<String, TaskControl>>>,
     automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
+    scheduler: Arc<crate::application::stage_scheduler::StageScheduler>,
 ) {
-    let mut runner = JobRunner::new(config);
-    if let Some(database) = &database {
-        runner = runner.with_database(database.clone());
-    }
-
     loop {
         let task = {
             let mut receiver = receiver.lock().await;
@@ -999,109 +1025,158 @@ async fn run_worker(
             return;
         };
 
-        let job_dir = match &task {
-            QueuedTask::Transcribe { job_dir, .. } | QueuedTask::Process { job_dir, .. } => {
-                job_dir.clone()
+        let config = config.clone();
+        let database = database.clone();
+        let controls = controls.clone();
+        let automatic = automatic.clone();
+        let scheduler = scheduler.clone();
+        tokio::spawn(async move {
+            run_queued_task(config, task, database, controls, automatic, scheduler).await;
+        });
+    }
+}
+
+async fn run_queued_task(
+    config: AppConfig,
+    task: QueuedTask,
+    database: Option<LocalDatabase>,
+    controls: Arc<Mutex<HashMap<String, TaskControl>>>,
+    automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
+    scheduler: Arc<crate::application::stage_scheduler::StageScheduler>,
+) {
+    let mut runner = JobRunner::new(config);
+    if let Some(database) = &database {
+        runner = runner.with_database(database.clone());
+    }
+    let job_dir = match &task {
+        QueuedTask::Transcribe { job_dir, .. } | QueuedTask::Process { job_dir, .. } => {
+            job_dir.clone()
+        }
+    };
+    let id = job_dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let mut pause = {
+        let mut entries = controls.lock().await;
+        let Some(control) = entries.get_mut(&id) else {
+            return;
+        };
+        control.sender.subscribe()
+    };
+    if !job_dir.is_dir() {
+        controls.lock().await.remove(&id);
+        automatic.lock().await.remove(&id);
+        return;
+    }
+    let asr_pending = !job_dir.join("asr-published.json").is_file();
+    let mut asr_permit = loop {
+        while *pause.borrow() {
+            if pause.changed().await.is_err() {
+                return;
             }
+        }
+        let permit = if asr_pending {
+            tokio::select! {
+                permit = scheduler.acquire_asr() => Some(permit),
+                _ = pause.changed() => continue,
+            }
+        } else {
+            None
         };
-        let id = job_dir
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let mut pause = {
-            let mut entries = controls.lock().await;
-            let Some(control) = entries.get_mut(&id) else {
-                continue;
-            };
-            control.started = true;
-            control.sender.subscribe()
+        let mut entries = controls.lock().await;
+        let Some(control) = entries.get_mut(&id) else {
+            return;
         };
-        if !job_dir.is_dir() {
-            controls.lock().await.remove(&id);
-            automatic.lock().await.remove(&id);
+        if *control.sender.borrow() {
+            drop(permit);
             continue;
         }
-        let automatic_workspace = automatic.lock().await.get(&id).cloned();
-        let work = async {
-            let job = Job::open(job_dir.clone())?;
-            if !job.dir.join("asr-published.json").is_file() {
-                match task {
-                    QueuedTask::Transcribe { spec, .. } => {
-                        runner.transcribe(spec).await?;
-                    }
-                    QueuedTask::Process { spec, .. } => {
-                        runner.process(spec).await?;
-                    }
+        control.started = true;
+        break permit;
+    };
+    let automatic_workspace = automatic.lock().await.get(&id).cloned();
+    let work = async {
+        let job = Job::open(job_dir.clone())?;
+        if !job.dir.join("asr-published.json").is_file() {
+            match task {
+                QueuedTask::Transcribe { spec, .. } => {
+                    runner.transcribe(spec).await?;
                 }
-                if let Some(db) = &database {
-                    db.sync_snapshot(&JobSnapshot::load(&job_dir)?).await?;
-                    sync_initial_asr_provenance(db, &job_dir).await?;
+                QueuedTask::Process { spec, .. } => {
+                    runner.process(spec).await?;
                 }
-                crate::application::acoustic_plan::write_json(
-                    &job.dir.join("asr-published.json"),
-                    &true,
-                )?;
             }
-            if let Some(workspace) = automatic_workspace {
-                let mut manifest = job
-                    .read_manifest_if_exists()?
-                    .ok_or_else(|| anyhow!("task manifest missing"))?;
-                manifest.mark(JobStatus::Translating);
-                job.write_manifest(&manifest)?;
-                workspace.translate_pending(&id).await?;
-                manifest.mark(JobStatus::Done);
-                job.write_manifest(&manifest)?;
+            drop(asr_permit.take());
+            if let Some(db) = &database {
+                db.sync_snapshot(&JobSnapshot::load(&job_dir)?).await?;
+                sync_initial_asr_provenance(db, &job_dir).await?;
             }
-            Ok::<(), anyhow::Error>(())
-        };
-        let result=run_with_status_sync(&job_dir,database.as_ref(),async {
+            crate::application::acoustic_plan::write_json(
+                &job.dir.join("asr-published.json"),
+                &true,
+            )?;
+        }
+        if let Some(workspace) = automatic_workspace {
+            let mut manifest = job
+                .read_manifest_if_exists()?
+                .ok_or_else(|| anyhow!("task manifest missing"))?;
+            manifest.mark(JobStatus::Translating);
+            job.write_manifest(&manifest)?;
+            workspace.translate_pending(&id).await?;
+            manifest.mark(JobStatus::Done);
+            job.write_manifest(&manifest)?;
+        }
+        Ok::<(), anyhow::Error>(())
+    };
+    let result=run_with_status_sync(&job_dir,database.as_ref(),async {
             if *pause.borrow() {return Err(anyhow!("已暂停；可从检查点继续"))}
             tokio::select! { result=work => result, _=pause.changed()=>Err(anyhow!("已暂停；可从检查点继续")) }
         }).await;
-        if let Err(error) = &result {
-            if let (Some(db), Ok(job)) = (&database, Job::open(job_dir.clone())) {
-                if let Ok(runs) = db.list_asr_runs(&id).await {
-                    for record in runs
-                        .into_iter()
-                        .filter(|r| r.status == "running" || r.status == "queued")
-                    {
-                        if let Ok(artifacts) = AsrRunArtifacts::open(&job, &record.id) {
-                            if let Ok(mut run) = artifacts.read_run() {
-                                run.fail(format!("{error:#}"));
-                                let _ = artifacts.write_run(&run);
-                                let _ = db.update_asr_run(&run).await;
-                            }
+    if let Err(error) = &result {
+        if let (Some(db), Ok(job)) = (&database, Job::open(job_dir.clone())) {
+            if let Ok(runs) = db.list_asr_runs(&id).await {
+                for record in runs
+                    .into_iter()
+                    .filter(|r| r.status == "running" || r.status == "queued")
+                {
+                    if let Ok(artifacts) = AsrRunArtifacts::open(&job, &record.id) {
+                        if let Ok(mut run) = artifacts.read_run() {
+                            run.fail(format!("{error:#}"));
+                            let _ = artifacts.write_run(&run);
+                            let _ = db.update_asr_run(&run).await;
                         }
                     }
                 }
             }
-            if let Ok(job) = Job::open(job_dir.clone()) {
-                if let Ok(Some(mut manifest)) = job.read_manifest_if_exists() {
-                    manifest.fail(format!("{error:#}"));
-                    let _ = job.write_manifest(&manifest);
-                }
+        }
+        if let Ok(job) = Job::open(job_dir.clone()) {
+            if let Ok(Some(mut manifest)) = job.read_manifest_if_exists() {
+                manifest.fail(format!("{error:#}"));
+                let _ = job.write_manifest(&manifest);
             }
         }
+    }
 
-        if let Err(error) = result {
-            eprintln!("[task-service] task failed: {error:#}");
-        }
+    if let Err(error) = result {
+        eprintln!("[task-service] task failed: {error:#}");
+    }
 
-        if let Some(database) = &database {
-            match JobSnapshot::load(&job_dir) {
-                Ok(snapshot) => {
-                    if let Err(error) = database.sync_snapshot(&snapshot).await {
-                        eprintln!("[task-service] failed to sync local database: {error:#}");
-                    } else if let Err(error) = sync_initial_asr_provenance(database, &job_dir).await
-                    {
-                        eprintln!("[task-service] failed to sync ASR cue provenance: {error:#}");
-                    }
+    if let Some(database) = &database {
+        match JobSnapshot::load(&job_dir) {
+            Ok(snapshot) => {
+                if let Err(error) = database.sync_snapshot(&snapshot).await {
+                    eprintln!("[task-service] failed to sync local database: {error:#}");
+                } else if let Err(error) = sync_initial_asr_provenance(database, &job_dir).await {
+                    eprintln!("[task-service] failed to sync ASR cue provenance: {error:#}");
                 }
-                Err(error) => eprintln!("[task-service] failed to load task state: {error:#}"),
             }
+            Err(error) => eprintln!("[task-service] failed to load task state: {error:#}"),
         }
-        controls.lock().await.remove(&id);
-        automatic.lock().await.remove(&id);
+    }
+    automatic.lock().await.remove(&id);
+    if let Some(control) = controls.lock().await.remove(&id) {
+        control.finished.send_replace(true);
     }
 }
 
@@ -1321,6 +1396,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1358,6 +1434,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1420,6 +1497,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1505,6 +1583,7 @@ mod tests {
         let (sender, _receiver) = mpsc::channel(1);
         let jobs_dir = root.join("jobs");
         let service = LocalTaskService {
+            scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1552,6 +1631,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(2);
         let service = LocalTaskService {
+            scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1648,6 +1728,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1756,14 +1837,16 @@ mod tests {
         let model = root.join("model.bin");
         fs::write(&model, b"fixture").unwrap();
         let db = LocalDatabase::open(root.join("db.sqlite")).await.unwrap();
-        let service = LocalTaskService::start_with_database(
+        let service = LocalTaskService::with_workers_and_database(
             AppConfig {
                 ffmpeg,
                 whisper_cli: whisper,
                 deepl_auth_key: None,
             },
             root.join("jobs"),
-            db.clone(),
+            1,
+            8,
+            Some(db.clone()),
         )
         .unwrap();
         let snapshot = service

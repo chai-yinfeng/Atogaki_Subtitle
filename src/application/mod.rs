@@ -14,6 +14,7 @@ pub mod local_render_service;
 pub mod local_retranscription_service;
 pub mod local_task_service;
 pub mod local_workspace_service;
+pub mod stage_scheduler;
 pub mod subtitle_font_service;
 pub mod subtitle_segmentation;
 pub mod subtitle_style_service;

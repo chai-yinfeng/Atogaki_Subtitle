@@ -1098,7 +1098,9 @@ async fn task_workspace(
         .task_provider(&profile)
         .await
         .map_err(|e| format!("{e:#}"))?;
-    Ok(state.workspace_service.using_provider(provider))
+    Ok(state
+        .workspace_service
+        .using_provider(state.task_service.schedule_translation_provider(provider)))
 }
 #[tauri::command]
 async fn set_task_translation(
@@ -2832,7 +2834,7 @@ fn main() {
             tauri::async_runtime::block_on(task_service.recover_interrupted_jobs())?;
             let workspace_service = LocalWorkspaceService::with_provider(
                 database.clone(),
-                Arc::new(translation_provider),
+                task_service.schedule_translation_provider(Arc::new(translation_provider)),
             );
             let render_service = tauri::async_runtime::block_on(LocalRenderService::start(
                 config.ffmpeg.clone(),
