@@ -1,6 +1,6 @@
 # 产品方向：多语言音视频理解工作台
 
-_最后更新：2026-10-19_
+_最后更新：2026-10-20_
 
 ## 项目起点与泛化方向
 
@@ -25,7 +25,7 @@ Atogaki 是一个本地优先的个人工具，帮助中文使用者理解、定
 
 首批支持语言组合为日语、英语或韩语识别、简体中文翻译。日语到简体中文继续作为首要质量基线；语言代码、任务存储、字幕轨道和 provider 适配不得假定固定语言组合。
 
-当前日常开发与交互质量基线是 macOS Apple Silicon。Windows x86_64 已通过未签名的 `v0.1.0-alpha.10` 同步当前共享业务能力，并继续在选定稳定候选节点集中更新。韩语体验仍需由实际 Windows 用户完成真实节目闭环后才能宣称成熟；Windows 保持 CPU 识别、系统凭据、模型下载、字幕编辑导出和 LGPL 烧录边界，平台 GPU 加速另行迭代。悬浮字幕在 Windows 上仍不稳定，不建议使用，也不作为本轮共享功能同步完成的证明。
+当前日常开发与交互质量基线是 macOS Apple Silicon，稳定发行线为 v0.1.1，本轮只生成 macOS arm64 安装包。Windows x86_64 已通过未签名的 `v0.1.0-alpha.10` 同步当前共享业务能力，并继续在选定稳定候选节点集中更新。韩语体验仍需由实际 Windows 用户完成真实节目闭环后才能宣称成熟；Windows 保持 CPU 识别、系统凭据、模型下载、字幕编辑导出和 LGPL 烧录边界，平台 GPU 加速另行迭代。悬浮字幕在 Windows 上仍不稳定，不建议使用，也不作为本轮共享功能同步完成的证明。
 
 Windows 基础发行已随 `alpha.10` 同步学习区、词典、任务级字幕样式与真实渲染预览、可恢复翻译、局部重新识别、长视频播放和视频质量档；未逐项实测的 Windows 场景继续扩测。近期主线调整为改善识别与翻译质量及其工作流：先建立真实节目质量基线与分层处理数据，再完善翻译分组、ASR 审查和本地／云端 provider 组合。已有字幕、收听和学习闭环继续维护；macOS Apple Silicon 仍是日常质量基线，Windows 只在选定候选完成专项实机回归后更新。实时辅助先进行协议与录音回放实验，在离线数据边界和质量验收稳定后接入，不抢先替代离线精修。
 
@@ -70,7 +70,7 @@ Windows 基础发行通过实机闭环后，日常核心开发与交互质量继
 
 ASR 可疑信号、人工／自动审查和修复尝试进入正式数据模型。词级时间只保存实际可得精度，不能用插值或旧字幕反推值冒充精确时间。先用现有原视频及少量人工复核参考建立基线，不以大量完整标准字幕作为启动条件。
 
-本地／云端 ASR 与本地／云端翻译独立组合：Whisper 保留本地识别基线，Hy-MT2 是待验证的本地翻译路线，Gemini Transcribe 是待接入的云端识别路线。本地模型的下载和 runtime 生命周期最终由应用管理，普通用户不需要手动编译或维护 llama.cpp。Muse Voice Transcribe、SeamlessStreaming 和 SimulStreaming 作为分别研究的线索；Gemini Live Translate 仅设 E2E experimental 路线，不改变正式资料的两段式结构。
+本地／云端 ASR 与本地／云端翻译独立组合：Whisper 保留本地识别基线，Hy-MT2 已接入本地翻译（日常推荐 1.8B，7B 供资源更充足的设备选择），Gemini 支持需要确切范围授权的局部识别及独立的文本翻译。本地模型的下载和 runtime 生命周期最终由应用管理，普通用户不需要手动编译或维护 llama.cpp。Muse Voice Transcribe、SeamlessStreaming 和 SimulStreaming 作为分别研究的线索；Gemini Live Translate 仅设 E2E experimental 路线，不改变正式资料的两段式结构。
 
 实时 candidate、stable、committed 与离线精修结果分开。模型、算法、部署细节和质量结论按阶段验证，不因记录方向而视为已经实现。详见 [管线演进计划](pipeline-evolution.md) 与 [决策 0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
 

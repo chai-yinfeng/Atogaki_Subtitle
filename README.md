@@ -2,7 +2,7 @@
 
 Atogaki 是一个面向中文使用者的、本地优先的外语音视频理解与学习工作台。它通过识别、翻译、字幕校对、词典与可回看的媒体时间轴，把用户本机已有的节目整理成可以理解、复习和导出的双语资料。项目最初用于整理ヨルシカ「後書き」电台；字幕编辑、样式和烧录是建立可信资料的基础能力，但 Atogaki 目前不以替代完整视频字幕制作软件为目标。
 
-macOS Apple Silicon 是日常开发和完整体验基线，`v0.1.0` 已完成本地候选打包，等待用户检查，尚未创建公开 Release；当前公开版本仍为 [`v0.1.0-alpha.9`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.9)，采用 ad-hoc 签名且尚未公证。Windows 11 x86_64 当前版本为未签名的 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，已同步学习区、词典、字幕样式、可恢复翻译、局部重新识别、长视频播放和视频质量档；Windows 悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`v0.1.1`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.1)，采用 ad-hoc 签名且尚未公证，最低声明 macOS 12.0。本次不提供 Windows 更新；Windows 11 x86_64 继续使用未签名的 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
 ## 能做什么
 
@@ -10,25 +10,26 @@ macOS Apple Silicon 是日常开发和完整体验基线，`v0.1.0` 已完成本
 - 使用 Silero VAD 过滤静音、音乐和环境声，并通过词表提高人名与作品名的一致性。
 - 在播放器中按时间轴查看、跳转和编辑字幕；原文修改后会标记对应译文为待重译。
 - 可选使用 Hy-MT2 本地翻译、DeepL、DeepSeek 或 Gemini 将日语、英语或韩语翻译为简体中文；也可填写自定义 OpenAI-compatible Base URL 与模型。
-- 在任务内字幕编辑器中用波形调整时间、切分／合并字幕，并保留会话撤销。
+- 在任务内字幕编辑器中用波形调整时间、插入／删除、切分／合并字幕；文字自动保存，多个字幕草稿互不覆盖，并可撤销。
 - 为原文和译文设置字体、字号、颜色、描边、背景、位置与边距；FFmpeg/libass 真实预览、双语 ASS 和视频烧录共享同一套样式。
 - 在“收听”中连续阅读并按当前句跟随播放；选择词、短语、语法或整句保存到按语言分册的“学习”区域，并返回原节目时间。
 - 查询用户自行下载的 JMdict、Tomoshi、ECDICT 离线词典，或使用用户配置的 Merriam-Webster API；可选择词典释义作为学习条目的简明译义。
 - 按需导出原文、简体中文或双语 SRT/ASS，或把原文、译文、双语字幕烧录到 MP4。
 - 记录任务、失败阶段、重试来源和烧录历史；重启后会识别被中断的任务，并允许在同任务内从已提交检查点继续；无检查点的历史任务保留原重试入口。
 - 持久化工作台任务顺序；模型下载中断后可在下次启动通过 HTTP Range 安全续传。
+- 使用月夜／来信主题，或导入本机 PNG、JPEG、WebP。提取最多 12 个代表色，通过共享色盘分别设置场景底色、阅读面色与按钮强调色，预览后应用；图片不上传、不随软件分发。
 
 媒体、模型、词典包、任务、学习资料和编辑结果默认保留在设备上。只有启用云端字幕翻译时，待翻译的原文字幕及有限的相邻上下文会发送给所选 provider；Gemini 局部识别需另行确认确切音频上传范围；只有用户主动查询在线词典时，所选文本才会发送给对应词典 API。
 
-## v0.1.0 本地候选的离线工作流
+## v0.1.1 离线工作流
 
-v0.1.0 增加两分钟识别检查点、同任务暂停／继续和只读部分原文；任务可明确选择仅转录或 Hy-MT2／DeepSeek／DeepL／Gemini 翻译，完整识别后自动进入独立翻译阶段。翻译中断只补未完成或过期部分。设置、任务级后端、持久候选、全文检索、循环试听、批量导入、预设、学习来源和 Anki TSV 一并整理。
+本版包含两分钟识别检查点、同任务暂停／继续和只读部分原文；任务可明确选择仅转录或 Hy-MT2／DeepSeek／DeepL／Gemini 翻译，完整识别后自动进入独立翻译阶段。翻译中断只补未完成或过期部分。设置、任务级后端、持久候选、全文检索、循环试听、批量导入、预设、学习来源和 Anki TSV 一并整理。
 
-macOS v0.1.0 本地候选包含上述能力、字幕自动保存和本机图片主题；MLX 暂缓，桌面继续使用 C++ / Metal。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
+Hy-MT2 1.8B 是日常本地翻译推荐，7B 需要更多内存与处理时间；两者使用官方 GGUF Q4_K_M 量化权重，模型另行下载。MLX 暂缓，桌面继续使用 C++ / Metal。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
 
 ## 安装与首次配置
 
-当前提供 Apple Silicon macOS DMG 和 Windows 11 x86_64 NSIS 安装器。普通测试者应从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。
+macOS 下载 `Atogaki-v0.1.1-macos-arm64.dmg` 及相邻 `.sha256`；Windows 继续使用 alpha.10 的 NSIS 安装器。从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。
 
 macOS 版本没有 Developer ID 签名或公证。核对下载来源与 SHA-256 后，首次打开若被 Gatekeeper 阻止，可在 Finder 中右键 App 选择“打开”。Windows `alpha.10` 安装包同样没有商业代码签名，SmartScreen 可能显示“未知发布者”；不要为运行测试版而全局关闭系统安全功能。
 
@@ -88,7 +89,8 @@ macOS 正式数据目录通常为：
 ├── atogaki.sqlite
 ├── jobs/
 ├── models/
-└── dictionaries/
+├── dictionaries/
+└── themes/imported/
 ```
 
 可在开发或隔离测试时使用绝对路径覆盖：
@@ -121,11 +123,8 @@ cargo run --manifest-path src-tauri/Cargo.toml
 构建 ad-hoc 签名、未公证的 App 或 DMG：
 
 ```bash
-tauri build --bundles app
-# 仅用于验证 DMG 结构；会跳过 Finder 图标布局
-CI=true tauri build --bundles dmg
-# 最终发布 DMG；使用 tauri.conf.json 中的 Finder 布局
-tauri build --bundles dmg
+cd src-tauri
+cargo tauri build --config tauri.macos-complete.conf.json --bundles app,dmg
 ```
 
 产物位于 `src-tauri/target/release/bundle/`。详细窗口回归见 [`docs/desktop-testing.md`](docs/desktop-testing.md)，发布资产和 LGPL 源码归档见 [`docs/releasing.md`](docs/releasing.md)，下一阶段的 Windows 工作分解见 [`docs/windows-porting.md`](docs/windows-porting.md)。
