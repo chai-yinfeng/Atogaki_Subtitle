@@ -2,6 +2,8 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
+import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
+applyTheme(readTheme());
 import { matchesQuery, highlightSaved, candidateTextDiff, playheadHandleContains, timelineTimeAtX } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
 let playbackLoop: {startMs:number;endMs:number;repeat:boolean} | null = null;
@@ -1582,7 +1584,7 @@ function formatBytes(bytes: number): string {
 function syncProviderSettings(): void {
   const provider = settingsProvider?.value ?? "none";
   const cloudEnabled = provider !== "none" && provider !== "hy-mt2-local";
-  const llmEnabled = provider === "gemini" || provider === "deepseek" || provider === "openai-compatible" || provider === "hy-mt2-local";
+  const llmEnabled = provider === "gemini" || provider === "deepseek" || provider === "openai-compatible";
   const customEndpoint = provider === "openai-compatible";
   document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !cloudEnabled);
   settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !cloudEnabled);
@@ -1596,7 +1598,7 @@ function syncProviderSettings(): void {
   const clearApiKeyLabel = document.querySelector<HTMLSpanElement>("#clear-api-key-label");
   if (apiKeyLabel) apiKeyLabel.textContent = `${providerLabel} API Key`;
   if (clearApiKeyLabel) clearApiKeyLabel.textContent = `删除系统凭据库中已保存的 ${providerLabel} Key`;
-  settingsHyMt2Model?.closest(".settings-path-row")?.classList.toggle("hidden", provider !== "hy-mt2-local");
+  settingsHyMt2Model?.closest(".settings-path-row")?.classList.remove("hidden");
   renderProviderCards();
 }
 
@@ -3380,7 +3382,11 @@ async function openKaraokeJob(jobId: string): Promise<void> {
   await stopActivePlayback();
   if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
   karaokeSelectedJobId = jobId;
-  if (!reopeningSelectedJob) karaokeResumeMs = 0;
+  if (!reopeningSelectedJob) {
+    karaokeResumeMs = 0;
+    const drawer = document.querySelector<HTMLDetailsElement>(".karaoke-repair-drawer");
+    if (drawer) drawer.open = false;
+  }
   activeDetail = null;
   karaokeWaveformWindow = null;
   karaokeTextDraftSegmentId = null;
@@ -3460,12 +3466,13 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
       const review = signal.latest_decision === "confirmed_problem" ? "已确认问题"
         : signal.latest_decision === "false_positive" ? "已标记误报"
           : signal.latest_decision === "resolved" ? "已修复" : "待审查";
-      return `<article class="asr-quality-signal" data-severity="${signal.severity}">
+      const checked = signal.latest_decision !== null;
+      return `${checked ? `<details class="reviewed-signal"><summary>${range} · ${escapeHtml(signalLabels[signal.signal_kind])} · ${review}</summary>` : ""}<article class="asr-quality-signal" data-severity="${signal.severity}">
         <div>${signal.start_ms === null || signal.end_ms === null
           ? `<p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review}</span>`
           : `<button type="button" class="asr-quality-locate" data-locate-signal="${signal.id}" data-job-id="${jobId}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}" aria-label="定位 ${range}：${escapeHtml(signal.message)}"><span class="asr-quality-message">${escapeHtml(signal.message)}</span><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review} · 点击定位</span></button>`}</div>
         <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">选取此范围</button>`}</div>
-      </article>`;
+      </article>${checked ? "</details>" : ""}`;
     }).join("");
   } catch (error) {
     if (activeDetail?.job.job_id !== jobId) return;
@@ -3716,13 +3723,16 @@ function renderKaraokeTimeline(): void {
     canvas.width = width;
     canvas.height = height;
   }
+  const theme = getComputedStyle(document.documentElement);
+  const accent = theme.getPropertyValue("--accent").trim();
+  const accentSoft = theme.getPropertyValue("--accent-soft").trim();
   const context = canvas.getContext("2d");
   if (!context) return;
   context.setTransform(scale, 0, 0, scale, 0, 0);
   const cssWidth = width / scale;
   const cssHeight = height / scale;
   context.clearRect(0, 0, cssWidth, cssHeight);
-  context.fillStyle = "#f8f5ec";
+  context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--surface-soft").trim() || "#f8f5ec";
   context.fillRect(0, 0, cssWidth, cssHeight);
   const waveform = karaokeWaveformWindow;
   if (!waveform || waveform.peaks.length === 0) {
@@ -3744,7 +3754,7 @@ function renderKaraokeTimeline(): void {
   context.moveTo(0, centerY);
   context.lineTo(cssWidth, centerY);
   context.stroke();
-  context.strokeStyle = "#4f766a";
+  context.strokeStyle = accent;
   context.lineWidth = Math.max(1, cssWidth / waveform.peaks.length);
   context.beginPath();
   waveform.peaks.forEach((peak, index) => {
@@ -3778,15 +3788,15 @@ function renderKaraokeTimeline(): void {
     const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
     const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
     const active = segment.id === (karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId);
-    context.fillStyle = active ? "#2e5d52" : "#dfe9e2";
-    context.strokeStyle = active ? "#173f36" : "#8ca89c";
+    context.fillStyle = active ? accent : accentSoft;
+    context.strokeStyle = accent;
     context.lineWidth = active ? 2 : 1;
     context.beginPath();
     context.roundRect(left + 1, trackTop, Math.max(3, right - left - 2), trackHeight, 5);
     context.fill();
     context.stroke();
     const dragged = karaokeTimingDrag?.segmentIndex === segment.segment_index;
-    context.strokeStyle = dragged ? "#b34b36" : "#587c70";
+    context.strokeStyle = dragged ? "#b34b36" : accent;
     context.lineWidth = dragged ? 3 : 2;
     context.beginPath();
     context.moveTo(left + 3, trackTop + 5);
@@ -3799,7 +3809,7 @@ function renderKaraokeTimeline(): void {
       context.beginPath();
       context.rect(left + 5, trackTop + 2, Math.max(1, right - left - 10), trackHeight - 4);
       context.clip();
-      context.fillStyle = active ? "#fffaf1" : "#36564d";
+      context.fillStyle = active ? "#fffaf1" : theme.getPropertyValue("--ink").trim();
       context.font = "11px system-ui";
       context.textAlign = "left";
       context.fillText(segment.source_text, left + 7, trackTop + trackHeight / 2 + 4);
@@ -6674,6 +6684,8 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
   setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
+  const drawer = document.querySelector<HTMLDetailsElement>(".karaoke-repair-drawer");
+  if (drawer) { drawer.open = true; drawer.scrollIntoView({behavior:"smooth", block:"start"}); }
 });
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
 document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());
@@ -7025,6 +7037,16 @@ async function showPartialTranscript(jobId: string): Promise<void> {
 }
 
 // Keep the existing typed controls; reorganize their ownership without duplicate forms.
+const repairPanel = document.querySelector<HTMLElement>(".retranscription-range");
+const editorSurface = document.querySelector<HTMLElement>(".karaoke-editor");
+const reviewPanel = document.querySelector<HTMLDetailsElement>("#asr-quality-review");
+if (repairPanel && editorSurface) {
+  const drawer = document.createElement("details"); drawer.className = "karaoke-repair-drawer";
+  drawer.innerHTML = "<summary>重新识别与候选</summary>";
+  drawer.append(repairPanel); editorSurface.append(drawer);
+  if (reviewPanel) editorSurface.insertBefore(reviewPanel, drawer);
+}
+window.addEventListener("atogaki-theme-change", () => renderKaraokeTimeline());
 let providerEditor: HTMLDivElement | null = null;
 function renderProviderCards(): void {
   const selected = settingsProvider?.value ?? "none";
@@ -7046,20 +7068,17 @@ function renderProviderCards(): void {
       if (advanced) advanced.open = true;
     }
   }
-  if (selected === "none") providerEditor?.classList.add("hidden");
+  if (selected === "none" || selected === "hy-mt2-local") providerEditor?.classList.add("hidden");
   document.querySelector("[data-save-provider-key]")?.classList.toggle("hidden", selected === "none" || selected === "hy-mt2-local");
   document.querySelector("[data-delete-provider-key]")?.classList.toggle("hidden", selected === "none" || selected === "hy-mt2-local");
-  const shortcuts = document.querySelector<HTMLElement>(".provider-model-shortcuts");
-  if (shortcuts) {
-    shortcuts.innerHTML = availableModels.filter(model => model.kind === "hy-mt2").map(model => {
-      const state = modelDownloads.find(download => download.modelId === model.id);
-      const busy = state && ["queued", "downloading", "cancelling"].includes(state.status);
-      return `<button type="button" class="secondary" data-provider-model="${escapeHtml(model.id)}" ${busy ? "disabled" : ""}>${busy ? "下载中" : state?.status === "done" ? "选择" : "下载"} ${escapeHtml(model.name)} · ${escapeHtml(model.sizeLabel)}</button>`;
-    }).join("");
-    shortcuts.querySelectorAll<HTMLButtonElement>("button").forEach(button => button.onclick = () => {
-      const id = button.dataset.providerModel!;
-      void (modelDownloads.find(download => download.modelId === id)?.status === "done" ? selectModel(id) : startModelDownload(id));
-    });
+  const selector = document.querySelector<HTMLSelectElement>("#local-translation-model-choice");
+  if (selector) {
+    const installed = modelDownloads.filter(state => state.status === "done" && state.path && availableModels.some(m => m.id === state.modelId && m.kind === "hy-mt2"));
+    const current = settingsHyMt2Model?.value ?? "";
+    const entries = installed.map(state => ({path:state.path!, name:availableModels.find(m=>m.id===state.modelId)!.name.replace(/（本地翻译候选）/g, "")}));
+    if (current && !entries.some(e=>e.path===current)) entries.unshift({path:current,name:current.split(/[\\/]/).pop() ?? "当前模型"});
+    selector.innerHTML = '<option value="">选择已安装模型</option>'+entries.map(e=>`<option value="${escapeHtml(e.path)}">${escapeHtml(e.name)}</option>`).join("");
+    selector.value = current;
   }
 }
 
@@ -7090,7 +7109,8 @@ function organizeTranslationCards(section: HTMLElement): void {
   const advanced = document.createElement("details"); advanced.innerHTML = "<summary>高级：自定义兼容服务</summary>";
   for (const [id, title, description] of entries) {
     const card = document.createElement("article"); card.className = "provider-card"; card.dataset.providerCard = id;
-    card.innerHTML = `<h4>${escapeHtml(title)}</h4><p>${escapeHtml(description)}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<div class="provider-model-shortcuts"></div>' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div>`;
+    card.innerHTML = `<h4>${escapeHtml(title)}</h4><p>${escapeHtml(description)}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<label class="local-model-choice">翻译模型<select id="local-translation-model-choice"></select></label><p>模型详情与下载位于“模型与存储”。</p>' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div>`;
+    if (id === "hy-mt2-local") card.querySelector("[data-test-provider]")?.classList.add("hidden");
     card.querySelector<HTMLButtonElement>("[data-configure-provider]")!.onclick = () => {
       if (!settingsProvider) return;
       if (settingsProvider.value !== id) { settingsProvider.value = id; settingsProvider.dispatchEvent(new Event("change", { bubbles: true })); }
@@ -7115,6 +7135,9 @@ function organizeTranslationCards(section: HTMLElement): void {
     if (id === "openai-compatible") advanced.append(card); else cards.append(card);
   }
   cards.append(advanced); section.append(cards);
+  document.querySelector<HTMLSelectElement>("#local-translation-model-choice")?.addEventListener("change", event => {
+    if (settingsHyMt2Model) { settingsHyMt2Model.value = (event.target as HTMLSelectElement).value; settingsHyMt2Model.dispatchEvent(new Event("input", {bubbles:true})); }
+  });
   const actions = document.createElement("div"); actions.className = "offline-tools";
   actions.innerHTML = '<button type="button" data-save-provider-key>保存此后端凭据</button><button type="button" class="secondary" data-delete-provider-key>删除此后端凭据</button>';
   providerEditor.append(actions);
@@ -7157,7 +7180,12 @@ function organizeSettings(): void {
     if (item) downloads.append(item);
   }
   const localModel = document.querySelector("#settings-hy-mt2-model")?.closest(".settings-path-row");
-  if (localModel) translation.prepend(localModel);
+  if (localModel) downloads.append(localModel);
+  const appearance = document.createElement("section"); appearance.className = "settings-section appearance-settings";
+  appearance.innerHTML = '<h3>外观</h3><p>选择页面主题，即时生效并自动保存。字幕导出样式保持独立。</p><div class="theme-options"><button type="button" data-app-theme="moonlight"><span class="theme-swatch moonlight-swatch"></span><strong>月夜</strong><span>蓝绿夜色与冷白纸面</span></button><button type="button" data-app-theme="letter"><span class="theme-swatch letter-swatch"></span><strong>来信</strong><span>暖纸、墨字与书信细节</span></button></div>';
+  const syncTheme = () => appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.appTheme === document.documentElement.dataset.theme)));
+  appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.onclick = () => { applyTheme(button.dataset.appTheme as "moonlight"|"letter"); syncTheme(); });
+  syncTheme();
   models.querySelector("strong")!.textContent = "本地转录";
   const optionalAsr = document.createElement("details"); optionalAsr.className="onboarding-optional";
   optionalAsr.innerHTML='<summary>可选：Gemini 局部修复</summary>';
@@ -7170,6 +7198,7 @@ function organizeSettings(): void {
   nav.className = "settings-tabs";
   nav.setAttribute("aria-label", "设置分区");
   const pages = [
+    ["appearance", "外观", appearance],
     ["transcription", "转录", models],
     ["translation", "翻译", translation],
     ["models", "模型与存储", downloads],
@@ -7179,7 +7208,7 @@ function organizeSettings(): void {
   const footer = form.querySelector(".settings-footer");
   pages.forEach(([key, label, page]) => {
     page.dataset.settingsPage = key;
-    if (page === downloads) form.insertBefore(page, footer);
+    if (page === downloads || page === appearance) form.insertBefore(page, footer);
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary";
@@ -7334,7 +7363,7 @@ function addOfflineTools(): void {
   candidateTools.className = "offline-tools";
   candidateTools.innerHTML =
     '<button type="button" class="secondary" data-full-candidate>生成全片本地候选</button><button type="button" class="secondary" data-candidate-history>历史候选</button><button type="button" class="secondary" data-cancel-candidate>取消候选运行</button><div class="candidate-history"></div>';
-  asrQualitySignalsHost?.after(candidateTools);
+  repairPanel?.append(candidateTools);
   candidateTools.querySelector<HTMLButtonElement>("[data-full-candidate]")!.onclick = async () => {
     if (!activeDetail || retranscriptionBusy) return;
     activeRepairSignalId=null;
@@ -7366,17 +7395,24 @@ function addOfflineTools(): void {
     const jobId = activeDetail.job.job_id;
     try {
       const runs = await invoke<
-        Array<{ id: string; provider_name: string; status: string; model_identity: string; reopenable?: boolean }>
+        Array<CandidateLabelInput & { status:string; reopenable?:boolean; released?:boolean; cleanable?:boolean; adopted?:boolean }>
       >("list_asr_runs", { jobId });
       const host = candidateTools.querySelector(".candidate-history")!;
       host.innerHTML =
         runs
-          .filter((r) => r.status === "succeeded" && r.reopenable !== false)
-          .map(
-            (r) =>
-              `<button type="button" class="secondary" data-reopen-run="${escapeHtml(r.id)}">${escapeHtml(r.provider_name)} · ${escapeHtml(r.model_identity)}</button>`,
-          )
+          .map((r) => `<article class="candidate-history-row"><div><strong>${escapeHtml(candidateLabel(r))}</strong><span>${r.released ? "产物已清理" : r.adopted ? "已采用，保留来源" : r.is_candidate === false ? "原始识别，保留来源" : ({succeeded:"可对照",failed:"运行失败",running:"识别中",queued:"排队中"} as Record<string,string>)[r.status] ?? r.status}</span></div>${r.status === "succeeded" && r.reopenable ? `<button type="button" class="secondary" data-reopen-run="${escapeHtml(r.id)}">对照</button>` : ""}${r.cleanable ? `<button type="button" class="secondary" data-release-run="${escapeHtml(r.id)}">${r.released ? "再次清理残留" : "清理产物"}</button>` : ""}</article>`)
           .join("") || "还没有成功候选。";
+      host.querySelectorAll<HTMLButtonElement>("[data-release-run]").forEach(button => button.onclick = async () => {
+        const runId = button.dataset.releaseRun!;
+        if (!await confirmAction({title:"清理这个未采用候选？", message:"释放候选的音频缓存和识别产物，保留运行摘要。清理后无法再打开该候选；当前字幕不变。", confirmLabel:"清理产物", danger:true})) return;
+        button.disabled = true;
+        try {
+          const bytes = await invoke<number>("release_asr_candidate", {jobId, runId});
+          if (activeRetranscriptionPreview?.preview_id === runId) { activeRetranscriptionPreview = null; retranscriptionDialog?.close(); }
+          setRetranscriptionMessage(`已清理候选产物，本次释放 ${formatBytes(bytes)}。`);
+          candidateTools.querySelector<HTMLButtonElement>("[data-candidate-history]")?.click();
+        } catch(error) { setRetranscriptionMessage(String(error), true); button.disabled = false; }
+      });
       host.querySelectorAll<HTMLButtonElement>("[data-reopen-run]").forEach(
         (button) =>
           (button.onclick = async () => {

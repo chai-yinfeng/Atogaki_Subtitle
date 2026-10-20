@@ -320,6 +320,14 @@ impl LocalTaskService {
         database.list_job_translation_stats().await
     }
 
+    pub async fn asr_run_is_protected(&self, run_id: &str) -> Result<bool> {
+        self.database
+            .as_ref()
+            .ok_or_else(|| anyhow!("ASR history requires SQLite"))?
+            .asr_run_is_protected(run_id)
+            .await
+    }
+
     pub async fn list_persisted_asr_runs(
         &self,
         job_id: &str,

@@ -157,3 +157,11 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 主题仅补充官方参考与架构建议，没有实现主题配置或把官方素材放进 App。
 
 本次辅助审查交互已更新到 /Applications/Atogaki.app 并启动，原有 13 个任务与翻译选择保留；四个 sidecar、签名与主程序一致性检查通过。当前库一致性备份在 local-artifacts/install-backups/20261019-review/，前版本在 /Applications/.Atogaki.previous.20261019-review。没有改动主题、字幕内容、审查结论或任务执行状态。
+
+## 2026-10-19：整体主题、编辑层级与候选清理
+
+- 核心 `cargo test --lib`：126 通过、4 忽略；壳层 `cargo test --manifest-path src-tauri/Cargo.toml`：30 通过、4 忽略。候选回归覆盖已采用 marker 丢失仍受 ledger 保护、原始结果重开后仍不可清理、互斥锁等待、共享缓存最后引用释放、重复清理、已清理结果禁止重开／采用、越界指针拒绝及字幕内容不变。
+- 前端 `npm test`：7 通过；`npm run build` 类型检查和生产构建通过；`cargo fmt --check`、`git diff --check` 通过。完整 macOS release app 构建、四个 sidecar 和 ad-hoc 签名校验通过。
+- 隔离目录 `/private/tmp/atogaki-theme-window` 真实窗口：月夜／来信即时切换，重启保留来信；高级编辑默认只展示时间轴和当前字幕，复核及候选折叠；人工注入的测试提示定位到 10 秒，标记误报后摘要折叠且待复核数从 1 变 0；候选显示原始／全片、模型简称、时间及短 ID，采用记录无清理按钮；本地配置只展示已安装模型选择，模型列表包含 1.8B／7B。未进行真实数据清理，清理的破坏性操作由临时 artifact 自动化测试覆盖。
+- 已安装至 `/Applications/Atogaki.app`，保留 `/Applications/.Atogaki.previous.20261019-themes`；安装前 SQLite 一致性备份在忽略目录 `local-artifacts/install-backups/20261019-themes/atogaki-before-install.sqlite`，integrity_check=ok。更新后真实窗口仍显示 13 个正式任务。
+- 原创 SVG 场景只用于主题，不包含官网素材；未读取／改写 Key，未发起云端请求，未改正式字幕或清理用户候选。Windows 原生视觉和完整接缝人工听审仍待后续验收。

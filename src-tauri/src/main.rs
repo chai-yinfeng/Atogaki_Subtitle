@@ -713,6 +713,17 @@ async fn list_asr_runs(
         .list_persisted_asr_runs(&job_id)
         .await
         .map_err(|e| e.to_string())?;
+    let mut protected = std::collections::HashSet::new();
+    for run in &runs {
+        if state
+            .task_service
+            .asr_run_is_protected(&run.id)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            protected.insert(run.id.clone());
+        }
+    }
     runs.into_iter()
         .map(|run| {
             let artifacts = atogaki_subtitle::infrastructure::asr_run_store::AsrRunArtifacts::open(
@@ -723,12 +734,31 @@ async fn list_asr_runs(
                 .as_ref()
                 .and_then(|a| std::fs::read(a.dir.join("checkpoints.json")).ok())
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-            let reopenable = artifacts.as_ref().is_some_and(|a| {
-                a.dir.join("preview.json").is_file() || a.candidate_cues_json.is_file()
+            let released = artifacts
+                .as_ref()
+                .is_some_and(|a| a.dir.join("released.json").exists());
+            let adopted = protected.contains(&run.id)
+                || artifacts
+                    .as_ref()
+                    .is_some_and(|a| a.dir.join("adopted.json").exists());
+            let candidate = artifacts.as_ref().is_some_and(|a| {
+                a.dir.join("candidate.json").exists()
+                    || a.dir.join("progress.json").exists()
+                    || released
             });
+            let reopenable = !released
+                && artifacts.as_ref().is_some_and(|a| {
+                    a.dir.join("preview.json").is_file() || a.candidate_cues_json.is_file()
+                });
+            let cleanable =
+                candidate && !adopted && !matches!(run.status.as_str(), "running" | "queued");
             let mut output = serde_json::to_value(run).map_err(|e| e.to_string())?;
             output["checkpoint_progress"] = progress.unwrap_or(serde_json::Value::Null);
             output["reopenable"] = reopenable.into();
+            output["released"] = released.into();
+            output["adopted"] = adopted.into();
+            output["is_candidate"] = candidate.into();
+            output["cleanable"] = cleanable.into();
             Ok(output)
         })
         .collect()
@@ -1630,6 +1660,19 @@ async fn refresh_asr_comparison(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+#[tauri::command]
+async fn release_asr_candidate(
+    state: State<'_, DesktopState>,
+    job_id: String,
+    run_id: String,
+) -> Result<u64, String> {
+    state
+        .retranscription_service
+        .release_candidate(&job_id, &run_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 async fn reopen_asr_candidate(
     state: State<'_, DesktopState>,
@@ -2766,6 +2809,7 @@ fn main() {
             get_waveform_window,
             preview_retranscription,
             reopen_asr_candidate,
+            release_asr_candidate,
             refresh_asr_comparison,
             cancel_asr_candidate,
             asr_candidate_progress,

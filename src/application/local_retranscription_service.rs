@@ -45,6 +45,7 @@ pub struct LocalRetranscriptionService {
     asr_provider: Arc<dyn AsrProvider>,
     database: LocalDatabase,
     recognition_lock: Arc<Mutex<()>>,
+    artifact_lock: Arc<Mutex<()>>,
     cancellations: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
 }
 
@@ -55,6 +56,7 @@ impl LocalRetranscriptionService {
             asr_provider: Arc::new(WhisperAsrProvider::new(whisper_cli)),
             database,
             recognition_lock: Arc::new(Mutex::new(())),
+            artifact_lock: Arc::new(Mutex::new(())),
             cancellations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -182,6 +184,10 @@ impl LocalRetranscriptionService {
             config_snapshot,
         );
         let artifacts = AsrRunArtifacts::create(&job, &run)?;
+        crate::application::acoustic_plan::write_json(
+            &artifacts.dir.join("candidate.json"),
+            &true,
+        )?;
         self.database.record_asr_run(&run, &artifacts.dir).await?;
 
         let run_id = run.id.clone();
@@ -379,7 +385,12 @@ impl LocalRetranscriptionService {
         Ok(preview)
     }
 
-    pub async fn reopen(
+    pub async fn reopen(&self, job_id: &str, run_id: &str) -> Result<LocalRetranscriptionPreview> {
+        let _guard = self.artifact_lock.lock().await;
+        self.read_preview(job_id, run_id).await
+    }
+
+    async fn read_preview(
         &self,
         job_id: &str,
         preview_id: &str,
@@ -391,6 +402,9 @@ impl LocalRetranscriptionService {
             .ok_or_else(|| anyhow!("task not found"))?;
         let job = Job::open(record.storage_dir.into())?;
         let artifacts = AsrRunArtifacts::open(&job, preview_id)?;
+        if artifacts.dir.join("released.json").exists() {
+            return Err(anyhow!("候选产物已清理，无法重新打开"));
+        }
         let preview: LocalRetranscriptionPreview = if artifacts.dir.join("preview.json").is_file() {
             serde_json::from_slice(&fs::read(artifacts.dir.join("preview.json"))?)?
         } else {
@@ -473,7 +487,8 @@ impl LocalRetranscriptionService {
         job_id: &str,
         run_id: &str,
     ) -> Result<LocalRetranscriptionPreview> {
-        let mut preview = self.reopen(job_id, run_id).await?;
+        let _guard = self.artifact_lock.lock().await;
+        let mut preview = self.read_preview(job_id, run_id).await?;
         let (revision, segments) = self.database.subtitle_workspace_snapshot(job_id).await?;
         preview.workspace_revision = Some(revision);
         preview.original_segments = segments
@@ -497,6 +512,93 @@ impl LocalRetranscriptionService {
             &preview,
         )?;
         Ok(preview)
+    }
+
+    /// Keep audit metadata; release only an unused candidate's owned payloads.
+    pub async fn release_candidate(&self, job_id: &str, run_id: &str) -> Result<u64> {
+        let _recognition = self
+            .recognition_lock
+            .try_lock()
+            .map_err(|_| anyhow!("候选正在处理，请稍后清理"))?;
+        let _guard = self.artifact_lock.lock().await;
+        let record = self
+            .database
+            .get_job(job_id)
+            .await?
+            .ok_or_else(|| anyhow!("task not found"))?;
+        let job = Job::open(record.storage_dir.into())?;
+        let runs = self.database.list_asr_runs(job_id).await?;
+        if runs
+            .iter()
+            .any(|r| matches!(r.status.as_str(), "running" | "queued"))
+        {
+            return Err(anyhow!("当前任务仍有候选正在运行"));
+        }
+        let run = runs
+            .iter()
+            .find(|r| r.id == run_id)
+            .ok_or_else(|| anyhow!("candidate not found in this task"))?;
+        let artifacts = AsrRunArtifacts::open(&job, &run.id)?;
+        if !artifacts.dir.join("candidate.json").exists()
+            && !artifacts.dir.join("progress.json").exists()
+            && !artifacts.dir.join("released.json").exists()
+        {
+            return Err(anyhow!("原始识别结果不能作为未采用候选清理"));
+        }
+        if self.database.asr_run_is_protected(run_id).await?
+            || artifacts.dir.join("adopted.json").exists()
+        {
+            return Err(anyhow!("该候选已被采用，需保留来源证据"));
+        }
+        let allowed = job.asr_runs_dir.canonicalize()?;
+        let directory = artifacts.dir.canonicalize()?;
+        if directory.parent() != Some(allowed.as_path())
+            || fs::symlink_metadata(&artifacts.dir)?
+                .file_type()
+                .is_symlink()
+        {
+            return Err(anyhow!("candidate artifact path is not owned by this task"));
+        }
+        // A durable tombstone blocks adoption before any payload is removed. Retrying is safe.
+        crate::application::acoustic_plan::write_json(&artifacts.dir.join("released.json"), &true)?;
+        let mut freed = 0;
+        if let Ok(bytes) = fs::read(artifacts.dir.join("checkpoint-root.json")) {
+            let root: PathBuf = serde_json::from_slice(&bytes)?;
+            if root.exists() {
+                let root = root.canonicalize()?;
+                let cache_root = job.dir.join("candidate-checkpoints").canonicalize()?;
+                if root.parent() != Some(cache_root.as_path()) {
+                    return Err(anyhow!("checkpoint path is outside this task"));
+                }
+                let shared = runs.iter().filter(|r| r.id != run_id).any(|other| {
+                    let Ok(a) = AsrRunArtifacts::open(&job, &other.id) else {
+                        return true;
+                    };
+                    if a.dir.join("released.json").exists() {
+                        return false;
+                    }
+                    fs::read(a.dir.join("checkpoint-root.json"))
+                        .ok()
+                        .and_then(|v| serde_json::from_slice::<PathBuf>(&v).ok())
+                        .and_then(|p| p.canonicalize().ok())
+                        .is_some_and(|p| p == root)
+                });
+                if !shared {
+                    freed += remove_owned_payload(&root)?;
+                }
+            }
+        }
+        for entry in fs::read_dir(&artifacts.dir)? {
+            let entry = entry?;
+            if matches!(
+                entry.file_name().to_str(),
+                Some("run.json" | "released.json" | "checkpoint-root.json")
+            ) {
+                continue;
+            }
+            freed += remove_owned_payload(&entry.path())?;
+        }
+        Ok(freed)
     }
 
     pub async fn preview_full(&self, job_id: &str) -> Result<LocalRetranscriptionPreview> {
@@ -523,6 +625,7 @@ impl LocalRetranscriptionService {
         preview_id: &str,
         comparison_id: Option<&str>,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        let _guard = self.artifact_lock.lock().await;
         let preview = if let Some(comparison) = comparison_id {
             uuid::Uuid::parse_str(comparison).context("invalid comparison id")?;
             let record = self
@@ -532,6 +635,9 @@ impl LocalRetranscriptionService {
                 .ok_or_else(|| anyhow!("task not found"))?;
             let job = Job::open(record.storage_dir.into())?;
             let artifacts = AsrRunArtifacts::open(&job, preview_id)?;
+            if artifacts.dir.join("released.json").exists() {
+                return Err(anyhow!("候选已清理"));
+            }
             let preview: LocalRetranscriptionPreview = serde_json::from_slice(&fs::read(
                 artifacts
                     .dir
@@ -545,7 +651,7 @@ impl LocalRetranscriptionService {
             }
             preview
         } else {
-            self.reopen(job_id, preview_id).await?
+            self.read_preview(job_id, preview_id).await?
         };
         if preview.job_id != job_id {
             return Err(anyhow!(
@@ -588,6 +694,21 @@ struct TempDirectory(PathBuf);
 impl Drop for TempDirectory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn remove_owned_payload(path: &std::path::Path) -> Result<u64> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        let mut bytes = 0;
+        for entry in fs::read_dir(path)? {
+            bytes += remove_owned_payload(&entry?.path())?;
+        }
+        fs::remove_dir(path)?;
+        Ok(bytes)
+    } else {
+        fs::remove_file(path)?;
+        Ok(metadata.len())
     }
 }
 
@@ -739,6 +860,105 @@ mod tests {
                 .await
                 .is_err()
         );
+        // The durable ledger protects adopted evidence even if its optional marker is lost.
+        let adopted_artifacts = AsrRunArtifacts::open(&job, &preview.preview_id).unwrap();
+        fs::remove_file(adopted_artifacts.dir.join("adopted.json")).unwrap();
+        assert!(db.asr_run_is_protected(&preview.preview_id).await.unwrap());
+        assert!(
+            reopened
+                .release_candidate(&job.id(), &preview.preview_id)
+                .await
+                .is_err()
+        );
+        let before_cleanup = db.list_segments(&job.id()).await.unwrap();
+        let unused = reopened.preview(&job.id(), 0, 1000).await.unwrap();
+        let guard = reopened.artifact_lock.lock().await;
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                reopened.release_candidate(&job.id(), &unused.preview_id)
+            )
+            .await
+            .is_err()
+        );
+        drop(guard);
+        let comparison = reopened
+            .refresh_comparison(&job.id(), &unused.preview_id)
+            .await
+            .unwrap();
+        let unused2 = reopened.preview(&job.id(), 0, 1000).await.unwrap();
+        let a = AsrRunArtifacts::open(&job, &unused.preview_id).unwrap();
+        let b = AsrRunArtifacts::open(&job, &unused2.preview_id).unwrap();
+        let cache = job.dir.join("candidate-checkpoints").join("shared-fixture");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("audio.wav"), vec![0; 1024]).unwrap();
+        for artifact in [&a, &b] {
+            crate::application::acoustic_plan::write_json(
+                &artifact.dir.join("checkpoint-root.json"),
+                &cache,
+            )
+            .unwrap();
+        }
+        assert!(
+            reopened
+                .release_candidate(&job.id(), &unused.preview_id)
+                .await
+                .unwrap()
+                > 0
+        );
+        assert!(
+            cache.exists(),
+            "another candidate still owns this shared cache"
+        );
+        assert!(a.run_json.exists() && a.dir.join("released.json").exists());
+        assert!(
+            reopened
+                .reopen(&job.id(), &unused.preview_id)
+                .await
+                .is_err()
+        );
+        assert!(
+            reopened
+                .confirm_comparison(
+                    &job.id(),
+                    &unused.preview_id,
+                    comparison.comparison_id.as_deref()
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            reopened
+                .release_candidate(&job.id(), &unused.preview_id)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(
+            reopened
+                .release_candidate(&job.id(), &unused2.preview_id)
+                .await
+                .unwrap()
+                >= 1024
+        );
+        assert!(!cache.exists());
+        assert_eq!(db.list_segments(&job.id()).await.unwrap(), before_cleanup);
+        let outside = root.join("outside-evidence");
+        fs::write(&outside, b"keep").unwrap();
+        let unsafe_candidate = reopened.preview(&job.id(), 0, 1000).await.unwrap();
+        let unsafe_artifact = AsrRunArtifacts::open(&job, &unsafe_candidate.preview_id).unwrap();
+        crate::application::acoustic_plan::write_json(
+            &unsafe_artifact.dir.join("checkpoint-root.json"),
+            &outside,
+        )
+        .unwrap();
+        assert!(
+            reopened
+                .release_candidate(&job.id(), &unsafe_candidate.preview_id)
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(&outside).unwrap(), b"keep");
         // Full-run scope includes trailing silence, not merely the last cue.
         let mut wav = Vec::new();
         wav.extend_from_slice(b"RIFF");
@@ -769,6 +989,13 @@ mod tests {
         )
         .unwrap();
         let full_preview = reopened.reopen(&job.id(), &full.id).await.unwrap();
+        assert!(
+            reopened
+                .release_candidate(&job.id(), &full.id)
+                .await
+                .is_err(),
+            "reopening original ASR must not make it disposable"
+        );
         assert_eq!(full_preview.end_ms, 2000);
         assert_eq!(
             full_preview.timing_granularities,

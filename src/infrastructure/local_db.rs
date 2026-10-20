@@ -754,6 +754,17 @@ impl LocalDatabase {
         Ok(())
     }
 
+    pub async fn asr_run_is_protected(&self, run_id: &str) -> Result<bool> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT (EXISTS(SELECT 1 FROM local_asr_candidate_adoptions WHERE run_id = ?) OR EXISTS(SELECT 1 FROM local_subtitle_provenance WHERE source_run_id = ?))",
+        )
+        .bind(run_id)
+        .bind(run_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count > 0)
+    }
+
     pub async fn list_asr_runs(&self, job_id: &str) -> Result<Vec<LocalAsrRunRecord>> {
         sqlx::query_as(
             "SELECT id, job_id, parent_run_id, run_kind, provider_id, provider_name,
@@ -2847,6 +2858,10 @@ impl LocalDatabase {
         persist_structure_segments(&mut tx, job_id, &mut updated).await?;
         if let Some((run_id, candidates)) = asr_provenance {
             assign_asr_cue_provenance_in_transaction(&mut tx, job_id, run_id, candidates).await?;
+            sqlx::query("INSERT OR IGNORE INTO local_asr_candidate_adoptions(run_id) VALUES (?)")
+                .bind(run_id)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit()
             .await
