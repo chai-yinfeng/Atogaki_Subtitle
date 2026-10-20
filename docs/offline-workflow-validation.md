@@ -212,3 +212,5 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - 原 v0.1.0 tag、DMG 及 SHA-256 保持原样。继续不创建 Release、不上传安装包；本机 App 更新单独记录。近似色名只辅助辨识，不是专业色彩校准或原图风格复现。
 
 - 同轮用户反馈滚动内容穿过设置底栏：改为固定标题／说明／导航与底栏，仅中间 `.settings-content` 滚动裁剪；不影响其他复用 `.settings-dialog` 的只读原文弹窗。隔离窗口实际滚动确认上下边界不再透出内容，切换翻译分区回到顶部，展开原生下拉菜单确认 Gemini（LLM API）；未选择后端、保存凭据或调用服务。
+
+- 已安装并打开 `/Applications/Atogaki.app` 外观页；原有图片、12 色与显式选色保留，13 个任务及全部字幕表与安装前备份完全一致。旧 App 为 `/Applications/.Atogaki.previous.20261020-palette`，一致性备份位于 `local-artifacts/install-backups/20261020-palette/`（integrity_check=ok）。本轮未生成 DMG，原 v0.1.0 两个归档 SHA-256 再核对通过。
