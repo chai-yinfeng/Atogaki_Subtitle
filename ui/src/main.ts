@@ -7162,7 +7162,7 @@ function renderProviderCards(): void {
   if (selector) {
     const installed = modelDownloads.filter(state => state.status === "done" && state.path && availableModels.some(m => m.id === state.modelId && m.kind === "hy-mt2"));
     const current = settingsHyMt2Model?.value ?? "";
-    const entries = installed.map(state => ({path:state.path!, name:availableModels.find(m=>m.id===state.modelId)!.name.replace(/（本地翻译候选）/g, "")}));
+    const entries = installed.map(state => ({path:state.path!, name:availableModels.find(m=>m.id===state.modelId)!.name}));
     if (current && !entries.some(e=>e.path===current)) entries.unshift({path:current,name:current.split(/[\\/]/).pop() ?? "当前模型"});
     selector.innerHTML = '<option value="">选择已安装模型</option>'+entries.map(e=>`<option value="${escapeHtml(e.path)}">${escapeHtml(e.name)}</option>`).join("");
     selector.value = current;
