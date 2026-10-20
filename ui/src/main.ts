@@ -750,7 +750,7 @@ app.innerHTML = `
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
             <div class="karaoke-text-editor"><span id="karaoke-segment-time">当前没有字幕</span><label>原文<textarea id="karaoke-current-source" rows="3" placeholder="当前时间没有原文字幕" disabled></textarea></label><label>译文<textarea id="karaoke-current-translation" rows="3" placeholder="尚无译文" disabled></textarea></label></div>
-            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤销上次文字保存</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会自动保存。</p></div>
+            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤销上次文字保存</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><button id="karaoke-insert-block" type="button" class="secondary">插入字幕块</button><button id="karaoke-delete-block" type="button" class="secondary">删除当前块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会自动保存。</p></div>
           </section>
         </section>
       </div>
@@ -3437,6 +3437,7 @@ async function saveAsrReviewDecision(
   }
 }
 
+let showProcessedSignals = false;
 async function loadAsrQualitySignals(jobId: string): Promise<void> {
   if (!asrQualitySignalsHost) return;
   const disclosure = document.querySelector<HTMLDetailsElement>("#asr-quality-review");
@@ -3444,22 +3445,26 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
   if (disclosure && disclosure.dataset.jobId !== jobId) {
     disclosure.open = false;
     disclosure.dataset.jobId = jobId;
+    showProcessedSignals = false;
     if (summary) summary.textContent = "转录待复核提示 · 正在读取";
     asrQualitySignalsHost.innerHTML = "";
   }
   try {
-    const signals = await invoke<AsrQualitySignal[]>("list_asr_quality_signals", { jobId });
+    const allSignals = await invoke<AsrQualitySignal[]>("list_asr_quality_signals", { jobId });
+    const processedCount = allSignals.filter(s => s.latest_decision === "false_positive" || s.latest_decision === "resolved").length;
+    const signals = allSignals.filter(s => showProcessedSignals || (s.latest_decision !== "false_positive" && s.latest_decision !== "resolved"));
     if (activeDetail?.job.job_id !== jobId) return;
-    if (summary) summary.textContent = `转录待复核提示 · ${signals.length} 项，${signals.filter(signal => signal.latest_decision === null).length} 项待复核`;
+    if (summary) summary.textContent = `转录待复核提示 · ${signals.length} 项，${signals.filter(signal => signal.latest_decision === null).length} 项待复核${!showProcessedSignals && processedCount ? ` · 已隐藏 ${processedCount} 项` : ""}`;
+    const filterBar = `<label class="asr-review-filter"><input type="checkbox" data-show-processed ${showProcessedSignals ? "checked" : ""}>显示已处理（${processedCount}）</label>`;
     if (signals.length === 0) {
-      asrQualitySignalsHost.innerHTML = '<p class="media-message">未发现自动提示，仍可根据试听结果手动选择重新识别的范围。</p>';
+      asrQualitySignalsHost.innerHTML = filterBar + `<p class="media-message">${processedCount ? '误报和已解决提示已隐藏。可勾选“显示已处理”找回。' : '未发现自动提示，仍可根据试听结果手动选择重新识别的范围。'}</p>`;
       return;
     }
     const signalLabels: Record<AsrQualitySignal["signal_kind"], string> = {
       boundary_repetition: "边界文字重复", repeated_loop: "相邻字幕重复",
       abnormal_speech_rate: "文字与时长不匹配", speech_during_silence: "静音区出现文字", manual_concern: "接缝待复核",
     };
-    asrQualitySignalsHost.innerHTML = '<p class="media-message">以下提示由转录结果自动检查产生，不是重跑或翻译历史，也不代表一定识别错误。点击提示可定位时间轴；试听后可确认问题或标记误报。选取范围后，再点击“识别并预览”生成候选。</p>' + signals.map((signal) => {
+    asrQualitySignalsHost.innerHTML = filterBar + '<p class="media-message">以下提示由转录结果自动检查产生，不是重跑或翻译历史，也不代表一定识别错误。点击提示可定位时间轴；试听后可确认问题或标记误报。选取范围后，再点击“识别并预览”生成候选。</p>' + signals.map((signal) => {
       const range = signal.start_ms === null || signal.end_ms === null
         ? "未指定范围"
         : `${formatPreciseTime(signal.start_ms)} → ${formatPreciseTime(signal.end_ms)}`;
@@ -3471,7 +3476,7 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
         <div>${signal.start_ms === null || signal.end_ms === null
           ? `<p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review}</span>`
           : `<button type="button" class="asr-quality-locate" data-locate-signal="${signal.id}" data-job-id="${jobId}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}" aria-label="定位 ${range}：${escapeHtml(signal.message)}"><span class="asr-quality-message">${escapeHtml(signal.message)}</span><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review} · 点击定位</span></button>`}</div>
-        <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">选取此范围</button>`}</div>
+        <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button><button type="button" class="secondary" data-asr-review="resolved" data-signal-id="${signal.id}">已解决</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">选取此范围</button>`}</div>
       </article>${checked ? "</details>" : ""}`;
     }).join("");
   } catch (error) {
@@ -4135,6 +4140,64 @@ function seekKaraokeBy(milliseconds: number): void {
   updateKaraokePosition(activeMedia.currentTime * 1_000);
 }
 
+async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSegment | null): Promise<void> {
+  if (!activeDetail || workspaceActionBusy) return;
+  const jobId = activeDetail.job.job_id;
+  const before = cloneSubtitleSegments(activeDetail.segments);
+  workspaceActionBusy = true;
+  try {
+    const after = await invoke<SubtitleSegment[]>("edit_subtitle_block", {request:{jobId, beforeSegments:before, removeId, insertion}});
+    rememberStructureEdit(before, after, removeId ? "删除字幕块" : "插入字幕块", jobId);
+    if (activeDetail?.job.job_id === jobId) {
+      applySubtitleStructure(after, insertion?.id ?? after[0]?.id);
+      if (insertion) { seekTo(insertion.start_ms, false); updateActiveSubtitle(insertion.start_ms); }
+      setSubtitleEditAction("已保存，可用“撤销上次打轴”撤回；机器译文已标记需要核对，人工译文保留。");
+    }
+  } catch(error) { setSubtitleEditAction(`字幕块操作失败：${String(error)}`, true); }
+  finally { workspaceActionBusy = false; }
+}
+function openInsertSubtitleBlock(): void {
+  if (!activeDetail || workspaceActionBusy) return;
+  if (karaokeTextDraftDirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
+  if (!activeMedia || !Number.isFinite(activeMedia.duration) || activeMedia.duration <= 0) { setSubtitleEditAction("媒体时长尚未就绪，请等待加载或重新定位媒体。", true); return; }
+  activeMedia.pause();
+  const jobId = activeDetail.job.job_id;
+  const position = Math.round((activeMedia?.currentTime ?? 0) * 1000 / 10) * 10;
+  const current = activeDetail.segments.find(s=>s.start_ms <= position && s.end_ms > position);
+  const start = current?.end_ms ?? position;
+  const next = activeDetail.segments.find(s=>s.start_ms >= start);
+  const duration = Number.isFinite(activeMedia?.duration) ? Math.round(activeMedia!.duration*1000) : start+2000;
+  const end = Math.min(start+2000, next?.start_ms ?? duration, duration);
+  const dialog = document.createElement("dialog"); dialog.className="rename-job-dialog insert-block-dialog";
+  dialog.innerHTML='<form><h2>插入字幕块</h2><p>在空白区间新增字幕，不移动已有块。</p><label>开始<input name="start" required></label><label>结束<input name="end" required></label><label>原文<textarea name="source" rows="3" required></textarea></label><label>译文（可选）<textarea name="translation" rows="2"></textarea></label><p role="status"></p><div class="confirmation-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit">插入</button></div></form>';
+  const field = (name:string)=>dialog.querySelector<HTMLInputElement|HTMLTextAreaElement>(`[name="${name}"]`)!;
+  field("start").value=formatPreciseTime(start); field("end").value=formatPreciseTime(Math.max(start,end));
+  if (end <= start) dialog.querySelector('[role="status"]')!.textContent="当前位置后方没有空白，请手动选择其他空白区间，或先修剪已有字幕边界。";
+  dialog.querySelector("[data-close]")!.addEventListener("click",()=>dialog.close());
+  dialog.addEventListener("close",()=>dialog.remove());
+  dialog.querySelector("form")!.onsubmit=async event=>{
+    event.preventDefault();
+    const startMs=parseTimecode(field("start").value), endMs=parseTimecode(field("end").value), source=field("source").value.trim();
+    if (activeDetail?.job.job_id !== jobId) { dialog.close(); return; }
+    if (startMs===null || endMs===null || startMs<0 || endMs<=startMs || endMs>duration || !source || activeDetail.segments.some(s=>s.start_ms<endMs && s.end_ms>startMs)) {
+      dialog.querySelector('[role="status"]')!.textContent="请输入有效原文和媒体范围内的空白区间，不能与已有字幕重叠。"; return;
+    }
+    const insertion:SubtitleSegment={id:crypto.randomUUID(),job_id:jobId,segment_index:0,start_ms:startMs,end_ms:endMs,source_text:source,translated_text:field("translation").value.trim()||null,source_edited:true,translation_edited:!!field("translation").value.trim(),translation_stale:false,timing_edited:true};
+    dialog.close(); await changeKaraokeBlock(null,insertion);
+  };
+  document.body.append(dialog); dialog.showModal();
+}
+async function deleteCurrentSubtitleBlock(): Promise<void> {
+  if (!activeDetail || workspaceActionBusy) return;
+  if (karaokeTextDraftDirty) { setSubtitleEditAction("删除前请先保存或放弃文字修改。", true); return; }
+  const jobId=activeDetail.job.job_id;
+  const id=activeSegmentId;
+  if (!id || !activeDetail.segments.some(s=>s.id===id)) { setSubtitleEditAction("请先选择要删除的字幕块。",true); return; }
+  activeMedia?.pause();
+  if (!await confirmAction({title:"删除当前字幕块？",message:"删除原文、译文及此块时间范围；不会移动其他字幕。学习收藏保留来源快照。当前会话可用“撤销上次打轴”恢复。",confirmLabel:"删除字幕块",danger:true})) return;
+  if (activeDetail?.job.job_id===jobId) await changeKaraokeBlock(id,null);
+}
+
 async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;
   if (karaokeTextDraftDirty) {
@@ -4451,9 +4514,8 @@ function updateStructureUndoButton(): void {
     : "当前会话还没有可撤销的打轴或结构修改";
 }
 
-function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment[], label: string): void {
-  if (!activeDetail) return;
-  const jobId = activeDetail.job.job_id;
+function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment[], label: string, jobId = activeDetail?.job.job_id): void {
+  if (!jobId) return;
   const history = subtitleStructureUndoHistory.get(jobId) ?? [];
   history.push({ before: cloneSubtitleSegments(before), after: cloneSubtitleSegments(after), label });
   if (history.length > 10) history.shift();
@@ -7546,3 +7608,10 @@ window.setInterval(async()=>{
     setRetranscriptionMessage(`${phase}${progress.duration_ms?` · ${formatTime(progress.completed_ms??0)} / ${formatTime(progress.duration_ms)}`:""}`,false);
   }catch{/* Preserve the active operation's result or actionable error. */}
 },1000);
+
+document.querySelector("#karaoke-insert-block")?.addEventListener("click",openInsertSubtitleBlock);
+document.querySelector("#karaoke-delete-block")?.addEventListener("click",()=>void deleteCurrentSubtitleBlock());
+asrQualitySignalsHost?.addEventListener("change",event=>{
+  const input=event.target as HTMLInputElement;
+  if (input.matches("[data-show-processed]")) { showProcessedSignals=input.checked; if(activeDetail) void loadAsrQualitySignals(activeDetail.job.job_id); }
+});

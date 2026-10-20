@@ -174,3 +174,12 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - `/private/tmp/atogaki-theme-window` 隔离窗口实看两套主题的高级编辑、波形、输入区、设置与主题选择；切换即时更新画面与 Canvas 配色。根据窗口检查修正月夜说明文字对比不足及设置底栏遗留黄白色。未编辑／保存字幕，未调用识别、翻译、下载或凭据操作。
 - 安装至 `/Applications/Atogaki.app`；旧版保留在 `/Applications/.Atogaki.previous.20261019-materials`；安装前一致性 SQLite 备份 `local-artifacts/install-backups/20261019-materials/atogaki-before-install.sqlite`，integrity_check=ok。正式版启动仍显示 13 个任务，外观页显示两张新材质预览。
 - 视觉风格是否达到预期等待用户判断；Windows 原生外观、旧版 WebKit 和减少透明度系统选项未实机验证。新增位图加载／内存未作专项性能基准，不宣称零开销。其他作品主题不扩展。
+
+## 2026-10-19：分页边距、字幕块增删与审查过滤
+
+- 核心 `cargo test --lib` 126 通过、4 忽略；壳层 30 通过、4 忽略；前端 7 通过，类型检查及生产构建通过。`cargo fmt --check`、`git diff --check` 通过。
+- 增量扩展结构测试：空白插入、重叠拒绝、旧快照冲突拒绝、机器译文过期、删除／撤销、删空后恢复、学习来源外键保留与被删除来源的文本快照保留。同一秒内的两次审查决定按 rowid 顺序读取最新值。
+- 隔离窗口 `/private/tmp/atogaki-theme-window`：确认分页标题已离开纸面边缘；插入表单正确提示范围，59.000–59.500 秒插入英文测试块后定位到新块；删除、撤销删除、撤销插入完整通过，最后恢复原始 21 段。误报默认不可见，勾选“显示已处理（1）”找回原摘要。未调用 ASR、翻译、下载或凭据操作。
+- 窗口工具对动态 dialog 的 AX 树偶尔为空，坐标操作偶有 noWindowsAvailable；使用可见窗口与键盘表单导航完成回归。一次坐标输入落到隔离字幕草稿，已明确放弃，未保存。正式数据未用于编辑测试。
+- 最后补齐无可用空白的提示、媒体时长就绪检查和标签悬停对比；Windows 原生窗口仍未实测。删除来源的 cue 外键解除后，即使撤销也仍可通过保留的任务时间／文本快照返回，不推测重新关联。
+- 已安装至 `/Applications/Atogaki.app`，旧版保留 `/Applications/.Atogaki.previous.20261019-blocks`，一致性数据库备份 `local-artifacts/install-backups/20261019-blocks/atogaki-before-install.sqlite`（integrity_check=ok）。更新后正式版 13 个任务仍在，已打开原任务校对页检查修正后的留白，未修改正式字幕。

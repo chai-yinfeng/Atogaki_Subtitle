@@ -865,10 +865,10 @@ impl LocalDatabase {
                     s.message, s.evidence_json, s.created_at_unix,
                     (SELECT d.decision FROM local_asr_review_decisions d
                      WHERE d.signal_id = s.id
-                     ORDER BY d.created_at_unix DESC, d.id DESC LIMIT 1) AS latest_decision,
+                     ORDER BY d.created_at_unix DESC, d.rowid DESC LIMIT 1) AS latest_decision,
                     (SELECT d.note FROM local_asr_review_decisions d
                      WHERE d.signal_id = s.id
-                     ORDER BY d.created_at_unix DESC, d.id DESC LIMIT 1) AS latest_decision_note
+                     ORDER BY d.created_at_unix DESC, d.rowid DESC LIMIT 1) AS latest_decision_note
              FROM local_asr_quality_signals s
              WHERE s.job_id = ?
              ORDER BY COALESCE(s.start_ms, 0), s.created_at_unix, s.id",
@@ -2467,6 +2467,64 @@ impl LocalDatabase {
         Ok(restored)
     }
 
+    pub async fn edit_subtitle_block(
+        &self,
+        job_id: &str,
+        before: &[LocalSubtitleSegmentRecord],
+        remove_id: Option<&str>,
+        insertion: Option<LocalSubtitleSegmentRecord>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        let mut tx = self.pool.begin().await?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let mut segments = list_segments_in_transaction(&mut tx, job_id).await?;
+        if segments != before {
+            return Err(anyhow!("字幕已变化，请重新读取后再操作"));
+        }
+        match (remove_id, insertion) {
+            (Some(id), None) => {
+                let index = segments
+                    .iter()
+                    .position(|s| s.id == id)
+                    .ok_or_else(|| anyhow!("字幕块不存在"))?;
+                segments.remove(index);
+            }
+            (None, Some(mut block)) => {
+                if block.job_id != job_id || segments.iter().any(|s| s.id == block.id) {
+                    return Err(anyhow!("invalid new subtitle identity"));
+                }
+                if block.start_ms < 0
+                    || block.end_ms <= block.start_ms
+                    || segments
+                        .iter()
+                        .any(|s| s.start_ms < block.end_ms && s.end_ms > block.start_ms)
+                {
+                    return Err(anyhow!("插入范围无效或与已有字幕重叠，请选择空白区间"));
+                }
+                block.source_edited = true;
+                block.translation_edited = block
+                    .translated_text
+                    .as_ref()
+                    .is_some_and(|s| !s.trim().is_empty());
+                block.translation_stale = false;
+                block.timing_edited = true;
+                segments.push(block);
+                segments.sort_by_key(|s| (s.start_ms, s.end_ms));
+            }
+            _ => return Err(anyhow!("choose exactly one subtitle block operation")),
+        }
+        // Adding/removing context invalidates machine translations, preserving human text.
+        for s in &mut segments {
+            if s.translated_text.is_some() && !s.translation_edited {
+                s.translation_stale = true;
+            }
+        }
+        persist_structure_segments(&mut tx, job_id, &mut segments).await?;
+        sqlx::query("UPDATE local_subtitle_provenance SET translation_dependency_stale = 1 WHERE segment_id IN (SELECT id FROM local_subtitle_segments WHERE job_id = ? AND translation_stale = 1)")
+            .bind(job_id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(segments)
+    }
+
     pub async fn split_segment(
         &self,
         job_id: &str,
@@ -3140,6 +3198,8 @@ async fn persist_structure_segments(
     job_id: &str,
     segments: &mut [LocalSubtitleSegmentRecord],
 ) -> Result<()> {
+    let learning_links = sqlx::query_as::<_, (String, String)>("SELECT id, segment_id FROM local_learning_occurrences WHERE job_id = ? AND segment_id IS NOT NULL")
+        .bind(job_id).fetch_all(&mut **tx).await?;
     let previous_provenance = sqlx::query_as::<_, LocalSubtitleProvenanceRecord>(
         "SELECT segment_id, job_id, source_kind, source_run_id, timed_unit_ids_json,
                 timing_source, alignment_status, source_revision, translation_revision,
@@ -3243,6 +3303,15 @@ async fn persist_structure_segments(
             .execute(&mut **tx)
             .await
             .context("failed to mark structural subtitle provenance")?;
+        }
+    }
+    for (occurrence_id, segment_id) in learning_links {
+        if ids.contains(&segment_id) {
+            sqlx::query("UPDATE local_learning_occurrences SET segment_id = ? WHERE id = ?")
+                .bind(segment_id)
+                .bind(occurrence_id)
+                .execute(&mut **tx)
+                .await?;
         }
     }
     for (target_id, context_id, revision) in previous_dependencies {
@@ -3707,6 +3776,22 @@ mod tests {
         assert_eq!(
             signals[0].latest_decision_note.as_deref(),
             Some("heard repetition")
+        );
+        database
+            .record_asr_review_decision(&ReviewDecision {
+                id: "a-later-decision".into(),
+                signal_id: signal.id.clone(),
+                decision: ReviewDecisionKind::FalsePositive,
+                note: None,
+                created_at_unix: 11,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            database.list_asr_quality_signals(&job.id()).await.unwrap()[0]
+                .latest_decision
+                .as_deref(),
+            Some("false_positive")
         );
         assert_eq!(
             database.list_asr_repair_attempts(&signal.id).await.unwrap()[0].status,
@@ -4209,6 +4294,75 @@ mod tests {
             .await
             .unwrap();
         let original = database.list_segments(&manifest.job_id).await.unwrap();
+
+        sqlx::query("INSERT INTO local_learning_items(id,source_language,target_language,item_type,source_text,source_key,created_at_unix,updated_at_unix) VALUES ('test-learning','en','zh-CN','sentence','hello world','hello',0,0)")
+            .execute(&database.pool).await.unwrap();
+        sqlx::query("INSERT INTO local_learning_occurrences(id,learning_item_id,job_id,segment_id,job_display_name_snapshot,segment_source_snapshot,selection_start_utf16,selection_end_utf16,start_ms,end_ms,created_at_unix) VALUES ('test-occurrence','test-learning',?,?,'test','hello world',0,5,0,1000,0)")
+            .bind(&manifest.job_id).bind(&original[0].id).execute(&database.pool).await.unwrap();
+        let mut inserted = original[0].clone();
+        inserted.id = uuid::Uuid::new_v4().to_string();
+        inserted.start_ms = 1000;
+        inserted.end_ms = 1100;
+        inserted.source_text = "added".into();
+        inserted.translated_text = None;
+        let mut bad = inserted.clone();
+        bad.start_ms = 999;
+        assert!(
+            database
+                .edit_subtitle_block(&manifest.job_id, &original, None, Some(bad))
+                .await
+                .is_err()
+        );
+        let added = database
+            .edit_subtitle_block(&manifest.job_id, &original, None, Some(inserted.clone()))
+            .await
+            .unwrap();
+        assert_eq!(added.len(), 3);
+        assert_eq!(added[1].id, inserted.id);
+        assert!(added[0].translation_stale);
+        let link: Option<String> = sqlx::query_scalar(
+            "SELECT segment_id FROM local_learning_occurrences WHERE id='test-occurrence'",
+        )
+        .fetch_one(&database.pool)
+        .await
+        .unwrap();
+        assert_eq!(link.as_deref(), Some(original[0].id.as_str()));
+        assert!(
+            database
+                .edit_subtitle_block(&manifest.job_id, &original, Some(&inserted.id), None)
+                .await
+                .is_err()
+        );
+        let deleted = database
+            .edit_subtitle_block(&manifest.job_id, &added, Some(&inserted.id), None)
+            .await
+            .unwrap();
+        assert_eq!(deleted.len(), 2);
+        let restored = database
+            .restore_segment_structure(&manifest.job_id, &added, &deleted)
+            .await
+            .unwrap();
+        assert_eq!(restored, added);
+        database
+            .restore_segment_structure(&manifest.job_id, &original, &restored)
+            .await
+            .unwrap();
+        // Delete all blocks and undo, retaining learning text/time snapshots.
+        let one = database
+            .edit_subtitle_block(&manifest.job_id, &original, Some(&original[0].id), None)
+            .await
+            .unwrap();
+        let empty = database
+            .edit_subtitle_block(&manifest.job_id, &one, Some(&one[0].id), None)
+            .await
+            .unwrap();
+        assert!(empty.is_empty());
+        let snapshot:String=sqlx::query_scalar("SELECT segment_source_snapshot FROM local_learning_occurrences WHERE id='test-occurrence'").fetch_one(&database.pool).await.unwrap();
+        assert_eq!(snapshot, "hello world");
+        database
+            .restore_segment_structure(&manifest.job_id, &original, &empty)
+            .await
+            .unwrap();
 
         let mut timing_draft = original.clone();
         timing_draft[0].end_ms = 1_050;

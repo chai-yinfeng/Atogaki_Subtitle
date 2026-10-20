@@ -735,3 +735,17 @@ dialog, .settings-dialog, .glossary-dialog, .learning-dictionary-dialog,
 .workspace-section-tab:hover { color:var(--ink); background:var(--accent-soft); border-color:var(--line); }
 
 .karaoke-heading p:last-child, .learning-heading p:last-child, .listening-heading p:last-child, .jobs > .section-heading span { color:var(--chrome-muted); }
+
+/* The three task tabs now have their own visible paper surface. */
+.workspace-panel { padding:22px; }
+.workspace-panel > .module-heading { margin-top:0; padding-bottom:16px; border-bottom:1px solid var(--line); }
+.workspace-panel > .module-heading h2 { margin:0 0 10px; }
+.workspace-panel .review-grid { gap:20px; }
+.insert-block-dialog label { display:grid; gap:6px; font-size:13px; }
+.insert-block-dialog input, .insert-block-dialog textarea { width:100%; padding:9px; color:var(--ink); background:var(--reading-fill); border:1px solid var(--line); border-radius:4px; font:inherit; }
+.insert-block-dialog [role="status"] { color:#9a3e30; }
+.asr-review-filter { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:12px; padding:6px 0; }
+@media(max-width:800px) { .workspace-panel { padding:16px; } .review-grid { grid-template-columns:1fr; } }
+
+.workspace-section-tab.active:hover { color:var(--reading-fill); background:var(--accent); }
+.workspace-section-tab.active:hover span { color:var(--reading-fill); }

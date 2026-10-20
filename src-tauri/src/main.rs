@@ -456,6 +456,15 @@ struct UpdateSubtitleRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct EditSubtitleBlockRequest {
+    job_id: String,
+    before_segments: Vec<LocalSubtitleSegmentRecord>,
+    remove_id: Option<String>,
+    insertion: Option<LocalSubtitleSegmentRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SplitSubtitleRequest {
     job_id: String,
     segment_id: String,
@@ -1332,6 +1341,23 @@ async fn restore_subtitle(
         .restore_subtitle(&snapshot)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn edit_subtitle_block(
+    state: State<'_, DesktopState>,
+    request: EditSubtitleBlockRequest,
+) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    state
+        .workspace_service
+        .edit_subtitle_block(
+            &request.job_id,
+            &request.before_segments,
+            request.remove_id.as_deref(),
+            request.insertion,
+        )
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2886,6 +2912,7 @@ fn main() {
             update_subtitle,
             restore_subtitle,
             split_subtitle,
+            edit_subtitle_block,
             merge_subtitles,
             restore_subtitle_structure,
             save_subtitle_timing

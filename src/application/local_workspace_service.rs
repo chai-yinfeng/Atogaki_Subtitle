@@ -326,6 +326,30 @@ impl LocalWorkspaceService {
             .await
     }
 
+    pub async fn edit_subtitle_block(
+        &self,
+        job_id: &str,
+        before: &[LocalSubtitleSegmentRecord],
+        remove_id: Option<&str>,
+        insertion: Option<LocalSubtitleSegmentRecord>,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        if let Some(block) = &insertion {
+            let record = self
+                .database
+                .get_job(job_id)
+                .await?
+                .ok_or_else(|| anyhow!("task not found"))?;
+            let job = Job::open(record.storage_dir.into())?;
+            let duration = crate::application::acoustic_plan::wav_duration(&job.audio_wav)?;
+            if block.end_ms < 0 || block.end_ms as u64 > duration {
+                return Err(anyhow!("字幕范围超过媒体时长"));
+            }
+        }
+        self.database
+            .edit_subtitle_block(job_id, before, remove_id, insertion)
+            .await
+    }
+
     pub async fn restore_subtitle_structure(
         &self,
         job_id: &str,
