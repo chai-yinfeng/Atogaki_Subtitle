@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "atogaki-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "atogaki-subtitle",
@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "atogaki-subtitle"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",

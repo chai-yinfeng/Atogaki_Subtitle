@@ -27,7 +27,7 @@ macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`
 
 Hy-MT2 1.8B 是日常本地翻译推荐，7B 需要更多内存与处理时间；两者使用官方 GGUF Q4_K_M 量化权重，模型另行下载。MLX 暂缓，桌面继续使用 C++ / Metal。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
 
-当前开发分支另已接入阶段队列：默认同时识别两个任务，DeepSeek 文本翻译最多四个请求并发，并可在同一任务的稳定原文前缀上提前进行；成功结果持久保存，完整识别后核对并复用。局部本地识别共享设备限额，Hy-MT2 在完整识别后独占设备翻译。越界修复及这些后续改进尚未进入已发布的 v0.1.1 安装包；设计与验证见 [0052](docs/decisions/0052-staged-concurrency-and-early-translation.md) 和 [阶段管线验证](docs/staged-pipeline-validation.md)。
+正在准备的 v0.1.2 候选已接入阶段队列：默认同时识别两个任务，DeepSeek 文本翻译最多四个请求并发，并可在同一任务的稳定原文前缀上提前进行；成功结果持久保存，完整识别后核对并复用。局部本地识别共享设备限额，Hy-MT2 在完整识别后独占设备翻译。修复长电影在 VAD 右上下文末尾时间轻微越界时无法继续的问题，并显示失败块与产物位置。v0.1.2 仍在本机测试及打包，尚未公开发布；这些改进未进入现有 v0.1.1 安装包。候选说明见 [v0.1.2](docs/release-notes/v0.1.2.md)；设计与验证见 [0052](docs/decisions/0052-staged-concurrency-and-early-translation.md) 和 [阶段管线验证](docs/staged-pipeline-validation.md)。
 
 ## 安装与首次配置
 

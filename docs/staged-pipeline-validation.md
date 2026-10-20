@@ -49,3 +49,9 @@ cargo test --release --lib real_two_job_metal_pipeline -- --ignored --nocapture
 通过 `cargo tauri build --config tauri.macos-complete.conf.json --bundles app` 生成完整四 sidecar、ad-hoc 签名 App，并通过 `codesign --verify --deep --strict`。在 `/private/tmp/atogaki-stage-window` 隔离数据库中使用明确的测试任务与检查点：最终构建实见新任务的云端提前翻译说明、失败任务的缓存计数、错误详情展开以及只读原文预览，无编辑／收藏／导出入口；关闭后重开状态保留，测试窗口已关闭。模拟任务没有音频，窗口测试不作为媒体播放回归。
 
 未生成新 DMG、未发布、未替换正式 App 或修改正式数据库。真实云端限流／断网验收仍需用户授权样本；完整长节目双任务的持续内存与吞吐、所有接缝的人工听审、Windows 原生窗口尚未验证。现有单份 202 分钟影片恢复验收属于前一修复，不能替代本轮双任务长时间压测。本轮不宣称吞吐翻倍或翻译质量提升。
+
+## 2026-10-20：本机安装与 v0.1.2 候选
+
+按用户要求先安装功能测试构建，再准备发行包。退出旧应用后，使用 SQLite backup API 备份数据库，并保存旧 App；安装 `/Applications/Atogaki.app` 后通过 deep/strict 签名检查，主程序与已验证构建逐字节一致。原生窗口确认新云端提前翻译说明和可展开失败原因，14 个任务仍在。未自动继续正式电影任务或调用云端。备份在忽略目录 `local-artifacts/install-backups/20261020-162429/`，另保留 `/Applications/.Atogaki.previous-20261020-162429`。
+
+安装测试构建暂保留 0.1.1 元数据；待打包的候选统一为 0.1.2，运行代码相同，仅版本与发行文档、许可证索引更新。版本更新后核心 137 通过／5 忽略、Tauri 32 通过／4 忽略、前端 17 通过，类型检查、生产构建、双 Rust 格式与差异检查通过。许可证重新生成仅更新自身版本及前端 lockfile 摘要。用户正在正式数据上试用；尚未创建 tag 或公开 Release。
