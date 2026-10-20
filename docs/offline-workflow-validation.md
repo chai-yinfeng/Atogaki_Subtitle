@@ -191,3 +191,15 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - 对用户当前任务按安装前 148 段备份审计当前 147 段，比较原文、时间、译文、人工标志、原文／译文 revision 和已记录上下文的存在／内容／revision。131 段满足恢复证据，撤回误标；16 段依赖已删除上下文或缺少充分恢复证据，保留待核对。仅改变两种过期标志，逐字段确认字幕其他字段、ID 和数量完全不变，未调用翻译。
 - 修复前一致性数据库备份和逐 ID 报告保留在忽略目录 local-artifacts/install-backups/20261020-invalidation/；备份 integrity_check=ok。未创建广泛自动迁移去清除所有过期状态。
 - 安装至 /Applications/Atogaki.app，旧版保留 /Applications/.Atogaki.previous.20261020-invalidation；正式窗口首页确认仍为 13 个任务，目标任务显示“待重译 16”。Windows 原生窗口未实机验证；本轮不更改主题图像，也不下载画集内容。
+
+
+## 2026-10-20：macOS 本地稳定候选与配色角色
+
+- 核心 129 项通过、4 忽略；壳层 32 项通过、4 忽略；前端 17 项全部通过，类型检查／生产构建、cargo fmt --check、git diff --check 通过。额外单独执行被忽略的 LGPL FFmpeg SQLite 工作区真实渲染测试，1 项通过。Rust／前端许可证重新生成无变化。
+- 图片代表色先合并相近直方图，再按占比与色差选择最多 12 色；增加场景底色／阅读面色／按钮强调色和单角色自动，固定语义色。旧色盘可重新提取，保留自选色、署名与模板。移除月猫专用路径、开关和命令，不删除用户原图。
+- 隔离签名 App 使用 `/private/tmp/atogaki-theme-window`：旧三色色盘重新提取为 11 色，暖金色可见；保留旧场景色，单独选择暖金阅读面与深蓝按钮；重启后全部保持，恢复阅读面自动及切回内置来信通过。正式 App 外观确认旧图片和设置仍在，通用入口与三类选择均显示，未修改正式配色或字幕。
+- 完整四 sidecar App／非 CI Finder 美化 DMG 从干净源码生成。arm64、最低声明 macOS 12.0、全部系统 dylib 依赖、ad-hoc 深度严格签名、许可证／构建清单／无模型权重检查通过。DMG CRC 校验及只读挂载通过；Finder 实际窗口显示 App 左、Applications 右。原始布局记录为 660×400，图标坐标 (180,170) 和 (480,170)。
+- 发现旧构建输入符号链接到已签名 `/Applications` sidecar，导致签名前清单校验失败；已换回匹配固定清单的独立原始文件，没有跳过摘要门禁或改写来源。对应源码包增加 llama.cpp，8 个上游归档内部 SHA-256 全部逐项通过。
+- PR #19 已合并，源码基线/tag `v0.1.0` 为 `f5d4d4027cfdca8b18a5445fa84622b0acc97bc5`，其 tree 与最终功能提交 `3b72d14` 完全一致。Windows 编译门禁通过：[CI 39445142814](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/39445142814)。不生成 Windows 包，不宣称原生实机验收。
+- 已覆盖安装 `/Applications/Atogaki.app`；旧版 `/Applications/.Atogaki.previous.20261020-v010`，一致性备份 `local-artifacts/install-backups/20261020-v010/atogaki-before-install.sqlite`，integrity_check=ok；安装前后所有字幕相关表完全一致，窗口仍显示 13 个任务。未调用云端、凭据、识别或翻译。
+- 用户在最终打包时要求“先别发布，打包好即可”。停止公开发布；不创建 Release、不上传资产。已推送 tag 保持不可变，后续如改源码使用新版本。长节目人工接缝听审与翻译质量门禁按用户既有决定后补；MLX 暂缓。
