@@ -2,7 +2,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
-import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
+import { applyTheme, readTheme, candidateLabel, usePersonalMoonlightArtwork, readPersonalMoonlightArtwork, type CandidateLabelInput } from "./themes";
 applyTheme(readTheme());
 import { matchesQuery, highlightSaved, candidateTextDiff, playheadHandleContains, timelineTimeAtX } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
@@ -7630,3 +7630,22 @@ asrQualitySignalsHost?.addEventListener("change",event=>{
   const input=event.target as HTMLInputElement;
   if (input.matches("[data-show-processed]")) { showProcessedSignals=input.checked; if(activeDetail) void loadAsrQualitySignals(activeDetail.job.job_id); }
 });
+
+// This optional file is installed only in the user's data directory, never bundled.
+void invoke<string | null>("personal_moonlight_artwork").then(path => {
+  if (!path) return;
+  document.documentElement.style.setProperty("--personal-moonlight-artwork", `url(${JSON.stringify(convertFileSrc(path))})`);
+  usePersonalMoonlightArtwork(readPersonalMoonlightArtwork());
+  const host = document.querySelector(".appearance-settings");
+  const section = document.createElement("div");
+  section.className = "personal-artwork-option";
+  section.innerHTML = '<label><input type="checkbox">月夜使用本机月猫原画</label><p>保留原图比例，搭配月夜阅读面。仅影响本机外观。</p><a href="https://sp.universal-music.co.jp/yorushika/tsukineko/" target="_blank" rel="noopener noreferrer">素材来源：ヨルシカ LIVE「月と猫のダンス」特设</a><small>Copyright © 2024 UNIVERSAL MUSIC LLC All rights reserved.</small>';
+  const checkbox = section.querySelector<HTMLInputElement>("input")!;
+  checkbox.checked = readPersonalMoonlightArtwork();
+  checkbox.onchange = () => usePersonalMoonlightArtwork(checkbox.checked);
+  host?.append(section);
+  const credit = document.createElement("footer");
+  credit.className = "personal-artwork-credit";
+  credit.innerHTML = '<a href="https://sp.universal-music.co.jp/yorushika/tsukineko/" target="_blank" rel="noopener noreferrer">ヨルシカ LIVE「月と猫のダンス」特设</a><span>Copyright © 2024 UNIVERSAL MUSIC LLC All rights reserved.</span>';
+  document.body.append(credit);
+}).catch(error => console.warn("Personal artwork could not be loaded", error));

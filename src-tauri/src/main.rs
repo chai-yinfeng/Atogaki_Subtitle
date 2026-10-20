@@ -2383,6 +2383,16 @@ fn data_directory(state: State<'_, DesktopState>) -> String {
     state.data_dir.display().to_string()
 }
 
+/// Optional user-owned artwork stays outside the app bundle and distribution.
+#[tauri::command]
+fn personal_moonlight_artwork(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<Option<String>, String> {
+    let path = state.data_dir.join("themes/moonlight/background.jpg");
+    allow_asset_file(&app, path.to_str())
+}
+
 fn register_playback_file(
     registry: &PlaybackMediaRegistry,
     path: Option<&str>,
@@ -2828,6 +2838,7 @@ fn main() {
             check_dictionary_credential,
             check_translation_api_key,
             data_directory,
+            personal_moonlight_artwork,
             desktop_settings,
             dictionary_catalog,
             dictionary_credential_statuses,

@@ -749,3 +749,21 @@ dialog, .settings-dialog, .glossary-dialog, .learning-dictionary-dialog,
 
 .workspace-section-tab.active:hover { color:var(--reading-fill); background:var(--accent); }
 .workspace-section-tab.active:hover span { color:var(--reading-fill); }
+
+/* Personal artwork is displayed intact; official images are not bundled. */
+:root[data-theme="moonlight"][data-personal-artwork="true"] body {
+  background-image:var(--personal-moonlight-artwork);
+  background-size:contain;
+}
+.personal-artwork-option { margin-top:20px; padding-top:16px; border-top:1px solid var(--line); }
+.personal-artwork-option label { display:flex; align-items:center; gap:9px; }
+.personal-artwork-option p { margin:8px 0; font-size:13px; color:var(--muted); }
+.personal-artwork-option a { color:var(--accent); font-size:12px; }
+.personal-artwork-option small { display:block; margin-top:5px; color:var(--muted); font-size:11px; }
+.personal-artwork-credit { display:none; }
+:root[data-theme="moonlight"][data-personal-artwork="true"] .personal-artwork-credit {
+  display:flex; justify-content:center; flex-wrap:wrap; gap:6px 14px;
+  margin:14px 24px 22px; padding:9px 14px; font-size:10px;
+  color:var(--chrome-ink); background:var(--chrome-fill);
+}
+.personal-artwork-credit a { color:inherit; }

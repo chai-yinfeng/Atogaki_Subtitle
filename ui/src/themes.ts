@@ -19,3 +19,12 @@ export function candidateLabel(run: CandidateLabelInput): string {
   const date = new Date(run.created_at_unix * 1000).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
   return `${run.is_candidate === false ? "原始识别" : range+"候选"} · ${run.provider_name} · ${model} · ${date} · ${run.id.slice(0,8)}`;
 }
+
+export function usePersonalMoonlightArtwork(enabled: boolean): void {
+  document.documentElement.dataset.personalArtwork = String(enabled);
+  try { localStorage.setItem("atogaki.appearance.personalArtwork", String(enabled)); } catch { /* Session preference still applies. */ }
+}
+export function readPersonalMoonlightArtwork(): boolean {
+  try { return localStorage.getItem("atogaki.appearance.personalArtwork") === "true"; }
+  catch { return false; }
+}
