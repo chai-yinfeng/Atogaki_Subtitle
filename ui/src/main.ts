@@ -7182,7 +7182,7 @@ function organizeSettings(): void {
   const localModel = document.querySelector("#settings-hy-mt2-model")?.closest(".settings-path-row");
   if (localModel) downloads.append(localModel);
   const appearance = document.createElement("section"); appearance.className = "settings-section appearance-settings";
-  appearance.innerHTML = '<h3>外观</h3><p>选择页面主题，即时生效并自动保存。字幕导出样式保持独立。</p><div class="theme-options"><button type="button" data-app-theme="moonlight"><span class="theme-swatch moonlight-swatch"></span><strong>月夜</strong><span>蓝绿夜色与冷白纸面</span></button><button type="button" data-app-theme="letter"><span class="theme-swatch letter-swatch"></span><strong>来信</strong><span>暖纸、墨字与书信细节</span></button></div>';
+  appearance.innerHTML = '<h3>外观</h3><p>选择页面主题，即时生效并自动保存。字幕导出样式保持独立。</p><div class="theme-options"><button type="button" data-app-theme="moonlight"><span class="theme-swatch moonlight-swatch"></span><strong>月夜</strong><span>颜料笔触、月光与青灰纸面</span></button><button type="button" data-app-theme="letter"><span class="theme-swatch letter-swatch"></span><strong>来信</strong><span>纸纤维、折痕与信笺层次</span></button></div>';
   const syncTheme = () => appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.appTheme === document.documentElement.dataset.theme)));
   appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.onclick = () => { applyTheme(button.dataset.appTheme as "moonlight"|"letter"); syncTheme(); });
   syncTheme();

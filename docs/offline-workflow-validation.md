@@ -165,3 +165,12 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - 隔离目录 `/private/tmp/atogaki-theme-window` 真实窗口：月夜／来信即时切换，重启保留来信；高级编辑默认只展示时间轴和当前字幕，复核及候选折叠；人工注入的测试提示定位到 10 秒，标记误报后摘要折叠且待复核数从 1 变 0；候选显示原始／全片、模型简称、时间及短 ID，采用记录无清理按钮；本地配置只展示已安装模型选择，模型列表包含 1.8B／7B。未进行真实数据清理，清理的破坏性操作由临时 artifact 自动化测试覆盖。
 - 已安装至 `/Applications/Atogaki.app`，保留 `/Applications/.Atogaki.previous.20261019-themes`；安装前 SQLite 一致性备份在忽略目录 `local-artifacts/install-backups/20261019-themes/atogaki-before-install.sqlite`，integrity_check=ok。更新后真实窗口仍显示 13 个正式任务。
 - 原创 SVG 场景只用于主题，不包含官网素材；未读取／改写 Key，未发起云端请求，未改正式字幕或清理用户候选。Windows 原生视觉和完整接缝人工听审仍待后续验收。
+
+## 2026-10-19：两套主题材质深化
+
+- 用户批准只深化月夜／来信；替换旧几何 SVG，新增绘画场景、文具场景和细纸肌理三张生成 PNG。来源、完整提示词、实际尺寸与约 8.7 MiB 体积见 `theme-material-assets.md`。
+- 外围透出场景，导航有稳定透明底；面板、字幕输入与波形使用主题色阅读面。月夜采用青灰纸面和暖金边，来信用页边线与轻微纸张错层。降低正文纹理强度；减少透明度偏好有不透明降级。保留原有主题 ID 和用户选择。
+- `npm test` 7 项通过；`npm run build` 类型检查及生产构建通过；`cargo fmt --check`、`git diff --check` 通过。macOS 完整 debug／release app 构建及四个 sidecar、ad-hoc 签名校验通过。本轮未改 Rust 逻辑或 Tauri API，未重复执行共享核心测试。
+- `/private/tmp/atogaki-theme-window` 隔离窗口实看两套主题的高级编辑、波形、输入区、设置与主题选择；切换即时更新画面与 Canvas 配色。根据窗口检查修正月夜说明文字对比不足及设置底栏遗留黄白色。未编辑／保存字幕，未调用识别、翻译、下载或凭据操作。
+- 安装至 `/Applications/Atogaki.app`；旧版保留在 `/Applications/.Atogaki.previous.20261019-materials`；安装前一致性 SQLite 备份 `local-artifacts/install-backups/20261019-materials/atogaki-before-install.sqlite`，integrity_check=ok。正式版启动仍显示 13 个任务，外观页显示两张新材质预览。
+- 视觉风格是否达到预期等待用户判断；Windows 原生外观、旧版 WebKit 和减少透明度系统选项未实机验证。新增位图加载／内存未作专项性能基准，不宣称零开销。其他作品主题不扩展。

@@ -1,15 +1,23 @@
-/* App themes are independent of exported subtitle styling. Backgrounds are original SVGs. */
+/* Theme palettes: scene, translucent chrome, tactile reading surface. Export styling is independent. */
 :root, :root[data-theme="moonlight"] {
-  --page-ground:#233f51; --surface:#f5f7f6; --surface-soft:#eaf0f0; --ink:#263a43;
-  --muted:#607078; --line:#c8d5d7; --accent:#315d73; --accent-hover:#23485d;
-  --accent-soft:#e0e9ec; --accent-soft-hover:#ccdce2; --page-paper:rgba(244,247,246,.96);
-  --scene:url("./assets/moonlight.svg");
+  --page-ground:#192e38; --surface:#dce7e5; --surface-soft:#cbdcda; --ink:#223c42;
+  --muted:#50696c; --line:#a7bebb; --accent:#315f65; --accent-hover:#254b52;
+  --accent-soft:#c4d9d5; --accent-soft-hover:#b0cac5;
+  --page-paper:rgba(173,198,195,.22); --chrome-ink:#f0f3e9; --chrome-muted:#cddbd7;
+  --chrome-line:rgba(219,235,225,.35); --chrome-fill:rgba(26,48,56,.66);
+  --panel-tint:rgba(217,230,226,.88); --reading-wash:rgba(220,232,227,.84);
+  --reading-fill:#e8efea; --material-mark:#c5aa6e; --panel-shadow:0 9px 28px #081b2529;
+  --scene:url("./assets/moonlight-painted.png");
 }
 :root[data-theme="letter"] {
-  --page-ground:#ded0b9; --surface:#fffbf2; --surface-soft:#f5eddd; --ink:#3c3631;
-  --muted:#786b60; --line:#dbceba; --accent:#85574d; --accent-hover:#694139;
-  --accent-soft:#eee1d7; --accent-soft-hover:#e2cec0; --page-paper:rgba(255,250,239,.97);
-  --scene:url("./assets/letter.svg");
+  --page-ground:#d3c3aa; --surface:#f5f1e7; --surface-soft:#eae3d5; --ink:#393b36;
+  --muted:#6b6c60; --line:#c7beaa; --accent:#91584b; --accent-hover:#734336;
+  --accent-soft:#e9ddd0; --accent-soft-hover:#ddcabc;
+  --page-paper:rgba(249,246,235,.36); --chrome-ink:#353d39; --chrome-muted:#555e56;
+  --chrome-line:rgba(121,104,79,.35); --chrome-fill:rgba(247,244,231,.86);
+  --panel-tint:rgba(247,244,233,.86); --reading-wash:rgba(251,248,238,.78);
+  --reading-fill:#fbf8ef; --material-mark:#a45c4c; --panel-shadow:0 6px 19px #5c493c1c;
+  --scene:url("./assets/letter-stationery.png");
 }
 :root {
   color: var(--ink);
@@ -620,8 +628,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .asr-quality-locate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .asr-quality-locate .asr-quality-message { color: var(--ink); font-size: 11px; line-height: 1.5; }
 
-body { background:var(--page-ground) var(--scene) center top / cover fixed no-repeat; color:var(--ink); }
-.shell { width:calc(100% - 48px); margin:24px auto; max-width:1180px; min-height:calc(100vh - 48px); padding:24px 28px 44px; background:var(--page-paper); border:1px solid var(--line); box-shadow:0 8px 38px #14273525; }
+body { background:var(--page-ground) var(--scene) center center / cover fixed no-repeat; color:var(--ink); }
+.shell { width:calc(100% - 48px); margin:24px auto; max-width:1180px; min-height:calc(100vh - 48px); padding:24px 28px 44px; color:var(--chrome-ink); background:var(--page-paper); border:1px solid var(--chrome-line); box-shadow:0 12px 60px #101d2426; }
 header h1 { font-size:36px; letter-spacing:-.03em; }
 button { border-radius:6px; padding:9px 13px; }
 .eyebrow { display:none; }
@@ -643,9 +651,9 @@ button { border-radius:6px; padding:9px 13px; }
 .theme-options button { display:grid; gap:8px; padding:12px; text-align:left; color:var(--ink); background:var(--surface-soft); border:2px solid transparent; border-radius:6px; }
 .theme-options button[aria-pressed="true"] { border-color:var(--accent); }
 .theme-options button > span:last-child { font-size:12px; color:var(--muted); }
-.theme-swatch { display:block; height:130px; border-radius:3px; background-size:cover; background-position:center; }
-.moonlight-swatch { background-image:url("./assets/moonlight.svg"); }
-.letter-swatch { background-image:url("./assets/letter.svg"); }
+.theme-swatch { display:block; height:160px; border-radius:3px; background-size:cover; background-position:center; }
+.moonlight-swatch { background-image:url("./assets/moonlight-painted.png"); }
+.letter-swatch { background-image:url("./assets/letter-stationery.png"); }
 .karaoke-editor { gap:12px; padding:14px; }
 .karaoke-player-strip { grid-template-columns:minmax(180px,.55fr) minmax(360px,1.45fr); }
 .karaoke-media-host, .karaoke-media-host video { min-height:100px; max-height:145px; }
@@ -668,3 +676,62 @@ button { border-radius:6px; padding:9px 13px; }
 .candidate-history-row span { color:var(--muted); font-size:11px; }
 .candidate-history-row button { white-space:nowrap; padding:6px 9px; font-size:11px; }
 @media(max-width:800px) { .shell { width:calc(100% - 20px); margin:10px auto; padding:18px; } .provider-cards,.provider-editor,.karaoke-player-strip { grid-template-columns:1fr; } .candidate-history-row { flex-wrap:wrap; } }
+
+/* Peripheral controls carry the scene; text and waveforms keep a stable reading ground. */
+.shell > header { padding-bottom:18px; border-bottom:1px solid var(--chrome-line); }
+.shell > header .secondary, .primary-navigation button { color:var(--chrome-ink); background:var(--chrome-fill); }
+.primary-navigation button.active { color:var(--reading-fill); background:var(--accent); }
+.intro p, .workspace-heading > div > p, .workspace-heading > p,
+.learning-heading > div > p, .listening-heading > div > p { color:var(--chrome-muted); }
+.jobs { border-color:var(--chrome-line); }
+.create-task, .workspace-panel, .media-panel, .karaoke-editor,
+.listening-library, .listening-player, .learning-card, .export-card,
+.subtitle-card, .job-card {
+  color:var(--ink); border-color:var(--line); background-color:var(--panel-tint);
+  background-image:linear-gradient(var(--reading-wash),var(--reading-wash)),url("./assets/reading-paper.png");
+  background-size:auto,520px; box-shadow:var(--panel-shadow); border-radius:4px;
+}
+.karaoke-editor, .create-task { border-top:2px solid var(--material-mark); }
+.job-card { box-shadow:0 2px 8px #162b3012; }
+.karaoke-transport, .task-glossary-configuration, .workspace-toolbar,
+.workspace-glossary-inspection > section, .workspace-glossary-inspection > details,
+.glossary-mapping-list > div { color:var(--ink); background:var(--surface-soft); border-color:var(--line); }
+.subtitle-input, .karaoke-text-editor textarea, .listening-subtitle-list,
+.learning-provider-result, .retranscription-comparison > section {
+  color:var(--ink); background-color:var(--reading-fill);
+  background-image:linear-gradient(var(--reading-wash),var(--reading-wash)),url("./assets/reading-paper.png");
+  background-size:auto,520px; border-color:var(--line);
+}
+.karaoke-text-editor { position:relative; padding:12px 14px 12px 20px; border-left:2px solid var(--material-mark); }
+.karaoke-text-editor > span { color:var(--muted); letter-spacing:.04em; }
+.karaoke-waveform-panel { background:var(--surface-soft); border-color:var(--line); }
+.listening-source, .subtitle-card label, .listening-job { color:var(--ink); }
+.listening-translation, .subtitle-footer span { color:var(--muted); }
+.listening-subtitle.active { background:var(--accent-soft); box-shadow:inset 3px 0 var(--accent); }
+dialog, .settings-dialog, .glossary-dialog, .learning-dictionary-dialog,
+.rename-job-dialog, .retranscription-dialog, .subtitle-style-dialog {
+  color:var(--ink); border-color:var(--line); border-radius:5px;
+  background-color:var(--surface);
+  background-image:linear-gradient(var(--reading-wash),var(--reading-wash)),url("./assets/reading-paper.png");
+  background-size:auto,520px; box-shadow:0 18px 75px #0b1c3550;
+}
+.settings-section { background:var(--panel-tint); border-radius:3px; }
+.settings-tabs { background:var(--surface); border-bottom:1px solid var(--line); }
+.settings-dialog .confirmation-actions, .retranscription-dialog .confirmation-actions { background:var(--surface); }
+.theme-options button { position:relative; border:1px solid var(--line); padding:9px 9px 14px; background:var(--reading-fill); box-shadow:0 3px 9px #182f3014; }
+.theme-options button[aria-pressed="true"] { outline:2px solid var(--accent); outline-offset:3px; }
+.theme-options button strong { font-family:Georgia,"Songti SC",serif; font-size:20px; font-weight:500; letter-spacing:.08em; }
+:root[data-theme="letter"] .create-task,
+:root[data-theme="letter"] .karaoke-editor { box-shadow:3px 4px 0 -1px #e8e0ce,3px 4px 0 0 #c7beaa,0 10px 22px #5643301c; }
+:root[data-theme="letter"] .karaoke-text-editor { border-left-width:1px; background-image:linear-gradient(90deg,transparent 11px,#a45c4c35 11px,#a45c4c35 12px,transparent 12px); }
+:root[data-theme="letter"] .settings-section-heading h3 { border-bottom:1px solid #a45c4c55; padding-bottom:6px; }
+@media (max-width:800px) { .shell { width:calc(100% - 20px); padding:18px; } .theme-swatch { height:110px; } }
+@media (prefers-reduced-transparency:reduce) { .shell { background:var(--surface); color:var(--ink); --chrome-ink:var(--ink); --chrome-muted:var(--muted); --chrome-line:var(--line); --chrome-fill:var(--surface-soft); } }
+.settings-footer { background:var(--surface); }
+.workspace-section-tab { color:var(--chrome-ink); background:var(--chrome-fill); }
+.workspace-section-tab span, .workspace-message { color:var(--chrome-muted); }
+.workspace-section-tab.active { color:var(--reading-fill); background:var(--accent); }
+.workspace-section-tab.active span { color:var(--reading-fill); }
+.workspace-section-tab:hover { color:var(--ink); background:var(--accent-soft); border-color:var(--line); }
+
+.karaoke-heading p:last-child, .learning-heading p:last-child, .listening-heading p:last-child, .jobs > .section-heading span { color:var(--chrome-muted); }
