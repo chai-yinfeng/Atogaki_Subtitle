@@ -81,3 +81,10 @@ cargo test --release --lib real_two_job_metal_pipeline -- --ignored --nocapture
 最终 DMG 的版本、主程序与四 sidecar 逐字节身份、签名、许可证、Applications 链接及 hdiutil 校验通过；Finder 初次没有可连接窗口，用户按路径打开后，通过原生截图实见 App 左、Applications 右且充分分隔。八项上游源码摘要通过。四项资产上传草稿后重新下载，与本地逐字节一致，两个 SHA-256 校验均通过；随后公开为非 prerelease、latest 的 [v0.1.2](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.2)。
 
 最终 DMG：45,876,757 字节，SHA-256 `db313f4ae10def142cbe009526279f459220ecb38f83a8d39424b37e6f54014c`；对应源码：81,923,880 字节，SHA-256 `1ccc7daa28b29ecdb343668b4d4f05349d99487909a90a68cc34a3c7cdaf72cc`。此前段落中的私有候选摘要均为历史记录，不是公开发行资产。正式应用仍在处理用户电影翻译，未再次退出或替换它；持续双任务压力、云端故障与人工质量验收边界保持不变。
+
+
+## v0.1.2 本机覆盖安装
+
+用户确认《教父》翻译完成后授权覆盖。安装前确认没有活动任务；退出旧 App，使用 SQLite backup API 和完整 App 副本备份，从 SHA-256 为 `db313f4ae10def142cbe009526279f459220ecb38f83a8d39424b37e6f54014c` 的已公开 DMG 安装到 `/Applications/Atogaki.app`。采用暂存目录和目录重命名替换，保留旧 App，异常时回退；主程序及四 sidecar 与 DMG 逐字节一致，deep/strict 签名与 0.1.2 版本核对通过。
+
+启动正式应用后，原生窗口确认 14 个任务、《教父》已完成／已翻译；SQLite 验证 3,089 段原文均有译文。字幕、学习和词表五张数据表的全行摘要与安装前一致。没有自动运行 ASR 或翻译，也未修改历史计时。备份位于忽略目录 `local-artifacts/install-backups/v012-20261020T210406Z/`；旧 App 另保留在 `/Applications/.Atogaki.previous-20261020T210406Z`。用户可直接继续使用已启动的新版。
