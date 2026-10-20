@@ -30,7 +30,7 @@ Atogaki bundles separately executable command-line sidecars. They communicate wi
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
 | whisper.cpp / `whisper-cli` | v1.8.6 | MIT | https://github.com/ggml-org/whisper.cpp/releases/tag/v1.8.6 |
-| llama.cpp / `llama-server` (P3 local test bundle) | v0.4.1 (`391fac1`) | MIT | https://github.com/ggml-org/llama.cpp/tree/391fac16460f15233a7740550d858ac96df3419d |
+| llama.cpp / `llama-server` | v0.4.1 (`391fac1`) | MIT | https://github.com/ggml-org/llama.cpp/tree/391fac16460f15233a7740550d858ac96df3419d |
 | FFmpeg / `ffmpeg` / `ffprobe` | 8.1.2 | LGPL v2.1+ build | https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz |
 | libass | 0.17.5 | ISC | https://github.com/libass/libass/releases/tag/0.17.5 |
 | libunibreak | 7.0 | permissive; see bundled license | https://github.com/adah1972/libunibreak/releases/tag/libunibreak_7_0 |
@@ -48,7 +48,7 @@ Before publishing an installer, generate the complete corresponding source archi
 ./scripts/package-sidecar-sources-windows.ps1
 ```
 
-The macOS script writes `Atogaki-<version>-third-party-sources.tar.xz` under `src-tauri/target/release/bundle/sources/`; the Windows script writes `Atogaki-<version>-windows-x86_64-third-party-sources.tar.gz` under `target/release/bundle/sources/`. Each has a neighboring SHA-256 file. Upload the target's archive beside its installer in the same GitHub Release. Each archive includes the exact FFmpeg, libass, libunibreak, FriBidi, FreeType, HarfBuzz and whisper.cpp upstream sources, checksums, license texts, pinned build scripts and matching binary manifest. These are Release assets: they are intentionally ignored by Git and not embedded in the ordinary installer.
+The macOS script writes `Atogaki-<version>-third-party-sources.tar.xz` under `src-tauri/target/release/bundle/sources/`; the Windows script writes `Atogaki-<version>-windows-x86_64-third-party-sources.tar.gz` under `target/release/bundle/sources/`. Each has a neighboring SHA-256 file. Upload the target's archive beside its installer in the same GitHub Release. Each archive includes the exact FFmpeg, libass, libunibreak, FriBidi, FreeType, HarfBuzz whisper.cpp and (for the complete macOS bundle) llama.cpp upstream sources, checksums, license texts, pinned build scripts and matching binary manifest. These are Release assets: they are intentionally ignored by Git and not embedded in the ordinary installer.
 
 This repository documentation is a build aid, not legal advice.
 

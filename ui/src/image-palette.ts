@@ -1,4 +1,5 @@
 export type RGB = [number, number, number];
+export type ColorRoles = { ground?: RGB; reading?: RGB; accent?: RGB };
 export type ImagePalette = { dominant: RGB; accent: RGB; swatches: RGB[] };
 export function hex(rgb: RGB): string { return '#'+rgb.map(c => Math.round(Math.max(0,Math.min(255,c))).toString(16).padStart(2,'0')).join(''); }
 export function luminance(rgb: RGB): number {
@@ -36,23 +37,50 @@ export function extractPalette(pixels: ArrayLike<number>): ImagePalette {
     const score=(bin:typeof a)=>{const [,s,l]=hsl(avg(bin));return Math.sqrt(bin.count)*(.15+s)*(l>.08&&l<.92?1:.15);};
     return score(b)-score(a);
   });
-  return {dominant,accent:avg(accents[0]??ranked[0]),swatches:ranked.slice(0,6).map(avg)};
+  // Group neighboring histogram bins before filtering: small painted details often
+  // span many bins and would disappear if each bin needed a minimum frequency.
+  const clusters:typeof ranked=[];
+  const distance=(a:RGB,b:RGB)=>Math.hypot(...a.map((v,i)=>v-b[i]));
+  for(const bin of ranked){
+    const color=avg(bin);
+    const nearest=clusters.map(cluster=>({cluster,d:distance(color,avg(cluster))})).sort((a,b)=>a.d-b.d)[0];
+    if(nearest&&nearest.d<32){
+      for(let i=0;i<3;i++)nearest.cluster.sum[i]+=bin.sum[i];
+      nearest.cluster.count+=bin.count;
+    }else clusters.push({sum:[...bin.sum] as RGB,count:bin.count});
+  }
+  const eligible=clusters.filter(bin=>bin.count>=Math.max(2,total*.0015)).sort((a,b)=>b.count-a.count);
+  const selected:typeof ranked=[];
+  // Keep the dominant color, then favor both population and distance from colors
+  // already offered. This preserves smaller distinct accents alongside main hues.
+  while(eligible.length&&selected.length<12){
+    const score=(bin:typeof ranked[number])=>selected.length
+      ?Math.sqrt(bin.count)*Math.min(...selected.map(other=>distance(avg(bin),avg(other))))
+      :bin.count;
+    eligible.sort((a,b)=>score(b)-score(a));
+    const next=eligible.shift()!;
+    if(selected.every(other=>distance(avg(next),avg(other))>=32))selected.push(next);
+  }
+  const swatches=(selected.length?selected:[ranked[0]]).map(avg);
+  return {dominant,accent:avg(accents[0]??ranked[0]),swatches};
 }
-export function paletteVariables(palette: ImagePalette, strength=.45): Record<string,string> {
-  const [h,s]=hsl(palette.accent),[groundH,groundS]=hsl(palette.dominant);
+export function paletteVariables(palette: ImagePalette, strength=.45, roles:ColorRoles={}): Record<string,string> {
+  const [h,s]=hsl(roles.accent??palette.accent),[groundH,groundS]=hsl(roles.ground??palette.dominant);
+  const [readingH,readingS]=hsl(roles.reading??roles.accent??palette.accent);
   const color=(light:number,sat=Math.min(s,.18),hue=h)=>rgb([hue,sat,light]);
-  const surface=color(.93),soft=color(.86),ink=color(.14,Math.min(s,.25)),muted=color(.32,Math.min(s,.2));
+  const reading=(light:number,sat=Math.min(readingS,.18))=>rgb([readingH,sat,light]);
+  const surface=reading(.93),soft=reading(.86),ink=reading(.14,Math.min(readingS,.25)),muted=reading(.32,Math.min(readingS,.2));
   let accent=color(.34,Math.min(s,.52));
   for(let l=.33;contrast(accent,[255,250,241])<4.5&&l>=.08;l-=.01)accent=color(l,Math.min(s,.52));
   const ground=rgb([groundH,Math.min(groundS,.35),.17]);
   const alpha=Math.max(.15,Math.min(.85,strength));
   return {
     '--page-ground':hex(ground),'--surface':hex(surface),'--surface-soft':hex(soft),'--ink':hex(ink),'--muted':hex(muted),
-    '--line':hex(color(.67)),'--accent':hex(accent),'--accent-hover':hex(color(.23,Math.min(s,.52))),
+    '--line':hex(reading(.67)),'--accent':hex(accent),'--accent-hover':hex(color(.23,Math.min(s,.52))),
     '--accent-soft':hex(color(.81)),'--accent-soft-hover':hex(color(.74)),
     '--page-paper':`rgba(${ground.join(',')},${alpha})`,'--chrome-ink':'#f0f3e9','--chrome-muted':'#dce8df',
     '--chrome-line':'#dbe8e080','--chrome-fill':`rgba(${ground.join(',')},.9)`,
-    '--panel-tint':hex(surface)+'f5','--reading-wash':hex(surface)+'e8','--reading-fill':hex(color(.97)),
+    '--panel-tint':hex(surface)+'f5','--reading-wash':hex(surface)+'e8','--reading-fill':hex(reading(.97)),
     '--material-mark':hex(color(.53,Math.min(s,.35))),'--panel-shadow':'0 7px 24px #081b2529',
   };
 }

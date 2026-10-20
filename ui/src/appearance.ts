@@ -1,8 +1,8 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
-import { applyTheme, usePersonalMoonlightArtwork, type AppTheme } from './themes';
-import { extractPalette, paletteVariables, hex, type ImagePalette } from './image-palette';
+import { applyTheme, type AppTheme } from './themes';
+import { extractPalette, paletteVariables, hex, type ImagePalette, type ColorRoles } from './image-palette';
 
-type ImageTheme = {version:1; name:string; displayName:string; palette:ImagePalette; template:AppTheme; fit:'contain'|'cover'; strength:number; credit:string; source:string; enabled:boolean};
+type ImageTheme = {version:1; name:string; displayName:string; palette:ImagePalette; roles?:ColorRoles; template:AppTheme; fit:'contain'|'cover'; strength:number; credit:string; source:string; enabled:boolean};
 const KEY='atogaki.appearance.imageTheme';
 const validName=(name:unknown):name is string=>typeof name==='string'&&/^[a-f0-9]{64}\.(png|jpg|webp)$/.test(name);
 function read():ImageTheme|null {
@@ -10,7 +10,9 @@ function read():ImageTheme|null {
     const value=JSON.parse(localStorage.getItem(KEY)??'null');
     const color=(rgb:unknown)=>Array.isArray(rgb)&&rgb.length===3&&rgb.every(c=>typeof c==='number'&&Number.isFinite(c)&&c>=0&&c<=255);
     if(value?.version!==1||!validName(value.name)||!color(value.palette?.dominant)||!color(value.palette?.accent)||!Array.isArray(value.palette?.swatches)||!value.palette.swatches.every(color))return null;
-    return {...value,enabled:value.enabled===true,displayName:String(value.displayName??''),credit:String(value.credit??''),source:String(value.source??''),template:value.template==='letter'?'letter':'moonlight',fit:value.fit==='cover'?'cover':'contain',strength:Math.max(.15,Math.min(.85,Number(value.strength)||.45))};
+    const roles:ColorRoles={};
+    for(const role of ['ground','reading','accent'] as const) { if(color(value.roles?.[role]))roles[role]=value.roles[role]; }
+    return {...value,roles,enabled:value.enabled===true,displayName:String(value.displayName??''),credit:String(value.credit??''),source:String(value.source??''),template:value.template==='letter'?'letter':'moonlight',fit:value.fit==='cover'?'cover':'contain',strength:Math.max(.15,Math.min(.85,Number(value.strength)||.45))};
   }catch{return null;}
 }
 export async function setupImageThemes(host:HTMLElement):Promise<void> {
@@ -20,7 +22,7 @@ export async function setupImageThemes(host:HTMLElement):Promise<void> {
     <div class="image-theme-import"><button type="button" data-import-image>选择图片并生成</button><input data-image-path aria-label="主题图片路径" placeholder="也可粘贴本机图片完整路径"><button type="button" class="secondary" data-import-path>从路径导入</button></div>
     <p class="image-theme-status" role="status"></p>
     <div class="image-theme-controls hidden"><img class="image-theme-preview" alt="导入的主题原图预览"><div class="image-theme-fields">
-      <strong data-image-name></strong><div class="image-palette" aria-label="提取的图片颜色"></div>
+      <strong data-image-name></strong><div class="image-palette" aria-label="提取的图片颜色"></div><button type="button" class="secondary" data-refresh-palette>重新提取配色</button><div class="image-role-colors"></div><p class="image-role-help">从最多 12 个提取色中分别选择场景底色、阅读面和按钮基色，可重复使用同一颜色；文字、边框、悬停与选中颜色自动派生，并调整明暗保证可读。警告与错误颜色保持独立。</p>
       <label>阅读面模板<select data-image-template><option value="moonlight">月夜 · 冷纸阅读面</option><option value="letter">来信 · 信笺阅读面</option></select></label>
       <label>背景显示<select data-image-fit><option value="contain">完整显示</option><option value="cover">铺满窗口（可能裁切）</option></select></label>
       <label>界面遮罩强度<input data-image-strength type="range" min="15" max="85" step="5"></label>
@@ -54,9 +56,7 @@ export async function setupImageThemes(host:HTMLElement):Promise<void> {
     const path=await invoke<string|null>('load_theme_image',{name:config.name});
     if(!path)throw new Error('本机图片副本已缺失，请重新导入');
     applying=true;try{applyTheme(config.template);}finally{applying=false;}
-    usePersonalMoonlightArtwork(false);
-    const legacy=host.querySelector<HTMLInputElement>('.personal-artwork-option input');if(legacy)legacy.checked=false;
-    for(const [key,value] of Object.entries(paletteVariables(config.palette,config.strength)))document.documentElement.style.setProperty(key,value);
+    for(const [key,value] of Object.entries(paletteVariables(config.palette,config.strength,config.roles)))document.documentElement.style.setProperty(key,value);
     document.documentElement.style.setProperty('--scene',`url(${JSON.stringify(convertFileSrc(path))})`);
     document.documentElement.dataset.imageTheme=config.fit;
     config.enabled=true;refreshCredit();save();
@@ -69,6 +69,31 @@ export async function setupImageThemes(host:HTMLElement):Promise<void> {
     config.strength=Number(find<HTMLInputElement>('[data-image-strength]').value)/100;
     config.credit=find<HTMLInputElement>('[data-image-credit]').value.trim();config.source=find<HTMLInputElement>('[data-image-source]').value.trim();
   };
+  const renderRoles=()=>{
+    const host=find<HTMLElement>('.image-role-colors');host.replaceChildren();
+    if(!config)return;
+    for(const [role,label] of [['ground','场景底色'],['reading','阅读面色'],['accent','按钮强调色']] as const){
+      const field=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent=label;field.append(legend);
+      const choices=document.createElement('div');choices.className='image-role-swatches';
+      const chosen=config.roles?.[role];
+      const colors=[...config.palette.swatches];
+      if(chosen&&!colors.some(color=>hex(color)===hex(chosen)))colors.push(chosen);
+      for(const color of [null,...colors]){
+        const button=document.createElement('button');button.type='button';
+        button.setAttribute('aria-label',`${label}：${color?hex(color):'自动'}`);
+        button.setAttribute('aria-pressed',String(color?!!chosen&&hex(chosen)===hex(color):!chosen));
+        if(color){button.style.backgroundColor=hex(color);button.title=hex(color);}
+        else{button.dataset.autoColor='true';button.textContent='自动';}
+        button.onclick=()=>{
+          if(!config)return;
+          config.roles={...config.roles,[role]:color??undefined};renderRoles();
+          if(config.enabled)void use().then(()=>message(`已更新${label}。`)).catch(e=>message(String(e),true));else save();
+        };
+        choices.append(button);
+      }
+      field.append(choices);host.append(field);
+    }
+  };
   const render=async()=>{
     if(!config)return;
     find<HTMLElement>('.image-theme-controls').classList.remove('hidden');
@@ -77,26 +102,38 @@ export async function setupImageThemes(host:HTMLElement):Promise<void> {
     find<HTMLSelectElement>('[data-image-fit]').value=config.fit;
     find<HTMLInputElement>('[data-image-strength]').value=String(config.strength*100);
     find<HTMLInputElement>('[data-image-credit]').value=config.credit;find<HTMLInputElement>('[data-image-source]').value=config.source;
+    renderRoles();
     const palette=find<HTMLElement>('.image-palette');palette.replaceChildren();
     for(const color of config.palette.swatches){const swatch=document.createElement('span');swatch.style.backgroundColor=hex(color);swatch.title=hex(color);palette.append(swatch);}
     const path=await invoke<string|null>('load_theme_image',{name:config.name});
     if(path)find<HTMLImageElement>('.image-theme-preview').src=convertFileSrc(path);
     else throw new Error('图片副本缺失，请重新导入；已恢复内置主题');
   };
+  const analyze=async(name:string):Promise<ImagePalette>=>{
+    const buffer=await invoke<ArrayBuffer>('theme_image_bytes',{name});
+    const url=URL.createObjectURL(new Blob([buffer]));
+    try{
+      const img=new Image();img.src=url;await img.decode();
+      const canvas=document.createElement('canvas');canvas.width=96;canvas.height=96;
+      const context=canvas.getContext('2d',{willReadFrequently:true});if(!context)throw new Error('无法分析图片颜色');
+      context.drawImage(img,0,0,96,96);return extractPalette(context.getImageData(0,0,96,96).data);
+    }finally{URL.revokeObjectURL(url);}
+  };
+  find<HTMLButtonElement>('[data-refresh-palette]').onclick=()=>void(async()=>{
+    if(working||!config)return;working=true;
+    try{
+      const palette=await analyze(config.name);config.palette=palette;
+      // Keep explicitly chosen role colors, credits and template when updating choices.
+      await render();if(config.enabled)await use();else save();
+      message(`已提取 ${palette.swatches.length} 个代表色，保留现有选择、署名与模板。`);
+    }catch(error){message(`配色提取失败：${String(error)}`,true);}finally{working=false;}
+  })();
   const importImage=async(path:string|null)=>{
     if(working)return;working=true;section.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled=true);message('正在本机读取图片与提取配色…');
     try{
       const imported=await invoke<{name:string;display_name:string;path:string}|null>('import_theme_image',{path});
       if(!imported){message('已取消图片选择。');return;}
-      const buffer=await invoke<ArrayBuffer>('theme_image_bytes',{name:imported.name});
-      const url=URL.createObjectURL(new Blob([buffer]));
-      let palette:ImagePalette;
-      try{
-        const img=new Image();img.src=url;await img.decode();
-        const canvas=document.createElement('canvas');canvas.width=96;canvas.height=96;
-        const context=canvas.getContext('2d',{willReadFrequently:true});if(!context)throw new Error('无法分析图片颜色');
-        context.drawImage(img,0,0,96,96);palette=extractPalette(context.getImageData(0,0,96,96).data);
-      }finally{URL.revokeObjectURL(url);}
+      const palette=await analyze(imported.name);
       const old=config;
       config={version:1,name:imported.name,displayName:imported.display_name,palette,template:old?.template??'moonlight',fit:'contain',strength:.45,credit:'',source:'',enabled:true};
       await render();await use();message('已从图片生成主题，自动保存到本机；字幕导出样式保持独立。');
@@ -116,6 +153,5 @@ export async function setupImageThemes(host:HTMLElement):Promise<void> {
     config.enabled=false;clear();save();
   });
   host.querySelectorAll<HTMLButtonElement>('[data-app-theme]').forEach(button=>button.addEventListener('click',()=>{if(config)config.enabled=false;clear();save();}));
-  host.addEventListener('change',event=>{if((event.target as HTMLElement).closest('.personal-artwork-option')){if(config)config.enabled=false;clear();save();}});
   if(config){try{await render();if(config.enabled){await use();message('已恢复本机图片主题。');}else message('已保存图片主题，可点击“使用图片主题”启用。');}catch(error){clear();message(String(error),true);}}
 }

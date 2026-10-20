@@ -2384,16 +2384,6 @@ fn data_directory(state: State<'_, DesktopState>) -> String {
     state.data_dir.display().to_string()
 }
 
-/// Optional user-owned artwork stays outside the app bundle and distribution.
-#[tauri::command]
-fn personal_moonlight_artwork(
-    app: AppHandle,
-    state: State<'_, DesktopState>,
-) -> Result<Option<String>, String> {
-    let path = state.data_dir.join("themes/moonlight/background.jpg");
-    allow_asset_file(&app, path.to_str())
-}
-
 #[tauri::command]
 async fn import_theme_image(
     app: AppHandle,
@@ -2452,20 +2442,8 @@ async fn theme_image_bytes(
 }
 
 #[tauri::command]
-fn reveal_theme_image(state: State<'_, DesktopState>, name: Option<String>) -> Result<(), String> {
-    let path = match name {
-        Some(name) => theme_artwork::image_path(&state.data_dir, &name)?,
-        None => {
-            let reference = state
-                .data_dir
-                .join("themes/references/tsukineko/images/bg02.jpg");
-            if reference.is_file() {
-                reference
-            } else {
-                state.data_dir.join("themes/moonlight/background.jpg")
-            }
-        }
-    };
+fn reveal_theme_image(state: State<'_, DesktopState>, name: String) -> Result<(), String> {
+    let path = theme_artwork::image_path(&state.data_dir, &name)?;
     reveal_in_file_manager(path.display().to_string(), "主题图片")
 }
 
@@ -2938,7 +2916,6 @@ fn main() {
             check_dictionary_credential,
             check_translation_api_key,
             data_directory,
-            personal_moonlight_artwork,
             import_theme_image,
             load_theme_image,
             theme_image_bytes,
