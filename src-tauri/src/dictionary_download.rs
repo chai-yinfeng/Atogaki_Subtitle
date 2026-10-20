@@ -10,11 +10,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
-use tokio::{
-    fs,
-    io::AsyncWriteExt,
-    sync::Mutex,
-};
+use tokio::{fs, io::AsyncWriteExt, sync::Mutex};
 
 use crate::desktop_settings::DesktopSettingsService;
 
@@ -89,7 +85,10 @@ pub struct DictionaryDownloadService {
 impl DictionaryDownloadService {
     pub fn new(directory: PathBuf, settings: DesktopSettingsService) -> Result<Self> {
         std::fs::create_dir_all(&directory).with_context(|| {
-            format!("failed to create dictionary directory {}", directory.display())
+            format!(
+                "failed to create dictionary directory {}",
+                directory.display()
+            )
         })?;
         cleanup_partial_downloads(&directory)?;
         let mut states = HashMap::new();
@@ -143,10 +142,12 @@ impl DictionaryDownloadService {
             .cloned()
             .ok_or_else(|| anyhow!("unknown dictionary: {dictionary_id}"))?;
         let mut states = self.states.lock().await;
-        if states
-            .values()
-            .any(|state| matches!(state.status.as_str(), "queued" | "resolving" | "downloading"))
-        {
+        if states.values().any(|state| {
+            matches!(
+                state.status.as_str(),
+                "queued" | "resolving" | "downloading"
+            )
+        }) {
             bail!("another dictionary download is already running");
         }
         let state = DictionaryDownloadState {
@@ -221,13 +222,19 @@ impl DictionaryDownloadService {
         let mut digest = StreamingDigest::new(resolved.algorithm, resolved.total_bytes)?;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.context("dictionary download was interrupted")?;
-            output.write_all(&chunk).await.context("failed to write dictionary package")?;
+            output
+                .write_all(&chunk)
+                .await
+                .context("failed to write dictionary package")?;
             digest.update(&chunk);
             downloaded = downloaded.saturating_add(chunk.len() as u64);
             self.update_state(item.id, |state| state.downloaded_bytes = downloaded)
                 .await;
         }
-        output.flush().await.context("failed to flush dictionary package")?;
+        output
+            .flush()
+            .await
+            .context("failed to flush dictionary package")?;
         drop(output);
         if downloaded == 0 {
             bail!("下载来源返回了空文件");
@@ -380,7 +387,9 @@ fn source_host(url: &str) -> String {
 fn version_path(path: &Path) -> PathBuf {
     path.with_extension(format!(
         "{}.version",
-        path.extension().and_then(|value| value.to_str()).unwrap_or("package")
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("package")
     ))
 }
 
@@ -389,7 +398,10 @@ fn cleanup_partial_downloads(directory: &Path) -> Result<()> {
         let path = entry?.path();
         if path.extension().and_then(|value| value.to_str()) == Some("part") {
             std::fs::remove_file(&path).with_context(|| {
-                format!("failed to clean interrupted dictionary download {}", path.display())
+                format!(
+                    "failed to clean interrupted dictionary download {}",
+                    path.display()
+                )
             })?;
         } else if path
             .file_name()
@@ -433,8 +445,12 @@ async fn install_package(part_path: &Path, output_path: &Path) -> Result<()> {
         .with_context(|| format!("failed to prepare update for {}", output_path.display()))?;
     if let Err(error) = fs::rename(part_path, output_path).await {
         let _ = fs::rename(&backup_path, output_path).await;
-        return Err(error)
-            .with_context(|| format!("failed to update {}; previous package restored", output_path.display()));
+        return Err(error).with_context(|| {
+            format!(
+                "failed to update {}; previous package restored",
+                output_path.display()
+            )
+        });
     }
     fs::remove_file(&backup_path)
         .await
@@ -502,7 +518,9 @@ fn dictionary_catalog() -> &'static [DictionaryCatalogItem] {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChecksumAlgorithm, StreamingDigest, cleanup_partial_downloads, dictionary_catalog};
+    use super::{
+        ChecksumAlgorithm, StreamingDigest, cleanup_partial_downloads, dictionary_catalog,
+    };
     use sha2::{Digest, Sha256};
 
     #[test]
@@ -512,14 +530,21 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), catalog.len());
-        assert!(catalog.iter().all(|item| item.source_url.starts_with("https://")));
+        assert!(
+            catalog
+                .iter()
+                .all(|item| item.source_url.starts_with("https://"))
+        );
     }
 
     #[test]
     fn streaming_digest_supports_both_manifest_algorithms() {
         let mut sha256 = StreamingDigest::new(ChecksumAlgorithm::Sha256, None).unwrap();
         sha256.update(b"atogaki");
-        assert_eq!(sha256.finalize(), format!("{:x}", Sha256::digest(b"atogaki")));
+        assert_eq!(
+            sha256.finalize(),
+            format!("{:x}", Sha256::digest(b"atogaki"))
+        );
         let mut git = StreamingDigest::new(ChecksumAlgorithm::GitSha1, Some(7)).unwrap();
         git.update(b"atogaki");
         assert_eq!(git.finalize(), "0f74bb4e2751dca7e6d37b0314d0bd607f49d8cf");
@@ -527,7 +552,8 @@ mod tests {
 
     #[test]
     fn interrupted_packages_are_cleaned_without_touching_installed_files() {
-        let root = std::env::temp_dir().join(format!("atogaki-dict-cleanup-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("atogaki-dict-cleanup-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let installed = root.join("dictionary.db.zst");
         let partial = root.join("dictionary.db.zst.part");
@@ -541,8 +567,7 @@ mod tests {
 
     #[test]
     fn interrupted_update_restores_the_previous_package() {
-        let root =
-            std::env::temp_dir().join(format!("atogaki-dict-backup-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("atogaki-dict-backup-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let installed = root.join("dictionary.db.zst");
         let backup = root.join("dictionary.db.zst.backup");

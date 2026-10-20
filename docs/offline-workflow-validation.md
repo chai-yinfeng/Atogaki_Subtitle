@@ -226,3 +226,5 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - 用户确认本机版本并明确要求重新打包发布、同步 README。统一核心／壳层／前端／锁文件至 0.1.1；保留未发行 v0.1.0 tag，新的公开发行使用 v0.1.1，不创建 Windows 安装包。
 - 核心 129 项通过、4 忽略，壳层 32 项通过、4 忽略，前端 17 项通过；另行单独运行实际 LGPL sidecar SQLite 工作区渲染 1 项通过。两套 Rust 格式、diff、前端类型检查／生产构建通过。
 - 重新生成 macOS 和共享 Windows Rust 声明、前端声明，差异仅自有 package 版本号，未新增第三方依赖或改变许可证。Windows 声明更新用于维护共享编译门禁，不代表生成新 Windows 安装包或实机验收。最终 DMG／窗口／下载复核与 Release 状态后续追加。
+
+- 单独运行 Tauri manifest 的 rustfmt 检查发现三个历史文件有格式差异（dictionary_download、dictionary_lookup、model_download），已由 rustfmt 统一；随后两套格式检查、diff 检查及壳层 32 项测试重新通过。修正前一次提交记录了预期通过状态，本条给出实际检查结果及修复顺序。
