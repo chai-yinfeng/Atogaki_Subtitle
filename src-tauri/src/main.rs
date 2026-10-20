@@ -629,11 +629,32 @@ struct VideoOutputSelection {
 #[derive(Debug, Serialize)]
 struct DesktopJobDetail {
     translation_context_stale_ids: Vec<String>,
-    job: LocalJobRecord,
+    job: DesktopTimedJob,
     segments: Vec<LocalSubtitleSegmentRecord>,
     translation_runs: Vec<LocalTranslationRunRecord>,
     playback_path: Option<String>,
     audio_fallback_path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DesktopTimedJob {
+    #[serde(flatten)]
+    job: LocalJobRecord,
+    processing_time: Option<atogaki_subtitle::application::job_manifest::ProcessingTime>,
+}
+
+impl DesktopTimedJob {
+    fn new(job: LocalJobRecord) -> Self {
+        let processing_time =
+            atogaki_subtitle::infrastructure::job_store::Job::open(PathBuf::from(&job.storage_dir))
+                .ok()
+                .and_then(|j| j.read_manifest_if_exists().ok().flatten())
+                .and_then(|m| m.processing_time);
+        Self {
+            job,
+            processing_time,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1321,7 +1342,7 @@ async fn get_job_detail(
             .filter(|cue| cue.translation_dependency_stale)
             .map(|cue| cue.segment_id.clone())
             .collect(),
-        job: detail.job,
+        job: DesktopTimedJob::new(detail.job),
         segments: detail.segments,
         translation_runs: detail.translation_runs,
         playback_path,

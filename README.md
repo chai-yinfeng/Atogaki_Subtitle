@@ -2,7 +2,7 @@
 
 Atogaki 是一个面向中文使用者的、本地优先的外语音视频理解与学习工作台。它通过识别、翻译、字幕校对、词典与可回看的媒体时间轴，把用户本机已有的节目整理成可以理解、复习和导出的双语资料。项目最初用于整理ヨルシカ「後書き」电台；字幕编辑、样式和烧录是建立可信资料的基础能力，但 Atogaki 目前不以替代完整视频字幕制作软件为目标。
 
-macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`v0.1.1`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.1)，采用 ad-hoc 签名且尚未公证，最低声明 macOS 12.0。本次不提供 Windows 更新；Windows 11 x86_64 继续使用未签名的 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`v0.1.2`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.2)，采用 ad-hoc 签名且尚未公证，最低声明 macOS 12.0。本次不提供 Windows 更新；Windows 11 x86_64 继续使用未签名的 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
 ## 能做什么
 
@@ -21,17 +21,17 @@ macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`
 
 媒体、模型、词典包、任务、学习资料和编辑结果默认保留在设备上。只有启用云端字幕翻译时，待翻译的原文字幕及有限的相邻上下文会发送给所选 provider；Gemini 局部识别需另行确认确切音频上传范围；只有用户主动查询在线词典时，所选文本才会发送给对应词典 API。
 
-## v0.1.1 离线工作流
+## v0.1.2 离线工作流
 
 本版包含两分钟识别检查点、同任务暂停／继续和只读部分原文；任务可明确选择仅转录或 Hy-MT2／DeepSeek／DeepL／Gemini 翻译，完整识别后自动进入独立翻译阶段。翻译中断只补未完成或过期部分。设置、任务级后端、持久候选、全文检索、循环试听、批量导入、预设、学习来源和 Anki TSV 一并整理。
 
 Hy-MT2 1.8B 是日常本地翻译推荐，7B 需要更多内存与处理时间；两者使用官方 GGUF Q4_K_M 量化权重，模型另行下载。MLX 暂缓，桌面继续使用 C++ / Metal。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
 
-正在准备的 v0.1.2 候选已接入阶段队列：默认同时识别两个任务，DeepSeek 文本翻译最多四个请求并发，并可在同一任务的稳定原文前缀上提前进行；成功结果持久保存，完整识别后核对并复用。局部本地识别共享设备限额，Hy-MT2 在完整识别后独占设备翻译。修复长电影在 VAD 右上下文末尾时间轻微越界时无法继续的问题，并显示失败块与产物位置。v0.1.2 仍在本机测试及打包，尚未公开发布；这些改进未进入现有 v0.1.1 安装包。候选说明见 [v0.1.2](docs/release-notes/v0.1.2.md)；设计与验证见 [0052](docs/decisions/0052-staged-concurrency-and-early-translation.md) 和 [阶段管线验证](docs/staged-pipeline-validation.md)。
+v0.1.2 已接入阶段队列：默认同时识别两个任务，DeepSeek 文本翻译最多四个请求并发，并可在同一任务的稳定原文前缀上提前进行；成功结果持久保存，完整识别后核对并复用。局部本地识别共享设备限额，Hy-MT2 在完整识别后独占设备翻译。修复长电影在 VAD 右上下文末尾时间轻微越界时无法继续的问题，并显示失败块与产物位置。新增累计执行计时，排除中断等待，并按成功分组更新提前翻译进度。发行说明见 [v0.1.2](docs/release-notes/v0.1.2.md)；设计与验证见 [0052](docs/decisions/0052-staged-concurrency-and-early-translation.md) 和 [阶段管线验证](docs/staged-pipeline-validation.md)。
 
 ## 安装与首次配置
 
-macOS 下载 `Atogaki-v0.1.1-macos-arm64.dmg` 及相邻 `.sha256`；Windows 继续使用 alpha.10 的 NSIS 安装器。从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。
+macOS 下载 `Atogaki-v0.1.2-macos-arm64.dmg` 及相邻 `.sha256`；Windows 继续使用 alpha.10 的 NSIS 安装器。从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。
 
 macOS 版本没有 Developer ID 签名或公证。核对下载来源与 SHA-256 后，首次打开若被 Gatekeeper 阻止，可在 Finder 中右键 App 选择“打开”。Windows `alpha.10` 安装包同样没有商业代码签名，SmartScreen 可能显示“未知发布者”；不要为运行测试版而全局关闭系统安全功能。
 

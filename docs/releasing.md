@@ -14,10 +14,10 @@ DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后�
 
 当前 Apple Silicon 稳定版资产约定为（预发布保留 alpha 后缀）：
 
-- `Atogaki-v0.1.1-macos-arm64.dmg`
-- `Atogaki-v0.1.1-macos-arm64.dmg.sha256`
-- `Atogaki-0.1.1-third-party-sources.tar.xz`
-- `Atogaki-0.1.1-third-party-sources.tar.xz.sha256`
+- `Atogaki-v0.1.2-macos-arm64.dmg`
+- `Atogaki-v0.1.2-macos-arm64.dmg.sha256`
+- `Atogaki-0.1.2-third-party-sources.tar.xz`
+- `Atogaki-0.1.2-third-party-sources.tar.xz.sha256`
 
 `src-tauri/third-party/` 中的项目依赖声明、sidecar 构建清单和许可证材料已经随 `.app` 进入 DMG；对应源码包单独上传，避免每个普通用户重复下载约数十 MiB 的源码。
 
@@ -28,7 +28,7 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 1. 在干净提交上完成 Rust、前端、打包 App、模型下载和真实窗口回归。凡本版本新增或修改的交互，必须在**最终 ad-hoc 签名 App**中逐项完成对应 `docs/desktop-testing.md` 场景并记录结果；仅通过单元测试、前端构建、Tauri 编译，或仅验证窗口能创建，均不得创建公开 Release。
 2. 运行 `./scripts/generate-rust-licenses.sh` 与 `node ./scripts/generate-frontend-licenses.mjs`，审阅并提交生成声明。详细范围见 `docs/third-party-license-audit.md`。
 3. 用固定 sidecar 构建完整 DMG：在 `src-tauri/` 运行 `cargo tauri build --config tauri.macos-complete.conf.json --bundles app,dmg`。构建输入必须为与清单匹配的独立原始二进制，不能符号链接到 `/Applications` 中的已签名副本。`CI=true tauri build --bundles dmg` 只用于结构 smoke，会跳过 Finder 图标布局，不能作为最终发布产物；最终 DMG 必须在非 CI 环境运行 `tauri build --bundles dmg`，挂载后确认 App 位于左侧、Applications 位于右侧，两个图标在 660×400 窗口中居中并充分分隔。若 Finder 美化脚本挂起，应阻止发布并单独排查，不能回退发布左上角堆叠的 CI 产物。当前配置使用不需要 Apple Developer 账号的 ad-hoc identity `-`，发布时必须明确标注“ad-hoc 签名、未公证”，供知情测试者使用。
-4. 运行 `./scripts/package-sidecar-sources-macos.sh`。进入输出目录执行 `shasum -a 256 -c Atogaki-0.1.1-third-party-sources.tar.xz.sha256`，并抽查归档的 `SOURCES.md`、`sources/SHA256SUMS` 和 `build/build-manifest.txt`。
+4. 运行 `./scripts/package-sidecar-sources-macos.sh`。进入输出目录执行 `shasum -a 256 -c Atogaki-0.1.2-third-party-sources.tar.xz.sha256`，并抽查归档的 `SOURCES.md`、`sources/SHA256SUMS` 和 `build/build-manifest.txt`。
 5. 为最终 DMG 生成 SHA-256，并挂载确认 App、Applications 链接、四个 sidecar、根许可证和 `third-party/` 声明都存在。
 6. 创建带版本号的 annotated tag，例如 `v0.1.0-alpha.N`，并把 tag 推送到 GitHub。
 7. 在 GitHub 的 Releases 页面从该 tag 创建 Release（alpha tag 标记 prerelease，稳定 tag 不标记），填写支持架构、macOS 版本、已知 Gatekeeper 操作、校验值、模型不内置和第三方许可证说明。
@@ -39,12 +39,12 @@ GitHub 自动生成的 Source code 归档只覆盖本仓库，不能替代 FFmpe
 可使用 GitHub CLI 上传已核对的产物：
 
 ```bash
-gh release create v0.1.1 \
-  path/to/Atogaki-v0.1.1-macos-arm64.dmg \
-  path/to/Atogaki-v0.1.1-macos-arm64.dmg.sha256 \
-  src-tauri/target/release/bundle/sources/Atogaki-0.1.1-third-party-sources.tar.xz \
-  src-tauri/target/release/bundle/sources/Atogaki-0.1.1-third-party-sources.tar.xz.sha256 \
-  --verify-tag --title "Atogaki v0.1.1 (macOS)" --notes-file path/to/release-notes.md
+gh release create v0.1.2 \
+  path/to/Atogaki-v0.1.2-macos-arm64.dmg \
+  path/to/Atogaki-v0.1.2-macos-arm64.dmg.sha256 \
+  src-tauri/target/release/bundle/sources/Atogaki-0.1.2-third-party-sources.tar.xz \
+  src-tauri/target/release/bundle/sources/Atogaki-0.1.2-third-party-sources.tar.xz.sha256 \
+  --verify-tag --title "Atogaki v0.1.2 (macOS)" --notes-file path/to/release-notes.md
 ```
 
 ### 自动化时机
