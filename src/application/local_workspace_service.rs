@@ -449,12 +449,8 @@ impl LocalWorkspaceService {
                 resumed: true,
             });
         }
-        let resumed = !pending.is_empty() && pending.len() < segments.len();
-        let targets = if pending.is_empty() {
-            &segments
-        } else {
-            &pending
-        };
+        let resumed = only_pending;
+        let targets = if !only_pending { &segments } else { &pending };
         let requested_count = targets.len();
         let (segments, empty_segment_ids) =
             self.translate_records(job_id, &segments, targets).await?;
@@ -1970,7 +1966,7 @@ mod tests {
 
         let provider = Arc::new(FakeTranslationProvider::new(false));
         let resumed = LocalWorkspaceService::with_provider(database.clone(), provider.clone())
-            .translate_all(&manifest.job_id)
+            .translate_pending(&manifest.job_id)
             .await
             .unwrap();
         assert!(resumed.resumed);
@@ -1982,6 +1978,44 @@ mod tests {
                 .iter()
                 .all(|segment| segment.translated_text.is_some())
         );
+
+        let records = database.list_segments(&manifest.job_id).await.unwrap();
+        let first = &records[0];
+        database
+            .update_segment(
+                &manifest.job_id,
+                &first.id,
+                "修改后的原文".into(),
+                first.translated_text.clone(),
+                first.start_ms,
+                first.end_ms,
+            )
+            .await
+            .unwrap();
+        provider.requests.lock().unwrap().clear();
+        let full = LocalWorkspaceService::with_provider(database.clone(), provider.clone())
+            .translate_all(&manifest.job_id)
+            .await
+            .unwrap();
+        assert!(!full.resumed);
+        assert_eq!(full.requested_count, 13);
+        assert_eq!(
+            provider
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|request| request.targets.len())
+                .sum::<usize>(),
+            13
+        );
+        provider.requests.lock().unwrap().clear();
+        let pending = LocalWorkspaceService::with_provider(database.clone(), provider.clone())
+            .translate_pending(&manifest.job_id)
+            .await
+            .unwrap();
+        assert_eq!(pending.requested_count, 0);
+        assert!(provider.requests.lock().unwrap().is_empty());
 
         database.close().await;
         drop(database);

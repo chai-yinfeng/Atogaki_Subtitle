@@ -627,6 +627,7 @@ struct VideoOutputSelection {
 
 #[derive(Debug, Serialize)]
 struct DesktopJobDetail {
+    translation_context_stale_ids: Vec<String>,
     job: LocalJobRecord,
     segments: Vec<LocalSubtitleSegmentRecord>,
     translation_runs: Vec<LocalTranslationRunRecord>,
@@ -1304,6 +1305,12 @@ async fn get_job_detail(
     let audio_fallback_path = register_playback_file(&media_registry, fallback.to_str())?;
 
     Ok(DesktopJobDetail {
+        translation_context_stale_ids: detail
+            .cue_provenance
+            .iter()
+            .filter(|cue| cue.translation_dependency_stale)
+            .map(|cue| cue.segment_id.clone())
+            .collect(),
         job: detail.job,
         segments: detail.segments,
         translation_runs: detail.translation_runs,
@@ -1459,12 +1466,15 @@ async fn translate_subtitle(
 async fn translate_all_subtitles(
     state: State<'_, DesktopState>,
     job_id: String,
+    only_pending: bool,
 ) -> Result<LocalBatchTranslationResult, String> {
-    task_workspace(&state, &job_id)
-        .await?
-        .translate_all(&job_id)
-        .await
-        .map_err(|error| format!("{error:#}"))
+    let workspace = task_workspace(&state, &job_id).await?;
+    let result = if only_pending {
+        workspace.translate_pending(&job_id).await
+    } else {
+        workspace.translate_all(&job_id).await
+    };
+    result.map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]

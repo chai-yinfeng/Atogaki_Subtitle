@@ -163,6 +163,7 @@ type SubtitleStructureUndoEntry = {
 };
 
 type JobDetail = {
+  translation_context_stale_ids: string[];
   job: LocalJob;
   segments: SubtitleSegment[];
   translation_runs: TranslationRun[];
@@ -830,7 +831,8 @@ app.innerHTML = `
             <span id="translation-run-status" class="muted"></span>
           </div>
           <div class="workspace-action-buttons">
-            <button id="translate-all" type="button">全部翻译／重译</button>
+            <button id="translate-pending" type="button">补译缺失／过期段</button>
+            <button id="translate-all" class="secondary" type="button">全体翻译／重译</button>
           </div>
           <div class="workspace-glossary-row">
             <div>
@@ -1255,6 +1257,7 @@ const learningProviderTabs = document.querySelector<HTMLElement>("#learning-prov
 const learningProviderPanel = document.querySelector<HTMLElement>("#learning-provider-panel");
 const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
 const translationRunStatusText = document.querySelector<HTMLSpanElement>("#translation-run-status");
+const translatePendingButton = document.querySelector<HTMLButtonElement>("#translate-pending");
 const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
 const openSubtitleOverlayButton = document.querySelector<HTMLButtonElement>("#open-subtitle-overlay");
 const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
@@ -2331,6 +2334,10 @@ function updateTranslationControls(): void {
         : "";
       translationRunStatusText.textContent = `最近批次：${latest.provider_name}${model} · ${latest.segment_count} 段${tokens} · ${new Date(latest.completed_at_unix * 1_000).toLocaleString()}`;
     }
+  }
+  if (translatePendingButton) {
+    translatePendingButton.disabled = taskBusy || !hasSegments || !translationStatus.configured ||
+      !activeDetail?.segments.some(segment => segmentNeedsTranslation(segment));
   }
   if (translateAllButton) {
     translateAllButton.disabled = taskBusy || !hasSegments || !translationStatus.configured;
@@ -5170,7 +5177,12 @@ function highlightSegment(segmentId: string | null): void {
   });
 }
 
-async function translateAllSubtitles(): Promise<void> {
+function segmentNeedsTranslation(segment: SubtitleSegment): boolean {
+  return segment.translation_stale || !segment.translated_text?.trim() ||
+    !!activeDetail?.translation_context_stale_ids.includes(segment.id);
+}
+
+async function translateAllSubtitles(onlyPending: boolean): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
   const jobId = activeDetail.job.job_id;
   if (taskTranslationActivities.has(jobId)) return;
@@ -5179,10 +5191,11 @@ async function translateAllSubtitles(): Promise<void> {
     return;
   }
   const pendingSegments = activeDetail.segments.filter(
-    (segment) => segment.translation_stale || !segment.translated_text?.trim(),
+    (segment) => segmentNeedsTranslation(segment),
   );
-  const isResume = pendingSegments.length > 0 && pendingSegments.length < activeDetail.segments.length;
-  const requestCount = pendingSegments.length || activeDetail.segments.length;
+  const isResume = onlyPending;
+  const requestCount = onlyPending ? pendingSegments.length : activeDetail.segments.length;
+  if (requestCount === 0) return;
   const confirmed = await confirmAction({
     title: isResume ? "继续翻译未完成字幕？" : "全部翻译／重译？",
     message: isResume
@@ -5202,6 +5215,7 @@ async function translateAllSubtitles(): Promise<void> {
   try {
     const result = await invoke<BatchTranslationResult>("translate_all_subtitles", {
       jobId,
+      onlyPending,
     });
     if (activeDetail?.job.job_id === jobId) {
       activeDetail.segments = result.segments;
@@ -5231,7 +5245,7 @@ async function translateAllSubtitles(): Promise<void> {
     if (activeDetail?.job.job_id === jobId) {
       try {
         await reloadTranslatedWorkspace(jobId);
-        setWorkspaceAction(`翻译在后续批次停止，之前成功的批次已经保留；再次点击会从缺失或过期段继续。错误：${String(error)}`, true);
+        setWorkspaceAction(`翻译在后续批次停止，之前成功的批次已经保留。${onlyPending ? "点击“补译缺失／过期段”可以继续。" : "未完成重译的段落保留原译文；补译只处理缺失／过期段，再次全体重译会重新处理所有段落。"}错误：${String(error)}`, true);
       } catch (reloadError) {
         setWorkspaceAction(`翻译停止：${String(error)}；已完成批次可能已保存，但重新读取失败：${String(reloadError)}`, true);
       }
@@ -6495,7 +6509,8 @@ workspaceSectionTabs.forEach((tab) => {
     event.preventDefault();
   });
 });
-translateAllButton?.addEventListener("click", () => void translateAllSubtitles());
+translatePendingButton?.addEventListener("click", () => void translateAllSubtitles(true));
+translateAllButton?.addEventListener("click", () => void translateAllSubtitles(false));
 openSubtitleOverlayButton?.addEventListener("click", () => void openSubtitleOverlay());
 previousSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(-1));
 rewindMediaButton?.addEventListener("click", () => seekRelative(-5));

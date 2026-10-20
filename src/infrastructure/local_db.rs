@@ -2026,7 +2026,7 @@ impl LocalDatabase {
             .context("failed to begin local translation transaction")?;
 
         let mut dependency_stale = false;
-        let mut dependency_revisions = Vec::new();
+        let mut dependency_revisions = HashMap::new();
         for dependency in dependencies {
             let current = sqlx::query_as::<_, (String, i64)>(
                 "SELECT s.source_text, p.source_revision
@@ -2043,7 +2043,7 @@ impl LocalDatabase {
                 Some((source_text, revision)) => {
                     dependency_stale |= source_text != dependency.source_text
                         || revision != dependency.expected_source_revision;
-                    dependency_revisions.push((dependency.segment_id.as_str(), revision));
+                    dependency_revisions.insert(dependency.segment_id.as_str(), revision);
                 }
                 None => dependency_stale = true,
             }
@@ -2078,6 +2078,16 @@ impl LocalDatabase {
                     translation.segment_id
                 ));
             }
+
+            // An identical translation does not fire the translated_text trigger.
+            // Always replace its context snapshot, including removed dependencies.
+            sqlx::query(
+                "DELETE FROM local_translation_dependency_edges WHERE target_segment_id = ?",
+            )
+            .bind(&translation.segment_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to replace translation context dependencies")?;
 
             for (context_segment_id, context_source_revision) in &dependency_revisions {
                 if *context_segment_id == translation.segment_id {
@@ -4796,6 +4806,123 @@ mod tests {
         let unchanged = database.list_segments(&manifest.job_id).await.unwrap();
         assert_eq!(unchanged[0].translated_text.as_deref(), Some("第一句话"));
 
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn identical_retranslation_replaces_context_and_preserves_conflict_guard() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-identical-translation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let job = Job::create_in(&root).unwrap();
+        let manifest = JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        let before = TranscriptSegment::new(0, 1_000, "前文".into());
+        let target = TranscriptSegment::new(1_000, 2_000, "対象".into());
+        let after = TranscriptSegment::new(2_000, 3_000, "後文".into());
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![before.clone(), target.clone(), after.clone()],
+            })
+            .await
+            .unwrap();
+        let update = |expected: Option<&str>| LocalMachineTranslation {
+            segment_id: target.id.clone(),
+            source_text: target.source_text.clone(),
+            expected_translated_text: expected.map(str::to_string),
+            expected_translation_edited: false,
+            translated_text: "目标".into(),
+        };
+        let dependency = |segment: &TranscriptSegment| LocalTranslationDependency {
+            segment_id: segment.id.clone(),
+            source_text: segment.source_text.clone(),
+            expected_source_revision: 0,
+        };
+        database
+            .apply_machine_translation_group(
+                &manifest.job_id,
+                &[update(None)],
+                &[dependency(&before)],
+            )
+            .await
+            .unwrap();
+        // Same output, same context, and duplicate evidence must be idempotent.
+        database
+            .apply_machine_translation_group(
+                &manifest.job_id,
+                &[update(Some("目标"))],
+                &[dependency(&before), dependency(&before)],
+            )
+            .await
+            .unwrap();
+        // The context may change even when the resulting text does not.
+        database
+            .apply_machine_translation_group(
+                &manifest.job_id,
+                &[update(Some("目标"))],
+                &[dependency(&after)],
+            )
+            .await
+            .unwrap();
+        let edges: Vec<(String,)> = sqlx::query_as("SELECT context_segment_id FROM local_translation_dependency_edges WHERE target_segment_id = ?")
+            .bind(&target.id).fetch_all(&database.pool).await.unwrap();
+        assert_eq!(edges, vec![(after.id.clone(),)]);
+        let error = database
+            .apply_machine_translation_group(&manifest.job_id, &[update(Some("旧译文"))], &[])
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("changed while"));
+        let edges: Vec<(String,)> = sqlx::query_as("SELECT context_segment_id FROM local_translation_dependency_edges WHERE target_segment_id = ?")
+            .bind(&target.id).fetch_all(&database.pool).await.unwrap();
+        assert_eq!(edges, vec![(after.id.clone(),)]);
+        database
+            .update_segment(
+                &manifest.job_id,
+                &before.id,
+                "不再使用的上下文".into(),
+                None,
+                0,
+                1_000,
+            )
+            .await
+            .unwrap();
+        assert!(
+            !database
+                .list_subtitle_provenance(&manifest.job_id)
+                .await
+                .unwrap()
+                .iter()
+                .find(|p| p.segment_id == target.id)
+                .unwrap()
+                .translation_dependency_stale
+        );
+        database
+            .update_segment(
+                &manifest.job_id,
+                &after.id,
+                "仍被引用的上下文".into(),
+                None,
+                2_000,
+                3_000,
+            )
+            .await
+            .unwrap();
+        assert!(
+            database
+                .list_subtitle_provenance(&manifest.job_id)
+                .await
+                .unwrap()
+                .iter()
+                .find(|p| p.segment_id == target.id)
+                .unwrap()
+                .translation_dependency_stale
+        );
         database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
