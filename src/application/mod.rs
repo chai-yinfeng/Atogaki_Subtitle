@@ -2,6 +2,7 @@ pub mod acoustic_plan;
 pub mod asr_provider;
 pub mod asr_quality;
 pub mod asr_run;
+pub mod early_translation;
 pub mod evaluation;
 pub mod job_manifest;
 pub mod job_runner;

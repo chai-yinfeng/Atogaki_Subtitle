@@ -62,6 +62,7 @@ pub struct TaskRecoverySummary {
     pub completed_ranges: Vec<(u64, u64)>,
     pub can_resume: bool,
     pub blocked_reason: Option<String>,
+    pub early_translation: Option<crate::application::early_translation::EarlyTranslationProgress>,
 }
 
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
@@ -300,6 +301,7 @@ pub fn recovery_summary(job: &Job) -> Result<TaskRecoverySummary> {
     let path = job.dir.join("asr-checkpoint/plan.json");
     if !path.is_file() {
         return Ok(TaskRecoverySummary {
+            early_translation: None,
             phase: if job.dir.join("workflow-version.json").exists() {
                 phase
             } else {
@@ -324,6 +326,9 @@ pub fn recovery_summary(job: &Job) -> Result<TaskRecoverySummary> {
         .map(|c| (c.start_ms, c.end_ms))
         .collect::<Vec<_>>();
     Ok(TaskRecoverySummary {
+        early_translation: fs::read(job.dir.join("early-translation/progress.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok()),
         phase,
         completed_ms: completed_ranges.iter().map(|(s, e)| e - s).sum(),
         duration_ms: plan.duration_ms,
@@ -346,6 +351,38 @@ pub fn partial_units(job: &Job) -> Result<Vec<TimedUnit>> {
         }
     }
     Ok(stitch_units(units))
+}
+
+/// A conservative prefix: contiguous, checked chunks only, with one whole
+/// completed ownership block and the left read margin held back. Translation
+/// additionally reserves its own after-context window from this frontier.
+pub fn stable_prefix(job: &Job) -> Result<Option<(Vec<TimedUnit>, u64)>> {
+    let root = job.dir.join("asr-checkpoint");
+    let plan: AcousticPlan = serde_json::from_slice(&fs::read(root.join("plan.json"))?)?;
+    let mut units = vec![];
+    let mut contiguous = 0;
+    for chunk in &plan.chunks {
+        let Ok(evidence) = read_evidence(&root, chunk) else {
+            break;
+        };
+        units.extend(
+            owned_units(chunk, evidence.units)
+                .into_iter()
+                .map(|u| (chunk.index, u)),
+        );
+        contiguous += 1;
+    }
+    if contiguous < 2 {
+        return Ok(None);
+    }
+    let frontier = plan.chunks[contiguous - 1].read_start_ms;
+    Ok(Some((
+        stitch_units(units)
+            .into_iter()
+            .filter(|u| u.end_ms.is_some_and(|e| e <= frontier))
+            .collect(),
+        frontier,
+    )))
 }
 fn owned_units(chunk: &AcousticChunk, units: Vec<TimedUnit>) -> Vec<TimedUnit> {
     units
@@ -403,6 +440,18 @@ pub async fn execute_chunks(
     options: &TranscriptionOptions,
     run_id: &str,
     database: Option<&LocalDatabase>,
+) -> Result<AsrResponse> {
+    execute_chunks_with_progress(job, ffmpeg, provider, options, run_id, database, None).await
+}
+
+pub async fn execute_chunks_with_progress(
+    job: &Job,
+    ffmpeg: &Path,
+    provider: Arc<dyn AsrProvider>,
+    options: &TranscriptionOptions,
+    run_id: &str,
+    database: Option<&LocalDatabase>,
+    progress: Option<&tokio::sync::watch::Sender<u64>>,
 ) -> Result<AsrResponse> {
     let root = job.dir.join("asr-checkpoint");
     fs::create_dir_all(&root)?;
@@ -527,6 +576,9 @@ pub async fn execute_chunks(
         if evidence.device == "cpu" {
             effective.whisper.no_gpu = true;
         }
+        if let Some(progress) = progress {
+            progress.send_replace(chunk.index as u64 + 1);
+        }
         if let Ok(artifacts) =
             crate::infrastructure::asr_run_store::AsrRunArtifacts::open(job, run_id)
         {
@@ -574,11 +626,15 @@ pub fn candidate_cues(units: &[TimedUnit]) -> crate::application::CandidateCueSe
         cues: units
             .iter()
             .map(|u| crate::application::CandidateCue {
-                cue: crate::domain::TranscriptSegment::new(
-                    u.start_ms.unwrap(),
-                    u.end_ms.unwrap(),
-                    u.text.clone(),
-                ),
+                cue: {
+                    let mut cue = crate::domain::TranscriptSegment::new(
+                        u.start_ms.unwrap(),
+                        u.end_ms.unwrap(),
+                        u.text.clone(),
+                    );
+                    cue.id = u.id.clone();
+                    cue
+                },
                 timed_unit_ids: vec![u.id.clone()],
             })
             .collect(),

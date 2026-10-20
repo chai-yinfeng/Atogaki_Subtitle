@@ -35,7 +35,7 @@ pub struct TranslationTargetSegment {
     pub source_text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TranslationRequest {
     pub options: TranslationOptions,
     pub before_context: Vec<TranslationContextSegment>,
@@ -50,13 +50,13 @@ pub struct TranslationResult {
     pub translated_text: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranslationUsage {
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranslationResponse {
     pub translations: Vec<TranslationResult>,
     pub model: Option<String>,

@@ -47,6 +47,7 @@ pub struct LocalRetranscriptionService {
     recognition_lock: Arc<Mutex<()>>,
     artifact_lock: Arc<Mutex<()>>,
     cancellations: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
+    scheduler: Option<Arc<crate::application::stage_scheduler::StageScheduler>>,
 }
 
 impl LocalRetranscriptionService {
@@ -58,11 +59,20 @@ impl LocalRetranscriptionService {
             recognition_lock: Arc::new(Mutex::new(())),
             artifact_lock: Arc::new(Mutex::new(())),
             cancellations: Arc::new(Mutex::new(HashMap::new())),
+            scheduler: None,
         }
     }
 
     pub fn with_asr_provider(mut self, provider: Arc<dyn AsrProvider>) -> Self {
         self.asr_provider = provider;
+        self
+    }
+
+    pub fn with_stage_scheduler(
+        mut self,
+        scheduler: Arc<crate::application::stage_scheduler::StageScheduler>,
+    ) -> Self {
+        self.scheduler = Some(scheduler);
         self
     }
 
@@ -212,6 +222,15 @@ impl LocalRetranscriptionService {
             &serde_json::json!({"phase":"extracting_audio"}),
         )?;
         let recognition_future = async {
+            let _stage_permit = if !cloud {
+                if let Some(scheduler) = &self.scheduler {
+                    Some(scheduler.acquire_asr().await)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             media::extract_wav_range(
                 &self.ffmpeg,
                 &job.audio_wav,

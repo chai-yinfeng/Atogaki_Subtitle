@@ -137,7 +137,7 @@ pub async fn execute_translation_group(
     Ok(response)
 }
 
-fn validate_translation_results(
+pub(crate) fn validate_translation_results(
     provider_name: &str,
     expected_ids: &[String],
     translations: &[TranslationResult],

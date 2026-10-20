@@ -27,6 +27,8 @@ macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`
 
 Hy-MT2 1.8B 是日常本地翻译推荐，7B 需要更多内存与处理时间；两者使用官方 GGUF Q4_K_M 量化权重，模型另行下载。MLX 暂缓，桌面继续使用 C++ / Metal。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
 
+当前开发分支另已接入阶段队列：默认同时识别两个任务，DeepSeek 文本翻译最多四个请求并发，并可在同一任务的稳定原文前缀上提前进行；成功结果持久保存，完整识别后核对并复用。局部本地识别共享设备限额，Hy-MT2 在完整识别后独占设备翻译。越界修复及这些后续改进尚未进入已发布的 v0.1.1 安装包；设计与验证见 [0052](docs/decisions/0052-staged-concurrency-and-early-translation.md) 和 [阶段管线验证](docs/staged-pipeline-validation.md)。
+
 ## 安装与首次配置
 
 macOS 下载 `Atogaki-v0.1.1-macos-arm64.dmg` 及相邻 `.sha256`；Windows 继续使用 alpha.10 的 NSIS 安装器。从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。

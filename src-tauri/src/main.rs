@@ -2845,7 +2845,8 @@ fn main() {
                 config.ffmpeg.clone(),
                 config.whisper_cli.clone(),
                 database.clone(),
-            );
+            )
+            .with_stage_scheduler(task_service.stage_scheduler());
             let subtitle_style_service = SubtitleStyleService::new(
                 config.ffmpeg.clone(),
                 workspace_service.clone(),

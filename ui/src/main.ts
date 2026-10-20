@@ -18,7 +18,7 @@ let learningTaskFilter = "";
 type LanguageCode = "ja" | "en" | "ko" | "zh-Hans";
 type LearningLanguage = "ja" | "en" | "ko";
 
-type RecoverySummary = { phase: string; completed_ms: number; duration_ms: number; completed_ranges: [number, number][]; can_resume: boolean; blocked_reason: string | null };
+type RecoverySummary = { phase: string; completed_ms: number; duration_ms: number; completed_ranges: [number, number][]; can_resume: boolean; blocked_reason: string | null; early_translation?: { translated_cues: number; stable_through_ms: number; error: string | null } | null };
 type LocalJob = {
   recovery?: RecoverySummary;
   job_id: string;
@@ -626,7 +626,7 @@ app.innerHTML = `
           </div>
           <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
           <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
-          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>完整转录后自动翻译；云端只发送字幕文本和上下文。</span></label>
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>云端随稳定原文提前翻译，本地在完整转录后翻译；云端只发送字幕文本和上下文。</span></label>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
@@ -2467,6 +2467,7 @@ function renderJobs(jobs: LocalJob[]): void {
             </span>
           </button>
           <div class="job-actions">
+            ${job.status !== "done" && job.recovery?.early_translation ? `<span title="完整识别后会核对原文与上下文，再写入译文">已提前翻译 ${job.recovery.early_translation.translated_cues} 段${job.recovery.early_translation.error ? (runningJob(job) ? " · 翻译已停止，识别继续" : " · 翻译待继续") : ""}</span>` : ""}
             ${job.recovery?.duration_ms ? `<span>${job.status==="failed" ? `${escapeHtml(statusLabel(job.recovery.phase))} · ` : ""}${formatTime(job.recovery.completed_ms)} / ${formatTime(job.recovery.duration_ms)}</span><button type="button" class="secondary" data-partial-job="${escapeHtml(job.job_id)}">查看已保存原文</button>` : ""}
             ${job.status === "failed" && job.recovery?.can_resume ? `<button type="button" data-resume-job="${escapeHtml(job.job_id)}">继续</button>` : ""}
             ${runningJob(job) ? `<button type="button" class="secondary" data-pause-job="${escapeHtml(job.job_id)}">暂停</button>` : ""}
@@ -7088,7 +7089,7 @@ async function showPartialTranscript(jobId: string): Promise<void> {
   const dialog = document.createElement("dialog");
   dialog.className = "settings-dialog";
   dialog.innerHTML =
-    '<div class="dialog-heading"><h2>已保存原文 · 只读</h2><button type="button">关闭</button></div><p>完整识别完成后开放校对、翻译、收藏和导出。只显示通过校验的完成块。</p><div class="partial-media"></div><div class="partial-text">正在读取…</div>';
+    '<div class="dialog-heading"><h2>已保存原文 · 只读</h2><button type="button">关闭</button></div><p>完整识别后开放校对、手动重译、收藏和导出。只显示通过校验的完成块；已选择云端翻译时，稳定原文可在后台提前翻译。</p><div class="partial-media"></div><div class="partial-text">正在读取…</div>';
   document.body.append(dialog);
   dialog.querySelector("button")!.onclick = () => dialog.close();
   dialog.addEventListener("close", () => {

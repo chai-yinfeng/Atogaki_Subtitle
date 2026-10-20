@@ -253,6 +253,8 @@ struct LocalLearningSourceRow {
 
 #[derive(Debug, Clone)]
 pub struct LocalMachineTranslation {
+    pub expected_source_revision: Option<i64>,
+    pub expected_translation_revision: Option<i64>,
     pub segment_id: String,
     pub source_text: String,
     pub expected_translated_text: Option<String>,
@@ -2050,6 +2052,24 @@ impl LocalDatabase {
         }
 
         for translation in translations {
+            if translation.expected_source_revision.is_some()
+                || translation.expected_translation_revision.is_some()
+            {
+                let current: (i64, i64) = sqlx::query_as("SELECT source_revision, translation_revision FROM local_subtitle_provenance WHERE job_id = ? AND segment_id = ?")
+                    .bind(job_id).bind(&translation.segment_id).fetch_one(&mut *tx).await?;
+                if translation
+                    .expected_source_revision
+                    .is_some_and(|revision| revision != current.0)
+                    || translation
+                        .expected_translation_revision
+                        .is_some_and(|revision| revision != current.1)
+                {
+                    return Err(anyhow!(
+                        "subtitle revision changed while it was being translated: {}",
+                        translation.segment_id
+                    ));
+                }
+            }
             let translated_text = translation.translated_text.trim();
             if translated_text.is_empty() {
                 return Err(anyhow!(
@@ -4714,6 +4734,8 @@ mod tests {
                 &manifest.job_id,
                 &[
                     LocalMachineTranslation {
+                        expected_source_revision: None,
+                        expected_translation_revision: None,
                         segment_id: first.id.clone(),
                         source_text: first.source_text.clone(),
                         expected_translated_text: None,
@@ -4721,6 +4743,8 @@ mod tests {
                         translated_text: "第一句话".to_string(),
                     },
                     LocalMachineTranslation {
+                        expected_source_revision: None,
+                        expected_translation_revision: None,
                         segment_id: second.id.clone(),
                         source_text: second.source_text.clone(),
                         expected_translated_text: None,
@@ -4761,6 +4785,8 @@ mod tests {
             .apply_machine_translations(
                 &manifest.job_id,
                 &[LocalMachineTranslation {
+                    expected_source_revision: None,
+                    expected_translation_revision: None,
                     segment_id: second.id.clone(),
                     source_text: second.source_text.clone(),
                     expected_translated_text: Some("下一句话".to_string()),
@@ -4795,6 +4821,8 @@ mod tests {
             .apply_machine_translations(
                 &manifest.job_id,
                 &[LocalMachineTranslation {
+                    expected_source_revision: None,
+                    expected_translation_revision: None,
                     segment_id: first.id,
                     source_text: "已经过时的日文".to_string(),
                     expected_translated_text: Some("第一句话".to_string()),
@@ -4835,6 +4863,8 @@ mod tests {
             .await
             .unwrap();
         let update = |expected: Option<&str>| LocalMachineTranslation {
+            expected_source_revision: None,
+            expected_translation_revision: None,
             segment_id: target.id.clone(),
             source_text: target.source_text.clone(),
             expected_translated_text: expected.map(str::to_string),
@@ -4956,6 +4986,8 @@ mod tests {
             .apply_machine_translation_group(
                 &manifest.job_id,
                 &[LocalMachineTranslation {
+                    expected_source_revision: None,
+                    expected_translation_revision: None,
                     segment_id: target.id.clone(),
                     source_text: target.source_text.clone(),
                     expected_translated_text: None,
@@ -5031,6 +5063,8 @@ mod tests {
             .apply_machine_translation_group(
                 &manifest.job_id,
                 &[LocalMachineTranslation {
+                    expected_source_revision: None,
+                    expected_translation_revision: None,
                     segment_id: target.id.clone(),
                     source_text: target.source_text.clone(),
                     expected_translated_text: Some("目标".to_string()),

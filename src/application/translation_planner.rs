@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::application::{TranslationContextSegment, TranslationTargetSegment};
 
 pub const TRANSLATION_GROUPING_STRATEGY: &str = "semantic-v1";
+pub const TRANSLATION_AFTER_CONTEXT_MS: u64 = 30_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranslationPlannerCue {
@@ -46,7 +47,7 @@ impl Default for TranslationPlanner {
             max_targets: 12,
             max_target_chars: 1_800,
             pause_boundary_ms: 1_500,
-            context_window_ms: 30_000,
+            context_window_ms: TRANSLATION_AFTER_CONTEXT_MS as i64,
             max_context_chars: 2_000,
         }
     }

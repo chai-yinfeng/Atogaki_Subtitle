@@ -150,6 +150,11 @@ struct PreparedTranslation {
 }
 
 impl LocalWorkspaceService {
+    pub(crate) fn frozen_translation_provider(&self) -> Arc<dyn TranslationProvider> {
+        self.translation_provider
+            .execution_snapshot()
+            .unwrap_or_else(|| self.translation_provider.clone())
+    }
     pub fn new(database: LocalDatabase) -> Self {
         Self::with_provider(database, Arc::new(UnconfiguredTranslationProvider))
     }
@@ -899,8 +904,14 @@ impl LocalWorkspaceService {
                 })?;
         let response_model = response.model.clone().or_else(|| provider.model.clone());
         let response_usage = response.usage.clone();
-        let (updates, empty) =
+        let (mut updates, empty) =
             validated_translation_updates(&provider.name, &batch, response.translations)?;
+        for update in &mut updates {
+            if let Some(p) = provenance_by_id.get(&update.segment_id) {
+                update.expected_source_revision = Some(p.source_revision);
+                update.expected_translation_revision = Some(p.translation_revision);
+            }
+        }
         if !updates.is_empty() {
             self.database
                 .apply_machine_translation_group(job_id, &updates, &dependencies)
@@ -975,11 +986,17 @@ impl LocalWorkspaceService {
                 .clone()
                 .or_else(|| provider.model.clone());
             let retry_usage = retry_response.usage.clone();
-            let (retry_updates, still_empty) = validated_translation_updates(
+            let (mut retry_updates, still_empty) = validated_translation_updates(
                 &provider.name,
                 &retry_batch,
                 retry_response.translations,
             )?;
+            for update in &mut retry_updates {
+                if let Some(p) = provenance_by_id.get(&update.segment_id) {
+                    update.expected_source_revision = Some(p.source_revision);
+                    update.expected_translation_revision = Some(p.translation_revision);
+                }
+            }
             if !retry_updates.is_empty() {
                 self.database
                     .apply_machine_translation_group(job_id, &retry_updates, &retry_dependencies)
@@ -1121,6 +1138,8 @@ fn validated_translation_updates(
             empty.push(segment.id.clone());
         } else {
             updates.push(LocalMachineTranslation {
+                expected_source_revision: None,
+                expected_translation_revision: None,
                 segment_id: segment.id.clone(),
                 source_text: segment.source_text.clone(),
                 expected_translated_text: segment.translated_text.clone(),

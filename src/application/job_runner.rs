@@ -26,6 +26,7 @@ pub struct JobRunner {
     config: AppConfig,
     asr_provider: Arc<dyn AsrProvider>,
     database: Option<LocalDatabase>,
+    asr_progress: Option<tokio::sync::watch::Sender<u64>>,
 }
 
 impl JobRunner {
@@ -35,11 +36,17 @@ impl JobRunner {
             config,
             asr_provider,
             database: None,
+            asr_progress: None,
         }
     }
 
     pub fn with_database(mut self, database: LocalDatabase) -> Self {
         self.database = Some(database);
+        self
+    }
+
+    pub fn with_asr_progress(mut self, progress: tokio::sync::watch::Sender<u64>) -> Self {
+        self.asr_progress = Some(progress);
         self
     }
 
@@ -370,13 +377,14 @@ impl JobRunner {
             self.asr_provider.status().id.as_str(),
             "whisper.cpp" | "mlx-whisper"
         ) {
-            crate::application::acoustic_plan::execute_chunks(
+            crate::application::acoustic_plan::execute_chunks_with_progress(
                 job,
                 &self.config.ffmpeg,
                 Arc::clone(&self.asr_provider),
                 options,
                 &run.id,
                 self.database.as_ref(),
+                self.asr_progress.as_ref(),
             )
             .await
         } else {

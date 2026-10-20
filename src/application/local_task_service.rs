@@ -67,6 +67,9 @@ enum QueuedTask {
 }
 
 impl LocalTaskService {
+    pub fn stage_scheduler(&self) -> Arc<crate::application::stage_scheduler::StageScheduler> {
+        self.scheduler.clone()
+    }
     pub fn schedule_translation_provider(
         &self,
         provider: Arc<dyn crate::application::TranslationProvider>,
@@ -1095,19 +1098,56 @@ async fn run_queued_task(
         control.started = true;
         break permit;
     };
+    let (progress_tx, progress_rx) = watch::channel(0);
+    runner = runner.with_asr_progress(progress_tx);
     let automatic_workspace = automatic.lock().await.get(&id).cloned();
     let work = async {
         let job = Job::open(job_dir.clone())?;
+        let early = automatic_workspace
+            .as_ref()
+            .map(|workspace| {
+                crate::application::early_translation::EarlyTranslationSession::new(
+                    job.clone(),
+                    workspace.frozen_translation_provider(),
+                )
+            })
+            .transpose()?
+            .flatten();
+        let mut early_error = None;
         if !job.dir.join("asr-published.json").is_file() {
-            match task {
-                QueuedTask::Transcribe { spec, .. } => {
-                    runner.transcribe(spec).await?;
+            let (done_tx, done_rx) = watch::channel(false);
+            let asr = async {
+                let mut result = match task {
+                    QueuedTask::Transcribe { spec, .. } => {
+                        runner.transcribe(spec).await.map(|_| ())
+                    }
+                    QueuedTask::Process { spec, .. } => runner.process(spec).await.map(|_| ()),
+                };
+                drop(asr_permit.take());
+                if result.is_ok() && automatic_workspace.is_some() {
+                    result = async {
+                        let mut manifest = job
+                            .read_manifest_if_exists()?
+                            .ok_or_else(|| anyhow!("task manifest missing"))?;
+                        manifest.mark(JobStatus::Translating);
+                        job.write_manifest(&manifest)?;
+                        Ok(())
+                    }
+                    .await;
                 }
-                QueuedTask::Process { spec, .. } => {
-                    runner.process(spec).await?;
+                done_tx.send_replace(true);
+                result
+            };
+            let prefix = async {
+                if let Some(session) = &early {
+                    session.run(progress_rx, done_rx).await
+                } else {
+                    Ok(())
                 }
-            }
-            drop(asr_permit.take());
+            };
+            let (asr_result, prefix_result) = tokio::join!(asr, prefix);
+            asr_result?;
+            early_error = prefix_result.err();
             if let Some(db) = &database {
                 db.sync_snapshot(&JobSnapshot::load(&job_dir)?).await?;
                 sync_initial_asr_provenance(db, &job_dir).await?;
@@ -1123,6 +1163,14 @@ async fn run_queued_task(
                 .ok_or_else(|| anyhow!("task manifest missing"))?;
             manifest.mark(JobStatus::Translating);
             job.write_manifest(&manifest)?;
+            if let Some(error) = early_error {
+                return Err(error);
+            }
+            let workspace = if let (Some(early), Some(db)) = (&early, &database) {
+                workspace.using_provider(early.final_provider(db.clone()))
+            } else {
+                workspace
+            };
             workspace.translate_pending(&id).await?;
             manifest.mark(JobStatus::Done);
             job.write_manifest(&manifest)?;
@@ -1944,5 +1992,443 @@ mod tests {
         drop(service);
         db.close().await;
         fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stage_pipeline_starts_two_asr_jobs_and_next_job_while_early_cloud_is_blocked() {
+        use super::{Arc, Duration, Job};
+        use crate::application::{
+            TranslationFuture, TranslationProvider, TranslationProviderStatus, TranslationRequest,
+            TranslationResponse, TranslationResult, TranslationUsage,
+        };
+        use std::{
+            os::unix::fs::PermissionsExt,
+            sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        #[derive(Debug)]
+        struct Cloud {
+            started: tokio::sync::mpsc::UnboundedSender<()>,
+            release: Arc<tokio::sync::Semaphore>,
+            calls: AtomicUsize,
+            fail_once: AtomicBool,
+        }
+        impl TranslationProvider for Cloud {
+            fn status(&self) -> TranslationProviderStatus {
+                TranslationProviderStatus {
+                    id: "deepseek".into(),
+                    name: "Fixture".into(),
+                    configured: true,
+                    model: Some("v1".into()),
+                    endpoint_kind: "test".into(),
+                    configuration_hint: None,
+                }
+            }
+            fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+                Box::pin(async move {
+                    self.calls.fetch_add(1, Ordering::SeqCst);
+                    self.started.send(()).unwrap();
+                    self.release.acquire().await.unwrap().forget();
+                    if self.fail_once.swap(false, Ordering::SeqCst) {
+                        anyhow::bail!("injected cloud interruption");
+                    }
+                    Ok(TranslationResponse {
+                        translations: request
+                            .targets
+                            .into_iter()
+                            .map(|t| TranslationResult {
+                                segment_id: t.segment_id,
+                                translated_text: format!("译：{}", t.source_text),
+                            })
+                            .collect(),
+                        model: Some("v1".into()),
+                        usage: TranslationUsage::default(),
+                    })
+                })
+            }
+        }
+        let root = std::env::temp_dir().join(format!("atogaki-stage-e2e-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let ffmpeg = root.join("ffmpeg");
+        fs::write(&ffmpeg,"#!/bin/sh\nneed=0\nfor arg do\n if [ \"$need\" = 1 ]; then input=$arg; need=0; fi\n if [ \"$arg\" = -i ]; then need=1; fi\n destination=$arg\ndone\ncp \"$input\" \"$destination\"\n").unwrap();
+        let whisper = root.join("whisper");
+        fs::write(&whisper,r##"#!/bin/sh
+need=0
+for arg do
+ if [ "$need" = 1 ]; then prefix=$arg; need=0; fi
+ if [ "$arg" = -of ]; then need=1; fi
+done
+attempt=$(dirname "$prefix")
+checkpoint=$(dirname "$attempt")
+job=$(dirname "$checkpoint")
+index=$(basename "$attempt" | cut -d- -f2)
+echo started > "$prefix.started"
+if [ "$index" = 2 ]; then
+ while [ ! -f "$job/release-final" ]; do sleep 0.02; done
+fi
+printf '{"transcription":[{"offsets":{"from":6000,"to":7000},"text":"Sentence %s."}]}' "$index" > "$prefix.json"
+"##).unwrap();
+        for p in [&ffmpeg, &whisper] {
+            fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let input = root.join("input.wav");
+        let data_len = 360 * 32000u32;
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF");
+        wav.extend((data_len + 36).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16u32.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(16000u32.to_le_bytes());
+        wav.extend(32000u32.to_le_bytes());
+        wav.extend(2u16.to_le_bytes());
+        wav.extend(16u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend(data_len.to_le_bytes());
+        wav.resize(data_len as usize + 44, 0);
+        fs::write(&input, wav).unwrap();
+        let model = root.join("model");
+        fs::write(&model, b"fixture").unwrap();
+        let db = LocalDatabase::open(root.join("index.sqlite"))
+            .await
+            .unwrap();
+        let service = LocalTaskService::start_with_database(
+            AppConfig {
+                ffmpeg,
+                whisper_cli: whisper,
+                deepl_auth_key: None,
+            },
+            root.join("jobs"),
+            db.clone(),
+        )
+        .unwrap();
+        let (started, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let cloud = Arc::new(Cloud {
+            started,
+            release: release.clone(),
+            calls: AtomicUsize::new(0),
+            fail_once: AtomicBool::new(false),
+        });
+        let mut jobs = vec![];
+        for _ in 0..3 {
+            let snapshot = service
+                .submit_with_translation(
+                    TranscribeSpec {
+                        input: input.clone(),
+                        output_dir: None,
+                        transcription: TranscriptionOptions::new(
+                            model.clone(),
+                            LanguageCode::English,
+                        ),
+                    },
+                    None,
+                    &[],
+                    Some((cloud.clone(), serde_json::json!({"provider":"fixture"}))),
+                )
+                .await
+                .unwrap();
+            jobs.push(Job::open(root.join("jobs").join(snapshot.manifest.job_id)).unwrap());
+        }
+        for _ in 0..2 {
+            tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let active = jobs
+            .iter()
+            .filter(|j| j.dir.join("asr-checkpoint").is_dir())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            active.len(),
+            2,
+            "third ASR waits while first two are active"
+        );
+        for job in active {
+            fs::write(job.dir.join("release-final"), b"continue").unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            jobs.iter().all(|j| j.dir.join("asr-checkpoint").is_dir()),
+            "next ASR starts while earlier cloud requests are blocked"
+        );
+        assert_eq!(cloud.calls.load(Ordering::SeqCst), 3);
+        for job in &jobs {
+            fs::write(job.dir.join("release-final"), b"continue").unwrap();
+        }
+        release.add_permits(32);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let mut done = true;
+                for job in &jobs {
+                    let record = db.get_job(&job.id()).await.unwrap().unwrap();
+                    assert_ne!(record.status, "failed", "{:?}", record.error_message);
+                    done &= record.status == "done"
+                        && !service.controls.lock().await.contains_key(&job.id());
+                }
+                if done {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            cloud.calls.load(Ordering::SeqCst),
+            9,
+            "each prefix result reused by final translation"
+        );
+        for job in &jobs {
+            let cues = db.list_segments(&job.id()).await.unwrap();
+            assert_eq!(cues.len(), 3);
+            assert!(cues.iter().all(|c| c.translated_text.is_some()));
+        }
+        // A later task's early API failure must not stop ASR. Its resume must
+        // use only the translation stage, even after original resources vanish.
+        while receiver.try_recv().is_ok() {}
+        cloud.fail_once.store(true, Ordering::SeqCst);
+        let failed = service
+            .submit_with_translation(
+                TranscribeSpec {
+                    input: input.clone(),
+                    output_dir: None,
+                    transcription: TranscriptionOptions::new(model.clone(), LanguageCode::English),
+                },
+                None,
+                &[],
+                Some((cloud.clone(), serde_json::json!({"provider":"fixture"}))),
+            )
+            .await
+            .unwrap();
+        let failed_job = Job::open(root.join("jobs").join(&failed.manifest.job_id)).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        fs::write(failed_job.dir.join("release-final"), b"continue").unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if db.get_job(&failed_job.id()).await.unwrap().unwrap().status == "failed"
+                    && !service.controls.lock().await.contains_key(&failed_job.id())
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let stopped = failed_job.read_manifest_if_exists().unwrap().unwrap();
+        assert_eq!(
+            stopped.failed_stage,
+            Some(crate::application::job_status::JobStatus::Translating)
+        );
+        assert!(failed_job.dir.join("asr-published.json").is_file());
+        let evidence_hashes = (0..3)
+            .map(|i| {
+                crate::application::acoustic_plan::file_digest(
+                    &failed_job
+                        .dir
+                        .join(format!("asr-checkpoint/chunk-{i:06}/evidence.json")),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        fs::remove_file(&model).unwrap();
+        fs::remove_file(&input).unwrap();
+        service
+            .configure_task_translation(&failed_job.id(), cloud.clone())
+            .await
+            .unwrap();
+        service.resume(&failed_job.id()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let record = db.get_job(&failed_job.id()).await.unwrap().unwrap();
+                assert_ne!(record.status, "failed", "{:?}", record.error_message);
+                if record.status == "done"
+                    && !service.controls.lock().await.contains_key(&failed_job.id())
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for (i, expected) in evidence_hashes.iter().enumerate() {
+            assert_eq!(
+                &crate::application::acoustic_plan::file_digest(
+                    &failed_job
+                        .dir
+                        .join(format!("asr-checkpoint/chunk-{i:06}/evidence.json"))
+                )
+                .unwrap(),
+                expected
+            );
+        }
+        assert_eq!(cloud.calls.load(Ordering::SeqCst), 13);
+        drop(service);
+        db.close().await;
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    #[ignore = "requires ATOGAKI_STAGE_SMOKE_INPUT, ATOGAKI_STAGE_SMOKE_MODEL and real Metal sidecars"]
+    async fn real_two_job_metal_pipeline_with_local_translation_fixture() {
+        use super::{Arc, Job};
+        use crate::application::{
+            TranslationFuture, TranslationProvider, TranslationProviderStatus, TranslationRequest,
+            TranslationResponse, TranslationResult, TranslationUsage,
+        };
+        use std::sync::atomic::{AtomicBool, Ordering};
+        #[derive(Debug)]
+        struct Echo {
+            jobs: std::path::PathBuf,
+            early: AtomicBool,
+        }
+        impl TranslationProvider for Echo {
+            fn status(&self) -> TranslationProviderStatus {
+                TranslationProviderStatus {
+                    id: "deepseek".into(),
+                    name: "Local fixture (no network)".into(),
+                    configured: true,
+                    model: Some("fixture".into()),
+                    endpoint_kind: "test".into(),
+                    configuration_hint: None,
+                }
+            }
+            fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+                Box::pin(async move {
+                    for entry in fs::read_dir(&self.jobs)?.flatten() {
+                        let Ok(job) = Job::open(entry.path()) else {
+                            continue;
+                        };
+                        let Ok(summary) = crate::application::acoustic_plan::recovery_summary(&job)
+                        else {
+                            continue;
+                        };
+                        if summary.completed_ms > 0 && summary.completed_ms < summary.duration_ms {
+                            let units = crate::application::acoustic_plan::partial_units(&job)?;
+                            if request
+                                .targets
+                                .iter()
+                                .any(|target| units.iter().any(|unit| unit.id == target.segment_id))
+                            {
+                                self.early.store(true, Ordering::SeqCst);
+                            }
+                        }
+                    }
+                    Ok(TranslationResponse {
+                        translations: request
+                            .targets
+                            .into_iter()
+                            .map(|t| TranslationResult {
+                                segment_id: t.segment_id,
+                                translated_text: format!("[local fixture] {}", t.source_text),
+                            })
+                            .collect(),
+                        model: Some("fixture".into()),
+                        usage: TranslationUsage::default(),
+                    })
+                })
+            }
+        }
+        let input = std::path::PathBuf::from(std::env::var("ATOGAKI_STAGE_SMOKE_INPUT").unwrap());
+        let model = std::path::PathBuf::from(std::env::var("ATOGAKI_STAGE_SMOKE_MODEL").unwrap());
+        let sidecars =
+            std::path::PathBuf::from(std::env::var("ATOGAKI_STAGE_SMOKE_SIDECARS").unwrap());
+        let root = std::path::PathBuf::from(std::env::var("ATOGAKI_STAGE_SMOKE_OUTPUT").unwrap());
+        fs::create_dir_all(&root).unwrap();
+        let db = LocalDatabase::open(root.join("index.sqlite"))
+            .await
+            .unwrap();
+        let service = LocalTaskService::start_with_database(
+            AppConfig {
+                ffmpeg: sidecars.join("ffmpeg"),
+                whisper_cli: sidecars.join("whisper-cli"),
+                deepl_auth_key: None,
+            },
+            root.join("jobs"),
+            db.clone(),
+        )
+        .unwrap();
+        let provider = Arc::new(Echo {
+            jobs: root.join("jobs"),
+            early: AtomicBool::new(false),
+        });
+        let mut jobs = vec![];
+        for _ in 0..2 {
+            let mut options = TranscriptionOptions::new(model.clone(), LanguageCode::English);
+            options.whisper.vad_model = Some(std::path::PathBuf::from(
+                std::env::var("ATOGAKI_STAGE_SMOKE_VAD").unwrap(),
+            ));
+            let snapshot = service
+                .submit_with_translation(
+                    TranscribeSpec {
+                        input: input.clone(),
+                        output_dir: None,
+                        transcription: options,
+                    },
+                    None,
+                    &[],
+                    Some((provider.clone(), serde_json::json!({"test":"local-only"}))),
+                )
+                .await
+                .unwrap();
+            jobs.push(Job::open(root.join("jobs").join(snapshot.manifest.job_id)).unwrap());
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(600), async {
+            loop {
+                let mut done = true;
+                for job in &jobs {
+                    let record = db.get_job(&job.id()).await.unwrap().unwrap();
+                    assert_ne!(record.status, "failed", "{:?}", record.error_message);
+                    done &= record.status == "done"
+                        && !service.controls.lock().await.contains_key(&job.id());
+                }
+                if done {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            provider.early.load(Ordering::SeqCst),
+            "real translation request must precede ASR completion for its own job"
+        );
+        let mut intervals = vec![];
+        let mut report_jobs = vec![];
+        for job in &jobs {
+            let segments = db.list_segments(&job.id()).await.unwrap();
+            assert!(!segments.is_empty());
+            assert!(segments.iter().all(|s| s.translated_text.is_some()));
+            let evidence_path = job.dir.join("asr-checkpoint/chunk-000000/evidence.json");
+            let evidence: serde_json::Value =
+                serde_json::from_slice(&fs::read(&evidence_path).unwrap()).unwrap();
+            assert_eq!(evidence["device"], "gpu");
+            let end = fs::metadata(evidence_path)
+                .unwrap()
+                .modified()
+                .unwrap()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let elapsed = evidence["recognition_elapsed_ms"].as_u64().unwrap() as u128;
+            intervals.push((end - elapsed, end));
+            report_jobs.push(serde_json::json!({"job_id":job.id(),"cues":segments.len(),"first_chunk_device":evidence["device"],"first_chunk_elapsed_ms":elapsed,"early_progress":serde_json::from_slice::<serde_json::Value>(&fs::read(job.dir.join("early-translation/progress.json")).unwrap()).unwrap()}));
+        }
+        assert!(
+            intervals[0].0.max(intervals[1].0) < intervals[0].1.min(intervals[1].1),
+            "first GPU recognitions must overlap"
+        );
+        crate::application::acoustic_plan::write_json(&root.join("report.json"),&serde_json::json!({"early_translation_before_own_asr_complete":true,"gpu_intervals_overlap":true,"first_chunk_intervals_ms":intervals,"cloud_network_used":false,"jobs":report_jobs})).unwrap();
+        drop(service);
+        db.close().await;
     }
 }
