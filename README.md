@@ -120,6 +120,8 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo run --manifest-path src-tauri/Cargo.toml
 ```
 
+完整打包还要求 `src-tauri/binaries/llama-server-aarch64-apple-darwin`。固定 runtime 版本与构建参数见 [`hy-mt2-versions.zsh`](scripts/hy-mt2-versions.zsh) 和 [`validate-hy-mt2.zsh`](scripts/validate-hy-mt2.zsh)；后者是会下载模型并执行本地推理的开发验证脚本，普通安装用户无需运行。
+
 构建 ad-hoc 签名、未公证的 App 或 DMG：
 
 ```bash

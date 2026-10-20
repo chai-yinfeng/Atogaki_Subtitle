@@ -228,3 +228,13 @@ Gemini 本机试用版已安装到 /Applications/Atogaki.app 并原生启动，�
 - 重新生成 macOS 和共享 Windows Rust 声明、前端声明，差异仅自有 package 版本号，未新增第三方依赖或改变许可证。Windows 声明更新用于维护共享编译门禁，不代表生成新 Windows 安装包或实机验收。最终 DMG／窗口／下载复核与 Release 状态后续追加。
 
 - 单独运行 Tauri manifest 的 rustfmt 检查发现三个历史文件有格式差异（dictionary_download、dictionary_lookup、model_download），已由 rustfmt 统一；随后两套格式检查、diff 检查及壳层 32 项测试重新通过。修正前一次提交记录了预期通过状态，本条给出实际检查结果及修复顺序。
+
+
+## 2026-10-20：v0.1.1 最终发行验收
+
+- [PR #20](https://github.com/chai-yinfeng/Atogaki_Subtitle/pull/20) 合并；[Windows 共享编译门禁 39453086206](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/39453086206) 5分42秒通过，不生成 Windows 安装包。tag `v0.1.1` 指向 `8975657028d0feb050ea4f30f0b562f26415bacd`，从干净 tag 重建完整非 CI App／DMG。
+- 隔离签名窗口复核两档 Hy-MT2 名称及资源说明、原图／共享色盘恢复、独立滚动裁剪、分区切换回顶部和 Gemini（LLM API）。通过产品“定位图片”打开 Finder 并进入挂载卷，实际显示 App 左、Applications 右；最终布局记录再次核对 (180,170)／(480,170)、660×400。
+- 最终 DMG CRC、arm64、最低声明 macOS 12.0、五个可执行文件的系统 dylib 依赖、深度严格签名、根许可证、生成声明与两个构建清单均通过。模型不随包分发，官方作品图片未进入 Bundle。八项 upstream 源码内部摘要和完整重建材料逐项核对。
+- 已安装并启动 `/Applications/Atogaki.app` 的实际发行 App；确认 13 个正式任务、1.8B 推荐与 7B 简明名称、用户原图及三类已选颜色保持。最终 DMG 与安装 App 的五个可执行文件逐项 SHA-256 一致。备份 `local-artifacts/install-backups/20261020-v011/atogaki-before-install.sqlite`，integrity_check=ok；全部字幕相关表与备份完全一致。旧 App `/Applications/.Atogaki.previous.20261020-v011` 保留。未调用识别、翻译或读取／写入 Key。
+- [v0.1.1 Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.1) 已公开为稳定版，四项 macOS 资产从草稿重新下载并通过两份 SHA-256 后公开；本地原件与下载验证副本位于忽略目录 `local-artifacts/release/v0.1.1/`。DMG 45,697,660 字节，对应源码 81,923,848 字节；最终摘要见 releasing.md。没有 Windows 资产，不移动 v0.1.0 tag。
+- 仍为 ad-hoc 签名、未公证。人工接缝听审与翻译内容质量门禁继续按用户决定后补，MLX 暂缓；没有据工程验收宣称模型准确率提升。后续优先收集实际使用反馈，维护离线恢复和编辑闭环。

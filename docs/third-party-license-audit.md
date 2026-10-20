@@ -137,3 +137,7 @@ Merriam-Webster 是用户自带 Key 的非商业网络服务，不随 App 分发
 本次锁定 macOS arm64 完整四 sidecar 配置。重新生成 Rust 与前端声明无内容变化；对应源码脚本新增 llama.cpp 固定版本源码、SHA-256、构建清单及重建脚本，拒绝清单或签名前二进制不匹配。FFmpeg 继续为 LGPL 构建，不含 GPL/nonfree/libx264。模型权重、用户媒体、词典数据与官方艺术素材不随安装包分发。Windows 不生成新安装包或对应源码资产。
 
 同日复核 [Merriam-Webster API 条款](https://dictionaryapi.com/info/terms-of-service)：非商业用途、每日每 reference 1,000 次、最多两个 reference，以及禁止自动查询和比较／基准测试的限制仍在。本轮不更改该服务入口、不调用 API。
+
+## 2026-10-20 v0.1.1 发行材料
+
+macOS／共享 Windows Rust 及前端声明已重新生成，变化仅自有 package 0.1.1 版本元数据，没有新依赖或新增许可证。完整 macOS Bundle 保留四个 sidecar 的清单和许可证；八项对应源码摘要逐项核对，归档与安装包重新下载校验后在同一 [v0.1.1 Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.1) 公开。模型、用户媒体、词典和官方作品图片不随包分发；本次不发行 Windows 安装包。

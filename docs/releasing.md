@@ -51,7 +51,7 @@ gh release create v0.1.1 \
 
 macOS 当前继续手工发布，以保留本机最终 Finder 布局和真实窗口门禁。取得 Apple Developer Program 资格后，再让 GitHub Actions 在版本 tag 上构建、签名、公证、装订 notarization ticket、生成 DMG 和校验文件，并上传到同一个 Release。签名证书、App Store Connect API key 等只放 GitHub Actions encrypted secrets，不进入仓库。
 
-当前 Apple Silicon App 使用 ad-hoc 签名并声明最低 macOS 12.0；这可以保证 Bundle 完整性，但不能代替 Developer ID 签名与公证，也不会消除外部下载时的 Gatekeeper 提示。DMG 已在本机用 `hdiutil verify` 通过结构校验，并确认包含 `.app`、Applications 链接、四个 sidecar、Apache-2.0 项目许可证和第三方构建清单。Tauri 配置现已固定 660×400 Finder 窗口及“App 左、Applications 右”的图标位置；`CI=true` 的无美化产物仍只用于结构校验。当前 macOS 26 环境的非 CI Finder 美化脚本仍需在最终发布前实机构建并复核，自动化不能用无布局产物替代这项发布门禁。
+当前 Apple Silicon App 使用 ad-hoc 签名并声明最低 macOS 12.0；这可以保证 Bundle 完整性，但不能代替 Developer ID 签名与公证，也不会消除外部下载时的 Gatekeeper 提示。DMG 已在本机用 `hdiutil verify` 通过结构校验，并确认包含 `.app`、Applications 链接、四个 sidecar、Apache-2.0 项目许可证和第三方构建清单。Tauri 配置现已固定 660×400 Finder 窗口及“App 左、Applications 右”的图标位置；`CI=true` 的无美化产物仍只用于结构校验。2026-10-20 已在当前 macOS 环境完成非 CI 美化脚本构建、布局记录与实际 Finder 窗口复核；后续发行仍逐版检查，不能用无布局产物代替。
 
 2026-09-08 已发布 macOS Apple Silicon 预发布版 `v0.1.0-alpha.9`：集中修复日语节目词表／转录、可恢复翻译、局部重新识别和长视频播放，并补充视频导出规格预览。固定 tag 的最终 App 已完成真实窗口回归，DMG、DMG 校验文件、对应源码包和源码包校验文件均已核对后上传。该版本不包含 Windows 资产；Windows 对应功能随后由 `v0.1.0-alpha.10` 单独发布。
 
@@ -74,3 +74,9 @@ Windows 日常共享代码只在 PR／`main` 运行编译门禁；完整安装�
 同一候选只有在两个平台都完成各自实机回归时才发布双平台资产。macOS 主线功能不能仅因共享代码可编译就自动进入 Windows Release。
 
 2026-09-09 已通过[固定 tag 发布流水线 34311527438](https://github.com/chai-yinfeng/Atogaki_Subtitle/actions/runs/34311527438)发布 Windows 11 x86_64 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)。流水线从 tag `aa9fdbb` 重建 NSIS，重新核对目标许可证与对应源码，并在安装后实际使用 DirectWrite/libass 生成 MJPEG 字幕预览，再完成 PE、sidecar、合规资源和静默卸载检查。Release 提供 28,230,248 字节安装器、45,543,185 字节对应源码包及各自 SHA-256。悬浮字幕不稳定以及部分 Windows 媒体播放器对 MPEG-4 Part 2 成品先提示后播放，均已在发布说明中明确列为已知限制。
+
+## 2026-10-20：v0.1.1 macOS 稳定发行
+
+已公开 [v0.1.1](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.1)，tag 指向 `8975657028d0feb050ea4f30f0b562f26415bacd`，由 PR #20 合并生成。Release 非草稿、非 prerelease，设为 latest；只有 macOS arm64 DMG、对应源码包与各自 SHA-256，共四项资产。v0.1.0 保持为没有 Release 的历史 tag，未移动或覆盖。
+
+DMG 为 45,697,660 字节，SHA-256 `fc7c1082354603b5d280df287a6b11a5b5075d32b380d29878aea1c06ec09b5c`；对应源码为 81,923,848 字节，SHA-256 `bccfcc0d4892f7084cd423591e60f0c2d0ec01d8b84e6afc608bbd07c976c3f0`。四项资产先上传草稿，再重新下载通过校验后公开，未替换公开资产。App 和 sidecar 采用 ad-hoc 签名、未公证，模型不在包内。
