@@ -1103,7 +1103,7 @@ app.innerHTML = `
             <select id="settings-provider">
               <option value="hy-mt2-local">Hy-MT2（本地翻译）</option>
               <option value="deepl">DeepL（传统翻译 API）</option>
-              <option value="deepseek">DeepSeek（LLM API）</option><option value="gemini">Gemini（文本翻译）</option>
+              <option value="deepseek">DeepSeek（LLM API）</option><option value="gemini">Gemini（LLM API）</option>
               <option value="openai-compatible">OpenAI-compatible（高级）</option>
               <option value="none">不翻译／仅保留原文</option>
             </select>
@@ -7162,7 +7162,7 @@ function renderProviderCards(): void {
   if (selector) {
     const installed = modelDownloads.filter(state => state.status === "done" && state.path && availableModels.some(m => m.id === state.modelId && m.kind === "hy-mt2"));
     const current = settingsHyMt2Model?.value ?? "";
-    const entries = installed.map(state => ({path:state.path!, name:availableModels.find(m=>m.id===state.modelId)!.name.replace(/（本地翻译候选）/g, "")}));
+    const entries = installed.map(state => ({path:state.path!, name:availableModels.find(m=>m.id===state.modelId)!.name}));
     if (current && !entries.some(e=>e.path===current)) entries.unshift({path:current,name:current.split(/[\\/]/).pop() ?? "当前模型"});
     selector.innerHTML = '<option value="">选择已安装模型</option>'+entries.map(e=>`<option value="${escapeHtml(e.path)}">${escapeHtml(e.name)}</option>`).join("");
     selector.value = current;
@@ -7294,9 +7294,12 @@ function organizeSettings(): void {
     ["network", "网络与高级", network],
   ] as const;
   const footer = form.querySelector(".settings-footer");
+  const content = document.createElement("div");
+  content.className = "settings-content";
+  form.insertBefore(content, footer);
   pages.forEach(([key, label, page]) => {
     page.dataset.settingsPage = key;
-    if (page === downloads || page === appearance) form.insertBefore(page, footer);
+    content.append(page);
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary";
@@ -7305,6 +7308,7 @@ function organizeSettings(): void {
     button.onclick = () => {
       pages.forEach(([candidate, , section]) => section.classList.toggle("hidden", candidate !== key));
       nav.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
+      content.scrollTop = 0;
     };
     nav.append(button);
     page.classList.toggle("hidden", key !== "transcription");

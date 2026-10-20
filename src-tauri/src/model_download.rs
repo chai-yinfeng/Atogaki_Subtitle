@@ -106,20 +106,21 @@ impl ModelDownloadService {
                 .as_deref()
                 == Some(path.as_path());
             if path.is_file() {
-                let state = states
-                    .entry(model.id.to_string())
-                    .or_insert_with(|| ModelDownloadState {
-                        model_id: model.id.to_string(),
-                        status: "done".to_string(),
-                        downloaded_bytes: std::fs::metadata(&path)
-                            .map(|metadata| metadata.len())
-                            .unwrap_or_default(),
-                        total_bytes: None,
-                        path: Some(path.display().to_string()),
-                        error: None,
-                        source: Some("本地已安装".to_string()),
-                        active,
-                    });
+                let state =
+                    states
+                        .entry(model.id.to_string())
+                        .or_insert_with(|| ModelDownloadState {
+                            model_id: model.id.to_string(),
+                            status: "done".to_string(),
+                            downloaded_bytes: std::fs::metadata(&path)
+                                .map(|metadata| metadata.len())
+                                .unwrap_or_default(),
+                            total_bytes: None,
+                            path: Some(path.display().to_string()),
+                            error: None,
+                            source: Some("本地已安装".to_string()),
+                            active,
+                        });
                 state.active = active;
             }
         }
@@ -135,15 +136,12 @@ impl ModelDownloadService {
             .cloned()
             .ok_or_else(|| anyhow!("unknown model: {model_id}"))?;
         let mut states = self.states.lock().await;
-        if states
-            .values()
-            .any(|state| {
-                matches!(
-                    state.status.as_str(),
-                    "queued" | "downloading" | "cancelling"
-                )
-            })
-        {
+        if states.values().any(|state| {
+            matches!(
+                state.status.as_str(),
+                "queued" | "downloading" | "cancelling"
+            )
+        }) {
             bail!("another model download is already running");
         }
         let downloaded_bytes = fs::metadata(self.partial_path(&model))
@@ -332,10 +330,15 @@ impl ModelDownloadService {
         let status = response.status();
         if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && existing_bytes > 0 {
             if sha256_file(&part_path).await? == model.sha256 {
-                return self.install_verified_download(model, &part_path, output_path).await;
+                return self
+                    .install_verified_download(model, &part_path, output_path)
+                    .await;
             }
             fs::remove_file(&part_path).await.with_context(|| {
-                format!("failed to discard invalid partial model {}", part_path.display())
+                format!(
+                    "failed to discard invalid partial model {}",
+                    part_path.display()
+                )
             })?;
             bail!("服务器拒绝续传，且现有临时文件未通过完整校验；下次将重新下载");
         }
@@ -374,7 +377,8 @@ impl ModelDownloadService {
         } else {
             options.truncate(true);
         }
-        let mut output = options.open(&part_path)
+        let mut output = options
+            .open(&part_path)
             .await
             .with_context(|| format!("failed to create {}", part_path.display()))?;
         let mut stream = response.bytes_stream();
@@ -413,12 +417,16 @@ impl ModelDownloadService {
         let actual = format!("{:x}", hasher.finalize());
         if actual != model.sha256 {
             fs::remove_file(&part_path).await.with_context(|| {
-                format!("failed to discard corrupt model download {}", part_path.display())
+                format!(
+                    "failed to discard corrupt model download {}",
+                    part_path.display()
+                )
             })?;
             bail!("SHA-256 校验失败，期望 {}，实际 {actual}", model.sha256);
         }
         self.ensure_not_cancelled(model.id).await?;
-        self.install_verified_download(model, &part_path, output_path).await
+        self.install_verified_download(model, &part_path, output_path)
+            .await
     }
 
     async fn install_verified_download(
@@ -683,10 +691,10 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
         ModelCatalogItem {
             id: "hy-mt2-1.8b-q4-k-m",
             kind: "hy-mt2",
-            name: "Hy-MT2 1.8B Q4_K_M（本地翻译候选）",
+            name: "Hy-MT2 1.8B Q4_K_M（本地翻译推荐）",
             file_name: "Hy-MT2-1.8B-Q4_K_M.gguf",
             size_label: "约 1.06 GiB",
-            recommended_for: "速度与内存占用较低；真实盲评完成前不标记为推荐。",
+            recommended_for: "速度较快，内存占用较低，适合日常本地翻译。",
             source_url: "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF",
             download_path: "tencent/Hy-MT2-1.8B-GGUF/resolve/a0c709d9fac510f2c807aa3af52872340dc37a4a/Hy-MT2-1.8B-Q4_K_M.gguf",
             sha256: "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
@@ -694,10 +702,10 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
         ModelCatalogItem {
             id: "hy-mt2-7b-q4-k-m",
             kind: "hy-mt2",
-            name: "Hy-MT2 7B Q4_K_M（本地翻译候选）",
+            name: "Hy-MT2 7B Q4_K_M",
             file_name: "Hy-MT2-7B-Q4_K_M.gguf",
             size_label: "约 4.31 GiB",
-            recommended_for: "质量候选，当前 Apple Silicon 实测约比 1.8B 慢 5.3 倍。",
+            recommended_for: "内存占用较高，翻译耗时更长。",
             source_url: "https://huggingface.co/tencent/Hy-MT2-7B-GGUF",
             download_path: "tencent/Hy-MT2-7B-GGUF/resolve/ab8472660ac61fac25f1af43fac2599d52a8a775/Hy-MT2-7B-Q4_K_M.gguf",
             sha256: "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b",
@@ -775,13 +783,21 @@ mod tests {
 
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "hy-mt2-1.8b-q4-k-m");
-        assert!(models[0].download_path.contains("a0c709d9fac510f2c807aa3af52872340dc37a4a"));
+        assert!(
+            models[0]
+                .download_path
+                .contains("a0c709d9fac510f2c807aa3af52872340dc37a4a")
+        );
         assert_eq!(
             models[0].sha256,
             "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699"
         );
         assert_eq!(models[1].id, "hy-mt2-7b-q4-k-m");
-        assert!(models[1].download_path.contains("ab8472660ac61fac25f1af43fac2599d52a8a775"));
+        assert!(
+            models[1]
+                .download_path
+                .contains("ab8472660ac61fac25f1af43fac2599d52a8a775")
+        );
         assert_eq!(
             models[1].sha256,
             "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b"
@@ -802,7 +818,10 @@ mod tests {
     #[test]
     fn content_range_must_continue_at_the_local_file_boundary() {
         let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_RANGE, HeaderValue::from_static("bytes 1024-2047/4096"));
+        headers.insert(
+            CONTENT_RANGE,
+            HeaderValue::from_static("bytes 1024-2047/4096"),
+        );
         validate_content_range(&headers, 1024).unwrap();
         assert_eq!(content_range_total(&headers), Some(4096));
         assert!(validate_content_range(&headers, 512).is_err());
@@ -845,10 +864,7 @@ mod tests {
             .find(|state| state.model_id == "hy-mt2-1.8b-q4-k-m")
             .unwrap();
         assert!(installed.active);
-        service
-            .uninstall("hy-mt2-1.8b-q4-k-m")
-            .await
-            .unwrap();
+        service.uninstall("hy-mt2-1.8b-q4-k-m").await.unwrap();
 
         assert!(!model_path.exists());
         assert!(
