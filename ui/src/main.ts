@@ -1,4 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { SubtitleDrafts, cueKey, type Draft } from "./subtitle-drafts";
 import { listen } from "@tauri-apps/api/event";
 import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
@@ -744,14 +746,14 @@ app.innerHTML = `
               <label>结束<input id="retranscription-end" inputmode="decimal" placeholder="00:55:00.000" /></label>
               <label>识别 provider<select id="retranscription-provider"><option value="whisper.cpp">Whisper.cpp（本地）</option><option value="gemini-transcribe">Gemini 3.5 Transcribe（云端）</option></select></label>
               <label id="gemini-upload-consent" class="clear-secret hidden"><input id="authorize-gemini-upload" type="checkbox" /><span>允许将这次所选范围的音频上传给 Google；免费层数据可能用于改进产品</span></label>
-              <div class="retranscription-actions"><button id="retranscription-use-window" type="button" class="secondary">使用当前波形范围</button><button id="retranscription-expand-segments" type="button" class="secondary">对齐到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
+              <div class="retranscription-actions"><button id="retranscription-use-current" type="button" class="secondary">使用播放头所在字幕段</button><button id="retranscription-use-window" type="button" class="secondary">使用当前波形范围</button><button id="retranscription-expand-segments" type="button" class="secondary">对齐到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
               <p id="retranscription-message" class="media-message">范围边界不能切穿已有字幕块；需要时请显式扩展。</p>
               <details id="asr-quality-review" class="asr-quality-review"><summary id="asr-quality-summary">转录待复核提示</summary><div id="asr-quality-signals" class="asr-quality-signals"></div></details>
             </div>
           </section>
           <section class="karaoke-current-segment" aria-live="polite">
             <div class="karaoke-text-editor"><span id="karaoke-segment-time">当前没有字幕</span><label>原文<textarea id="karaoke-current-source" rows="3" placeholder="当前时间没有原文字幕" disabled></textarea></label><label>译文<textarea id="karaoke-current-translation" rows="3" placeholder="尚无译文" disabled></textarea></label></div>
-            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤销上次文字保存</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><button id="karaoke-insert-block" type="button" class="secondary">插入字幕块</button><button id="karaoke-delete-block" type="button" class="secondary">删除当前块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会自动保存。</p></div>
+            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>立即保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤回上次文字编辑</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><button id="karaoke-insert-block" type="button" class="secondary">插入字幕块</button><button id="karaoke-delete-block" type="button" class="secondary">删除当前块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会自动保存。</p></div>
           </section>
         </section>
       </div>
@@ -1371,6 +1373,14 @@ let activeSegmentId: string | null = null;
 let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
 const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
+const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(async (before, value) => {
+  if (!value.source.trim()) throw new Error("原文不能为空；草稿已保留");
+  return invoke<SubtitleSegment>("update_subtitle", { request: {
+    jobId: before.job_id, segmentId: before.id, sourceText: value.source,
+    translatedText: value.translation.trim() || null, startMs: before.start_ms, endMs: before.end_ms,
+  } });
+}, updateSubtitleDraftUI);
+
 const subtitleStructureUndoHistory = new Map<string, SubtitleStructureUndoEntry[]>();
 let workspaceActionBusy = false;
 let lastExportedSubtitlePath: string | null = null;
@@ -2431,7 +2441,7 @@ function setWorkspaceBusy(busy: boolean): void {
 }
 
 function hasUnsavedSubtitleEdits(): boolean {
-  return karaokeTextDraftDirty || Boolean(subtitleList?.querySelector<HTMLElement>('[data-dirty="true"]'));
+  return [...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && subtitleDrafts.pending(draft));
 }
 
 function renderJobs(jobs: LocalJob[]): void {
@@ -2698,7 +2708,10 @@ async function deleteJob(job: LocalJob): Promise<void> {
   if (!confirmed) return;
   if (jobManagementMessage) jobManagementMessage.textContent = "正在删除任务数据…";
   try {
+    await subtitleDrafts.flushAll();
     await invoke("delete_job", { jobId: job.job_id });
+    subtitleDrafts.forgetJob(job.job_id);
+    try { localStorage.setItem("atogaki.subtitleDrafts", subtitleDrafts.snapshot()); } catch { /* Session state was cleared. */ }
     if (jobManagementMessage) jobManagementMessage.textContent = "任务已删除，原始媒体文件未改变。";
     await refresh();
   } catch (error) {
@@ -2763,6 +2776,7 @@ function showWorkspace(show: boolean): void {
 }
 
 async function stopActivePlayback(): Promise<void> {
+  await subtitleDrafts.flushAll();
   playbackLoop = null; loopStartMs = null;
   document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
 
@@ -3420,7 +3434,7 @@ async function openKaraokeJob(jobId: string): Promise<void> {
     updateStructureUndoButton();
     setSubtitleEditAction("拖动字幕块可整体移动，拖动左右边缘可单独修剪；按 10 ms 吸附，空白合法，同轨不能重叠。");
     await loadKaraokeWaveform(karaokeResumeMs, true);
-    useVisibleWindowForRetranscription();
+    usePlayheadSubtitleForRetranscription(false);
     await loadAsrQualitySignals(jobId);
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
@@ -3497,6 +3511,21 @@ function setRetranscriptionMessage(message: string, isError = false): void {
   if (!retranscriptionMessage) return;
   retranscriptionMessage.textContent = message;
   retranscriptionMessage.classList.toggle("warning", isError);
+}
+
+function usePlayheadSubtitleForRetranscription(reportGap = true): void {
+  const position = (activeMedia?.currentTime ?? 0) * 1_000;
+  const segment = activeDetail?.segments.find(cue => cue.start_ms <= position && position < cue.end_ms);
+  if (!segment) {
+    if (reportGap) setRetranscriptionMessage("播放头位于字幕空白处。请移动到字幕段，或手动选择要补识别的范围。", true);
+    return;
+  }
+  if (!retranscriptionStartInput || !retranscriptionEndInput) return;
+  if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
+  activeRepairSignalId = null;
+  retranscriptionStartInput.value = formatPreciseTime(segment.start_ms);
+  retranscriptionEndInput.value = formatPreciseTime(segment.end_ms);
+  setRetranscriptionMessage(`已选第 ${segment.segment_index + 1} 段完整字幕。选择识别方式后预览候选；Gemini 仍需本次上传授权。`);
 }
 
 function useVisibleWindowForRetranscription(): void {
@@ -4006,17 +4035,20 @@ function syncKaraokeTextDraft(segment: SubtitleSegment | undefined, force = fals
   if (!karaokeCurrentSource || !karaokeCurrentTranslation) return;
   if (karaokeTextDraftDirty && !force) return;
   karaokeTextDraftSegmentId = segment?.id ?? null;
-  karaokeTextDraftDirty = false;
-  karaokeCurrentSource.value = segment?.source_text ?? "";
-  karaokeCurrentTranslation.value = segment?.translated_text ?? "";
+  const draft = segment ? subtitleDrafts.ensure(segment) : undefined;
+  karaokeTextDraftDirty = !!draft && subtitleDrafts.pending(draft);
+  const source = draft?.value.source ?? "", translation = draft?.value.translation ?? "";
+  if (karaokeCurrentSource.value !== source) karaokeCurrentSource.value = source;
+  if (karaokeCurrentTranslation.value !== translation) karaokeCurrentTranslation.value = translation;
   karaokeCurrentSource.disabled = !segment;
   karaokeCurrentTranslation.disabled = !segment;
-  if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = true;
-  if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = true;
-  if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = !segment || !canUndoSegment(segment);
+  if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = !karaokeTextDraftDirty || !!draft?.saving;
+  if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = !karaokeTextDraftDirty || !!draft?.saving;
+  if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = karaokeTextDraftDirty || !segment || !canUndoSegment(segment);
+  if (draft?.error) setSubtitleEditAction(draft.error, true);
 }
 
-function markKaraokeTextDirty(): void {
+function markKaraokeTextDirty(event?: Event): void {
   const segment = karaokeDraftSegment();
   if (!segment) return;
   activeMedia?.pause();
@@ -4025,35 +4057,18 @@ function markKaraokeTextDirty(): void {
   if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = false;
   if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = false;
   if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = true;
-  setSubtitleEditAction(`第 ${segment.segment_index + 1} 段有尚未保存的文字修改。`);
+  subtitleDrafts.edit(segment, {source: karaokeCurrentSource?.value ?? "", translation: karaokeCurrentTranslation?.value ?? ""}, (event as InputEvent | undefined)?.isComposing);
+
 }
 
 async function saveKaraokeTextDraft(): Promise<void> {
-  if (!activeDetail || !karaokeCurrentSource || !karaokeCurrentTranslation || !karaokeTextDraftSegmentId || !karaokeTextDraftDirty) return;
-  const before = activeDetail.segments.find((item) => item.id === karaokeTextDraftSegmentId);
-  if (!before) return;
-  if (!karaokeCurrentSource.value.trim()) {
-    setSubtitleEditAction("原文不能为空。", true);
-    return;
-  }
-  if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = true;
-  try {
-    const updated = await persistSegment(before.id, karaokeCurrentSource.value, karaokeCurrentTranslation.value);
-    rememberSubtitleSave(before, updated);
-    replaceActiveSegment(updated);
-    karaokeTextDraftDirty = false;
-    syncKaraokeTextDraft(updated, true);
-    updateStructureUndoButton();
-    updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
-    setSubtitleEditAction(`第 ${updated.segment_index + 1} 段文字已保存到本地。`);
-  } catch (error) {
-    if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = false;
-    setSubtitleEditAction(`文字保存失败：${String(error)}`, true);
-  }
+  const segment = karaokeDraftSegment();
+  if (segment) await subtitleDrafts.flush(cueKey(segment), true).catch(() => {});
 }
 
 function discardKaraokeTextDraft(): void {
   const saved = activeDetail?.segments.find((item) => item.id === karaokeTextDraftSegmentId);
+  if (saved) subtitleDrafts.discard(saved);
   syncKaraokeTextDraft(saved, true);
   setSubtitleEditAction("已放弃当前字幕尚未保存的文字修改。");
 }
@@ -4585,6 +4600,41 @@ async function undoSubtitleStructure(): Promise<void> {
   }
 }
 
+function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleSegment): void {
+  try { localStorage.setItem("atogaki.subtitleDrafts", subtitleDrafts.snapshot()); } catch { /* SQLite autosave still runs. */ }
+  const saved = draft.saved;
+  if (before) rememberSubtitleSave(before, saved);
+  if (activeDetail?.job.job_id !== saved.job_id) return;
+  if (before) activeDetail.segments = activeDetail.segments.map(cue => cue.id === saved.id ? saved : cue);
+  const pending = subtitleDrafts.pending(draft);
+  const status = draft.error ? `保存失败，草稿已保留：${draft.error}`
+    : draft.saving ? "正在自动保存…" : pending ? "等待自动保存…" : savedSegmentState(saved);
+  const card = subtitleList?.querySelector<HTMLElement>(`[data-segment-id="${CSS.escape(saved.id)}"]`);
+  if (card) {
+    card.dataset.dirty = String(pending);
+    const state = card.querySelector<HTMLElement>(".subtitle-save-state");
+    if (state) { state.textContent = status; state.classList.toggle("warning", !!draft.error || saved.translation_stale); }
+    const save = card.querySelector<HTMLButtonElement>("[data-save-draft]");
+    const discard = card.querySelector<HTMLButtonElement>("[data-discard-draft]");
+    const undo = card.querySelector<HTMLButtonElement>("[data-undo-draft]");
+    if (save) save.disabled = !pending || draft.saving;
+    if (discard) discard.disabled = !pending || draft.saving;
+    if (undo) undo.disabled = pending || !canUndoSegment(saved);
+    const flags = card.querySelector<HTMLElement>(".edit-flags");
+    if (flags) flags.textContent = editFlags(saved);
+  }
+  if (karaokeTextDraftSegmentId === saved.id) {
+    karaokeTextDraftDirty = pending;
+    if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = !pending || draft.saving;
+    if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = !pending || draft.saving;
+    if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = pending || !canUndoSegment(saved);
+    if (!pending) syncKaraokeTextDraft(saved, true);
+    setSubtitleEditAction(status, !!draft.error);
+  }
+  updateTranslationControls();
+  if (before) { updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000); updateStructureUndoButton(); }
+}
+
 function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: string): void {
   if (!subtitleList) return;
   subtitleList.replaceChildren();
@@ -4597,7 +4647,8 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     const card = document.createElement("article");
     card.className = "subtitle-card";
     card.dataset.segmentId = segment.id;
-    card.dataset.dirty = "false";
+    const draft = subtitleDrafts.ensure(segment);
+    card.dataset.dirty = String(subtitleDrafts.pending(draft));
 
     const meta = document.createElement("div");
     meta.className = "subtitle-meta";
@@ -4616,7 +4667,7 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     const sourceInput = document.createElement("textarea");
     sourceInput.className = "subtitle-input source-input";
     sourceInput.rows = 2;
-    sourceInput.value = segment.source_text;
+    sourceInput.value = draft.value.source;
     sourceLabel.append(sourceInput);
 
     const translationLabel = document.createElement("label");
@@ -4625,27 +4676,31 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     translationInput.className = "subtitle-input translation-input";
     translationInput.rows = 2;
     translationInput.placeholder = "尚无翻译";
-    translationInput.value = segment.translated_text ?? "";
+    translationInput.value = draft.value.translation;
     translationLabel.append(translationInput);
 
     const footer = document.createElement("div");
     footer.className = "subtitle-footer";
     const state = document.createElement("span");
-    state.textContent = savedSegmentState(segment);
+    state.className = "subtitle-save-state";
+    state.textContent = draft.error ? `保存失败，草稿已保留：${draft.error}` : subtitleDrafts.pending(draft) ? "等待自动保存…" : savedSegmentState(segment);
     if (segment.translation_stale) state.classList.add("warning");
     const save = document.createElement("button");
     save.type = "button";
-    save.textContent = "保存本段";
-    save.disabled = true;
+    save.textContent = "立即保存";
+    save.dataset.saveDraft = "true";
+    save.disabled = !subtitleDrafts.pending(draft);
     const discard = document.createElement("button");
     discard.type = "button";
     discard.className = "secondary";
     discard.textContent = "放弃修改";
-    discard.disabled = true;
+    discard.dataset.discardDraft = "true";
+    discard.disabled = !subtitleDrafts.pending(draft) || draft.saving;
     const undo = document.createElement("button");
     undo.type = "button";
     undo.className = "secondary";
-    undo.textContent = "撤销上次保存";
+    undo.textContent = "撤回上次编辑";
+    undo.dataset.undoDraft = "true";
     undo.disabled = !canUndoSegment(segment);
     const translate = document.createElement("button");
     translate.type = "button";
@@ -4655,28 +4710,22 @@ function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: str
     capture.type = "button";
     capture.className = "capture-glossary-term secondary";
     capture.textContent = "修正加入词表";
-    const markDirty = (): void => {
-      card.dataset.dirty = "true";
-      save.disabled = false;
-      discard.disabled = false;
-      state.textContent = "有未保存的修改";
-      state.classList.remove("warning");
+    const markDirty = (event: Event): void => {
+      const current = activeDetail?.segments.find(cue => cue.id === segment.id) ?? segment;
+      subtitleDrafts.edit(current, {source: sourceInput.value, translation: translationInput.value}, (event as InputEvent).isComposing);
     };
-    sourceInput.addEventListener("input", markDirty);
-    translationInput.addEventListener("input", markDirty);
-
+    for (const input of [sourceInput, translationInput]) {
+      input.addEventListener("input", markDirty);
+      input.addEventListener("compositionend", markDirty);
+      input.addEventListener("blur", () => void subtitleDrafts.flush(cueKey(segment)).catch(() => {}));
+    }
     discard.addEventListener("click", () => {
-      const saved = activeDetail?.segments.find((item) => item.id === segment.id) ?? segment;
-      sourceInput.value = saved.source_text;
-      translationInput.value = saved.translated_text ?? "";
-      card.dataset.dirty = "false";
-      save.disabled = true;
-      discard.disabled = true;
-      state.textContent = savedSegmentState(saved);
-      state.classList.toggle("warning", saved.translation_stale);
+      subtitleDrafts.discard(segment);
+      sourceInput.value = draft.value.source;
+      translationInput.value = draft.value.translation;
     });
 
-    save.addEventListener("click", () => void saveSegment(segment, sourceInput, translationInput, save, state));
+    save.addEventListener("click", () => void saveSegment(segment));
     undo.addEventListener("click", () => void undoSegment(segment, undo, state));
     translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, state));
     capture.addEventListener("click", () => void captureGlossaryCorrection(segment, sourceInput, state));
@@ -4738,29 +4787,10 @@ function renderSubtitleListPreservingView(segments: SubtitleSegment[], expandedS
   requestAnimationFrame(restoreScroll);
 }
 
-async function saveSegment(
-  segment: SubtitleSegment,
-  sourceInput: HTMLTextAreaElement,
-  translationInput: HTMLTextAreaElement,
-  button: HTMLButtonElement,
-  state: HTMLSpanElement,
-): Promise<void> {
-  if (!activeDetail) return;
-  button.disabled = true;
-  state.textContent = "正在保存…";
-  try {
-    const before = activeDetail.segments.find((item) => item.id === segment.id) ?? segment;
-    const updated = await persistSegment(segment.id, sourceInput.value, translationInput.value);
-    rememberSubtitleSave(before, updated);
-    replaceActiveSegment(updated);
-    renderSubtitleListPreservingView(activeDetail.segments, segment.id);
-    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
-  } catch (error) {
-    state.textContent = `保存失败：${String(error)}`;
-    state.classList.add("warning");
-    button.disabled = false;
-  }
+async function saveSegment(segment: SubtitleSegment): Promise<void> {
+  await subtitleDrafts.flush(cueKey(segment), true).catch(() => {});
 }
+
 
 async function undoSegment(
   segment: SubtitleSegment,
@@ -4768,6 +4798,8 @@ async function undoSegment(
   state: HTMLSpanElement,
 ): Promise<void> {
   if (!activeDetail) return;
+  const draft = subtitleDrafts.entries.get(cueKey(segment));
+  if (draft && subtitleDrafts.pending(draft)) return;
   const key = subtitleUndoKey(segment);
   const history = subtitleUndoHistory.get(key);
   const entry = history?.at(-1);
@@ -4788,7 +4820,7 @@ async function undoSegment(
     replaceActiveSegment(restored);
     renderSubtitleListPreservingView(activeDetail.segments, segment.id);
     updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
-    setWorkspaceAction("已撤销该段上一次手动保存；此撤销历史仅在当前 App 会话内保留。");
+    setWorkspaceAction("已撤回该段上一次文字编辑；此撤回历史仅在当前 App 会话内保留。");
   } catch (error) {
     state.textContent = `撤销失败：${String(error)}`;
     state.classList.add("warning");
@@ -4800,31 +4832,12 @@ async function restoreSegment(snapshot: SubtitleSegment): Promise<SubtitleSegmen
   return invoke<SubtitleSegment>("restore_subtitle", { snapshot });
 }
 
-async function persistSegment(
-  segmentId: string,
-  sourceText: string,
-  translatedText: string,
-  startMs?: number,
-  endMs?: number,
-): Promise<SubtitleSegment> {
-  if (!activeDetail) throw new Error("没有打开的字幕任务");
-  const current = activeDetail.segments.find((segment) => segment.id === segmentId);
-  if (!current) throw new Error("字幕段已经不存在");
-  return invoke<SubtitleSegment>("update_subtitle", {
-    request: {
-      jobId: activeDetail.job.job_id,
-      segmentId,
-      sourceText,
-      translatedText: translatedText.trim() || null,
-      startMs: startMs ?? current.start_ms,
-      endMs: endMs ?? current.end_ms,
-    },
-  });
-}
 
 function replaceActiveSegment(updated: SubtitleSegment): void {
   if (!activeDetail) return;
+  if (activeDetail.job.job_id !== updated.job_id) return;
   activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
+  subtitleDrafts.ensure(updated);
 }
 
 async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
@@ -4833,6 +4846,7 @@ async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
   activeDetail.job = detail.job;
   activeDetail.segments = detail.segments;
   activeDetail.translation_runs = detail.translation_runs;
+  activeDetail.translation_context_stale_ids = detail.translation_context_stale_ids;
   renderSubtitleListPreservingView(activeDetail.segments);
   updateTranslationControls();
   updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
@@ -4851,17 +4865,7 @@ async function translateSegment(
   state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
   state.classList.remove("warning");
   try {
-    const saved = await invoke<SubtitleSegment>("update_subtitle", {
-      request: {
-        jobId,
-        segmentId: segment.id,
-        sourceText: sourceInput.value,
-        translatedText: translationInput.value.trim() || null,
-        startMs: segment.start_ms,
-        endMs: segment.end_ms,
-      },
-    });
-    if (activeDetail?.job.job_id === jobId) replaceActiveSegment(saved);
+    await subtitleDrafts.flush(cueKey(segment));
     const translated = await invoke<SubtitleSegment>("translate_subtitle", {
       jobId,
       segmentId: segment.id,
@@ -6717,6 +6721,7 @@ karaokeWaveform?.addEventListener("click", (event) => {
 });
 karaokeCutSegmentButton?.addEventListener("click", () => void cutKaraokeSegmentAtPlayhead());
 karaokeJoinSegmentButton?.addEventListener("click", () => void joinKaraokeSegmentWithNext());
+document.querySelector("#retranscription-use-current")?.addEventListener("click", () => usePlayheadSubtitleForRetranscription());
 retranscriptionUseWindowButton?.addEventListener("click", useVisibleWindowForRetranscription);
 retranscriptionExpandSegmentsButton?.addEventListener("click", expandRetranscriptionRangeToSegments);
 retranscriptionProvider?.addEventListener("change", () => {
@@ -6773,6 +6778,10 @@ clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredenti
 checkGeminiApiKeyButton?.addEventListener("click", () => void checkGeminiCredential());
 karaokeCurrentSource?.addEventListener("input", markKaraokeTextDirty);
 karaokeCurrentTranslation?.addEventListener("input", markKaraokeTextDirty);
+for (const input of [karaokeCurrentSource, karaokeCurrentTranslation]) {
+  input?.addEventListener("compositionend", markKaraokeTextDirty);
+  input?.addEventListener("blur", () => { const cue = karaokeDraftSegment(); if (cue) void subtitleDrafts.flush(cueKey(cue)).catch(() => {}); });
+}
 karaokeSaveTextButton?.addEventListener("click", () => void saveKaraokeTextDraft());
 karaokeDiscardTextButton?.addEventListener("click", discardKaraokeTextDraft);
 karaokeUndoTextButton?.addEventListener("click", () => void undoKaraokeTextSave());
@@ -7649,3 +7658,17 @@ void invoke<string | null>("personal_moonlight_artwork").then(path => {
   credit.innerHTML = '<a href="https://sp.universal-music.co.jp/yorushika/tsukineko/" target="_blank" rel="noopener noreferrer">ヨルシカ LIVE「月と猫のダンス」特设</a><span>Copyright © 2024 UNIVERSAL MUSIC LLC All rights reserved.</span>';
   document.body.append(credit);
 }).catch(error => console.warn("Personal artwork could not be loaded", error));
+
+try { subtitleDrafts.recover(localStorage.getItem("atogaki.subtitleDrafts") ?? "[]"); } catch { /* SQLite remains authoritative. */ }
+let subtitleCloseReady = false;
+void getCurrentWindow().onCloseRequested(async event => {
+  if (subtitleCloseReady) return;
+  event.preventDefault();
+  try {
+    await subtitleDrafts.flushAll();
+    subtitleCloseReady = true;
+    await getCurrentWindow().close();
+  } catch (error) {
+    setSubtitleEditAction(`保存失败，窗口保持打开；草稿已保留：${String(error)}`, true);
+  }
+});

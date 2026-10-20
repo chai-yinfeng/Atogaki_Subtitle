@@ -2928,16 +2928,18 @@ impl LocalDatabase {
             .into_iter()
             .filter(|segment| segment.end_ms <= start_ms || segment.start_ms >= end_ms)
             .collect::<Vec<_>>();
-        updated.extend(replacements);
-        updated.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
-        if updated
-            .windows(2)
-            .any(|pair| pair[0].end_ms > pair[1].start_ms)
-        {
+        // Legacy ASR overlaps outside this scope are not caused by adoption.
+        if replacements.iter().any(|candidate| {
+            updated.iter().any(|existing| {
+                candidate.start_ms < existing.end_ms && candidate.end_ms > existing.start_ms
+            })
+        }) {
             return Err(anyhow!(
                 "selected-range replacement would overlap an adjacent subtitle"
             ));
         }
+        updated.extend(replacements);
+        updated.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
         persist_structure_segments(&mut tx, job_id, &mut updated).await?;
         if let Some((run_id, candidates)) = asr_provenance {
             assign_asr_cue_provenance_in_transaction(&mut tx, job_id, run_id, candidates).await?;
@@ -5209,6 +5211,55 @@ mod tests {
         let unchanged_builtin = database.get_glossary(&builtin.id).await.unwrap().unwrap();
         assert_eq!(unchanged_builtin.terms[0].source_text, "新版内置项");
 
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn gap_candidate_adoption_preserves_unrelated_legacy_overlaps() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-legacy-overlap-{}", uuid::Uuid::new_v4()));
+        let job = Job::create_in(&root).unwrap();
+        let mut manifest =
+            JobManifest::new(&job, None, None, crate::domain::LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest,
+                segments: vec![
+                    TranscriptSegment::new(0, 1_500, "旧重叠一".into()),
+                    TranscriptSegment::new(1_000, 2_000, "旧重叠二".into()),
+                    TranscriptSegment::new(4_000, 5_000, "后文".into()),
+                ],
+            })
+            .await
+            .unwrap();
+        let before = database.list_segments(&job.id()).await.unwrap();
+        let candidates = vec![TranscriptSegment::new(2_500, 3_000, "补识别".into())];
+        let after = database
+            .replace_segment_range(&job.id(), 2_000, 4_000, &[], &candidates, None)
+            .await
+            .unwrap();
+        assert_eq!(after.len(), 4);
+        for old in &before {
+            let kept = after.iter().find(|cue| cue.id == old.id).unwrap();
+            assert_eq!(
+                (kept.start_ms, kept.end_ms, &kept.source_text),
+                (old.start_ms, old.end_ms, &old.source_text)
+            );
+        }
+        // A genuine boundary cut still refuses adoption without removing work.
+        assert!(
+            database
+                .replace_segment_range(&job.id(), 1_900, 4_000, &after[1..3], &candidates, None)
+                .await
+                .is_err()
+        );
+        assert_eq!(database.list_segments(&job.id()).await.unwrap(), after);
         database.close().await;
         drop(database);
         fs::remove_dir_all(root).unwrap();
