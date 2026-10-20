@@ -229,6 +229,14 @@ impl EarlyTranslationSession {
         mut progress: watch::Receiver<u64>,
         mut done: watch::Receiver<bool>,
     ) -> Result<()> {
+        // A new attempt must not display an old prefix error while retrying.
+        if let Ok(mut state) = self.progress() {
+            state.error = None;
+            acoustic_plan::write_json(
+                &self.job.dir.join("early-translation/progress.json"),
+                &state,
+            )?;
+        }
         // Notification is sent only after plan/configuration validation and a
         // verified chunk. Old evidence cannot trigger uploads before that gate.
         loop {
@@ -292,6 +300,12 @@ impl EarlyTranslationSession {
         } else {
             1
         };
+        let mut translated = groups
+            .iter()
+            .filter(|g| self.cached_group(g).is_ok())
+            .flat_map(|g| g.targets.iter().map(|t| t.segment_id.clone()))
+            .collect::<HashSet<_>>();
+        self.write_progress(translated.len(), cutoff, None)?;
         let mut pending = groups.iter().cloned();
         let mut tasks = tokio::task::JoinSet::new();
         let mut first_error = None;
@@ -303,6 +317,11 @@ impl EarlyTranslationSession {
                 let cache = self.cache.clone();
                 let options = self.options.clone();
                 tasks.spawn(async move {
+                    let ids = group
+                        .targets
+                        .iter()
+                        .map(|t| t.segment_id.clone())
+                        .collect::<Vec<_>>();
                     let response = execute_translation_group(&cache, options, group, None).await?;
                     if response
                         .translations
@@ -311,14 +330,21 @@ impl EarlyTranslationSession {
                     {
                         bail!("提前翻译返回空译文；完整识别后可继续翻译")
                     }
-                    Ok::<(), anyhow::Error>(())
+                    Ok::<_, anyhow::Error>(ids)
                 });
             }
             let Some(result) = tasks.join_next().await else {
                 break;
             };
             match result {
-                Ok(Ok(())) => {}
+                Ok(Ok(ids)) => {
+                    translated.extend(ids);
+                    self.write_progress(
+                        translated.len(),
+                        cutoff,
+                        first_error.as_ref().map(|e| format!("{e:#}")),
+                    )?;
+                }
                 Ok(Err(error)) => {
                     if first_error.is_none() {
                         first_error = Some(error);
@@ -331,24 +357,30 @@ impl EarlyTranslationSession {
                 }
             }
         }
-        let translated_cues = groups
-            .iter()
-            .filter(|g| self.cached_group(g).is_ok())
-            .flat_map(|g| g.targets.iter().map(|t| &t.segment_id))
-            .collect::<HashSet<_>>()
-            .len();
-        acoustic_plan::write_json(
-            &self.job.dir.join("early-translation/progress.json"),
-            &EarlyTranslationProgress {
-                translated_cues,
-                stable_through_ms: cutoff,
-                error: first_error.as_ref().map(|e| format!("{e:#}")),
-            },
+        self.write_progress(
+            translated.len(),
+            cutoff,
+            first_error.as_ref().map(|e| format!("{e:#}")),
         )?;
         if let Some(error) = first_error {
             return Err(error.context("提前翻译停止，已完成结果保留；识别继续执行"));
         }
         Ok(())
+    }
+    fn write_progress(
+        &self,
+        translated_cues: usize,
+        stable_through_ms: u64,
+        error: Option<String>,
+    ) -> Result<()> {
+        acoustic_plan::write_json(
+            &self.job.dir.join("early-translation/progress.json"),
+            &EarlyTranslationProgress {
+                translated_cues,
+                stable_through_ms,
+                error,
+            },
+        )
     }
     fn cached_group(&self, group: &TranslationGroup) -> Result<TranslationResponse> {
         let request = TranslationRequest {
@@ -503,6 +535,64 @@ mod tests {
                 .is_err()
         );
         (job, ffmpeg, asr, options)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn prefix_progress_publishes_each_group_before_the_batch_finishes() {
+        #[derive(Debug)]
+        struct Gated {
+            calls: AtomicUsize,
+            release: tokio::sync::Semaphore,
+        }
+        impl TranslationProvider for Gated {
+            fn status(&self) -> TranslationProviderStatus {
+                Provider::default().status()
+            }
+            fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+                Box::pin(async move {
+                    if self.calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                        self.release.acquire().await.unwrap().forget();
+                    }
+                    Provider::default().translate(request).await
+                })
+            }
+        }
+        let (job, _, _, _) = fixture().await;
+        let provider = Arc::new(Gated {
+            calls: AtomicUsize::new(0),
+            release: tokio::sync::Semaphore::new(0),
+        });
+        let session = EarlyTranslationSession::new(job.clone(), provider.clone())
+            .unwrap()
+            .unwrap();
+        session
+            .write_progress(0, 0, Some("old failure".into()))
+            .unwrap();
+        let worker = {
+            let session = session.clone();
+            tokio::spawn(async move { session.process_prefix().await })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                let state = session.progress().unwrap();
+                if state.translated_cues == 1 {
+                    assert!(
+                        state.error.is_none(),
+                        "old failure cleared while new request runs"
+                    );
+                    assert!(!worker.is_finished(), "other groups remain in flight");
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        provider.release.add_permits(8);
+        worker.await.unwrap().unwrap();
+        assert_eq!(session.progress().unwrap().translated_cues, 3);
+        fs::remove_dir_all(job.dir.parent().unwrap()).unwrap();
     }
 
     #[cfg(unix)]

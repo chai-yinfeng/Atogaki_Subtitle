@@ -638,6 +638,7 @@ struct DesktopJobDetail {
 
 #[derive(Debug, Serialize)]
 struct DesktopJobSummary {
+    processing_time: Option<atogaki_subtitle::application::job_manifest::ProcessingTime>,
     #[serde(flatten)]
     job: LocalJobRecord,
     recovery: Option<atogaki_subtitle::application::acoustic_plan::TaskRecoverySummary>,
@@ -672,7 +673,13 @@ impl DesktopJobSummary {
                 .and_then(|j| {
                     atogaki_subtitle::application::acoustic_plan::recovery_summary(&j).ok()
                 });
+        let processing_time =
+            atogaki_subtitle::infrastructure::job_store::Job::open(PathBuf::from(&job.storage_dir))
+                .ok()
+                .and_then(|j| j.read_manifest_if_exists().ok().flatten())
+                .and_then(|m| m.processing_time);
         Self {
+            processing_time,
             recovery,
             job,
             translation_status,

@@ -11,6 +11,13 @@ use crate::{
     infrastructure::job_store::Job,
 };
 
+/// Accumulated execution time; stopped intervals and queue waits are excluded.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProcessingTime {
+    pub elapsed_seconds: u64,
+    pub active_since_unix: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobManifest {
     pub job_id: String,
@@ -28,6 +35,8 @@ pub struct JobManifest {
     pub started_at_unix: Option<u64>,
     #[serde(default)]
     pub completed_at_unix: Option<u64>,
+    #[serde(default)]
+    pub processing_time: Option<ProcessingTime>,
     pub updated_at_unix: u64,
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -67,6 +76,7 @@ impl JobManifest {
             created_at_unix: now,
             started_at_unix: None,
             completed_at_unix: None,
+            processing_time: Some(ProcessingTime::default()),
             updated_at_unix: now,
             error: None,
             failed_stage: None,
@@ -74,7 +84,32 @@ impl JobManifest {
     }
 
     pub fn mark(&mut self, status: JobStatus) {
-        let now = unix_now();
+        self.mark_at(status, unix_now());
+    }
+
+    fn settle_processing_time(&mut self, now: u64) {
+        let clock = self.processing_time.get_or_insert_with(|| ProcessingTime {
+            elapsed_seconds: match (self.started_at_unix, self.completed_at_unix) {
+                (Some(start), Some(end)) => end.saturating_sub(start),
+                _ => 0,
+            },
+            active_since_unix: self
+                .status
+                .is_processing()
+                .then_some(self.started_at_unix)
+                .flatten(),
+        });
+        if let Some(start) = clock.active_since_unix.take() {
+            clock.elapsed_seconds = clock
+                .elapsed_seconds
+                .saturating_add(now.saturating_sub(start));
+        }
+    }
+
+    fn mark_at(&mut self, status: JobStatus, now: u64) {
+        self.settle_processing_time(now);
+        self.processing_time.as_mut().unwrap().active_since_unix =
+            status.is_processing().then_some(now);
         if status.is_processing() && self.started_at_unix.is_none() {
             self.started_at_unix = Some(now);
         }
@@ -93,15 +128,27 @@ impl JobManifest {
     }
 
     pub fn fail(&mut self, error: impl Into<String>) {
+        self.fail_at(error.into(), unix_now());
+    }
+
+    /// A crashed process stops at its last persisted heartbeat, not at restart.
+    pub fn fail_interrupted(&mut self, error: impl Into<String>, last_observed_unix: u64) {
+        self.fail_at(
+            error.into(),
+            last_observed_unix.max(self.updated_at_unix).min(unix_now()),
+        );
+    }
+
+    fn fail_at(&mut self, error: String, now: u64) {
+        self.settle_processing_time(now);
         if self.status != JobStatus::Failed {
             self.failed_stage = Some(self.status);
         }
-        let now = unix_now();
         self.status = JobStatus::Failed;
         self.message = JobStatus::Failed.label().to_string();
         self.completed_at_unix = Some(now);
         self.updated_at_unix = now;
-        self.error = Some(error.into());
+        self.error = Some(error);
     }
 
     pub fn replace_input(&mut self, input: PathBuf) {
@@ -183,9 +230,8 @@ mod tests {
         assert_eq!(manifest.completed_at_unix, None);
     }
 
-    #[test]
-    fn processing_timestamps_exclude_time_spent_queued() {
-        let mut manifest: JobManifest = serde_json::from_value(serde_json::json!({
+    fn legacy_queued_manifest() -> JobManifest {
+        serde_json::from_value(serde_json::json!({
             "job_id": "timed-job",
             "status": "queued",
             "message": "queued",
@@ -204,8 +250,12 @@ mod tests {
             "updated_at_unix": 1,
             "error": null
         }))
-        .unwrap();
+        .unwrap()
+    }
 
+    #[test]
+    fn processing_timestamps_exclude_time_spent_queued() {
+        let mut manifest = legacy_queued_manifest();
         manifest.mark(crate::application::job_status::JobStatus::Queued);
         assert_eq!(manifest.started_at_unix, None);
         manifest.mark(crate::application::job_status::JobStatus::ExtractingAudio);
@@ -214,5 +264,48 @@ mod tests {
         manifest.mark(crate::application::job_status::JobStatus::Done);
         assert_eq!(manifest.started_at_unix, started);
         assert!(manifest.completed_at_unix >= started);
+    }
+
+    #[test]
+    fn execution_clock_excludes_failure_pause_and_resume_queue_intervals() {
+        use crate::application::job_status::JobStatus::*;
+        let mut m = legacy_queued_manifest();
+        m.mark_at(ExtractingAudio, 100);
+        m.mark_at(Transcribing, 110);
+        m.fail_at("paused".into(), 130);
+        assert_eq!(m.processing_time.as_ref().unwrap().elapsed_seconds, 30);
+        assert_eq!(m.processing_time.as_ref().unwrap().active_since_unix, None);
+        m.mark_at(Queued, 3600);
+        m.mark_at(Transcribing, 4000);
+        m.mark_at(Translating, 4010);
+        m.mark_at(Done, 4030);
+        assert_eq!(m.processing_time.as_ref().unwrap().elapsed_seconds, 60);
+        assert_eq!(m.started_at_unix, Some(100));
+        let restored: JobManifest =
+            serde_json::from_slice(&serde_json::to_vec(&m).unwrap()).unwrap();
+        assert_eq!(restored.processing_time.unwrap().elapsed_seconds, 60);
+    }
+
+    #[test]
+    fn legacy_failure_duration_is_frozen_before_resuming() {
+        use crate::application::job_status::JobStatus::*;
+        let mut m = legacy_queued_manifest();
+        m.status = Failed;
+        m.started_at_unix = Some(100);
+        m.completed_at_unix = Some(130);
+        m.mark_at(Queued, 3600);
+        m.mark_at(Transcribing, 4000);
+        m.fail_at("failed".into(), 4010);
+        assert_eq!(m.processing_time.unwrap().elapsed_seconds, 40);
+    }
+
+    #[test]
+    fn crash_recovery_stops_clock_at_last_observation() {
+        use crate::application::job_status::JobStatus::*;
+        let mut m = legacy_queued_manifest();
+        m.mark_at(Transcribing, 100);
+        m.fail_interrupted("interrupted", 130);
+        assert_eq!(m.processing_time.unwrap().elapsed_seconds, 30);
+        assert_eq!(m.completed_at_unix, Some(130));
     }
 }

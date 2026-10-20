@@ -568,8 +568,13 @@ impl LocalTaskService {
                     .await?;
                 continue;
             }
-            manifest.fail(
-                "Atogaki 上次退出时任务尚未完成。旧任务数据已保留，可点击“重试”创建一个新任务。",
+            let last_observed = fs::read(job.dir.join("execution-heartbeat.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<u64>(&bytes).ok())
+                .unwrap_or(manifest.updated_at_unix);
+            manifest.fail_interrupted(
+                "Atogaki 上次退出时任务尚未完成。已保留检查点；支持断点的任务可点击“继续”，历史任务可重新运行。",
+                last_observed,
             );
             if let Err(error) = job.write_manifest(&manifest) {
                 eprintln!(
@@ -1259,8 +1264,21 @@ async fn run_with_status_sync<T>(
     // before publishing the terminal snapshot.
     let progress = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(500));
+        let mut ticks = 0_u64;
         loop {
             interval.tick().await;
+            if ticks % 10 == 0 {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                // Separate evidence avoids overwriting a concurrent phase transition.
+                let _ = crate::application::acoustic_plan::write_json(
+                    &path.join("execution-heartbeat.json"),
+                    &now,
+                );
+            }
+            ticks += 1;
             if let Ok(snapshot) = JobSnapshot::load(&path) {
                 if let Err(error) = database.sync_snapshot(&snapshot).await {
                     eprintln!("[task-service] failed to publish running task status: {error:#}");
