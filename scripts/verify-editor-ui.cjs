@@ -22,6 +22,9 @@ const panelOrder=await page.evaluate(()=>{
  const rect=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x,y:r.y,bottom:r.bottom,right:r.right};};
  return {video:rect('#editor-video-panel'),wave:rect('#editor-wave-panel'),edit:rect('.karaoke-current-segment'),list:rect('.editor-list-panel')};
 });
+const cueSpace=await page.evaluate(()=>{const box=s=>document.querySelector(s).getBoundingClientRect();return {navTop:box('.editor-cue-navigation').top,timeTop:box('.editor-timing-fields').top,toolbarBottom:box('.editor-cue-toolbar').bottom,textTop:box('#karaoke-current-source').top,textHeight:box('#karaoke-current-source').height};});
+assert.ok(Math.abs(cueSpace.navTop-cueSpace.timeTop)<12);
+assert.ok(cueSpace.toolbarBottom<=cueSpace.textTop && cueSpace.textHeight>=70);
 assert.equal(panelOrder.video.y,panelOrder.wave.y);
 assert.ok(panelOrder.video.right<=panelOrder.wave.x);
 assert.ok(panelOrder.wave.bottom<=panelOrder.edit.y && panelOrder.edit.bottom<=panelOrder.list.y);
