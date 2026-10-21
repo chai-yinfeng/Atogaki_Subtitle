@@ -24,3 +24,14 @@
 普通界面迭代轮换保留一份安装前 App，并保留一个已验证稳定回退版，不再每一步追加完整 App 副本。数据备份使用 SQLite 一致性快照；完全相同副本可合并并保留原路径链接，不能仅按日期删除修复／迁移前的独立证据。常规安装不复制模型、媒体和整个数据目录。
 
 现有 `install-current-macos-app.sh` 是构建与短暂回退替换助手，不负责上述 SQLite 备份和保留清单；不能把单独运行该脚本视为已经完成数据备份流程。Web Serve／Postgres 退役审计与其他产物整理仍独立推进。
+
+
+## 紧凑工作台试装（0058）
+
+继上述历史试装，本次从 `8a85af0` 完整 release 构建覆盖 `/Applications/Atogaki.app`，正式 identifier 与 0.1.2 版本号保持，包含四个 sidecar；完整包文件摘要与构建产物一致，深度签名通过。启动后及打开 3,089 段真实任务并短暂定位播放后，20 张表的内容摘要均与安装前一致（14 个任务／9,976 段）。正式字幕未执行文字或结构编辑，未调用识别或云端翻译。App 已停在字幕编辑页并暂停播放，供用户验收。
+
+最终 QA 包先以 `/tmp/atogaki-compact-native/data` 的隔离数据库和合成 H.264 视频验证大视频／右侧上下双语布局、中性色波形、播放跟随，以及 Cut→撤销由 20→21→20 段恢复；读 SQLite 核验 cue ID、时间、原译文和编辑标记与操作前完全一致，integrity_check=ok。最终截图与 QA 结果保留在 `/tmp/atogaki-compact-native/`。
+
+本次仅新增一份一致性 SQLite 快照，不复制模型、媒体或整个数据目录。保留上一版 `/Applications/.Atogaki.previous.20261021-compact` 和稳定版 `/Applications/.Atogaki.previous-20261020T210406Z`。验证新包和两份回退签名后，移除被取代的 `.Atogaki.previous.20261021-editor` 及三份过时临时 QA App；合计约 310 MiB 逻辑副本内容，物理释放量受 APFS 影响。旧 QA 数据、trace 与证据全部保留。
+
+本次记录位于忽略目录 `local-artifacts/install-backups/20261021-compact/`：一致性快照、20 表前后摘要、构建／安装／回退文件清单，以及轮换清理前后记录。没有新增公开发行资产。后续整体模块拆分、滚动 P95／长时内存和 Windows 原生验证仍按路线图推进，不能把本机试装当作这些项目全部完成。
