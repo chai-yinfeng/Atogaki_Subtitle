@@ -97,3 +97,8 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 ## 共享播放器生命周期抽取
 
 `media-player.test.mjs` 用可控媒体环境验证回退状态、移除事件、单一 RAF、任务身份、迟到 play 失败和异步 stop 不清除新实例；前端合计 39 项通过。类型／构建、cargo fmt --check、git diff --check 通过。既有五组 WebKit 回归通过；新增 `verify-media-player.cjs` 用真实 WebKit 媒体事件验证 1.5×／静音／音量／位置回退、旧事件不影响时钟、收听 4.5 秒恢复与 9 秒保存、两源损坏只回退一次并停止。专项曾发现 src 加载重置速度，修正默认速度与 metadata 恢复后通过。此模块提交尚未覆盖正在使用的正式 App。
+
+
+## 波形请求生命周期抽取
+
+44 项前端测试、类型／生产构建、cargo fmt --check、git diff --check 通过；六组 WebKit（编辑、跟随、紧凑布局、时间轴、手势、共享播放器）通过。波形模块测试用可控异步返回和定时器证明：新意图在 16 ms 合并等待内即阻止旧结果、旧错误不清除新窗口、直接定位取消排队平移、任务与导航代次变化／reset／dispose 后返回无效，并验证长素材与未知时长和峰值数量约束。

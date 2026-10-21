@@ -1,3 +1,4 @@
+import { createEditorWaveform } from "./editor-waveform";
 import { createMediaPlayer } from "./media-player";
 import type { TimingGesture } from "./timeline-timing";
 import { mountTimelineGestures } from "./editor-timeline-gestures";
@@ -20,7 +21,7 @@ import { mountCurrentCueEditor } from "./current-cue-editor";
 import { mountTaskTools, mountToolDialog } from "./task-tools";
 import { taskToolsTemplate } from "./task-tools-template";
 import { createEditorBackend } from "./editor-backend";
-import type { SubtitleSegment, WaveformWindow } from "./editor-types";
+import type { SubtitleSegment } from "./editor-types";
 import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
 import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
@@ -1212,16 +1213,10 @@ const taskTranslationActivities = new Map<string, TaskTranslationActivity>();
 let taskTranslationElapsedTimer: number | null = null;
 let playbackPositionSaveTimer: number | null = null;
 let lastPlaybackPositionSavedAt = 0;
-let karaokeWaveformWindow: WaveformWindow | null = null;
-let karaokeWaveformRequestId = 0;
-let karaokeViewStartMs = 0;
 let karaokeFollowPlayhead = true;
-let karaokeWaveformLoading = false;
 let karaokeSelectedJobId: string | null = null;
 let karaokeResumeMs = 0;
 let karaokeWaveformGain = 1;
-let karaokeWaveformReloadTimer: number | null = null;
-let karaokePendingWaveformStartMs = 0;
 let activeRetranscriptionPreview: RetranscriptionPreview | null = null;
 let retranscriptionBusy = false;
 let asrQualitySignals: AsrQualitySignal[] = [];
@@ -1248,11 +1243,29 @@ let editorTimeFingerprint = "";
 const editorRepairDialog = document.querySelector<HTMLDialogElement>("#editor-repair-dialog")!;
 const editorLayout = mountEditorLayout(editorRoot);
 const editorMenus = mountEditorMenus(editorRoot);
+const editorWaveform = createEditorWaveform({
+  context: () => activeDetail && currentArea === "karaoke" ? {
+    jobId: activeDetail.job.job_id, navigation: navigationRequestId,
+    durationMs: Math.round((mediaPlayer.media?.duration ?? 0) * 1_000), windowMs: karaokeWindowDurationMs(),
+  } : null,
+  points: () => (karaokeWaveform?.getBoundingClientRect().width ?? 1200) * window.devicePixelRatio,
+  request: editorBackend.waveform,
+  started: () => { if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "正在读取可见时间范围的波形…"; },
+  accepted: waveform => {
+    editorSession.timelineViewport = { startMs: waveform.start_ms, endMs: waveform.end_ms };
+    karaokeWaveformStatus?.classList.remove("waveform-error");
+    syncKaraokeWaveformStatus(); renderKaraokeTimeline();
+  },
+  failed: error => {
+    if (karaokeWaveformStatus) { karaokeWaveformStatus.textContent = `无法生成波形：${String(error)}`; karaokeWaveformStatus.classList.add("waveform-error"); }
+    renderKaraokeTimeline();
+  },
+});
 const editorTimeline = mountEditorTimeline(karaokeWaveform!, editorRoot, {
   time: formatPreciseTime,
   resized: () => {
     renderKaraokeTimeline();
-    if (activeDetail && currentArea === "karaoke") void loadKaraokeWaveform(karaokeViewStartMs, true);
+    if (activeDetail && currentArea === "karaoke") void loadKaraokeWaveform(editorWaveform.startMs, true);
   },
 });
 const currentCueEditor = mountCurrentCueEditor<SubtitleSegment>(editorRoot, {
@@ -1301,9 +1314,9 @@ const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
   },
 });
 const timelineGestures = mountTimelineGestures<SubtitleSegment>(karaokeWaveform!, karaokeZoomInput!, editorRoot, {
-  snapshot: () => activeDetail && karaokeWaveformWindow && currentArea === "karaoke" ? {
-    jobId: activeDetail.job.job_id, cues: activeDetail.segments, waveform: karaokeWaveformWindow,
-    currentMs: (mediaPlayer.media?.currentTime ?? 0) * 1_000, viewStartMs: karaokeViewStartMs, durationMs: karaokeWindowDurationMs(),
+  snapshot: () => activeDetail && editorWaveform.window && currentArea === "karaoke" ? {
+    jobId: activeDetail.job.job_id, cues: activeDetail.segments, waveform: editorWaveform.window,
+    currentMs: (mediaPlayer.media?.currentTime ?? 0) * 1_000, viewStartMs: editorWaveform.startMs, durationMs: karaokeWindowDurationMs(),
   } : null,
   select: id => {
     if (currentCueEditor.dirty) { setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true); return false; }
@@ -1312,7 +1325,7 @@ const timelineGestures = mountTimelineGestures<SubtitleSegment>(karaokeWaveform!
   pause: () => mediaPlayer.media?.pause(),
   seek: ms => { seekTo(ms, false); updateActiveSubtitle(ms); },
   stopFollowing: () => { karaokeFollowPlayhead = false; syncTimelineFollowState(); },
-  pan: start => { karaokeViewStartMs = start; scheduleKaraokeWaveformReload(start); },
+  pan: start => editorWaveform.schedule(start),
   zoomValue: () => Number(karaokeZoomInput?.value ?? "66"),
   zoom: value => { karaokeZoomInput!.value = String(value); syncKaraokeZoomLabel(); },
   zoomForDuration: karaokeZoomValueForDuration,
@@ -1428,6 +1441,7 @@ window.addEventListener("pagehide", () => {
   editorMenus.dispose();
   editorFollow.dispose();
   editorTimeline.dispose();
+  editorWaveform.dispose();
   timelineGestures.dispose();
   mediaPlayer.dispose();
   editorCueList.dispose();
@@ -2750,14 +2764,10 @@ async function stopActivePlayback(): Promise<void> {
 
   const detail = activeDetail;
   const area = currentArea;
-  karaokeWaveformRequestId += 1;
+  editorWaveform.reset();
+  editorTimeline.clear();
   timelineGestures.reset();
   currentCueEditor.clear();
-  if (karaokeWaveformReloadTimer !== null) {
-    window.clearTimeout(karaokeWaveformReloadTimer);
-    karaokeWaveformReloadTimer = null;
-  }
-  karaokePendingWaveformStartMs = 0;
   editorCueList.clear(); editorFilterCache = null;
   if (playbackPositionSaveTimer !== null) {
     window.clearTimeout(playbackPositionSaveTimer);
@@ -3362,9 +3372,8 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
 
   }
   activeDetail = null;
-  karaokeWaveformWindow = null;
+  editorWaveform.reset();
   currentCueEditor.clear();
-  karaokeViewStartMs = 0;
   karaokeFollowPlayhead = true;
   activeRetranscriptionPreview = null;
   activeRepairSignalId = null;
@@ -3499,9 +3508,9 @@ function usePlayheadSubtitleForRetranscription(reportGap = true): void {
 function useVisibleWindowForRetranscription(): void {
   if(authorizeGeminiUpload)authorizeGeminiUpload.checked=false;
   activeRepairSignalId=null;
-  if (!karaokeWaveformWindow || !retranscriptionStartInput || !retranscriptionEndInput) return;
-  retranscriptionStartInput.value = formatPreciseTime(karaokeWaveformWindow.start_ms);
-  retranscriptionEndInput.value = formatPreciseTime(karaokeWaveformWindow.end_ms);
+  if (!editorWaveform.window || !retranscriptionStartInput || !retranscriptionEndInput) return;
+  retranscriptionStartInput.value = formatPreciseTime(editorWaveform.window.start_ms);
+  retranscriptionEndInput.value = formatPreciseTime(editorWaveform.window.end_ms);
   setRetranscriptionMessage("已填写当前可视范围；若边界穿过字幕，请显式对齐到完整字幕块。");
 }
 
@@ -3673,60 +3682,12 @@ function syncKaraokeZoomLabel(): void {
   karaokeZoomLabel.value = seconds < 10 ? `${seconds.toFixed(1)} 秒` : `${Math.round(seconds)} 秒`;
 }
 
-function scheduleKaraokeWaveformReload(startMs: number): void {
-  karaokePendingWaveformStartMs = startMs;
-  if (karaokeWaveformReloadTimer !== null) return;
-  karaokeWaveformReloadTimer = window.setTimeout(() => {
-    karaokeWaveformReloadTimer = null;
-    void loadKaraokeWaveform(karaokePendingWaveformStartMs, true);
-  }, 16);
-}
-
 async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promise<void> {
-  if (!activeDetail || currentArea !== "karaoke") return;
-  const requestId = ++karaokeWaveformRequestId;
-  const waveformJobId = activeDetail.job.job_id;
-  const windowDuration = karaokeWindowDurationMs();
-  const knownDuration = karaokeWaveformWindow?.duration_ms ?? Math.round((mediaPlayer.media?.duration ?? 0) * 1_000);
-  const unclampedStart = alignStart ? anchorMs : anchorMs - windowDuration / 2;
-  const maximumStart = Math.max(0, knownDuration - windowDuration);
-  const startMs = knownDuration > 0
-    ? Math.max(0, Math.min(Math.round(unclampedStart), maximumStart))
-    : Math.max(0, Math.round(unclampedStart));
-  const endMs = startMs + windowDuration;
-  karaokeViewStartMs = startMs;
-  karaokeWaveformLoading = true;
-  if (karaokeWaveformStatus && !karaokeWaveformWindow) karaokeWaveformStatus.textContent = "正在读取可见时间范围的波形…";
-  try {
-    const width = karaokeWaveform?.getBoundingClientRect().width ?? 1_200;
-    const pointCount = Math.max(240, Math.min(2_400, Math.round(width * window.devicePixelRatio)));
-    const waveform = await invoke<WaveformWindow>("get_waveform_window", {
-      request: {
-        jobId: activeDetail.job.job_id,
-        startMs,
-        endMs,
-        pointCount,
-      },
-    });
-    if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke" || activeDetail?.job.job_id !== waveformJobId) return;
-    karaokeWaveformWindow = waveform;
-    karaokeWaveformStatus?.classList.remove("waveform-error");
-    editorSession.timelineViewport = { startMs: waveform.start_ms, endMs: waveform.end_ms };
-    karaokeViewStartMs = waveform.start_ms;
-    syncKaraokeWaveformStatus();
-    renderKaraokeTimeline();
-  } catch (error) {
-    if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke" || activeDetail?.job.job_id !== waveformJobId) return;
-    karaokeWaveformWindow = null;
-    if (karaokeWaveformStatus) { karaokeWaveformStatus.textContent = `无法生成波形：${String(error)}`; karaokeWaveformStatus.classList.add("waveform-error"); }
-    renderKaraokeTimeline();
-  } finally {
-    if (requestId === karaokeWaveformRequestId) karaokeWaveformLoading = false;
-  }
+  await editorWaveform.load(anchorMs, alignStart);
 }
 
 function renderKaraokeTimeline(): void {
-  const waveform = karaokeWaveformWindow;
+  const waveform = editorWaveform.window;
   const drag = timelineGestures.timing;
   const all = drag?.draft ?? activeDetail?.segments ?? [];
   const original = drag?.before ?? all;
@@ -3756,8 +3717,8 @@ function karaokeTimingAnomalySummary(segments: SubtitleSegment[]): string {
 }
 
 function syncKaraokeWaveformStatus(): void {
-  if (!karaokeWaveformStatus || !karaokeWaveformWindow || !activeDetail) return;
-  const waveform = karaokeWaveformWindow;
+  if (!karaokeWaveformStatus || !editorWaveform.window || !activeDetail) return;
+  const waveform = editorWaveform.window;
   const anomaly = karaokeTimingAnomalySummary(activeDetail.segments);
   karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms${anomaly ? ` · ${anomaly}` : " · 单轨无重叠"} · 拖动顶部红色把手定位；拖动波形背景平移`;
 }
@@ -3870,8 +3831,8 @@ function updateKaraokePosition(milliseconds: number): void {
       ? "两块之间存在空白；连接会填满静音区，因此只允许连接边界真正相接的字幕"
       : "连接相接的下一字幕块";
   }
-  const waveform = karaokeWaveformWindow;
-  if (karaokeFollowPlayhead && waveform && !karaokeWaveformLoading && !editorRoot.classList.contains("editor-waveform-hidden")) {
+  const waveform = editorWaveform.window;
+  if (karaokeFollowPlayhead && waveform && !editorWaveform.loading && !editorRoot.classList.contains("editor-waveform-hidden")) {
     const margin = (waveform.end_ms - waveform.start_ms) * 0.12;
     if (milliseconds < waveform.start_ms + margin || milliseconds > waveform.end_ms - margin) {
       void loadKaraokeWaveform(milliseconds);
@@ -6110,10 +6071,6 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
     mediaPlayer.media?.pause();
     karaokeFollowPlayhead = false;
     syncTimelineFollowState();
-    if (karaokeWaveformReloadTimer !== null) {
-      window.clearTimeout(karaokeWaveformReloadTimer);
-      karaokeWaveformReloadTimer = null;
-    }
     seekTo(startMs, false);
     updateActiveSubtitle(startMs);
     void loadKaraokeWaveform(startMs);
