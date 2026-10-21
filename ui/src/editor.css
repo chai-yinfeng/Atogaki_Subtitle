@@ -1,11 +1,11 @@
 /* Unified task editor. Ratios belong to this viewport, never to cue count. */
 body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
-.shell:has(#karaoke-view:not(.hidden)) { width: 100%; max-width: none; height: 100dvh; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.shell:has(#karaoke-view:not(.hidden)) { width: 100%; max-width: none; height: 100dvh; padding: 16px 24px; display: flex; flex-direction: column; gap: 6px; }
 .shell:has(#karaoke-view:not(.hidden)) > header { padding-bottom: 5px; flex-shrink: 0; }
 .shell:has(#karaoke-view:not(.hidden)) > header h1 { font-size: 18px; }
 #karaoke-view { margin: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 5px; }
 #karaoke-view button { padding: 5px 8px; border-radius: 4px; font-size: 12px; align-self: center; }
-.editor-command-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-shrink: 0; }
+.editor-command-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-shrink: 0; }
 .editor-command-bar h2 { flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px system-ui; margin: 0; }
 .editor-panels.karaoke-editor { min-height: 0; flex: 1; display: grid; grid-template-rows: minmax(170px,var(--editor-top-ratio)) 8px minmax(102px,var(--editor-wave-ratio)) 8px minmax(110px,var(--editor-list-ratio)); gap: 0; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); box-shadow: none; overflow: hidden; }
 .editor-top { min-height: 0; display: grid; grid-template-columns: minmax(150px,var(--editor-video-ratio)) 8px minmax(330px,var(--editor-text-ratio)); overflow: hidden; }
@@ -13,7 +13,7 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
 #karaoke-view .karaoke-media-host { width: 100%; height: 100%; min-height: 0; max-height: none; border: 0; }
 #karaoke-view .karaoke-media-host video { display: block; width: 100%; height: 100%; min-height: 0; max-height: none; object-fit: contain; }
 #karaoke-view .karaoke-media-host audio { width: 100%; max-width: 100%; }
-#karaoke-view .karaoke-current-segment { min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow: auto; padding: 7px; border: 0; border-radius: 0; }
+#karaoke-view .karaoke-current-segment { min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: auto; padding: 8px 12px; border: 0; border-radius: 0; }
 #karaoke-view .karaoke-text-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; padding: 0; border: 0; background-image: none; }
 #karaoke-view .karaoke-text-editor > span, .editor-cue-navigation, .editor-timing-fields { grid-column: 1 / -1; }
 .editor-cue-navigation, .editor-timing-fields { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -25,12 +25,12 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
 .editor-column-splitter { cursor: col-resize; }
 .editor-splitter:hover, .editor-splitter:focus-visible { background: var(--accent); outline: 1px solid var(--accent); z-index: 1; }
 .editor-wave-panel { min-height: 0; overflow: hidden; }
-#karaoke-view .waveform-panel { height: 100%; display: flex; flex-direction: column; gap: 2px; padding: 4px 7px; border: 0; border-radius: 0; }
+#karaoke-view .waveform-panel { height: 100%; display: flex; flex-direction: column; gap: 2px; padding: 6px 12px; border: 0; border-radius: 0; }
 #karaoke-view .waveform-panel .panel-heading { margin: 0; gap: 6px; flex-wrap: nowrap; }
 #karaoke-view .waveform-panel h3 { margin: 0; font-size: 12px; }
 #karaoke-view .waveform-panel .eyebrow, #karaoke-waveform-status { display: none; }
 #karaoke-view .karaoke-waveform { flex: 1; min-height: 60px; height: 0; border-radius: 2px; }
-#karaoke-view .karaoke-transport { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; padding: 4px 7px; gap: 6px 12px; }
+#karaoke-view .karaoke-transport { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; padding: 6px 12px; gap: 6px 12px; }
 #karaoke-view .karaoke-clock { gap: 5px; }
 #karaoke-view .karaoke-clock strong { font-size: 16px; }
 #karaoke-view .karaoke-transport-buttons { display: flex; gap: 4px; }
@@ -39,10 +39,10 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
 #karaoke-media-message { flex: 1; min-width: 80px; max-height: 32px; overflow: auto; overflow-wrap: anywhere; margin: 0; font-size: 10px; }
 #karaoke-view > .loop-tools { flex-shrink: 0; margin: 0; gap: 4px; padding: 0; border: 0; font-size: 11px; }
 .editor-list-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.editor-list-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 7px; font-size: 12px; }
+.editor-list-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12px; }
 .editor-list-toolbar input { flex: 1; min-width: 100px; }
 .editor-list-toolbar input, .editor-list-toolbar select { border: 1px solid var(--line); border-radius: 3px; padding: 4px; background: var(--surface); color: var(--ink); }
-#editor-selection-message { margin: 0 7px 3px; color: var(--muted); font-size: 11px; }
+#editor-selection-message { margin: 0 12px 4px; color: var(--muted); font-size: 11px; }
 .editor-cue-list { position: relative; min-height: 0; overflow: auto; flex: 1; overscroll-behavior: contain; background: var(--surface); }
 .editor-cue-header, .editor-cue-row { display: grid; grid-template-columns: 40px 205px minmax(0,1fr) minmax(0,1fr) 95px; align-items: center; gap: 7px; padding: 0 7px; }
 .editor-cue-header { flex-shrink: 0; font-size: 11px; height: 25px; background: var(--surface-soft); border-block: 1px solid var(--line); }
@@ -58,7 +58,7 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
 .editor-waveform-hidden .editor-wave-panel, .editor-waveform-hidden .editor-wave-splitter { display: none; }
 .editor-waveform-hidden .editor-panels { grid-template-rows: minmax(170px,var(--editor-top-ratio)) 8px minmax(110px,var(--editor-list-ratio)); }
 .editor-repair-dialog { width: min(850px,95vw); max-height: 85dvh; overflow: auto; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; }
-.editor-task-tools.workspace { position: fixed; z-index: 20; inset: 20px; margin: 0; padding: 18px; overflow: auto; background: var(--surface); box-shadow: 0 0 0 30px #0008; border: 1px solid var(--line); border-radius: 7px; }
+.editor-task-tools.workspace { position: fixed; z-index: 20; inset: 24px; margin: 0; padding: 12px; overflow: auto; background: var(--surface); box-shadow: 0 0 0 30px #0008; border: 1px solid var(--line); border-radius: 7px; }
 .editor-task-tools #reload-detail { display: none; }
 .editor-task-tools .workspace-heading { margin: 0; }
 @media(max-height:700px) { #karaoke-view .karaoke-transport { gap: 2px 8px; } #karaoke-view > .loop-tools button { font-size: 10px; } .shell:has(#karaoke-view:not(.hidden)) > header { display: none; } }
@@ -72,3 +72,18 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
    dynamically reused workspace controls. Focus is bounded by the controller. */
 .editor-task-tools.workspace .workspace-heading h2 { color: var(--ink); }
 .editor-task-tools.workspace .workspace-message { color: var(--muted); }
+
+.editor-workspace-label { color: var(--chrome-ink); font-size: 13px; font-weight: 600; white-space: nowrap; }
+#karaoke-view .karaoke-text-editor label { gap: 4px; }
+.editor-task-tools #workspace-tab-review { display: none; }
+.editor-task-tools .workspace-sections { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin-bottom: 8px; padding-bottom: 8px; }
+.editor-task-tools .workspace-section-tab { padding: 8px 12px; border-radius: 5px; }
+.editor-task-tools .workspace-panel { padding: 12px; }
+.editor-task-tools .workspace-panel > .module-heading { padding-bottom: 8px; margin-bottom: 12px; }
+.editor-task-tools .module-heading h2 { font-size: 20px; margin: 0 0 6px; }
+.editor-task-tools .module-heading p { margin-bottom: 0; }
+@media(max-width:1000px), (max-height:700px) {
+  .shell:has(#karaoke-view:not(.hidden)) { padding: 12px 16px; }
+  .editor-command-bar { gap: 6px; }
+  .editor-task-tools.workspace { inset: 16px; }
+}

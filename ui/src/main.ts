@@ -718,17 +718,17 @@ ${editorTemplate(primaryShortcutModifier)}
         <button id="back-to-jobs" class="secondary" type="button">← 返回任务</button>
         <div>
           <p class="eyebrow">TASK WORKSPACE</p>
-          <h2 id="workspace-title">任务详情</h2>
+          <h2 id="workspace-title">任务进度</h2>
           <p id="workspace-message" class="workspace-message"></p>
         </div>
         <button id="reload-detail" type="button" class="secondary">重新读取</button>
       </div>
-      <nav class="workspace-sections" role="tablist" aria-label="任务详情功能">
+      <nav class="workspace-sections" role="tablist" aria-label="任务工具">
         <button id="workspace-tab-translation" class="workspace-section-tab active" type="button" role="tab" aria-selected="true" aria-controls="workspace-translation-panel" data-workspace-section="translation">
           <strong>翻译与词表</strong><span>批量翻译与识别修正</span>
         </button>
         <button id="workspace-tab-review" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-review-panel" data-workspace-section="review">
-          <strong>字幕编辑</strong><span>返回统一编辑器</span>
+          <strong>任务进度</strong><span>识别进度与只读预览</span>
         </button>
         <button id="workspace-tab-export" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-export-panel" data-workspace-section="export">
           <strong>导出成品</strong><span>字幕文件与烧录视频</span>
@@ -737,7 +737,7 @@ ${editorTemplate(primaryShortcutModifier)}
       <p id="workspace-action-message" class="workspace-action-message" role="status"></p>
       <section id="workspace-review-panel" class="workspace-panel hidden" role="tabpanel" aria-labelledby="workspace-tab-review" data-workspace-panel="review">
         <div class="module-heading compact">
-          <div><p class="eyebrow">SUBTITLE REVIEW</p><h2>字幕校对</h2><p>识别中仅提供只读预览；完整识别后进入统一字幕编辑器。</p></div>
+          <div><p class="eyebrow">SUBTITLE REVIEW</p><h2>任务进度</h2><p>识别完成后直接进入字幕编辑。</p></div>
           <button id="open-subtitle-editor" type="button">进入字幕编辑 →</button>
         </div>
         <div class="review-grid">
@@ -829,7 +829,7 @@ ${editorTemplate(primaryShortcutModifier)}
             <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 ${fileManagerLabel} 中显示</button></div>
           </article>
           <article class="export-card">
-            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>把当前字幕和已保存样式冻结为一次独立烧录任务；提交后仍可返回字幕校对继续工作。</p></div>
+            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>把当前字幕和已保存样式冻结为一次独立烧录任务；提交后仍可返回字幕编辑继续工作。</p></div>
             <div class="export-card-actions"><button id="render-video" type="button">导出带字幕视频…</button></div>
           </article>
         </div>
@@ -1512,7 +1512,7 @@ async function showEditorTools(section: WorkspaceSection): Promise<void> {
   editorRoot.inert = true;
   renderWorkspace(activeDetail);
   showWorkspaceSection(section);
-  document.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回编辑";
+  document.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回字幕编辑";
   document.querySelector<HTMLButtonElement>("#back-to-jobs")?.focus();
   await refreshTranslationStatus();
 }
@@ -2458,7 +2458,7 @@ function updateTranslationControls(): void {
     renderVideoButton.title = inputPath && isAudioPath(inputPath)
       ? "音频任务不能烧录视频"
       : inputPath && !activeDetail?.playback_path
-        ? "原视频已移动，请先在字幕校对中重新定位"
+        ? "原视频已移动，请先在字幕编辑中重新定位"
         : "";
   }
   if (revealExportButton) {
@@ -2926,7 +2926,7 @@ async function stopActivePlayback(): Promise<void> {
   hideSubtitleOverlay();
 }
 
-async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">): Promise<void> {
+async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editorDetail?: JobDetail): Promise<void> {
   closeLearningSelection();
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
@@ -2953,7 +2953,7 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">): Promi
     if (learningDictionaryDialog?.open) renderLearningDictionary();
   }
   if (area === "karaoke" && karaokeSelectedJobId) {
-    await openKaraokeJob(karaokeSelectedJobId);
+    await openKaraokeJob(karaokeSelectedJobId, editorDetail);
     if (currentArea !== "karaoke") return;
   }
   window.scrollTo({ top: 0, behavior: "auto" });
@@ -3503,7 +3503,7 @@ async function playLearningSource(itemId: string): Promise<void> {
   await openListeningJob(occurrence.job_id, occurrence.start_ms, true);
 }
 
-async function openKaraokeJob(jobId: string): Promise<void> {
+async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<void> {
   if (!jobId || !karaokeMediaMessage) return;
   const reopeningSelectedJob = karaokeSelectedJobId === jobId;
   const requestId = ++navigationRequestId;
@@ -3527,9 +3527,10 @@ async function openKaraokeJob(jobId: string): Promise<void> {
   syncKaraokeFollowButton();
   renderKaraokeTimeline();
   karaokeMediaMessage.textContent = "正在读取字幕编辑任务…";
+  if (karaokeJobTitle) karaokeJobTitle.textContent = "正在打开任务…";
   if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "正在准备本地波形…";
   try {
-    const detail = await invoke<JobDetail>("get_job_detail", { jobId });
+    const detail = loadedDetail ?? await invoke<JobDetail>("get_job_detail", { jobId });
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
     if (!detail.segments.length || !matchesTerminalStatus(detail.job.status)) { await openJob(jobId, "review"); return; }
     activeDetail = detail;
@@ -4496,6 +4497,8 @@ function showWorkspaceSection(section: WorkspaceSection): void {
 
 async function openJob(jobId: string, initialSection?: WorkspaceSection): Promise<void> {
   if (!jobId || !workspaceMessage) return;
+  const known = latestJobs.find(job => job.job_id === jobId);
+  if ((initialSection === undefined || initialSection === "review") && known && known.segment_count > 0 && matchesTerminalStatus(known.status)) { await enterSubtitleEditor(jobId); return; }
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;
@@ -4510,7 +4513,7 @@ async function openJob(jobId: string, initialSection?: WorkspaceSection): Promis
     const detail = await invoke<JobDetail>("get_job_detail", { jobId });
     if (requestId !== navigationRequestId || currentArea !== "workspace") return;
     activeDetail = detail;
-    if ((initialSection === undefined || initialSection === "review") && detail.segments.length > 0 && matchesTerminalStatus(detail.job.status)) { await enterSubtitleEditor(jobId); return; }
+    if ((initialSection === undefined || initialSection === "review") && detail.segments.length > 0 && matchesTerminalStatus(detail.job.status)) { await enterSubtitleEditor(jobId, detail); return; }
     renderWorkspace(detail);
     await refreshTranslationStatus();
   } catch (error) {
@@ -4520,23 +4523,23 @@ async function openJob(jobId: string, initialSection?: WorkspaceSection): Promis
   }
 }
 
-async function enterSubtitleEditor(jobId: string): Promise<void> {
+async function enterSubtitleEditor(jobId: string, detail?: JobDetail): Promise<void> {
   if (!jobId) return;
   karaokeSelectedJobId = jobId;
-  await showTopLevelArea("karaoke");
+  await showTopLevelArea("karaoke", detail);
 }
 
 function renderWorkspace(detail: JobDetail): void {
   lastExportedSubtitlePath = null;
   revealExportButton?.classList.add("hidden");
-  if (workspaceTitle) workspaceTitle.textContent = displayName(detail.job);
+  if (workspaceTitle) workspaceTitle.textContent = `${displayName(detail.job)} · ${currentArea === "karaoke" ? "任务工具" : "任务进度"}`;
   if (workspaceMessage) {
     workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message} · ${jobTimingLabel(detail.job)}`;
   }
   if (segmentCount) segmentCount.textContent = `${detail.segments.length} 段`;
   if (openSubtitleEditorButton) {
     openSubtitleEditorButton.disabled = detail.segments.length === 0 || !matchesTerminalStatus(detail.job.status);
-    openSubtitleEditorButton.title = openSubtitleEditorButton.disabled ? "转写结束并产生字幕后才能进入字幕编辑" : "打开当前任务的统一字幕编辑器";
+    openSubtitleEditorButton.title = openSubtitleEditorButton.disabled ? "转写结束并产生字幕后才能进入字幕编辑" : "打开当前任务的字幕编辑器";
   }
   renderGlossaryOptions();
   const sourceTrackOption = videoSubtitleTrack?.querySelector<HTMLOptionElement>('option[value="source"]');
@@ -5980,7 +5983,7 @@ async function openVideoRenderDialog(): Promise<void> {
     return;
   }
   if (!activeDetail.job.input_path || !activeDetail.playback_path || isAudioPath(activeDetail.job.input_path)) {
-    setWorkspaceAction("当前任务没有可烧录的视频源；如果原文件已移动，请先在字幕校对中重新定位。", true);
+    setWorkspaceAction("当前任务没有可烧录的视频源；如果原文件已移动，请先在字幕编辑中重新定位。", true);
     return;
   }
   if (videoRenderMessage) videoRenderMessage.textContent = "";
@@ -6595,7 +6598,7 @@ relinkJobMediaButton?.addEventListener("click", () => void relinkActiveJobMedia(
 openSubtitleEditorButton?.addEventListener("click", () => {
   if (!activeDetail) return;
   if (hasUnsavedSubtitleEdits()) {
-    setWorkspaceAction("进入字幕编辑前，请先保存或放弃当前字幕校对中的文字草稿。", true);
+    setWorkspaceAction("进入字幕编辑前，请先保存或放弃当前字幕编辑中的文字草稿。", true);
     return;
   }
   void enterSubtitleEditor(activeDetail.job.job_id);
