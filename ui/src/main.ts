@@ -10,6 +10,9 @@ import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
 import { mountEditorLayout } from "./editor-layout";
 import { mountEditorCueList } from "./editor-cue-list";
+import { mountCurrentCueEditor } from "./current-cue-editor";
+import { createEditorBackend } from "./editor-backend";
+import type { SubtitleSegment } from "./editor-types";
 import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
 import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
@@ -115,19 +118,7 @@ type GlossaryApplyResult = {
   segments: SubtitleSegment[];
 };
 
-type SubtitleSegment = {
-  id: string;
-  job_id: string;
-  segment_index: number;
-  start_ms: number;
-  end_ms: number;
-  source_text: string;
-  translated_text: string | null;
-  source_edited: boolean;
-  translation_edited: boolean;
-  translation_stale: boolean;
-  timing_edited: boolean;
-};
+
 
 type RetranscriptionCandidate = {
   id: string;
@@ -1143,8 +1134,6 @@ const karaokeWaveform = document.querySelector<HTMLCanvasElement>("#karaoke-wave
 const karaokeSegmentTime = document.querySelector<HTMLSpanElement>("#karaoke-segment-time");
 const karaokeCurrentSource = document.querySelector<HTMLTextAreaElement>("#karaoke-current-source");
 const karaokeCurrentTranslation = document.querySelector<HTMLTextAreaElement>("#karaoke-current-translation");
-const karaokeSaveTextButton = document.querySelector<HTMLButtonElement>("#karaoke-save-text");
-const karaokeDiscardTextButton = document.querySelector<HTMLButtonElement>("#karaoke-discard-text");
 const karaokeUndoTextButton = document.querySelector<HTMLButtonElement>("#karaoke-undo-text");
 const karaokeCutSegmentButton = document.querySelector<HTMLButtonElement>("#karaoke-cut-segment");
 const karaokeJoinSegmentButton = document.querySelector<HTMLButtonElement>("#karaoke-join-segment");
@@ -1329,13 +1318,8 @@ let activeSegmentId: string | null = null;
 let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
 const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
-const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(async (before, value) => {
-  if (!value.source.trim()) throw new Error("原文不能为空；草稿已保留");
-  return invoke<SubtitleSegment>("update_subtitle", { request: {
-    jobId: before.job_id, segmentId: before.id, sourceText: value.source,
-    translatedText: value.translation.trim() || null, startMs: before.start_ms, endMs: before.end_ms,
-  } });
-}, updateSubtitleDraftUI);
+const editorBackend = createEditorBackend(invoke);
+const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(editorBackend.updateText, updateSubtitleDraftUI);
 
 const subtitleStructureUndoHistory = new Map<string, SubtitleStructureUndoEntry[]>();
 let workspaceActionBusy = false;
@@ -1400,8 +1384,6 @@ let karaokeWaveformGain = 1;
 let karaokeWaveformReloadTimer: number | null = null;
 let karaokePendingWaveformStartMs = 0;
 let karaokeGestureStart: { durationMs: number; anchorMs: number; ratio: number } | null = null;
-let karaokeTextDraftSegmentId: string | null = null;
-let karaokeTextDraftDirty = false;
 let activeRetranscriptionPreview: RetranscriptionPreview | null = null;
 let retranscriptionBusy = false;
 let asrQualitySignals: AsrQualitySignal[] = [];
@@ -1427,6 +1409,10 @@ const editorEnd = document.querySelector<HTMLInputElement>("#editor-cue-end")!;
 let editorTimeFingerprint = "";
 const editorRepairDialog = document.querySelector<HTMLDialogElement>("#editor-repair-dialog")!;
 const editorLayout = mountEditorLayout(editorRoot);
+const currentCueEditor = mountCurrentCueEditor<SubtitleSegment>(editorRoot, {
+  drafts: subtitleDrafts, current: karaokeDraftSegment, canUndo: canUndoSegment,
+  undo: undoKaraokeTextSave, status: setSubtitleEditAction,
+});
 const editorCueList = mountEditorCueList<SubtitleSegment>(document.querySelector<HTMLElement>("#editor-cue-list")!, {
   select: selectEditorCue,
   seek: id => { const cue = activeDetail ? subtitleTimeline().get(id) : undefined; if (cue) seekTo(cue.start_ms); },
@@ -1474,7 +1460,7 @@ function selectEditorCue(id: string): void {
   editorSession.selectedCueId = id;
   editorTimeFingerprint = "";
   editorStart.value = formatPreciseTime(cue.start_ms); editorEnd.value = formatPreciseTime(cue.end_ms);
-  syncKaraokeTextDraft(cue, true);
+  currentCueEditor.sync(cue, true);
   editorCueList.mark(id, editorSession.playbackCueId);
   updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
   renderEditorList();
@@ -1505,7 +1491,7 @@ async function saveEditorCueTime(): Promise<void> {
   const after = before.map(item => item.id === cue.id ? { ...item, start_ms: startMs, end_ms: endMs } : item);
   setEditorMutationBusy(true);
   try {
-    const saved = await invoke<SubtitleSegment[]>("save_subtitle_timing", { request: { jobId, beforeSegments: before, afterSegments: after } });
+    const saved = await editorBackend.saveTiming(jobId, before, after);
     rememberStructureEdit(before, saved, "手动调整时间", jobId);
     if (activeDetail?.job.job_id !== jobId) return;
     applySubtitleStructure(saved, cue.id); setSubtitleEditAction("时间已保存，未移动相邻字幕。");
@@ -1531,7 +1517,7 @@ function closeEditorTools(): void {
   workspaceView?.removeAttribute("role");
   editorRoot.inert = false;
   editorToolReturnFocus?.focus();
-  syncKaraokeTextDraft(karaokeDraftSegment(), true); renderEditorList();
+  currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList();
 }
 editorSearch.addEventListener("input", () => { editorSession.query = editorSearch.value; renderEditorList(); });
 editorFilter.addEventListener("change", () => { editorSession.filter = editorFilter.value as CueFilter; renderEditorList(); });
@@ -1562,7 +1548,7 @@ workspaceView?.addEventListener("keydown", event => {
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }
 });
-window.addEventListener("pagehide", () => { editorLayout.dispose(); editorCueList.dispose(); });
+window.addEventListener("pagehide", () => { editorLayout.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); });
 
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
@@ -2909,8 +2895,7 @@ async function stopActivePlayback(): Promise<void> {
   karaokePanDrag = null;
   karaokePlayheadDrag = null;
   karaokeGestureStart = null;
-  karaokeTextDraftSegmentId = null;
-  karaokeTextDraftDirty = false;
+  currentCueEditor.clear();
   if (karaokeWaveformReloadTimer !== null) {
     window.clearTimeout(karaokeWaveformReloadTimer);
     karaokeWaveformReloadTimer = null;
@@ -3529,8 +3514,7 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
   }
   activeDetail = null;
   karaokeWaveformWindow = null;
-  karaokeTextDraftSegmentId = null;
-  karaokeTextDraftDirty = false;
+  currentCueEditor.clear();
   karaokeViewStartMs = 0;
   karaokeFollowPlayhead = true;
   activeRetranscriptionPreview = null;
@@ -3550,7 +3534,7 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
     editorSession.open(jobId, detail.segments);
     editorSearch.value = editorSession.query; editorFilter.value = editorSession.filter;
     asrQualitySignals = [];
-    syncKaraokeTextDraft(karaokeDraftSegment(), true); renderEditorList(); syncEditorFollow();
+    currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList(); syncEditorFollow();
     activeSegmentId = null;
     if (karaokeJobTitle) karaokeJobTitle.textContent = displayName(detail.job);
     relinkJobMediaButton?.classList.toggle("hidden", !detail.job.input_path || Boolean(detail.playback_path));
@@ -3748,7 +3732,7 @@ function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
 
 async function previewSelectedRange(): Promise<void> {
   if (!activeDetail || retranscriptionBusy) return;
-  if (karaokeTextDraftDirty) {
+  if (currentCueEditor.dirty) {
     setRetranscriptionMessage("重新识别前请先保存或放弃当前文字修改。", true);
     return;
   }
@@ -4174,7 +4158,7 @@ async function commitKaraokeTimingDrag(): Promise<void> {
     rememberStructureEdit(before, saved, `第 ${segment.segment_index + 1} 段${action}`);
     activeDetail.segments = saved;
     editorSession.reconcile(saved, segment.id);
-    syncKaraokeTextDraft(karaokeDraftSegment(), true); renderEditorList();
+    currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList();
     updateStructureUndoButton();
     syncKaraokeWaveformStatus();
     updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
@@ -4198,50 +4182,9 @@ function karaokeDraftSegment(): SubtitleSegment | undefined {
   return activeDetail ? subtitleTimeline().get(segmentId) : undefined;
 }
 
-function syncKaraokeTextDraft(segment: SubtitleSegment | undefined, force = false): void {
-  if (!karaokeCurrentSource || !karaokeCurrentTranslation) return;
-  if (karaokeTextDraftDirty && !force) return;
-  karaokeTextDraftSegmentId = segment?.id ?? null;
-  const draft = segment ? subtitleDrafts.ensure(segment) : undefined;
-  karaokeTextDraftDirty = !!draft && subtitleDrafts.pending(draft);
-  const source = draft?.value.source ?? "", translation = draft?.value.translation ?? "";
-  if (karaokeCurrentSource.value !== source) karaokeCurrentSource.value = source;
-  if (karaokeCurrentTranslation.value !== translation) karaokeCurrentTranslation.value = translation;
-  karaokeCurrentSource.disabled = !segment;
-  karaokeCurrentTranslation.disabled = !segment;
-  if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = !karaokeTextDraftDirty || !!draft?.saving;
-  if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = !karaokeTextDraftDirty || !!draft?.saving;
-  if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = karaokeTextDraftDirty || !segment || !canUndoSegment(segment);
-  if (draft?.error) setSubtitleEditAction(draft.error, true);
-}
-
-function markKaraokeTextDirty(event?: Event): void {
-  const segment = karaokeDraftSegment();
-  if (!segment) return;
-  karaokeTextDraftSegmentId = segment.id;
-  karaokeTextDraftDirty = true;
-  if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = false;
-  if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = false;
-  if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = true;
-  subtitleDrafts.edit(segment, {source: karaokeCurrentSource?.value ?? "", translation: karaokeCurrentTranslation?.value ?? ""}, (event as InputEvent | undefined)?.isComposing);
-
-}
-
-async function saveKaraokeTextDraft(): Promise<void> {
-  const segment = karaokeDraftSegment();
-  if (segment) await subtitleDrafts.flush(cueKey(segment), true).catch(() => {});
-}
-
-function discardKaraokeTextDraft(): void {
-  const saved = activeDetail?.segments.find((item) => item.id === karaokeTextDraftSegmentId);
-  if (saved) subtitleDrafts.discard(saved);
-  syncKaraokeTextDraft(saved, true);
-  setSubtitleEditAction("已放弃当前字幕尚未保存的文字修改。");
-}
-
 async function undoKaraokeTextSave(): Promise<void> {
   const segment = karaokeDraftSegment();
-  if (!segment || !activeDetail || karaokeTextDraftDirty) return;
+  if (!segment || !activeDetail || currentCueEditor.dirty) return;
   const key = subtitleUndoKey(segment);
   const history = subtitleUndoHistory.get(key);
   const entry = history?.at(-1);
@@ -4257,7 +4200,7 @@ async function undoKaraokeTextSave(): Promise<void> {
     history?.pop();
     if (history?.length === 0) subtitleUndoHistory.delete(key);
     replaceActiveSegment(restored);
-    if (editorSession.selectedCueId === restored.id) syncKaraokeTextDraft(restored, true);
+    if (editorSession.selectedCueId === restored.id) currentCueEditor.sync(restored, true);
     updateStructureUndoButton();
     updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
     setSubtitleEditAction("已撤销当前字幕上一次文字保存；历史仅保留在本次 App 会话。");
@@ -4279,11 +4222,7 @@ function updateKaraokePosition(milliseconds: number): void {
       ? `${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)} · #${segment.segment_index + 1}`
       : "当前没有字幕";
   }
-  if (!karaokeTextDraftDirty && (
-    karaokeTextDraftSegmentId !== segment?.id
-    || karaokeCurrentSource?.value !== (segment?.source_text ?? "")
-    || karaokeCurrentTranslation?.value !== (segment?.translated_text ?? "")
-  )) syncKaraokeTextDraft(segment);
+  if (!currentCueEditor.dirty && !currentCueEditor.matches(segment)) currentCueEditor.sync(segment);
   const timeFingerprint = `${segment?.id}:${segment?.start_ms}:${segment?.end_ms}`;
   if (editorTimeFingerprint !== timeFingerprint && document.activeElement !== editorStart && document.activeElement !== editorEnd) {
     editorTimeFingerprint = timeFingerprint;
@@ -4356,7 +4295,7 @@ async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSe
 }
 async function openInsertSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
-  if (karaokeTextDraftDirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
+  if (currentCueEditor.dirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
   if (!activeMedia || !Number.isFinite(activeMedia.duration) || activeMedia.duration <= 0) { setSubtitleEditAction("媒体时长尚未就绪，请等待加载或重新定位媒体。", true); return; }
   activeMedia.pause();
   const jobId = activeDetail.job.job_id;
@@ -4389,7 +4328,7 @@ async function deleteCurrentSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;
   const selectedId = editorSession.selectedCueId;
   if (!await flushEditorStructureDrafts() || selectedId !== editorSession.selectedCueId) return;
-  if (karaokeTextDraftDirty) { setSubtitleEditAction("删除前请先保存或放弃文字修改。", true); return; }
+  if (currentCueEditor.dirty) { setSubtitleEditAction("删除前请先保存或放弃文字修改。", true); return; }
   const jobId=activeDetail.job.job_id;
   const id=editorSession.selectedCueId;
   if (!id || !activeDetail.segments.some(s=>s.id===id)) { setSubtitleEditAction("请先选择要删除的字幕块。",true); return; }
@@ -4401,7 +4340,7 @@ async function deleteCurrentSubtitleBlock(): Promise<void> {
 async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;
   if (!await flushEditorStructureDrafts()) return;
-  if (karaokeTextDraftDirty) {
+  if (currentCueEditor.dirty) {
     setSubtitleEditAction("Cut 前请先保存或放弃当前文字修改。", true);
     return;
   }
@@ -4442,7 +4381,7 @@ async function joinKaraokeSegmentWithNext(): Promise<void> {
   if (!activeDetail || !editorSession.selectedCueId || workspaceActionBusy) return;
   const selectedId = editorSession.selectedCueId;
   if (!await flushEditorStructureDrafts() || selectedId !== editorSession.selectedCueId) return;
-  if (karaokeTextDraftDirty) {
+  if (currentCueEditor.dirty) {
     setSubtitleEditAction("Join 前请先保存或放弃当前文字修改。", true);
     return;
   }
@@ -4757,7 +4696,7 @@ function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?:
   if (!activeDetail) return;
   activeDetail.segments = segments;
   editorSession.reconcile(segments, expandedSegmentId);
-  if (currentArea === "karaoke") { syncKaraokeTextDraft(karaokeDraftSegment(), true); renderEditorList(); }
+  if (currentArea === "karaoke") { currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList(); }
   if (segmentCount) segmentCount.textContent = `${segments.length} 段`;
   if (currentArea === "workspace") renderSubtitleListPreservingView(segments, expandedSegmentId);
   else {
@@ -4781,7 +4720,7 @@ function joinedSubtitleText(left: string, right: string, language: LanguageCode)
 
 async function undoSubtitleStructure(): Promise<void> {
   if (!activeDetail || !undoSubtitleStructureButton || !await flushEditorStructureDrafts()) return;
-  if (karaokeTextDraftDirty) {
+  if (currentCueEditor.dirty) {
     setSubtitleEditAction("撤销打轴前请先保存或放弃当前文字修改。", true);
     return;
   }
@@ -4842,12 +4781,8 @@ function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleS
     const flags = card.querySelector<HTMLElement>(".edit-flags");
     if (flags) flags.textContent = editFlags(saved);
   }
-  if (karaokeTextDraftSegmentId === saved.id) {
-    karaokeTextDraftDirty = pending;
-    if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = !pending || draft.saving;
-    if (karaokeDiscardTextButton) karaokeDiscardTextButton.disabled = !pending || draft.saving;
-    if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = pending || !canUndoSegment(saved);
-    if (!pending) syncKaraokeTextDraft(saved, true);
+  if (currentCueEditor.isShowing(saved)) {
+    currentCueEditor.refresh(draft);
     setSubtitleEditAction(status, !!draft.error);
   }
   if (before) updateTranslationControls();
@@ -4951,7 +4886,7 @@ async function undoSegment(
 }
 
 async function restoreSegment(snapshot: SubtitleSegment): Promise<SubtitleSegment> {
-  return invoke<SubtitleSegment>("restore_subtitle", { snapshot });
+  return editorBackend.restoreText(snapshot);
 }
 
 
@@ -4960,7 +4895,7 @@ function replaceActiveSegment(updated: SubtitleSegment): void {
   if (activeDetail.job.job_id !== updated.job_id) return;
   activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
   subtitleDrafts.ensure(updated);
-  if (currentArea === "karaoke") { syncKaraokeTextDraft(karaokeDraftSegment()); renderEditorList(); }
+  if (currentArea === "karaoke") { currentCueEditor.sync(karaokeDraftSegment()); renderEditorList(); }
 }
 
 async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
@@ -6700,7 +6635,7 @@ karaokeWaveform?.addEventListener("pointerdown", (event) => {
     karaokeSuppressClick = true;
     karaokeWaveform.style.cursor = "ew-resize";
   } else if (hit) {
-    if (karaokeTextDraftDirty) {
+    if (currentCueEditor.dirty) {
       setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true);
       return;
     }
@@ -6904,15 +6839,6 @@ confirmRetranscriptionButton?.addEventListener("click", () => void confirmSelect
 saveGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(false));
 clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(true));
 checkGeminiApiKeyButton?.addEventListener("click", () => void checkGeminiCredential());
-karaokeCurrentSource?.addEventListener("input", markKaraokeTextDirty);
-karaokeCurrentTranslation?.addEventListener("input", markKaraokeTextDirty);
-for (const input of [karaokeCurrentSource, karaokeCurrentTranslation]) {
-  input?.addEventListener("compositionend", markKaraokeTextDirty);
-  input?.addEventListener("blur", () => { const cue = karaokeDraftSegment(); if (cue) void subtitleDrafts.flush(cueKey(cue)).catch(() => {}); });
-}
-karaokeSaveTextButton?.addEventListener("click", () => void saveKaraokeTextDraft());
-karaokeDiscardTextButton?.addEventListener("click", discardKaraokeTextDraft);
-karaokeUndoTextButton?.addEventListener("click", () => void undoKaraokeTextSave());
 karaokeOpenWorkspaceButton?.addEventListener("click", () => void showEditorTools("translation"));
 exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
