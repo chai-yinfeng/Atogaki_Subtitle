@@ -44,7 +44,7 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
 .editor-list-toolbar input, .editor-list-toolbar select { border: 1px solid var(--line); border-radius: 3px; padding: 4px; background: var(--surface); color: var(--ink); }
 #editor-selection-message { margin: 0 12px 4px; color: var(--muted); font-size: 11px; }
 .editor-cue-list { position: relative; min-height: 0; overflow: auto; flex: 1; overscroll-behavior: contain; background: var(--surface); }
-.editor-cue-header, .editor-cue-row { display: grid; grid-template-columns: 40px 205px minmax(0,1fr) minmax(0,1fr) 95px; align-items: center; gap: 7px; padding: 0 7px; }
+.editor-cue-header, .editor-cue-row { display: grid; grid-template-columns: 48px 205px minmax(0,1fr) minmax(0,1fr) 95px; align-items: center; gap: 7px; padding: 0 7px; }
 .editor-cue-header { flex-shrink: 0; font-size: 11px; height: 25px; background: var(--surface-soft); border-block: 1px solid var(--line); }
 .editor-cue-row { height: 42px; font-size: 13px; border-bottom: 1px solid var(--line); cursor: pointer; background: var(--surface); }
 .editor-cue-row > * { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -62,7 +62,7 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
 .editor-task-tools #reload-detail { display: none; }
 .editor-task-tools .workspace-heading { margin: 0; }
 @media(max-height:700px) { #karaoke-view .karaoke-transport { gap: 2px 8px; } #karaoke-view > .loop-tools button { font-size: 10px; } .shell:has(#karaoke-view:not(.hidden)) > header { display: none; } }
-@media(max-width:1000px) { .editor-cue-header,.editor-cue-row { grid-template-columns: 30px 180px minmax(0,1fr) minmax(0,1fr) 75px; gap: 4px; } .editor-command-bar { gap: 4px; } #karaoke-view button { font-size: 11px; padding: 4px 6px; } }
+@media(max-width:1000px) { .editor-cue-header,.editor-cue-row { grid-template-columns: 40px 180px minmax(0,1fr) minmax(0,1fr) 75px; gap: 4px; } .editor-command-bar { gap: 4px; } #karaoke-view button { font-size: 11px; padding: 4px 6px; } }
 .shell:has(#karaoke-view:not(.hidden)) { margin: 0 auto; }
 #karaoke-view .karaoke-current-segment { align-items: stretch; }
 
@@ -87,3 +87,7 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
   .editor-command-bar { gap: 6px; }
   .editor-task-tools.workspace { inset: 16px; }
 }
+
+.editor-cue-list { overflow-anchor: none; }
+.editor-cue-content { position: relative; min-height: 1px; }
+.editor-cue-content > .editor-cue-row { position: absolute; left: 0; right: 0; }

@@ -37,6 +37,6 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 
 此包是面板验证产物，不是正式发行包；构建未打包 sidecar。Windows 原生窗口、真实视频的解码／自动回退、真实翻译与候选采用、实际导出和大规模 WebKit 性能仍需后续专项验收，不能从合成前端回归推断通过。
 
-## 下一步
+## 后继阶段
 
-用户验收面板后进入性能阶段，再做系统性模块拆分、unused 检查、文档归档、Web／Postgres 独立退役影响报告和产物保留清单。本阶段未清理模型、恢复备份、发行资产或 ASR 来源证据。
+用户已确认面板大体正常；入口统一称「字幕编辑」、完整任务直达及内外间距修正已交付。第二阶段实现与剩余门禁见 [性能验证](editor-performance-validation.md)，再做系统性模块拆分、unused 检查、文档归档、Web／Postgres 独立退役影响报告和产物保留清单。本阶段未清理模型、恢复备份、发行资产或 ASR 来源证据。

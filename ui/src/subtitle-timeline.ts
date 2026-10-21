@@ -1,6 +1,7 @@
 export type TimedCue = { id: string; start_ms: number; end_ms: number };
 
-/** Index immutable workspace snapshots. Overlaps keep the original first-cue
+/** Index workspace timing snapshots. Text-only replacements preserve the index.
+ * Overlaps keep the original first-cue
  * selection semantics, rather than assuming end times are sorted. */
 export class SubtitleTimeline<T extends TimedCue> {
   private ordered: { cue: T; index: number }[];
@@ -41,6 +42,12 @@ export class SubtitleTimeline<T extends TimedCue> {
       if (cue.end_ms >= start) result.push(cue);
     }
     return result;
+  }
+  replaceText(cue: T): boolean {
+    const entry = this.byId.get(cue.id);
+    if (!entry || entry.cue.start_ms !== cue.start_ms || entry.cue.end_ms !== cue.end_ms) return false;
+    entry.cue = cue;
+    return true;
   }
   get(id: string | null): T | undefined { return id ? this.byId.get(id)?.cue : undefined; }
   position(id: string): number { return this.byId.get(id)?.index ?? -1; }

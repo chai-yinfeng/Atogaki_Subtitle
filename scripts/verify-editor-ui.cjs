@@ -1,11 +1,12 @@
-const { chromium } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE || 'playwright');
+const { chromium, webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const output = process.env.ATOGAKI_EDITOR_QA_OUTPUT || '/tmp/atogaki-editor-ui';
 fs.mkdirSync(output, {recursive:true});
 (async()=>{
-const browser=await chromium.launch({...(process.env.ATOGAKI_CHROME ? {executablePath:process.env.ATOGAKI_CHROME} : {channel:'chrome'}),headless:true});
+const useWebkit=process.env.ATOGAKI_EDITOR_ENGINE==='webkit';
+const browser=await (useWebkit?webkit:chromium).launch({...(useWebkit?{}:process.env.ATOGAKI_CHROME ? {executablePath:process.env.ATOGAKI_CHROME} : {channel:'chrome'}),headless:true});
 const context=await browser.newContext({viewport:{width:1180,height:760}});
 const page=await context.newPage();
 const errors=[];page.on('pageerror',e=>errors.push(String(e)));
@@ -24,6 +25,8 @@ await page.keyboard.press('ArrowUp');
 assert.match(await page.locator('[data-cue-id="cue-0"]').getAttribute('class'),/selected/);
 await page.locator('#karaoke-current-source').fill('第一段修改');
 await page.locator('[data-cue-id="cue-1"]').click();
+assert.match(await page.locator('[data-cue-id="cue-1"]').getAttribute('class'),/selected/);
+assert.equal(await page.locator('#karaoke-current-source').inputValue(),'第 2 句：今日は音楽と日常について話します。');
 await page.locator('#karaoke-current-source').fill('第二段修改');
 await page.waitForTimeout(800);
 assert.equal(await page.evaluate(()=>window.__test.cues[0].source_text),'第一段修改');
@@ -77,6 +80,18 @@ assert.equal(await page.locator('#karaoke-current-source').inputValue(),'失败�
 await page.locator('[data-cue-id="cue-2"]').click();await page.locator('[data-cue-id="cue-1"]').click();assert.equal(await page.locator('#karaoke-current-source').inputValue(),'失败草稿');
 await page.evaluate(()=>window.__test.fail=false);await page.locator('#karaoke-save-text').click();await page.waitForTimeout(100);
 assert.equal(await page.evaluate(()=>window.__test.cues[1].source_text),'失败草稿');
+// Scrolling and recycling rows must keep offscreen drafts and keyboard navigation.
+assert.ok(await page.locator('.editor-cue-row').count() <= 80);
+await page.locator('#editor-cue-list').focus();await page.keyboard.press('End');
+assert.match(await page.locator('[data-cue-id="cue-299"]').getAttribute('class'),/selected/);
+await page.locator('#karaoke-current-source').fill('最后一段离屏保存');
+await page.locator('#editor-cue-list').focus();await page.keyboard.press('Home');
+await page.waitForTimeout(750);
+await page.locator('#editor-cue-list').focus();await page.keyboard.press('End');
+assert.equal(await page.locator('#karaoke-current-source').inputValue(),'最后一段离屏保存');
+assert.ok(await page.locator('.editor-cue-row').count() <= 80);
+assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.cmd==='list_jobs').length),0);
+assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.cmd==='list_job_summaries').length),1);
 // Reload validates cross-session layout preferences and restores the same panel sizes.
 await page.reload();await page.locator('.job-open').first().click();
 await page.locator('#editor-cue-list .editor-cue-row').first().waitFor();

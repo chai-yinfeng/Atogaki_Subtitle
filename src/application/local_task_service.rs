@@ -337,6 +337,64 @@ impl LocalTaskService {
         database.list_jobs().await
     }
 
+    /// Reconcile only the task being opened. Unchanged generated snapshots do
+    /// not need reparsing, and unrelated tasks are never loaded by this path.
+    pub async fn refresh_persisted_job(&self, job_id: &str) -> Result<()> {
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("task refresh requires SQLite persistence"))?;
+        let Some(record) = database.get_job(job_id).await? else {
+            return Ok(());
+        };
+        let snapshot = tokio::task::spawn_blocking(move || {
+            let job =
+                crate::infrastructure::job_store::Job::open(record.storage_dir.into()).ok()?;
+            let manifest = job.read_manifest_if_exists().ok().flatten()?;
+            (manifest.updated_at_unix > record.updated_at_unix as u64)
+                .then(|| JobSnapshot::load(&job.dir).ok())
+                .flatten()
+        })
+        .await
+        .context("task refresh reader stopped")?;
+        if let Some(snapshot) = snapshot {
+            database.sync_snapshot(&snapshot).await?;
+        }
+        Ok(())
+    }
+
+    /// Polling read model: SQLite metadata/counts plus small status files. The
+    /// runner publishes snapshots; opening a card does not rescan ASR evidence.
+    pub async fn list_job_summaries(
+        &self,
+    ) -> Result<Vec<crate::application::job_list_summary::JobListSummary>> {
+        use crate::application::job_list_summary::{JobListSummary, by_job};
+        let database = self
+            .database
+            .as_ref()
+            .ok_or_else(|| anyhow!("task summaries require SQLite persistence"))?;
+        let jobs = database.list_jobs().await?;
+        let stats = by_job(database.list_job_translation_stats().await?);
+        let mut inputs = Vec::with_capacity(jobs.len());
+        for job in jobs {
+            let ranges = if job.status == "done" {
+                Vec::new()
+            } else {
+                database.acoustic_checkpoint_ranges(&job.job_id).await?
+            };
+            let stat = stats.get(&job.job_id).cloned();
+            inputs.push((job, stat, ranges));
+        }
+        tokio::task::spawn_blocking(move || {
+            inputs
+                .into_iter()
+                .map(|(job, stats, ranges)| JobListSummary::read(job, stats, ranges))
+                .collect()
+        })
+        .await
+        .context("task summary reader stopped")
+    }
+
     pub async fn list_persisted_job_translation_stats(
         &self,
     ) -> Result<Vec<crate::infrastructure::local_db::LocalJobTranslationStats>> {

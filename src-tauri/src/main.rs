@@ -710,6 +710,17 @@ async fn list_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopJobSumma
 }
 
 #[tauri::command]
+async fn list_job_summaries(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<atogaki_subtitle::application::job_list_summary::JobListSummary>, String> {
+    state
+        .task_service
+        .list_job_summaries()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn list_asr_runs(
     state: State<'_, DesktopState>,
     job_id: String,
@@ -1294,10 +1305,10 @@ async fn get_job_detail(
     media_registry: State<'_, PlaybackMediaRegistry>,
     job_id: String,
 ) -> Result<DesktopJobDetail, String> {
-    // Pull the latest generated snapshot into SQLite before opening the editor.
+    // Reconcile only newer output for the task being opened.
     state
         .task_service
-        .list_persisted_jobs()
+        .refresh_persisted_job(&job_id)
         .await
         .map_err(|error| error.to_string())?;
     let detail = state
@@ -2764,6 +2775,7 @@ fn main() {
             list_asr_quality_signals,
             list_asr_runs,
             list_jobs,
+            list_job_summaries,
             list_learning_items,
             list_subtitle_fonts,
             lookup_learning_dictionary,

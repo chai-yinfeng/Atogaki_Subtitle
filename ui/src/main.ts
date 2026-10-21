@@ -29,6 +29,7 @@ type RecoverySummary = { phase: string; completed_ms: number; duration_ms: numbe
 type LocalJob = {
   processing_time?: ProcessingTime | null;
   recovery?: RecoverySummary;
+  recovery_progress_unverified?: boolean;
   job_id: string;
   display_name: string | null;
   storage_dir: string;
@@ -1441,9 +1442,18 @@ function editorReviewIds(): Set<string> {
   const signals = asrQualitySignals.filter(signal => signal.latest_decision !== "resolved" && signal.latest_decision !== "false_positive");
   return new Set((activeDetail?.segments ?? []).filter(cue => signals.some(signal => signal.start_ms !== null && signal.end_ms !== null && signal.start_ms < cue.end_ms && signal.end_ms > cue.start_ms)).map(cue => cue.id));
 }
+let editorFilterCache: { segments: SubtitleSegment[]; signals: AsrQualitySignal[]; stale: string[]; query: string; filter: CueFilter; result: SubtitleSegment[] } | null = null;
 function visibleEditorCues(): SubtitleSegment[] {
-  return editorSession.visible(activeDetail?.segments ?? [], editorReviewIds(), activeDetail?.translation_context_stale_ids);
+  if (!activeDetail) return [];
+  const { segments, translation_context_stale_ids: stale } = activeDetail;
+  const { query, filter } = editorSession;
+  if (!query.trim() && filter === "all") return segments;
+  if (editorFilterCache?.segments === segments && editorFilterCache.signals === asrQualitySignals && editorFilterCache.stale === stale && editorFilterCache.query === query && editorFilterCache.filter === filter) return editorFilterCache.result;
+  const result = editorSession.visible(segments, filter === "review" ? editorReviewIds() : new Set(), stale);
+  editorFilterCache = { segments, signals: asrQualitySignals, stale, query, filter, result };
+  return result;
 }
+
 function syncEditorFollow(): void {
   const button = editorRoot.querySelector<HTMLButtonElement>('[data-editor-action="follow"]');
   button?.setAttribute("aria-pressed", String(editorSession.followPlayback));
@@ -2566,14 +2576,14 @@ function renderJobs(jobs: LocalJob[]): void {
           </button>
           <div class="job-actions">
             ${job.status !== "done" && job.recovery?.early_translation ? `<span title="完整识别后会核对原文与上下文，再写入译文">${job.status === "translating" ? "识别已完成 · 正在完成翻译" : `已提前翻译 ${job.recovery.early_translation.translated_cues} 段${escapeHtml(earlyTranslationLabel(job.status, job.recovery.early_translation.error))}`}</span>` : ""}
-            ${job.recovery?.duration_ms ? `<span>${job.status==="failed" ? `${escapeHtml(statusLabel(job.recovery.phase))} · ` : ""}${formatTime(job.recovery.completed_ms)} / ${formatTime(job.recovery.duration_ms)}</span><button type="button" class="secondary" data-partial-job="${escapeHtml(job.job_id)}">查看已保存原文</button>` : ""}
+            ${job.recovery?.duration_ms ? `<span>${job.status==="failed" ? `${escapeHtml(statusLabel(job.recovery.phase))} · ` : ""}${formatTime(job.recovery.completed_ms)} / ${formatTime(job.recovery.duration_ms)}${job.recovery_progress_unverified ? " · 检查点待校验" : ""}</span><button type="button" class="secondary" data-partial-job="${escapeHtml(job.job_id)}">查看已保存原文</button>` : ""}
             ${job.status === "failed" && job.recovery?.can_resume ? `<button type="button" data-resume-job="${escapeHtml(job.job_id)}">继续</button>` : ""}
             ${runningJob(job) ? `<button type="button" class="secondary" data-pause-job="${escapeHtml(job.job_id)}">暂停</button>` : ""}
             ${job.status === "failed" ? `<button type="button" class="secondary" data-retry-job="${escapeHtml(job.job_id)}">重新运行</button>` : ""}
             <button type="button" class="secondary" data-rename-job="${escapeHtml(job.job_id)}">重命名</button>
             <button type="button" class="danger" data-delete-job="${escapeHtml(job.job_id)}" ${matchesTerminalStatus(job.status) ? "" : "disabled"} title="${matchesTerminalStatus(job.status) ? "删除任务数据，但保留原始媒体" : "任务结束后才能删除"}">删除</button>
           </div>
-          ${job.status === "failed" && job.error_message && !job.error_message.includes("已暂停") ? `<details class="job-error"><summary>查看失败原因</summary><pre>${escapeHtml(job.error_message)}</pre><p>失败不会删除已保存的结果。${job.recovery?.can_resume ? "点击“继续”从未完成处重试。" : ""}</p></details>` : ""}
+          ${job.status === "failed" && job.error_message && !job.error_message.includes("已暂停") ? `<details class="job-error"><summary>查看失败原因</summary><pre>${escapeHtml(job.error_message)}</pre><p>失败不会删除已保存的结果。${job.recovery?.can_resume ? "点击“继续”核验检查点并从未完成处重试。" : ""}</p></details>` : ""}
         </article>`,
     )
     .join("");
@@ -2821,15 +2831,16 @@ async function deleteJob(job: LocalJob): Promise<void> {
 }
 
 async function refresh(): Promise<void> {
-  if (!jobList || refreshing || jobOrderBusy) return;
+  if (!jobList || refreshing || jobOrderBusy || (currentArea !== "workbench" && currentArea !== "listening")) return;
   refreshing = true;
   if (!activeDetail && renderedJobsFingerprint === null && jobList.childElementCount === 0) {
     jobList.innerHTML = `<div class="empty-state">正在读取任务…</div>`;
   }
   try {
-    const jobs = await invoke<LocalJob[]>("list_jobs");
+    const jobs = await invoke<LocalJob[]>("list_job_summaries");
     latestJobs = jobs;
     const fingerprint = JSON.stringify(jobs);
+    if (currentArea !== "workbench" && currentArea !== "listening") return;
     if (fingerprint !== renderedJobsFingerprint) {
       const scrollTop = window.scrollY;
       renderJobs(jobs);
@@ -2905,6 +2916,7 @@ async function stopActivePlayback(): Promise<void> {
     karaokeWaveformReloadTimer = null;
   }
   karaokePendingWaveformStartMs = 0;
+  editorCueList.clear(); editorFilterCache = null;
   activeMedia = null;
   if (playbackPositionSaveTimer !== null) {
     window.clearTimeout(playbackPositionSaveTimer);
@@ -2948,6 +2960,7 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editor
   updatePlaybackControls();
   renderSubtitleOverlayButton();
   renderListeningJobs(latestJobs);
+  if (area === "workbench" || area === "listening") void refresh();
   if (area === "learning") {
     await Promise.all([refreshLearningItems(), loadDictionarySettings()]);
     if (learningDictionaryDialog?.open) renderLearningDictionary();
@@ -4805,9 +4818,14 @@ function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleS
   const saved = draft.saved;
   if (before) rememberSubtitleSave(before, saved);
   if (activeDetail?.job.job_id !== saved.job_id) return;
-  if (before) activeDetail.segments = activeDetail.segments.map(cue => cue.id === saved.id ? saved : cue);
+  if (before) {
+    const index = subtitleTimeline(), position = index.position(saved.id);
+    if (position >= 0 && index.replaceText(saved)) activeDetail.segments[position] = saved;
+    else activeDetail.segments = activeDetail.segments.map(cue => cue.id === saved.id ? saved : cue);
+    editorFilterCache = null;
+  }
   const pending = subtitleDrafts.pending(draft);
-  if (currentArea === "karaoke") renderEditorList();
+  if (currentArea === "karaoke") { if (before && (editorSession.query.trim() || editorSession.filter !== "all")) renderEditorList(); else editorCueList.update(saved); }
   const status = draft.error ? `保存失败，草稿已保留：${draft.error}`
     : draft.saving ? "正在自动保存…" : pending ? "等待自动保存…" : savedSegmentState(saved);
   const card = subtitleList?.querySelector<HTMLElement>(`[data-segment-id="${CSS.escape(saved.id)}"]`);
@@ -4832,7 +4850,7 @@ function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleS
     if (!pending) syncKaraokeTextDraft(saved, true);
     setSubtitleEditAction(status, !!draft.error);
   }
-  updateTranslationControls();
+  if (before) updateTranslationControls();
   if (before) { updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000); updateStructureUndoButton(); }
 }
 

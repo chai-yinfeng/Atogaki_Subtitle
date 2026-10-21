@@ -29,3 +29,18 @@ test('late-hour playback and visible-window queries do not scan the whole progra
   assert.deepEqual(index.visible(18000000,18010000).map(c => c.id), ['9000','9001','9002','9003','9004','9005']);
   assert.ok(reads < 60, `bounded reads, got ${reads}`);
 });
+
+
+test('text replacement updates playback and visible lookups without changing timing order', () => {
+  const cues = [{id:'a',start_ms:0,end_ms:1000,text:'old'},{id:'b',start_ms:2000,end_ms:3000,text:'later'}];
+  const index = new SubtitleTimeline(cues);
+  const edited = {...cues[0],text:'new'};
+  assert.equal(index.replaceText(edited),true);
+  assert.equal(index.get('a'),edited);
+  assert.equal(index.at(500),edited);
+  assert.equal(index.visible(0,500)[0],edited);
+  assert.equal(index.position('b'),1);
+  assert.equal(index.replaceText({...edited,end_ms:2500}),false);
+  assert.equal(index.replaceText({...edited,id:'missing'}),false);
+  assert.equal(index.at(1500),undefined);
+});

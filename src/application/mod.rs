@@ -4,6 +4,7 @@ pub mod asr_quality;
 pub mod asr_run;
 pub mod early_translation;
 pub mod evaluation;
+pub mod job_list_summary;
 pub mod job_manifest;
 pub mod job_runner;
 pub mod job_snapshot;
