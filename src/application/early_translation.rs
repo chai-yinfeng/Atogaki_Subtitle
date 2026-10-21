@@ -126,11 +126,18 @@ impl TranslationProvider for CachedProvider {
                     }
                 }
             }
+            let started_at_unix_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let started = std::time::Instant::now();
             let outcome = self.provider.translate(request.clone()).await;
+            let elapsed_ms = started.elapsed().as_millis();
             // Actual attempts remain immutable even when a cache is replaced or
             // a later source/context version makes this response unusable.
             let attempt = serde_json::json!({
                 "schema_version": 1, "profile_sha256": self.profile_sha256,
+                "started_at_unix_ms": started_at_unix_ms, "elapsed_ms": elapsed_ms,
                 "execution": self.profile_snapshot,
                 "input_sha256": key, "request": request,
                 "provider_id": self.status().id,

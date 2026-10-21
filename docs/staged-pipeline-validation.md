@@ -88,3 +88,13 @@ cargo test --release --lib real_two_job_metal_pipeline -- --ignored --nocapture
 用户确认《教父》翻译完成后授权覆盖。安装前确认没有活动任务；退出旧 App，使用 SQLite backup API 和完整 App 副本备份，从 SHA-256 为 `db313f4ae10def142cbe009526279f459220ecb38f83a8d39424b37e6f54014c` 的已公开 DMG 安装到 `/Applications/Atogaki.app`。采用暂存目录和目录重命名替换，保留旧 App，异常时回退；主程序及四 sidecar 与 DMG 逐字节一致，deep/strict 签名与 0.1.2 版本核对通过。
 
 启动正式应用后，原生窗口确认 14 个任务、《教父》已完成／已翻译；SQLite 验证 3,089 段原文均有译文。字幕、学习和词表五张数据表的全行摘要与安装前一致。没有自动运行 ASR 或翻译，也未修改历史计时。备份位于忽略目录 `local-artifacts/install-backups/v012-20261020T210406Z/`；旧 App 另保留在 `/Applications/.Atogaki.previous-20261020T210406Z`。用户可直接继续使用已启动的新版。
+
+## 长素材后续修复：第一批（未发行）
+
+只修改英文新任务默认字符切分、编辑器查询／绘制开销和显式 WAV 回退。原电影及已有字幕未改动，未调用真实云端。英文 CLI 与 desktop 共用 default_max_len，显式 CLI 覆盖、日语／韩语旧默认、旧英文反序列化配置有回归覆盖。当前核心 143 通过／5 忽略，壳层 32 通过／4 忽略，前端 21 通过；类型与生产构建通过，双 Rust 格式及差异检查通过。
+
+本机影片取 70–160 秒、medium／Silero／Metal、英文无 -ml 的独立验证完成，输出 25 段；包含完整的 and I raised my daughter in the American fashion.。上下文长度与旧完整任务不同，不作为准确率对照，只证明取消强制字符切分可输出较完整的片段。保留 VAD 原默认，停顿／长句仍可能分段。产物在忽略目录 local-artifacts/long-media-followup/。
+
+索引以原电影全部 3,089 条时间段作一万次后段查询，与原 find 完全相同；示例本机微基准旧查询约 43.25 ms、索引约 1.45 ms，窗口只涉及 8 段。该数字不代表原生帧率或完整渲染性能。另有 10,000 条合成 cue 的访问次数回归和包含重叠、同起点、空白、独占结束边界的等价性检查。静态波形缓存、草稿 flush 后释放隐藏 DOM，以及新音频回退尚待最终原生窗口实测。
+
+原始 MP4 有 H.264／AAC LC 双声道流，片段和任务 WAV 在语音处均有非零电平；两小时处原音轨也有非零信号。这不能证明当前 WKWebView 已播放出声音。新回退保持位置等状态并显式选择 audio 元素，原无 Range 时整文件读入内存的风险和云端短组吞吐仍未修复，待架构方向确认。

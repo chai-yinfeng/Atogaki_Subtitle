@@ -378,6 +378,12 @@ mod tests {
         let args = string_args(LanguageCode::English, false);
 
         assert!(args.windows(2).any(|pair| pair == ["-l", "en"]));
+        assert!(!args.iter().any(|argument| argument == "-ml"));
+        assert!(
+            string_args(LanguageCode::Japanese, false)
+                .windows(2)
+                .any(|pair| pair == ["-ml", "32"])
+        );
     }
 
     #[test]

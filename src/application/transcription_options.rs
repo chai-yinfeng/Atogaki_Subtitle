@@ -44,6 +44,15 @@ pub struct WhisperTranscriptionConfig {
 }
 
 impl TranscriptionOptions {
+    /// English keeps Whisper's native segment boundaries instead of wrapping
+    /// every ~32 characters. Persisted options remain authoritative on resume.
+    pub const fn default_max_len(source_language: LanguageCode) -> u32 {
+        match source_language {
+            LanguageCode::English => 0,
+            _ => 32,
+        }
+    }
+
     pub fn new(model: PathBuf, source_language: LanguageCode) -> Self {
         Self {
             source_language,
@@ -57,7 +66,7 @@ impl TranscriptionOptions {
                 vad_min_silence_ms: 450,
                 vad_max_speech_s: 8,
                 vad_speech_pad_ms: 120,
-                max_len: 32,
+                max_len: Self::default_max_len(source_language),
                 split_on_word: true,
                 no_speech_threshold: 0.30,
                 max_context: None,
@@ -91,5 +100,25 @@ mod tests {
         let decoded: TranscriptionOptions = serde_json::from_value(value).unwrap();
         assert_eq!(decoded.whisper.model, PathBuf::from("model.bin"));
         assert_eq!(decoded.whisper.vad_max_speech_s, 8);
+    }
+    #[test]
+    fn english_native_boundaries_do_not_change_saved_or_other_language_options() {
+        let english = TranscriptionOptions::new("model.bin".into(), LanguageCode::English);
+        assert_eq!(english.whisper.max_len, 0);
+        for language in [LanguageCode::Japanese, LanguageCode::Korean] {
+            assert_eq!(
+                TranscriptionOptions::new("model.bin".into(), language)
+                    .whisper
+                    .max_len,
+                32
+            );
+        }
+        let mut historical = serde_json::to_value(&english).unwrap();
+        historical["max_len"] = 32.into();
+        let restored: TranscriptionOptions = serde_json::from_value(historical).unwrap();
+        assert_eq!(
+            restored.whisper.max_len, 32,
+            "continue reuses frozen ASR semantics"
+        );
     }
 }

@@ -5,6 +5,7 @@ import { SubtitleDrafts, cueKey, type Draft } from "./subtitle-drafts";
 import { listen } from "@tauri-apps/api/event";
 import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
+import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
 import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
 applyTheme(readTheme());
@@ -2472,7 +2473,7 @@ function renderJobs(jobs: LocalJob[]): void {
             </span>
           </button>
           <div class="job-actions">
-            ${job.status !== "done" && job.recovery?.early_translation ? `<span title="完整识别后会核对原文与上下文，再写入译文">已提前翻译 ${job.recovery.early_translation.translated_cues} 段${escapeHtml(earlyTranslationLabel(job.status, job.recovery.early_translation.error))}</span>` : ""}
+            ${job.status !== "done" && job.recovery?.early_translation ? `<span title="完整识别后会核对原文与上下文，再写入译文">${job.status === "translating" ? "识别已完成 · 正在完成翻译" : `已提前翻译 ${job.recovery.early_translation.translated_cues} 段${escapeHtml(earlyTranslationLabel(job.status, job.recovery.early_translation.error))}`}</span>` : ""}
             ${job.recovery?.duration_ms ? `<span>${job.status==="failed" ? `${escapeHtml(statusLabel(job.recovery.phase))} · ` : ""}${formatTime(job.recovery.completed_ms)} / ${formatTime(job.recovery.duration_ms)}</span><button type="button" class="secondary" data-partial-job="${escapeHtml(job.job_id)}">查看已保存原文</button>` : ""}
             ${job.status === "failed" && job.recovery?.can_resume ? `<button type="button" data-resume-job="${escapeHtml(job.job_id)}">继续</button>` : ""}
             ${runningJob(job) ? `<button type="button" class="secondary" data-pause-job="${escapeHtml(job.job_id)}">暂停</button>` : ""}
@@ -2835,6 +2836,8 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">): Promi
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;
   activeDetail = null;
+  subtitleList?.replaceChildren();
+  listeningSubtitleList?.replaceChildren();
   currentArea = area;
   shell?.classList.toggle("workspace-open", area === "karaoke");
   workspaceView?.classList.add("hidden");
@@ -3761,6 +3764,8 @@ async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promis
   }
 }
 
+let karaokeTimelineBitmap: { waveform: WaveformWindow; key: string; canvas: HTMLCanvasElement } | null = null;
+
 function renderKaraokeTimeline(): void {
   const canvas = karaokeWaveform;
   if (!canvas) return;
@@ -3792,88 +3797,108 @@ function renderKaraokeTimeline(): void {
     return;
   }
 
+  const allSegments = karaokeTimingDrag?.draft ?? activeDetail?.segments ?? [];
+  const original = karaokeTimingDrag?.before ?? allSegments;
+  const index = subtitleTimeline(original);
+  const visible = index.visible(waveform.start_ms, waveform.end_ms);
+  const visibleIndices = new Set(visible.map(cue => index.position(cue.id)));
+  if (karaokeTimingDrag) visibleIndices.add(karaokeTimingDrag.segmentIndex);
+  const timelineSegments = [...visibleIndices].sort((a,b) => a-b).map(i => allSegments[i]);
+  const activeId = karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId;
+  const bitmapKey = JSON.stringify([width, height, karaokeWaveformGain, accent, accentSoft,
+    theme.getPropertyValue("--ink"), theme.getPropertyValue("--surface-soft"), activeId,
+    karaokeTimingDrag?.segmentIndex,
+    timelineSegments.map(cue => [cue.id, cue.start_ms, cue.end_ms, cue.source_text])]);
   const range = waveform.end_ms - waveform.start_ms;
   const rulerHeight = 28;
-  const waveformTop = rulerHeight;
-  const waveformHeight = Math.max(70, cssHeight * 0.5);
-  const centerY = waveformTop + waveformHeight / 2;
-  context.strokeStyle = "#d6d0c3";
-  context.lineWidth = 1;
-  context.beginPath();
-  context.moveTo(0, centerY);
-  context.lineTo(cssWidth, centerY);
-  context.stroke();
-  context.strokeStyle = accent;
-  context.lineWidth = Math.max(1, cssWidth / waveform.peaks.length);
-  context.beginPath();
-  waveform.peaks.forEach((peak, index) => {
-    const x = (index + 0.5) / waveform.peaks.length * cssWidth;
-    const minimum = Math.max(-1, peak.min * karaokeWaveformGain);
-    const maximum = Math.min(1, peak.max * karaokeWaveformGain);
-    context.moveTo(x, centerY + minimum * waveformHeight * 0.46);
-    context.lineTo(x, centerY + maximum * waveformHeight * 0.46);
-  });
-  context.stroke();
-
-  context.fillStyle = "#74776f";
-  context.font = "10px ui-monospace, monospace";
-  context.textAlign = "center";
-  for (let marker = 0; marker <= 5; marker += 1) {
-    const x = marker / 5 * cssWidth;
-    const time = waveform.start_ms + range * marker / 5;
-    context.fillText(formatPreciseTime(time), Math.min(cssWidth - 45, Math.max(45, x)), 17);
-    context.strokeStyle = "rgba(112, 115, 106, .2)";
+  if (karaokeTimelineBitmap?.waveform === waveform && karaokeTimelineBitmap.key === bitmapKey) {
+    context.drawImage(karaokeTimelineBitmap.canvas, 0, 0, cssWidth, cssHeight);
+  } else {
+    const waveformTop = rulerHeight;
+    const waveformHeight = Math.max(70, cssHeight * 0.5);
+    const centerY = waveformTop + waveformHeight / 2;
+    context.strokeStyle = "#d6d0c3";
+    context.lineWidth = 1;
     context.beginPath();
-    context.moveTo(x, rulerHeight - 5);
-    context.lineTo(x, cssHeight);
+    context.moveTo(0, centerY);
+    context.lineTo(cssWidth, centerY);
     context.stroke();
-  }
-
-  const trackTop = waveformTop + waveformHeight + 14;
-  const trackHeight = Math.max(38, cssHeight - trackTop - 10);
-  const timelineSegments = karaokeTimingDrag?.draft ?? activeDetail?.segments ?? [];
-  for (const segment of timelineSegments) {
-    if (segment.end_ms < waveform.start_ms || segment.start_ms > waveform.end_ms) continue;
-    const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
-    const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
-    const active = segment.id === (karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId);
-    context.fillStyle = active ? accent : accentSoft;
     context.strokeStyle = accent;
-    context.lineWidth = active ? 2 : 1;
+    context.lineWidth = Math.max(1, cssWidth / waveform.peaks.length);
     context.beginPath();
-    context.roundRect(left + 1, trackTop, Math.max(3, right - left - 2), trackHeight, 5);
-    context.fill();
+    waveform.peaks.forEach((peak, index) => {
+      const x = (index + 0.5) / waveform.peaks.length * cssWidth;
+      const minimum = Math.max(-1, peak.min * karaokeWaveformGain);
+      const maximum = Math.min(1, peak.max * karaokeWaveformGain);
+      context.moveTo(x, centerY + minimum * waveformHeight * 0.46);
+      context.lineTo(x, centerY + maximum * waveformHeight * 0.46);
+    });
     context.stroke();
-    const dragged = karaokeTimingDrag?.segmentIndex === segment.segment_index;
-    context.strokeStyle = dragged ? "#b34b36" : accent;
-    context.lineWidth = dragged ? 3 : 2;
-    context.beginPath();
-    context.moveTo(left + 3, trackTop + 5);
-    context.lineTo(left + 3, trackTop + trackHeight - 5);
-    context.moveTo(right - 3, trackTop + 5);
-    context.lineTo(right - 3, trackTop + trackHeight - 5);
-    context.stroke();
-    if (right - left > 45) {
-      context.save();
-      context.beginPath();
-      context.rect(left + 5, trackTop + 2, Math.max(1, right - left - 10), trackHeight - 4);
-      context.clip();
-      context.fillStyle = active ? "#fffaf1" : theme.getPropertyValue("--ink").trim();
-      context.font = "11px system-ui";
-      context.textAlign = "left";
-      context.fillText(segment.source_text, left + 7, trackTop + trackHeight / 2 + 4);
-      context.restore();
-    }
-  }
 
-  for (let index = 0; index + 1 < timelineSegments.length; index += 1) {
-    const left = timelineSegments[index];
-    const right = timelineSegments[index + 1];
-    if (left.end_ms <= right.start_ms) continue;
-    const warningLeft = Math.max(0, (right.start_ms - waveform.start_ms) / range * cssWidth);
-    const warningRight = Math.min(cssWidth, (left.end_ms - waveform.start_ms) / range * cssWidth);
-    context.fillStyle = "rgba(179, 75, 54, .3)";
-    context.fillRect(warningLeft, trackTop, Math.max(2, warningRight - warningLeft), trackHeight);
+    context.fillStyle = "#74776f";
+    context.font = "10px ui-monospace, monospace";
+    context.textAlign = "center";
+    for (let marker = 0; marker <= 5; marker += 1) {
+      const x = marker / 5 * cssWidth;
+      const time = waveform.start_ms + range * marker / 5;
+      context.fillText(formatPreciseTime(time), Math.min(cssWidth - 45, Math.max(45, x)), 17);
+      context.strokeStyle = "rgba(112, 115, 106, .2)";
+      context.beginPath();
+      context.moveTo(x, rulerHeight - 5);
+      context.lineTo(x, cssHeight);
+      context.stroke();
+    }
+
+    const trackTop = waveformTop + waveformHeight + 14;
+    const trackHeight = Math.max(38, cssHeight - trackTop - 10);
+    for (const segment of timelineSegments) {
+      if (segment.end_ms < waveform.start_ms || segment.start_ms > waveform.end_ms) continue;
+      const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
+      const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
+      const active = segment.id === (karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId);
+      context.fillStyle = active ? accent : accentSoft;
+      context.strokeStyle = accent;
+      context.lineWidth = active ? 2 : 1;
+      context.beginPath();
+      context.roundRect(left + 1, trackTop, Math.max(3, right - left - 2), trackHeight, 5);
+      context.fill();
+      context.stroke();
+      const dragged = karaokeTimingDrag?.segmentIndex === segment.segment_index;
+      context.strokeStyle = dragged ? "#b34b36" : accent;
+      context.lineWidth = dragged ? 3 : 2;
+      context.beginPath();
+      context.moveTo(left + 3, trackTop + 5);
+      context.lineTo(left + 3, trackTop + trackHeight - 5);
+      context.moveTo(right - 3, trackTop + 5);
+      context.lineTo(right - 3, trackTop + trackHeight - 5);
+      context.stroke();
+      if (right - left > 45) {
+        context.save();
+        context.beginPath();
+        context.rect(left + 5, trackTop + 2, Math.max(1, right - left - 10), trackHeight - 4);
+        context.clip();
+        context.fillStyle = active ? "#fffaf1" : theme.getPropertyValue("--ink").trim();
+        context.font = "11px system-ui";
+        context.textAlign = "left";
+        context.fillText(segment.source_text, left + 7, trackTop + trackHeight / 2 + 4);
+        context.restore();
+      }
+    }
+
+    for (let index = 0; index + 1 < timelineSegments.length; index += 1) {
+      const left = timelineSegments[index];
+      const right = timelineSegments[index + 1];
+      if (left.end_ms <= right.start_ms || left.end_ms < waveform.start_ms || right.start_ms > waveform.end_ms) continue;
+      const warningLeft = Math.max(0, (right.start_ms - waveform.start_ms) / range * cssWidth);
+      const warningRight = Math.min(cssWidth, (left.end_ms - waveform.start_ms) / range * cssWidth);
+      context.fillStyle = "rgba(179, 75, 54, .3)";
+      context.fillRect(warningLeft, trackTop, Math.max(2, warningRight - warningLeft), trackHeight);
+    }
+
+    const bitmap = document.createElement("canvas");
+    bitmap.width = width; bitmap.height = height;
+    bitmap.getContext("2d")?.drawImage(canvas, 0, 0);
+    karaokeTimelineBitmap = { waveform, key: bitmapKey, canvas: bitmap };
   }
 
   const currentMs = Math.round((activeMedia?.currentTime ?? 0) * 1_000);
@@ -4036,7 +4061,7 @@ function cancelKaraokeTimingDrag(): void {
 
 function karaokeDraftSegment(): SubtitleSegment | undefined {
   const segmentId = karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId;
-  return activeDetail?.segments.find((item) => item.id === segmentId);
+  return activeDetail ? subtitleTimeline().get(segmentId) : undefined;
 }
 
 function syncKaraokeTextDraft(segment: SubtitleSegment | undefined, force = false): void {
@@ -4123,7 +4148,7 @@ function updateKaraokePosition(milliseconds: number): void {
     || karaokeCurrentSource?.value !== (segment?.source_text ?? "")
     || karaokeCurrentTranslation?.value !== (segment?.translated_text ?? "")
   )) syncKaraokeTextDraft(segment);
-  const segmentIndex = segment ? activeDetail?.segments.findIndex((item) => item.id === segment.id) ?? -1 : -1;
+  const segmentIndex = segment ? subtitleTimeline().position(segment.id) : -1;
   const playhead = Math.round(milliseconds);
   if (karaokeCutSegmentButton) {
     karaokeCutSegmentButton.disabled = !playbackSegment
@@ -4449,14 +4474,18 @@ function mountMedia(
   activeMedia = null;
   updatePlaybackControls();
   host.replaceChildren();
+  if (host.nextElementSibling?.classList.contains("media-source-switch")) host.nextElementSibling.remove();
   const firstPath = primaryPath ?? fallbackPath;
   if (!firstPath) {
     message.textContent = "没有找到可播放的本地媒体；任务可能仍在处理或源文件已移动。";
     return;
   }
 
-  const loadPath = (path: string, isFallback: boolean): void => {
-    const element = document.createElement(isAudioPath(path) ? "audio" : "video");
+  const loadPath = (path: string, isFallback: boolean, positionMs = resumeMs, autoplay = false, volume = 1, muted = false): void => {
+    const previous = activeMedia;
+    activeMedia = null;
+    if (previous) { previous.pause(); previous.removeAttribute("src"); previous.load(); }
+    const element = document.createElement(isFallback || isAudioPath(activeDetail?.job.input_path ?? path) ? "audio" : "video");
     element.controls = true;
     element.preload = "metadata";
     const isCurrent = () => activeMedia === element && mediaSessionId === sessionId;
@@ -4486,7 +4515,8 @@ function mountMedia(
     });
     element.addEventListener("loadedmetadata", () => {
       if (!isCurrent()) return;
-      if (resumeMs > 0 && Number.isFinite(element.duration)) element.currentTime = Math.min(resumeMs / 1_000, Math.max(0, element.duration - 0.25));
+      if (positionMs > 0 && Number.isFinite(element.duration)) element.currentTime = Math.min(positionMs / 1_000, Math.max(0, element.duration - 0.25));
+      if (autoplay) void element.play().catch(() => { if (isCurrent()) message.textContent += " · 请点击播放"; });
       updatePlaybackControls();
       updateActiveSubtitle(element.currentTime * 1_000);
     });
@@ -4496,7 +4526,7 @@ function mountMedia(
         if (!isCurrent()) return;
         if (!isFallback && fallbackPath && fallbackPath !== path) {
           message.textContent = "原媒体编码无法由系统播放器读取，已切换到任务音频。";
-          loadPath(fallbackPath, true);
+          loadPath(fallbackPath, true, element.currentTime * 1_000, !element.paused, element.volume, element.muted);
         } else {
           message.textContent = "媒体加载失败。可能是文件已移动，或系统 WebView 不支持这种编码。";
         }
@@ -4505,14 +4535,31 @@ function mountMedia(
     );
     activeMedia = element;
     element.playbackRate = Number(activePlaybackRateSelect()?.value || "1");
+    element.volume = volume;
+    element.muted = muted;
     host.replaceChildren(element);
+    if (host.nextElementSibling?.classList.contains("media-source-switch")) host.nextElementSibling.remove();
+    if (primaryPath && fallbackPath && primaryPath !== fallbackPath) {
+      const switchMedia = document.createElement("button");
+      switchMedia.type = "button";
+      switchMedia.className = "secondary media-source-switch";
+      switchMedia.textContent = isFallback ? "返回原媒体" : "改用任务音频";
+      switchMedia.title = isFallback ? "返回原文件，保留播放位置" : "原媒体无声或不兼容时，使用识别任务已保存的 WAV；保留播放位置";
+      switchMedia.addEventListener("click", () => {
+        if (!isCurrent()) return;
+        loadPath(isFallback ? primaryPath : fallbackPath, !isFallback, element.currentTime * 1_000, !element.paused, element.volume, element.muted);
+      });
+      host.insertAdjacentElement("afterend", switchMedia);
+    }
     element.src = path.startsWith("atogaki-media:") || path.startsWith("http://atogaki-media.localhost/")
       ? path
       : convertFileSrc(path);
     updatePlaybackControls();
     if (!isFallback) {
       const displayPath = activeDetail?.job.input_path ?? path;
-      message.textContent = resumeMs > 0 ? `${displayPath} · 已恢复到 ${formatTime(resumeMs)}` : displayPath;
+      message.textContent = positionMs > 0 ? `${displayPath} · 已恢复到 ${formatTime(positionMs)}` : displayPath;
+    } else {
+      message.textContent = `任务音频 · ${formatTime(positionMs)} · 使用已保存的 WAV，可返回原媒体`;
     }
   };
 
@@ -5043,10 +5090,14 @@ function executePlaybackAction(action: PlaybackAction): void {
   else if (action === "toggle-overlay") void openSubtitleOverlay();
 }
 
+const subtitleTimelines = new WeakMap<SubtitleSegment[], SubtitleTimeline<SubtitleSegment>>();
+function subtitleTimeline(segments = activeDetail?.segments ?? []): SubtitleTimeline<SubtitleSegment> {
+  let index = subtitleTimelines.get(segments);
+  if (!index) { index = new SubtitleTimeline(segments); subtitleTimelines.set(segments, index); }
+  return index;
+}
 function subtitleAt(milliseconds: number): SubtitleSegment | undefined {
-  return activeDetail?.segments.find(
-    (item) => milliseconds >= item.start_ms && milliseconds < item.end_ms,
-  );
+  return activeDetail ? subtitleTimeline().at(milliseconds) : undefined;
 }
 
 function subtitleOverlayPayload(segment: SubtitleSegment | undefined): SubtitleOverlayPayload {
@@ -5117,13 +5168,18 @@ function updateActiveSubtitle(milliseconds: number): void {
 
   const segment = subtitleAt(milliseconds);
   const nextId = segment?.id ?? null;
-  if (currentSource) currentSource.textContent = segment?.source_text ?? "当前时间没有字幕。";
-  if (currentTranslation) {
-    currentTranslation.textContent = segment?.translated_text || `尚无${languageLabel(activeTargetLanguage())}翻译`;
+  const sourceText = segment?.source_text ?? "当前时间没有字幕。";
+  if (currentArea === "workspace" && currentSource && currentSource.textContent !== sourceText) currentSource.textContent = sourceText;
+  if (currentArea === "workspace" && currentTranslation) {
+    const translated = segment?.translated_text || `尚无${languageLabel(activeTargetLanguage())}翻译`;
+    if (currentTranslation.textContent !== translated) currentTranslation.textContent = translated;
     currentTranslation.classList.toggle("stale", segment?.translation_stale ?? false);
   }
-  if (listeningCurrentSource) listeningCurrentSource.textContent = segment?.source_text ?? "当前时间没有字幕。";
-  if (listeningCurrentTranslation) listeningCurrentTranslation.textContent = segment?.translated_text || `尚无${languageLabel(activeTargetLanguage())}翻译`;
+  if (currentArea === "listening" && listeningCurrentSource && listeningCurrentSource.textContent !== sourceText) listeningCurrentSource.textContent = sourceText;
+  if (currentArea === "listening" && listeningCurrentTranslation) {
+    const translated = segment?.translated_text || `尚无${languageLabel(activeTargetLanguage())}翻译`;
+    if (listeningCurrentTranslation.textContent !== translated) listeningCurrentTranslation.textContent = translated;
+  }
   if (activeSegmentId !== nextId) {
     activeSegmentId = nextId;
     highlightSegment(nextId);
@@ -5177,16 +5233,12 @@ function followActiveSubtitle(host: HTMLElement, card: HTMLElement): void {
 }
 
 function highlightSegment(segmentId: string | null): void {
-  subtitleList?.querySelectorAll<HTMLElement>(".subtitle-card").forEach((card) => {
-    const active = card.dataset.segmentId === segmentId;
-    card.classList.toggle("active", active);
-    if (active) followActiveSubtitle(subtitleList, card);
-  });
-  listeningSubtitleList?.querySelectorAll<HTMLElement>(".listening-subtitle").forEach((card) => {
-    const active = card.dataset.segmentId === segmentId;
-    card.classList.toggle("active", active);
-    if (active) followActiveSubtitle(listeningSubtitleList, card);
-  });
+  const host = currentArea === "workspace" ? subtitleList : currentArea === "listening" ? listeningSubtitleList : null;
+  if (!host) return;
+  host.querySelector<HTMLElement>(".active[data-segment-id]")?.classList.remove("active");
+  if (!segmentId) return;
+  const card = host.querySelector<HTMLElement>(`[data-segment-id="${CSS.escape(segmentId)}"]`);
+  if (card) { card.classList.add("active"); followActiveSubtitle(host, card); }
 }
 
 function segmentNeedsTranslation(segment: SubtitleSegment): boolean {

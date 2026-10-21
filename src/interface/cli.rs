@@ -310,10 +310,9 @@ pub struct WhisperArgs {
 
     #[arg(
         long,
-        default_value_t = 32,
-        help = "Whisper max segment length in characters; 0 disables it"
+        help = "Whisper max segment length; default: native boundaries for English, 32 for other languages; 0 disables wrapping"
     )]
-    pub max_len: u32,
+    pub max_len: Option<u32>,
 
     #[arg(long = "no-split-on-word", action = ArgAction::SetFalse, default_value_t = true)]
     pub split_on_word: bool,
@@ -352,7 +351,9 @@ impl From<WhisperArgs> for TranscriptionOptions {
                 vad_min_silence_ms: args.vad_min_silence_ms,
                 vad_max_speech_s: args.vad_max_speech_s,
                 vad_speech_pad_ms: args.vad_speech_pad_ms,
-                max_len: args.max_len,
+                max_len: args
+                    .max_len
+                    .unwrap_or_else(|| TranscriptionOptions::default_max_len(args.source_language)),
                 split_on_word: args.split_on_word,
                 no_speech_threshold: args.no_speech_threshold,
                 max_context: args.max_context,
@@ -360,5 +361,37 @@ impl From<WhisperArgs> for TranscriptionOptions {
                 no_gpu: args.no_gpu,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn transcription(language: &str, extra: &[&str]) -> TranscriptionOptions {
+        let mut args = vec![
+            "atogaki",
+            "transcribe",
+            "input.wav",
+            "--model",
+            "model.bin",
+            "--source-language",
+            language,
+        ];
+        args.extend_from_slice(extra);
+        let cli = Cli::try_parse_from(args).unwrap();
+        let Command::Transcribe(args) = cli.command else {
+            panic!("expected transcribe")
+        };
+        args.whisper.into()
+    }
+    #[test]
+    fn cli_language_defaults_and_explicit_length_override() {
+        assert_eq!(transcription("en", &[]).whisper.max_len, 0);
+        assert_eq!(transcription("ja", &[]).whisper.max_len, 32);
+        assert_eq!(transcription("ko", &[]).whisper.max_len, 32);
+        assert_eq!(
+            transcription("en", &["--max-len", "72"]).whisper.max_len,
+            72
+        );
     }
 }
