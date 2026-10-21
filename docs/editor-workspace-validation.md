@@ -52,3 +52,7 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 ## 紧凑编辑工具栏
 
 导航、时间字段与文字／结构操作集中在编辑区上方两行工具栏，状态提示保留在下方，双语正文填满剩余高度。1180×760 验证导航与时间共用一行、所有编辑操作在正文上方及正文高度至少 70 px；960×640、IME、切段、失败重试、工具返回继续通过。旧全局样式曾覆盖新工具栏 display，已通过实际截图与空间断言纠正，未仅依据构建成功判断布局通过。
+
+## 正式本机试装（2026-10-21）
+
+用户授权后，从 `ed48fc2` 构建正式 identifier 的 release App 并覆盖 `/Applications/Atogaki.app`。四个 sidecar、完整签名及五个可执行文件与构建产物 SHA-256 一致。原生窗口确认 14 个正式任务，打开 3,089 段真实长任务检查紧凑工具栏与扩展正文。启动后全部 20 张数据库内容表摘要与安装前一致，未执行真实识别、翻译或字幕修改。安装／清理记录见 [本机安装记录](local-editor-installation.md)。
