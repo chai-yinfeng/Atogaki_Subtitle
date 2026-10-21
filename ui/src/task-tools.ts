@@ -1,3 +1,14 @@
+function focusableControls(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, a[href], [tabindex="0"]')].filter(node => {
+    if (!node.getClientRects().length || getComputedStyle(node).visibility !== "visible") return false;
+    // WebKit can retain rectangles for descendants of a closed disclosure.
+    for (let parent = node.parentElement; parent && root.contains(parent); parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement && !parent.open && !parent.querySelector(":scope > summary")?.contains(node)) return false;
+    }
+    return true;
+  });
+}
+
 /** Own the task region's connection and focus boundary. Its single set of input
  * nodes is parked off-document between uses so existing form values survive. */
 export function mountTaskTools(region: HTMLElement, editor: HTMLElement, close: () => void) {
@@ -25,7 +36,7 @@ export function mountTaskTools(region: HTMLElement, editor: HTMLElement, close: 
     if (!region.classList.contains("editor-task-tools")) return;
     if (event.key === "Escape") { event.preventDefault(); close(); }
     if (event.key !== "Tab") return;
-    const controls = [...region.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter(item => item.getClientRects().length);
+    const controls = focusableControls(region);
     const first = controls[0], last = controls.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -52,11 +63,46 @@ export function mountToolDialog(dialog: HTMLDialogElement, hidden: () => void) {
   const parked = document.createDocumentFragment();
   parked.append(dialog);
   const events = new AbortController();
-  const unmount = () => { if (!dialog.open) { parked.append(dialog); hidden(); } };
+  let background: { node: HTMLElement; inert: boolean }[] = [];
+  let returnFocus: HTMLElement | null = null;
+  dialog.setAttribute("role", "region");
+  dialog.setAttribute("aria-label", dialog.querySelector("h2")?.textContent ?? "任务工具");
+  const unmount = () => {
+    if (dialog.open) return;
+    for (const item of background) item.node.inert = item.inert;
+    background = [];
+    parked.append(dialog); hidden();
+    if (returnFocus?.isConnected) returnFocus.focus();
+    returnFocus = null;
+  };
+  const close = () => { dialog.close(); unmount(); };
   dialog.addEventListener("close", unmount, { signal: events.signal });
+  dialog.addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); close(); }
+    if (event.key !== "Tab") return;
+    const controls = focusableControls(dialog);
+    const first = controls[0], last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  }, { signal: events.signal });
   return {
-    open() { if (!dialog.isConnected) anchor.after(dialog); if (!dialog.open) dialog.showModal(); },
-    close() { dialog.close(); unmount(); },
-    dispose() { events.abort(); dialog.close(); parked.append(dialog); hidden(); anchor.remove(); },
+    open() {
+      if (dialog.open) return;
+      returnFocus = document.activeElement as HTMLElement | null;
+      if (!dialog.isConnected) anchor.after(dialog);
+      let branch: HTMLElement = dialog;
+      while (branch.parentElement && branch !== document.body) {
+        for (const sibling of branch.parentElement.children) if (sibling !== branch && sibling instanceof HTMLElement) {
+          background.push({ node: sibling, inert: sibling.inert }); sibling.inert = true;
+        }
+        branch = branch.parentElement;
+      }
+      // WKWebView hides controls in a dynamically mounted modal dialog. A
+      // nonmodal named region plus explicit inert/focus management keeps AX live.
+      dialog.show();
+      dialog.querySelector<HTMLButtonElement>("button")?.focus();
+    },
+    close,
+    dispose() { events.abort(); close(); anchor.remove(); },
   };
 }

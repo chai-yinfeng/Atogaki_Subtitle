@@ -93,3 +93,5 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; }
 .editor-cue-list { overflow-anchor: none; }
 .editor-cue-content { position: relative; min-height: 1px; }
 .editor-cue-content > .editor-cue-row { position: absolute; left: 0; right: 0; }
+
+.editor-repair-dialog[open] { position: fixed; inset: 8dvh 0 auto; z-index: 30; box-shadow: 0 0 0 100vmax #0008; }

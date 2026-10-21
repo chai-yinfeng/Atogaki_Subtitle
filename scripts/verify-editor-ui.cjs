@@ -64,10 +64,18 @@ for(let i=0;i<2;i++) {
 }
 await page.locator('[data-editor-action="repair"]').click();
 await page.locator('#editor-repair-dialog[open]').waitFor();
+assert.equal(await page.locator('.shell > header').evaluate(node=>node.inert),true);
+await page.locator('[data-editor-action="close-repair"]').focus();
+await page.keyboard.press('Shift+Tab');
+assert.equal(await page.evaluate(()=>document.activeElement.id),'asr-quality-summary');
+await page.keyboard.press('Tab');
+assert.equal(await page.evaluate(()=>document.activeElement.dataset.editorAction),'close-repair');
+
 await page.locator('#asr-quality-review').evaluate(details=>details.open=true);
 await page.locator('.asr-quality-signal').waitFor();
 await page.locator('[data-editor-action="close-repair"]').click();
 assert.equal(await page.locator('#editor-repair-dialog').count(),0);
+assert.equal(await page.locator('.shell > header').evaluate(node=>node.inert),false);
 assert.equal(await page.locator('#karaoke-current-source').inputValue(),'第二段修改');
 
 await page.locator('[data-editor-reset]').click();
