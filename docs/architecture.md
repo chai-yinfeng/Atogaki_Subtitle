@@ -97,7 +97,7 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 ## 字幕编辑前端的渐进边界
 
-四区默认布局为左侧视频、右侧波形与上下双语编辑、下方整宽虚拟字幕列表。`editor-session` 区分跟随／锁定、编辑段、播放段与列表自动滚动；`editor-layout` 持有 v3 本机布局偏好，分别调整左右、工作区／列表、右侧波形／编辑比例，折叠只隐藏媒体预览；`editor-menus` 管理紧凑操作菜单的关闭和焦点生命周期；`editor-cue-list` 只呈现视口行。`current-cue-editor` 使用原 SubtitleDrafts 管理输入交互，`editor-backend` 集中适配文字／时间持久化，`task-tools` 持有工具 DOM 的挂载与焦点生命周期。工具模板与视图逻辑独立于主入口，关闭工具不重建媒体或草稿。
+四区默认布局为左侧视频、右侧波形与上下双语编辑、下方整宽虚拟字幕列表。`editor-session` 区分跟随／锁定、编辑段、播放段与列表自动滚动；`editor-layout` 持有 v3 本机布局偏好，分别调整左右、工作区／列表、右侧波形／编辑比例，折叠只隐藏媒体预览；`editor-menus` 管理紧凑操作菜单的关闭和焦点生命周期；`editor-cue-list` 只呈现视口行。`editor-follow` 协调编辑锁定、恢复请求代次与时间输入保护；`editor-timeline-view` 持有静态波形缓存、播放头与播放段独立绘制及 ResizeObserver，绘制与拖动命中共用几何规则；`current-cue-editor` 使用原 SubtitleDrafts 管理输入交互，`editor-backend` 集中适配文字／时间持久化，`task-tools` 持有工具 DOM 的挂载与焦点生命周期。工具模板与视图逻辑独立于主入口，关闭工具不重建媒体或草稿。
 
 主入口仍协调播放器、时间轴和部分处理用例，后续每次抽取一条边界，不能将当前结构写成已经完成全模块拆分。任务卡片通过 SQLite 摘要读取，恢复与采用仍完整验证来源证据；见 [0056](decisions/0056-editor-virtual-list-and-task-summary.md) 和 [0057](decisions/0057-editor-view-lifecycles.md)。
 

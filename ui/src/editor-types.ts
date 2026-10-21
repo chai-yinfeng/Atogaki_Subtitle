@@ -11,3 +11,8 @@ export type SubtitleSegment = {
   translation_stale: boolean;
   timing_edited: boolean;
 };
+
+export type WaveformWindow = {
+  duration_ms: number; start_ms: number; end_ms: number;
+  point_duration_ms: number; peaks: { min: number; max: number }[];
+};

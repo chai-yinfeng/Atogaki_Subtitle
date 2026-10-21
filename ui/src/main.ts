@@ -1,3 +1,4 @@
+import { mountEditorTimeline, timelineGeometry, timelineCueHit } from "./editor-timeline-view";
 import { mountEditorFollow } from "./editor-follow";
 import { mountEditorMenus } from "./editor-menus";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -16,7 +17,7 @@ import { mountCurrentCueEditor } from "./current-cue-editor";
 import { mountTaskTools, mountToolDialog } from "./task-tools";
 import { taskToolsTemplate } from "./task-tools-template";
 import { createEditorBackend } from "./editor-backend";
-import type { SubtitleSegment } from "./editor-types";
+import type { SubtitleSegment, WaveformWindow } from "./editor-types";
 import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
 import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
@@ -247,19 +248,6 @@ type PendingLearningSelection = {
   selectedText: string;
   selectionStartUtf16: number;
   selectionEndUtf16: number;
-};
-
-type WaveformPeak = {
-  min: number;
-  max: number;
-};
-
-type WaveformWindow = {
-  duration_ms: number;
-  start_ms: number;
-  end_ms: number;
-  point_duration_ms: number;
-  peaks: WaveformPeak[];
 };
 
 type KaraokeTimingDrag = {
@@ -1285,6 +1273,13 @@ let editorTimeFingerprint = "";
 const editorRepairDialog = document.querySelector<HTMLDialogElement>("#editor-repair-dialog")!;
 const editorLayout = mountEditorLayout(editorRoot);
 const editorMenus = mountEditorMenus(editorRoot);
+const editorTimeline = mountEditorTimeline(karaokeWaveform!, editorRoot, {
+  time: formatPreciseTime,
+  resized: () => {
+    renderKaraokeTimeline();
+    if (activeDetail && currentArea === "karaoke") void loadKaraokeWaveform(karaokeViewStartMs, true);
+  },
+});
 const currentCueEditor = mountCurrentCueEditor<SubtitleSegment>(editorRoot, {
   drafts: subtitleDrafts, current: karaokeDraftSegment, canUndo: canUndoSegment,
   undo: undoKaraokeTextSave, status: setSubtitleEditAction, lock: lockEditorCue,
@@ -1430,7 +1425,8 @@ editorRoot.addEventListener("click", event => {
 
 window.addEventListener("pagehide", () => { editorLayout.dispose();
   editorMenus.dispose();
-  editorFollow.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); taskTools.dispose(); repairTool.dispose(); });
+  editorFollow.dispose();
+  editorTimeline.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); taskTools.dispose(); repairTool.dispose(); });
 
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
@@ -3738,160 +3734,20 @@ async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promis
   }
 }
 
-let karaokeTimelineBitmap: { waveform: WaveformWindow; key: string; canvas: HTMLCanvasElement } | null = null;
-
 function renderKaraokeTimeline(): void {
-  const canvas = karaokeWaveform;
-  if (!canvas) return;
-  const bounds = canvas.getBoundingClientRect();
-  const scale = window.devicePixelRatio || 1;
-  const width = Math.max(1, Math.round(bounds.width * scale));
-  const height = Math.max(1, Math.round(bounds.height * scale));
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-  const theme = getComputedStyle(editorRoot);
-  const accent = theme.getPropertyValue("--accent").trim();
-  const accentSoft = theme.getPropertyValue("--accent-soft").trim();
-  const context = canvas.getContext("2d");
-  if (!context) return;
-  context.setTransform(scale, 0, 0, scale, 0, 0);
-  const cssWidth = width / scale;
-  const cssHeight = height / scale;
-  context.clearRect(0, 0, cssWidth, cssHeight);
-  context.fillStyle = theme.getPropertyValue("--surface-soft").trim() || "#f8f5ec";
-  context.fillRect(0, 0, cssWidth, cssHeight);
   const waveform = karaokeWaveformWindow;
-  if (!waveform || waveform.peaks.length === 0) {
-    context.fillStyle = "#777a72";
-    context.font = "13px system-ui";
-    context.textAlign = "center";
-    context.fillText(activeDetail ? "正在准备波形…" : "选择一个字幕任务", cssWidth / 2, cssHeight / 2);
-    return;
-  }
-
-  const allSegments = karaokeTimingDrag?.draft ?? activeDetail?.segments ?? [];
-  const original = karaokeTimingDrag?.before ?? allSegments;
+  const all = karaokeTimingDrag?.draft ?? activeDetail?.segments ?? [];
+  const original = karaokeTimingDrag?.before ?? all;
   const index = subtitleTimeline(original);
-  const visible = index.visible(waveform.start_ms, waveform.end_ms);
-  const visibleIndices = new Set(visible.map(cue => index.position(cue.id)));
-  if (karaokeTimingDrag) visibleIndices.add(karaokeTimingDrag.segmentIndex);
-  const timelineSegments = [...visibleIndices].sort((a,b) => a-b).map(i => allSegments[i]);
-  const activeId = editorSession.selectedCueId;
-  const bitmapKey = JSON.stringify([width, height, karaokeWaveformGain, accent, accentSoft,
-    theme.getPropertyValue("--ink"), theme.getPropertyValue("--surface-soft"), activeId,
-    karaokeTimingDrag?.segmentIndex,
-    timelineSegments.map(cue => [cue.id, cue.start_ms, cue.end_ms, cue.source_text])]);
-  const range = waveform.end_ms - waveform.start_ms;
-  const rulerHeight = 28;
-  if (karaokeTimelineBitmap?.waveform === waveform && karaokeTimelineBitmap.key === bitmapKey) {
-    context.drawImage(karaokeTimelineBitmap.canvas, 0, 0, cssWidth, cssHeight);
-  } else {
-    const waveformTop = rulerHeight;
-    const waveformHeight = Math.max(12, (cssHeight - 56) * 0.5);
-    const centerY = waveformTop + waveformHeight / 2;
-    context.strokeStyle = "#d6d0c3";
-    context.lineWidth = 1;
-    context.beginPath();
-    context.moveTo(0, centerY);
-    context.lineTo(cssWidth, centerY);
-    context.stroke();
-    context.strokeStyle = accent;
-    context.lineWidth = Math.max(1, cssWidth / waveform.peaks.length);
-    context.beginPath();
-    waveform.peaks.forEach((peak, index) => {
-      const x = (index + 0.5) / waveform.peaks.length * cssWidth;
-      const minimum = Math.max(-1, peak.min * karaokeWaveformGain);
-      const maximum = Math.min(1, peak.max * karaokeWaveformGain);
-      context.moveTo(x, centerY + minimum * waveformHeight * 0.46);
-      context.lineTo(x, centerY + maximum * waveformHeight * 0.46);
-    });
-    context.stroke();
-
-    context.fillStyle = "#74776f";
-    context.font = "10px ui-monospace, monospace";
-    context.textAlign = "center";
-    for (let marker = 0; marker <= 5; marker += 1) {
-      const x = marker / 5 * cssWidth;
-      const time = waveform.start_ms + range * marker / 5;
-      context.fillText(formatPreciseTime(time), Math.min(cssWidth - 45, Math.max(45, x)), 17);
-      context.strokeStyle = "rgba(112, 115, 106, .2)";
-      context.beginPath();
-      context.moveTo(x, rulerHeight - 5);
-      context.lineTo(x, cssHeight);
-      context.stroke();
-    }
-
-    const trackTop = waveformTop + waveformHeight + (cssHeight < 100 ? 6 : 14);
-    const trackHeight = Math.max(14, cssHeight - trackTop - 4);
-    for (const segment of timelineSegments) {
-      if (segment.end_ms < waveform.start_ms || segment.start_ms > waveform.end_ms) continue;
-      const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
-      const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
-      const active = segment.id === editorSession.selectedCueId;
-      context.fillStyle = active ? accent : accentSoft;
-      context.strokeStyle = accent;
-      context.lineWidth = active ? 2 : 1;
-      context.beginPath();
-      context.roundRect(left + 1, trackTop, Math.max(3, right - left - 2), trackHeight, 5);
-      context.fill();
-      context.stroke();
-      const dragged = karaokeTimingDrag?.segmentIndex === segment.segment_index;
-      context.strokeStyle = dragged ? "#b34b36" : accent;
-      context.lineWidth = dragged ? 3 : 2;
-      context.beginPath();
-      context.moveTo(left + 3, trackTop + 5);
-      context.lineTo(left + 3, trackTop + trackHeight - 5);
-      context.moveTo(right - 3, trackTop + 5);
-      context.lineTo(right - 3, trackTop + trackHeight - 5);
-      context.stroke();
-      if (right - left > 45) {
-        context.save();
-        context.beginPath();
-        context.rect(left + 5, trackTop + 2, Math.max(1, right - left - 10), trackHeight - 4);
-        context.clip();
-        context.fillStyle = active ? "#fffaf1" : theme.getPropertyValue("--ink").trim();
-        context.font = "11px system-ui";
-        context.textAlign = "left";
-        context.fillText(segment.source_text, left + 7, trackTop + trackHeight / 2 + 4);
-        context.restore();
-      }
-    }
-
-    for (let index = 0; index + 1 < timelineSegments.length; index += 1) {
-      const left = timelineSegments[index];
-      const right = timelineSegments[index + 1];
-      if (left.end_ms <= right.start_ms || left.end_ms < waveform.start_ms || right.start_ms > waveform.end_ms) continue;
-      const warningLeft = Math.max(0, (right.start_ms - waveform.start_ms) / range * cssWidth);
-      const warningRight = Math.min(cssWidth, (left.end_ms - waveform.start_ms) / range * cssWidth);
-      context.fillStyle = "rgba(179, 75, 54, .3)";
-      context.fillRect(warningLeft, trackTop, Math.max(2, warningRight - warningLeft), trackHeight);
-    }
-
-    const bitmap = document.createElement("canvas");
-    bitmap.width = width; bitmap.height = height;
-    bitmap.getContext("2d")?.drawImage(canvas, 0, 0);
-    karaokeTimelineBitmap = { waveform, key: bitmapKey, canvas: bitmap };
-  }
-
-  const currentMs = Math.round((activeMedia?.currentTime ?? 0) * 1_000);
-  if (currentMs >= waveform.start_ms && currentMs <= waveform.end_ms) {
-    const playheadX = (currentMs - waveform.start_ms) / range * cssWidth;
-    context.strokeStyle = "#b34b36";
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(playheadX, rulerHeight - 4);
-    context.lineTo(playheadX, cssHeight);
-    context.stroke();
-    context.fillStyle = "#b34b36";
-    context.beginPath();
-    context.moveTo(playheadX - 6, rulerHeight - 5);
-    context.lineTo(playheadX + 6, rulerHeight - 5);
-    context.lineTo(playheadX, rulerHeight + 4);
-    context.closePath();
-    context.fill();
-  }
+  const positions = new Set(waveform ? index.visible(waveform.start_ms, waveform.end_ms).map(cue => index.position(cue.id)) : []);
+  if (karaokeTimingDrag) positions.add(karaokeTimingDrag.segmentIndex);
+  editorTimeline.render({
+    waveform, cues: [...positions].sort((a,b) => a-b).map(i => all[i]),
+    selectedCueId: editorSession.selectedCueId, playbackCueId: editorSession.playbackCueId,
+    draggedCueId: karaokeTimingDrag ? all[karaokeTimingDrag.segmentIndex]?.id ?? null : null,
+    gain: karaokeWaveformGain, currentMs: Math.round((activeMedia?.currentTime ?? 0) * 1_000),
+    emptyMessage: activeDetail ? "正在准备波形…" : "选择一个字幕任务",
+  });
 }
 
 function karaokePlayheadHandleAtPoint(clientX: number, clientY: number): boolean {
@@ -3919,23 +3775,9 @@ function karaokeTimelineHitAtPoint(clientX: number, clientY: number): KaraokeTim
   if (!canvas || !waveform || !segments) return null;
   const bounds = canvas.getBoundingClientRect();
   const localY = clientY - bounds.top;
-  const waveformHeight = Math.max(12, (bounds.height - 56) * 0.5);
-  const trackTop = 28 + waveformHeight + (bounds.height < 100 ? 6 : 14);
+  const { trackTop } = timelineGeometry(bounds.height);
   if (localY < trackTop || localY > bounds.height - 4) return null;
-  const range = waveform.end_ms - waveform.start_ms;
-  for (let index = segments.length - 1; index >= 0; index -= 1) {
-    const segment = segments[index];
-    const left = bounds.left + (segment.start_ms - waveform.start_ms) / range * bounds.width;
-    const right = bounds.left + (segment.end_ms - waveform.start_ms) / range * bounds.width;
-    if (clientX < left - 8 || clientX > right + 8) continue;
-    const leftDistance = Math.abs(clientX - left);
-    const rightDistance = Math.abs(clientX - right);
-    if (leftDistance <= 8 || rightDistance <= 8) {
-      return { segmentIndex: index, mode: leftDistance <= rightDistance ? "start" : "end" };
-    }
-    if (clientX >= left && clientX <= right) return { segmentIndex: index, mode: "move" };
-  }
-  return null;
+  return timelineCueHit(segments, clientX - bounds.left, bounds.width, waveform.start_ms, waveform.end_ms);
 }
 
 function karaokeTimingAnomalySummary(segments: SubtitleSegment[]): string {
@@ -4115,7 +3957,7 @@ function updateKaraokePosition(milliseconds: number): void {
       : "连接相接的下一字幕块";
   }
   const waveform = karaokeWaveformWindow;
-  if (karaokeFollowPlayhead && waveform && !karaokeWaveformLoading) {
+  if (karaokeFollowPlayhead && waveform && !karaokeWaveformLoading && !editorRoot.classList.contains("editor-waveform-hidden")) {
     const margin = (waveform.end_ms - waveform.start_ms) * 0.12;
     if (milliseconds < waveform.start_ms + margin || milliseconds > waveform.end_ms - margin) {
       void loadKaraokeWaveform(milliseconds);
@@ -6913,14 +6755,6 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
 
 registerSubtitleFollowHost(subtitleList);
 registerSubtitleFollowHost(listeningSubtitleList);
-if (karaokeWaveform) {
-  const viewportObserver = new ResizeObserver(() => {
-    renderKaraokeTimeline();
-    if (activeDetail && currentArea === "karaoke") void loadKaraokeWaveform(karaokeViewStartMs, true);
-  });
-  viewportObserver.observe(karaokeWaveform);
-  window.addEventListener("pagehide", () => viewportObserver.disconnect(), { once: true });
-}
 syncVadControls();
 renderSubtitleOverlayButton();
 void loadDesktopSettings(true);

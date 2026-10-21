@@ -50,13 +50,13 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; background: #eceff3; }
 .editor-splitter { background: var(--line); cursor: row-resize; touch-action: none; border: 1px solid var(--surface); }
 .editor-column-splitter { cursor: col-resize; }
 .editor-splitter:hover, .editor-splitter:focus-visible { background: var(--accent); outline: 1px solid var(--accent); z-index: 1; }
-.editor-wave-panel { min-height: 0; overflow: hidden; }
+.editor-wave-panel { min-height: 0; overflow: auto; }
 #karaoke-view .waveform-panel { height: 100%; display: flex; flex-direction: column; gap: 2px; padding: 4px 7px; border: 0; border-radius: 0; }
 #karaoke-view .waveform-panel .panel-heading { margin: 0; gap: 5px; flex-wrap: wrap; }
 #karaoke-view .waveform-panel h3 { margin: 0; font-size: 11px; }
 #editor-wave-follow-state { color: var(--muted); font-size: 10px; }
 #karaoke-waveform-status { display: none; }
-#karaoke-view .karaoke-waveform { flex: 1; min-height: 40px; height: 0; border-radius: 0; }
+#karaoke-view .karaoke-waveform { flex: 1; min-height: 64px; height: 0; border-radius: 0; }
 .editor-wave-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .editor-wave-controls label { display: flex; align-items: center; gap: 4px; font-size: 10px; }
 .editor-wave-controls input { width: 80px; }

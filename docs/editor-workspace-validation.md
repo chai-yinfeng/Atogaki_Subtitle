@@ -71,3 +71,10 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 30 项前端测试、类型和生产构建、cargo fmt --check、git diff --check 通过。原编辑回归与跟随专项继续通过；`scripts/verify-editor-compact.cjs` 增加双尺寸几何、全文宽度、菜单焦点、双折叠保留播放器与播放控制、三处分隔线、v2→v3 迁移与跨加载记忆、大字号、主题隔离、10,000 段后段滚动与手动浏览后恢复。浏览器截图保存在 `/tmp/atogaki-editor-compact/`。
 
 独立 QA 包使用 `/tmp/atogaki-compact-native/data` 的合成任务数据库，未修改正式任务。原生 WAV 实际播放至第 6 段时，编辑框和列表同步；单击第一段后播放继续至第 10 段而编辑框保留第一段，恢复后随播放，折叠视频与波形继续至第 11 段；更多编辑菜单的各按钮可访问，Escape 关闭。此次原生包没有 sidecar，不作为正式发行验收。
+
+
+## 0058 第三阶段：跟随协调与时间轴视图
+
+跟随控制器独立管理输入焦点、时间 Escape、请求意图与任务／导航代次，dispose 使在途恢复失效。时间轴视图持有静态位图、播放头／播放段叠层与 ResizeObserver，并在缓存替换或 dispose 时释放位图；共享几何与最近边界命中规则修复紧凑视窗中相邻短间隔误选。视图直接接收既有会话快照，未增加保存器、播放器或后端调用。
+
+32 项前端测试、类型与生产构建、cargo fmt --check、git diff --check 通过。编辑主回归、跟随专项、紧凑布局／一万段专项继续通过；`scripts/verify-editor-timeline.cjs` 增加调色像素、真实鼠标拖动紧凑轨道并核验时间保存、折叠期间不请求波形及展开恢复。原生最后构建与本机覆盖另行记录；播放器、手势、处理用例与 Rust 大模块的完整拆分仍留在原路线图。
