@@ -108,3 +108,10 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 `a598bda` 隔离 App 的合成视频可用 1.5× 播放，编辑／列表跟随及双折叠继续播放正常，离开后重新进入恢复到 50.120 秒并保留 1.5×。但原生观察发现编辑框已是第 17 段，列表却从第一段开始：列表重建时保留了同一 playbackCueId，因此仅在 ID 变化时滚动的逻辑没有执行。已在列表渲染后按 listAutoScroll 显式 reveal 当前播放段；手动浏览仍不触发。共享播放器 WebKit 专项增加 18 秒暂停重入并确认第 7 段高亮及 scrollTop>0，44 项测试、类型／构建与格式检查通过。
 
 原生坐标拖动曾连续返回 `noWindowsAvailable`，但 AX 状态和按钮操作可用，进程仍存活；未将该项计为原生拖动通过。原生捕获丢失、pinch 等细节继续保留待实机手动验证，浏览器手势专项不替代它们。
+
+
+## 模块里程碑原生复查（5f9d177）
+
+独立 QA 包重新构建并签名，继续使用 `/tmp/atogaki-compact-native/data`。原生 AX 与截图确认：在 48.000 秒暂停、开启跟随后离开任务再进入，编辑框显示第 17 段，列表可见区也定位到第 17 段并显示黄色播放行与选中边框。隔离 cue 的 ID、原译文、时间和编辑标记与原始 20 段快照一致，integrity_check=ok。截图和摘要在忽略目录 `local-artifacts/editor-modules-20261021/`。
+
+新模块只更新了隔离 QA 包，正式 `/Applications/Atogaki.app` 仍为上一轮 `8a85af0` 的已验收版本，未中断用户正式试用或新增安装备份。原生坐标拖动仍受 CUA `noWindowsAvailable` 限制；部分观察还返回 ScreenCaptureKit 捕获错误，重新连接同一存活进程后可继续 AX 检查，未据此重启测试或将拖动计为通过。QA 实例和本地测试服务已关闭。
