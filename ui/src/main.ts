@@ -5,6 +5,11 @@ import { SubtitleDrafts, cueKey, type Draft } from "./subtitle-drafts";
 import { listen } from "@tauri-apps/api/event";
 import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
+import "./editor.css";
+import { editorTemplate } from "./editor-template";
+import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
+import { mountEditorLayout } from "./editor-layout";
+import { mountEditorCueList } from "./editor-cue-list";
 import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
 import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
@@ -707,61 +712,7 @@ app.innerHTML = `
       <p id="learning-message" class="learning-message" role="status"></p>
       <div id="learning-item-list" class="learning-item-list"></div>
     </section>
-    <section id="karaoke-view" class="karaoke-view hidden" aria-labelledby="karaoke-title">
-      <div class="module-heading karaoke-heading">
-        <div><p class="eyebrow">ADVANCED SUBTITLE EDITOR</p><h2 id="karaoke-title">字幕编辑</h2><p>针对当前任务精确播放、调整时间轴并集中修正字幕文字。</p></div>
-      </div>
-      <div class="karaoke-layout">
-        <section class="karaoke-editor" aria-label="波形时间轴编辑器">
-          <div class="panel-heading compact">
-            <div><p class="eyebrow">TIMING SESSION</p><h3 id="karaoke-job-title">正在读取当前任务</h3></div>
-            <button id="karaoke-open-workspace" type="button" class="secondary" disabled>← 返回字幕校对</button>
-          </div>
-          <div class="karaoke-player-strip">
-            <div id="karaoke-media-host" class="media-host karaoke-media-host"></div>
-            <div class="karaoke-transport">
-              <div class="karaoke-clock"><span>当前时间</span><strong id="karaoke-current-time">00:00:00.000</strong></div>
-              <div class="karaoke-transport-buttons">
-                <button id="karaoke-step-back-small" type="button" class="secondary" title="后退 10 ms（Shift+←）">−10 ms</button>
-                <button id="karaoke-step-back" type="button" class="secondary" title="后退 100 ms（←）">−100 ms</button>
-                <button id="karaoke-toggle-playback" type="button">播放</button>
-                <button id="karaoke-step-forward" type="button" class="secondary" title="前进 100 ms（→）">+100 ms</button>
-                <button id="karaoke-step-forward-small" type="button" class="secondary" title="前进 10 ms（Shift+→）">+10 ms</button>
-              </div>
-              <div class="karaoke-transport-options">
-                <label>速度<select id="karaoke-playback-rate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
-                <label>时间缩放<input id="karaoke-zoom" type="range" min="0" max="100" value="66" aria-label="时间轴缩放"><output id="karaoke-zoom-label">30 秒</output></label>
-                <label>波形强度<input id="karaoke-waveform-gain" type="range" min="1" max="8" step="0.25" value="1" aria-label="波形显示强度"><output id="karaoke-waveform-gain-label">1×</output></label>
-              </div>
-              <p class="shortcut-help">空格/K 播放暂停 · ←/→ 100 ms · Shift+←/→ 10 ms · ${primaryShortcutModifier}B 切开 · 触控板横向平移／捏合缩放</p>
-              <p id="karaoke-media-message" class="media-message">正在打开当前任务的媒体。</p>
-            </div>
-          </div>
-          <section class="waveform-panel" aria-labelledby="waveform-heading">
-            <div class="panel-heading compact">
-              <div><p class="eyebrow">WAVEFORM</p><h3 id="waveform-heading">声音与字幕时间轴</h3></div>
-              <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-follow-playhead" type="button" class="secondary active">跟随播放头</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销上次打轴</button></div>
-            </div>
-            <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。拖动字幕块可移动，拖动左右边缘可单独修剪；空白合法，同轨不能重叠。</div>
-            <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="声音波形与字幕时间轴：拖动顶部播放头定位，拖动波形背景平移"></canvas>
-            <div class="retranscription-range" aria-labelledby="retranscription-heading">
-              <div><p class="eyebrow">RECOGNIZE SELECTED RANGE</p><h4 id="retranscription-heading">局部重新识别</h4><p>选一段音频重新识别，先对照原字幕，再决定是否替换。</p></div>
-              <label>开始<input id="retranscription-start" inputmode="decimal" placeholder="00:49:00.000" /></label>
-              <label>结束<input id="retranscription-end" inputmode="decimal" placeholder="00:55:00.000" /></label>
-              <label>识别 provider<select id="retranscription-provider"><option value="whisper.cpp">Whisper.cpp（本地）</option><option value="gemini-transcribe">Gemini 3.5 Transcribe（云端）</option></select></label>
-              <label id="gemini-upload-consent" class="clear-secret hidden"><input id="authorize-gemini-upload" type="checkbox" /><span>允许将这次所选范围的音频上传给 Google；免费层数据可能用于改进产品</span></label>
-              <div class="retranscription-actions"><button id="retranscription-use-current" type="button" class="secondary">使用播放头所在字幕段</button><button id="retranscription-use-window" type="button" class="secondary">使用当前波形范围</button><button id="retranscription-expand-segments" type="button" class="secondary">对齐到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>
-              <p id="retranscription-message" class="media-message">范围边界不能切穿已有字幕块；需要时请显式扩展。</p>
-              <details id="asr-quality-review" class="asr-quality-review"><summary id="asr-quality-summary">转录待复核提示</summary><div id="asr-quality-signals" class="asr-quality-signals"></div></details>
-            </div>
-          </section>
-          <section class="karaoke-current-segment" aria-live="polite">
-            <div class="karaoke-text-editor"><span id="karaoke-segment-time">当前没有字幕</span><label>原文<textarea id="karaoke-current-source" rows="3" placeholder="当前时间没有原文字幕" disabled></textarea></label><label>译文<textarea id="karaoke-current-translation" rows="3" placeholder="尚无译文" disabled></textarea></label></div>
-            <div class="karaoke-segment-actions"><button id="karaoke-save-text" type="button" disabled>立即保存文字</button><button id="karaoke-discard-text" type="button" class="secondary" disabled>放弃文字修改</button><button id="karaoke-undo-text" type="button" class="secondary" disabled>撤回上次文字编辑</button><button id="karaoke-cut-segment" type="button" class="secondary" disabled>在播放头切开 ${primaryShortcutModifier}B</button><button id="karaoke-join-segment" type="button" class="secondary" disabled>连接下一块</button><button id="karaoke-insert-block" type="button" class="secondary">插入字幕块</button><button id="karaoke-delete-block" type="button" class="secondary">删除当前块</button><p id="karaoke-timing-message">拖动按 10 ms 网格吸附；默认不会移动相邻字幕，修改会自动保存。</p></div>
-          </section>
-        </section>
-      </div>
-    </section>
+${editorTemplate(primaryShortcutModifier)}
     <section id="workspace-view" class="workspace hidden" aria-labelledby="workspace-title">
       <div class="workspace-heading">
         <button id="back-to-jobs" class="secondary" type="button">← 返回任务</button>
@@ -777,7 +728,7 @@ app.innerHTML = `
           <strong>翻译与词表</strong><span>批量翻译与识别修正</span>
         </button>
         <button id="workspace-tab-review" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-review-panel" data-workspace-section="review">
-          <strong>字幕校对</strong><span>播放与文字粗修</span>
+          <strong>字幕编辑</strong><span>返回统一编辑器</span>
         </button>
         <button id="workspace-tab-export" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-export-panel" data-workspace-section="export">
           <strong>导出成品</strong><span>字幕文件与烧录视频</span>
@@ -786,12 +737,12 @@ app.innerHTML = `
       <p id="workspace-action-message" class="workspace-action-message" role="status"></p>
       <section id="workspace-review-panel" class="workspace-panel hidden" role="tabpanel" aria-labelledby="workspace-tab-review" data-workspace-panel="review">
         <div class="module-heading compact">
-          <div><p class="eyebrow">SUBTITLE REVIEW</p><h2>字幕校对</h2><p>逐段修正原文和译文；需要精确打轴、Cut 或 Join 时进入高级编辑。</p></div>
+          <div><p class="eyebrow">SUBTITLE REVIEW</p><h2>字幕校对</h2><p>识别中仅提供只读预览；完整识别后进入统一字幕编辑器。</p></div>
           <button id="open-subtitle-editor" type="button">进入字幕编辑 →</button>
         </div>
         <div class="review-grid">
           <section class="media-panel" aria-label="媒体播放器">
-            <div class="panel-heading compact"><div><p class="eyebrow">PLAYBACK</p><h3>媒体与当前字幕</h3></div><button id="relink-job-media" type="button" class="secondary hidden">重新定位原媒体</button></div>
+            <div class="panel-heading compact"><div><p class="eyebrow">PLAYBACK</p><h3>媒体与当前字幕</h3></div></div>
           <div id="media-host" class="media-host"></div>
           <div class="playback-tools" aria-label="播放快捷操作">
             <button id="previous-subtitle" type="button" class="secondary" title="上一句（[）">上一句</button>
@@ -819,7 +770,7 @@ app.innerHTML = `
           </section>
           <section class="timeline" aria-labelledby="timeline-title">
             <div class="section-heading">
-              <h2 id="timeline-title">字幕粗修</h2>
+              <h2 id="timeline-title">任务进度</h2>
               <span id="segment-count"></span>
             </div>
             <div id="subtitle-list" class="subtitle-list"></div>
@@ -1396,7 +1347,7 @@ let confirmationResolver: ((confirmed: boolean) => void) | null = null;
 let subtitleExportResolver: ((artifacts: SubtitleExportArtifact[] | null) => void) | null = null;
 let pendingGlossaryCorrection: {
   glossaryId: string;
-  state: HTMLSpanElement;
+  state: HTMLElement;
 } | null = null;
 let taskGlossaryConfigurationId: string | null = null;
 let selectedTaskContentGroups = new Set<string>();
@@ -1452,6 +1403,7 @@ let karaokeTextDraftSegmentId: string | null = null;
 let karaokeTextDraftDirty = false;
 let activeRetranscriptionPreview: RetranscriptionPreview | null = null;
 let retranscriptionBusy = false;
+let asrQualitySignals: AsrQualitySignal[] = [];
 let activeRepairSignalId: string | null = null;
 let currentWorkspaceSection: WorkspaceSection = "translation";
 type SubtitleFollowState = { userScrollingUntil: number; autoScrollingUntil: number; resumeTimer: number | null };
@@ -1464,6 +1416,143 @@ let translationStatus: TranslationStatus = {
   endpoint_kind: "none",
   configuration_hint: "请在设置中选择并配置翻译服务。",
 };
+
+const editorSession = new EditorSession();
+const editorRoot = document.querySelector<HTMLElement>("#karaoke-view")!;
+const editorSearch = document.querySelector<HTMLInputElement>("#editor-search")!;
+const editorFilter = document.querySelector<HTMLSelectElement>("#editor-filter")!;
+const editorStart = document.querySelector<HTMLInputElement>("#editor-cue-start")!;
+const editorEnd = document.querySelector<HTMLInputElement>("#editor-cue-end")!;
+let editorTimeFingerprint = "";
+const editorRepairDialog = document.querySelector<HTMLDialogElement>("#editor-repair-dialog")!;
+const editorLayout = mountEditorLayout(editorRoot);
+const editorCueList = mountEditorCueList<SubtitleSegment>(document.querySelector<HTMLElement>("#editor-cue-list")!, {
+  select: selectEditorCue,
+  seek: id => { const cue = activeDetail ? subtitleTimeline().get(id) : undefined; if (cue) seekTo(cue.start_ms); },
+  browse: () => { editorSession.followPlayback = false; syncEditorFollow(); },
+  time: formatPreciseTime,
+  status: cue => {
+    const draft = subtitleDrafts.entries.get(cueKey(cue));
+    return draft?.error ? "保存失败" : draft?.saving ? "保存中" : draft && subtitleDrafts.pending(draft) ? "草稿"
+      : segmentNeedsTranslation(cue) ? (cue.translated_text ? "待重译" : "未翻译") : editFlags(cue) || "已保存";
+  },
+});
+function editorReviewIds(): Set<string> {
+  const signals = asrQualitySignals.filter(signal => signal.latest_decision !== "resolved" && signal.latest_decision !== "false_positive");
+  return new Set((activeDetail?.segments ?? []).filter(cue => signals.some(signal => signal.start_ms !== null && signal.end_ms !== null && signal.start_ms < cue.end_ms && signal.end_ms > cue.start_ms)).map(cue => cue.id));
+}
+function visibleEditorCues(): SubtitleSegment[] {
+  return editorSession.visible(activeDetail?.segments ?? [], editorReviewIds(), activeDetail?.translation_context_stale_ids);
+}
+function syncEditorFollow(): void {
+  const button = editorRoot.querySelector<HTMLButtonElement>('[data-editor-action="follow"]');
+  button?.setAttribute("aria-pressed", String(editorSession.followPlayback));
+  if (button) button.textContent = editorSession.followPlayback ? "正在跟随播放" : "跟随播放";
+}
+function renderEditorList(): void {
+  if (currentArea !== "karaoke" || !activeDetail) return;
+  const cues = visibleEditorCues();
+  editorCueList.render(cues, editorSession.selectedCueId, editorSession.playbackCueId);
+  document.querySelector("#editor-match-count")!.textContent = `${cues.length} / ${activeDetail.segments.length} 段`;
+  document.querySelector("#editor-selection-message")!.textContent = editorSession.selectedCueId && !cues.some(cue => cue.id === editorSession.selectedCueId) ? "当前编辑段不在筛选结果中；编辑内容保持不变。" : "单击编辑 · 双击或点击时间码播放";
+}
+function selectEditorCue(id: string): void {
+  const cue = activeDetail ? subtitleTimeline().get(id) : undefined;
+  if (!cue || workspaceActionBusy) return;
+  const previous = karaokeDraftSegment();
+  if (previous && previous.id !== id && subtitleDrafts.entries.get(cueKey(previous))?.composing) { setSubtitleEditAction("请先完成输入法选字，再切换字幕。", true); return; }
+  editorSession.selectedCueId = id;
+  editorTimeFingerprint = "";
+  editorStart.value = formatPreciseTime(cue.start_ms); editorEnd.value = formatPreciseTime(cue.end_ms);
+  syncKaraokeTextDraft(cue, true);
+  editorCueList.mark(id, editorSession.playbackCueId);
+  updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
+  renderEditorList();
+}
+function setEditorMutationBusy(busy: boolean): void {
+  workspaceActionBusy = busy;
+  const panel = editorRoot.querySelector<HTMLElement>(".karaoke-current-segment");
+  if (panel) panel.inert = busy;
+}
+async function flushEditorStructureDrafts(): Promise<boolean> {
+  const jobId = activeDetail?.job.job_id;
+  try {
+    await subtitleDrafts.flushAll();
+    if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === jobId && subtitleDrafts.pending(draft))) throw new Error("请完成输入法选字后再执行操作");
+  }
+  catch (error) { setSubtitleEditAction(`文字保存失败，操作未执行：${String(error)}`, true); return false; }
+  return !!jobId && activeDetail?.job.job_id === jobId;
+}
+async function saveEditorCueTime(): Promise<void> {
+  const startInput = editorStart.value, endInput = editorEnd.value;
+  const selectedId = editorSession.selectedCueId;
+  if (workspaceActionBusy || !await flushEditorStructureDrafts() || !activeDetail) return;
+  const cue = karaokeDraftSegment();
+  if (!cue || cue.id !== selectedId) return;
+  const startMs = parseTimecode(startInput), endMs = parseTimecode(endInput);
+  if (startMs === null || endMs === null || startMs < 0 || endMs <= startMs) { setSubtitleEditAction("请输入有效的开始和结束时间。", true); return; }
+  const jobId = activeDetail.job.job_id, before = cloneSubtitleSegments(activeDetail.segments);
+  const after = before.map(item => item.id === cue.id ? { ...item, start_ms: startMs, end_ms: endMs } : item);
+  setEditorMutationBusy(true);
+  try {
+    const saved = await invoke<SubtitleSegment[]>("save_subtitle_timing", { request: { jobId, beforeSegments: before, afterSegments: after } });
+    rememberStructureEdit(before, saved, "手动调整时间", jobId);
+    if (activeDetail?.job.job_id !== jobId) return;
+    applySubtitleStructure(saved, cue.id); setSubtitleEditAction("时间已保存，未移动相邻字幕。");
+  } catch (error) { setSubtitleEditAction(`时间保存失败：${String(error)}`, true); }
+  finally { setEditorMutationBusy(false); }
+}
+let editorToolReturnFocus: HTMLElement | null = null;
+async function showEditorTools(section: WorkspaceSection): Promise<void> {
+  if (!activeDetail || !await flushEditorStructureDrafts()) return;
+  editorToolReturnFocus = document.activeElement as HTMLElement;
+  workspaceView?.classList.remove("hidden");
+  workspaceView?.classList.add("editor-task-tools");
+  workspaceView?.setAttribute("role", "region");
+  editorRoot.inert = true;
+  renderWorkspace(activeDetail);
+  showWorkspaceSection(section);
+  document.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回编辑";
+  document.querySelector<HTMLButtonElement>("#back-to-jobs")?.focus();
+  await refreshTranslationStatus();
+}
+function closeEditorTools(): void {
+  workspaceView?.classList.add("hidden"); workspaceView?.classList.remove("editor-task-tools");
+  workspaceView?.removeAttribute("role");
+  editorRoot.inert = false;
+  editorToolReturnFocus?.focus();
+  syncKaraokeTextDraft(karaokeDraftSegment(), true); renderEditorList();
+}
+editorSearch.addEventListener("input", () => { editorSession.query = editorSearch.value; renderEditorList(); });
+editorFilter.addEventListener("change", () => { editorSession.filter = editorFilter.value as CueFilter; renderEditorList(); });
+editorRoot.addEventListener("click", event => {
+  const button = (event.target as HTMLElement).closest<HTMLElement>("[data-editor-action]");
+  if (!button) return;
+  const action = button.dataset.editorAction;
+  if (action === "back") void showTopLevelArea("workbench").catch(error => setSubtitleEditAction(String(error), true));
+  else if (action === "export") void showEditorTools("export");
+  else if (action === "repair") editorRepairDialog.showModal();
+  else if (action === "close-repair") editorRepairDialog.close();
+  else if (action === "save-time") void saveEditorCueTime();
+  else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id) { selectEditorCue(id); editorCueList.reveal(id); } }
+  else if (action === "edit-playing" && editorSession.playbackCueId) selectEditorCue(editorSession.playbackCueId);
+  else if (action === "reveal-playing") { editorCueList.reveal(editorSession.playbackCueId); }
+  else if (action === "follow") { editorSession.followPlayback = !editorSession.followPlayback; syncEditorFollow(); if (editorSession.followPlayback) editorCueList.reveal(editorSession.playbackCueId); }
+  else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void translateSegment(cue, karaokeTimingMessage); }
+  else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
+  else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
+});
+workspaceView?.addEventListener("keydown", event => {
+  if (!workspaceView.classList.contains("editor-task-tools")) return;
+  if (event.key === "Escape") { event.preventDefault(); closeEditorTools(); }
+  if (event.key === "Tab") {
+    const controls = [...workspaceView.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter(item => item.getClientRects().length);
+    const first = controls[0], last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  }
+});
+window.addEventListener("pagehide", () => { editorLayout.dispose(); editorCueList.dispose(); });
 
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
@@ -2331,6 +2420,8 @@ function updateTranslationControls(): void {
     ? taskTranslationActivities.has(activeDetail.job.job_id)
     : false;
   const taskBusy = workspaceActionBusy || taskTranslationBusy;
+  const singleTranslate = editorRoot.querySelector<HTMLButtonElement>('[data-editor-action="translate"]');
+  if (singleTranslate) { singleTranslate.disabled = taskBusy || !hasSegments || !translationStatus.configured; singleTranslate.title = translationStatus.configured ? `使用 ${translationStatus.provider} 翻译当前句` : "请在翻译与词表中配置翻译方式"; }
   if (translationStatusText) {
     const model = translationStatus.model ? ` · ${translationStatus.model}` : "";
     const source = languageLabel(activeSourceLanguage());
@@ -2387,6 +2478,7 @@ function updateTranslationControls(): void {
 }
 
 function setWorkspaceAction(message: string, isError = false): void {
+  if (currentArea === "karaoke" && workspaceView?.classList.contains("hidden")) setSubtitleEditAction(message, isError);
   if (!workspaceActionMessage) return;
   workspaceActionMessage.textContent = message;
   workspaceActionMessage.classList.toggle("warning", isError);
@@ -2785,7 +2877,11 @@ function showWorkspace(show: boolean): void {
 }
 
 async function stopActivePlayback(): Promise<void> {
+  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
+  if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
+  editorRepairDialog.close();
+  if (workspaceView?.classList.contains("editor-task-tools")) closeEditorTools();
   playbackLoop = null; loopStartMs = null;
   document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
 
@@ -3416,8 +3512,7 @@ async function openKaraokeJob(jobId: string): Promise<void> {
   karaokeSelectedJobId = jobId;
   if (!reopeningSelectedJob) {
     karaokeResumeMs = 0;
-    const drawer = document.querySelector<HTMLDetailsElement>(".karaoke-repair-drawer");
-    if (drawer) drawer.open = false;
+
   }
   activeDetail = null;
   karaokeWaveformWindow = null;
@@ -3436,9 +3531,15 @@ async function openKaraokeJob(jobId: string): Promise<void> {
   try {
     const detail = await invoke<JobDetail>("get_job_detail", { jobId });
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
+    if (!detail.segments.length || !matchesTerminalStatus(detail.job.status)) { await openJob(jobId, "review"); return; }
     activeDetail = detail;
+    editorSession.open(jobId, detail.segments);
+    editorSearch.value = editorSession.query; editorFilter.value = editorSession.filter;
+    asrQualitySignals = [];
+    syncKaraokeTextDraft(karaokeDraftSegment(), true); renderEditorList(); syncEditorFollow();
     activeSegmentId = null;
     if (karaokeJobTitle) karaokeJobTitle.textContent = displayName(detail.job);
+    relinkJobMediaButton?.classList.toggle("hidden", !detail.job.input_path || Boolean(detail.playback_path));
     if (karaokeOpenWorkspaceButton) karaokeOpenWorkspaceButton.disabled = false;
     mountMedia(detail.playback_path, detail.audio_fallback_path, karaokeMediaHost, karaokeMediaMessage, karaokeResumeMs);
     updateActiveSubtitle(karaokeResumeMs);
@@ -3447,6 +3548,8 @@ async function openKaraokeJob(jobId: string): Promise<void> {
     await loadKaraokeWaveform(karaokeResumeMs, true);
     usePlayheadSubtitleForRetranscription(false);
     await loadAsrQualitySignals(jobId);
+    renderEditorList();
+    await refreshTranslationStatus();
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
     karaokeMediaMessage.textContent = `无法打开字幕编辑任务：${String(error)}`;
@@ -3459,12 +3562,15 @@ async function saveAsrReviewDecision(
   decision: "confirmed_problem" | "false_positive" | "resolved",
 ): Promise<void> {
   if (!activeDetail) return;
+  const jobId = activeDetail.job.job_id;
   try {
     await invoke<void>("save_asr_review_decision", {
       request: { signalId, decision, note: null },
     });
-    await loadAsrQualitySignals(activeDetail.job.job_id);
+    if (activeDetail?.job.job_id !== jobId) return;
+    await loadAsrQualitySignals(jobId);
   } catch (error) {
+    if (activeDetail?.job.job_id !== jobId) return;
     setRetranscriptionMessage(`保存审查结论失败：${String(error)}`, true);
   }
 }
@@ -3483,6 +3589,9 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
   }
   try {
     const allSignals = await invoke<AsrQualitySignal[]>("list_asr_quality_signals", { jobId });
+    if (activeDetail?.job.job_id !== jobId) return;
+    asrQualitySignals = allSignals;
+    renderEditorList();
     const processedCount = allSignals.filter(s => s.latest_decision === "false_positive" || s.latest_decision === "resolved").length;
     const signals = allSignals.filter(s => showProcessedSignals || (s.latest_decision !== "false_positive" && s.latest_decision !== "resolved"));
     if (activeDetail?.job.job_id !== jobId) return;
@@ -3631,6 +3740,7 @@ async function previewSelectedRange(): Promise<void> {
   }
   const range = retranscriptionRange();
   if (!range) return;
+  editorSession.processingRange = range;
   const providerId = retranscriptionProvider?.value ?? "whisper.cpp";
   const authorizeCloudAudioUpload = authorizeGeminiUpload?.checked ?? false;
   if (providerId === "gemini-transcribe" && !authorizeCloudAudioUpload) {
@@ -3727,6 +3837,7 @@ function scheduleKaraokeWaveformReload(startMs: number): void {
 async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promise<void> {
   if (!activeDetail || currentArea !== "karaoke") return;
   const requestId = ++karaokeWaveformRequestId;
+  const waveformJobId = activeDetail.job.job_id;
   const windowDuration = karaokeWindowDurationMs();
   const knownDuration = karaokeWaveformWindow?.duration_ms ?? Math.round((activeMedia?.duration ?? 0) * 1_000);
   const unclampedStart = alignStart ? anchorMs : anchorMs - windowDuration / 2;
@@ -3749,15 +3860,17 @@ async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promis
         pointCount,
       },
     });
-    if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke") return;
+    if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke" || activeDetail?.job.job_id !== waveformJobId) return;
     karaokeWaveformWindow = waveform;
+    karaokeWaveformStatus?.classList.remove("waveform-error");
+    editorSession.timelineViewport = { startMs: waveform.start_ms, endMs: waveform.end_ms };
     karaokeViewStartMs = waveform.start_ms;
     syncKaraokeWaveformStatus();
     renderKaraokeTimeline();
   } catch (error) {
-    if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke") return;
+    if (requestId !== karaokeWaveformRequestId || currentArea !== "karaoke" || activeDetail?.job.job_id !== waveformJobId) return;
     karaokeWaveformWindow = null;
-    if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = `无法生成波形：${String(error)}`;
+    if (karaokeWaveformStatus) { karaokeWaveformStatus.textContent = `无法生成波形：${String(error)}`; karaokeWaveformStatus.classList.add("waveform-error"); }
     renderKaraokeTimeline();
   } finally {
     if (requestId === karaokeWaveformRequestId) karaokeWaveformLoading = false;
@@ -3804,7 +3917,7 @@ function renderKaraokeTimeline(): void {
   const visibleIndices = new Set(visible.map(cue => index.position(cue.id)));
   if (karaokeTimingDrag) visibleIndices.add(karaokeTimingDrag.segmentIndex);
   const timelineSegments = [...visibleIndices].sort((a,b) => a-b).map(i => allSegments[i]);
-  const activeId = karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId;
+  const activeId = editorSession.selectedCueId;
   const bitmapKey = JSON.stringify([width, height, karaokeWaveformGain, accent, accentSoft,
     theme.getPropertyValue("--ink"), theme.getPropertyValue("--surface-soft"), activeId,
     karaokeTimingDrag?.segmentIndex,
@@ -3815,7 +3928,7 @@ function renderKaraokeTimeline(): void {
     context.drawImage(karaokeTimelineBitmap.canvas, 0, 0, cssWidth, cssHeight);
   } else {
     const waveformTop = rulerHeight;
-    const waveformHeight = Math.max(70, cssHeight * 0.5);
+    const waveformHeight = Math.max(12, (cssHeight - 56) * 0.5);
     const centerY = waveformTop + waveformHeight / 2;
     context.strokeStyle = "#d6d0c3";
     context.lineWidth = 1;
@@ -3855,7 +3968,7 @@ function renderKaraokeTimeline(): void {
       if (segment.end_ms < waveform.start_ms || segment.start_ms > waveform.end_ms) continue;
       const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
       const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
-      const active = segment.id === (karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId);
+      const active = segment.id === editorSession.selectedCueId;
       context.fillStyle = active ? accent : accentSoft;
       context.strokeStyle = accent;
       context.lineWidth = active ? 2 : 1;
@@ -3945,7 +4058,7 @@ function karaokeTimelineHitAtPoint(clientX: number, clientY: number): KaraokeTim
   if (!canvas || !waveform || !segments) return null;
   const bounds = canvas.getBoundingClientRect();
   const localY = clientY - bounds.top;
-  const waveformHeight = Math.max(70, bounds.height * 0.5);
+  const waveformHeight = Math.max(12, (bounds.height - 56) * 0.5);
   const trackTop = 28 + waveformHeight + 14;
   if (localY < trackTop || localY > bounds.height - 8) return null;
   const range = waveform.end_ms - waveform.start_ms;
@@ -4025,22 +4138,29 @@ async function commitKaraokeTimingDrag(): Promise<void> {
     renderKaraokeTimeline();
     return;
   }
+  if (!await flushEditorStructureDrafts() || !activeDetail) { renderKaraokeTimeline(); return; }
   const jobId = activeDetail.job.job_id;
+  const before = cloneSubtitleSegments(activeDetail.segments);
+  let after: SubtitleSegment[];
+  try { after = mergeDraggedCueTiming(before, drag.before[drag.segmentIndex], drag.draft[drag.segmentIndex]); }
+  catch (error) { setSubtitleEditAction(String(error), true); renderKaraokeTimeline(); return; }
   setSubtitleEditAction("正在原子保存字幕块时间…");
+  setEditorMutationBusy(true);
   try {
     const saved = await invoke<SubtitleSegment[]>("save_subtitle_timing", {
       request: {
         jobId,
-        beforeSegments: drag.before,
-        afterSegments: drag.draft,
+        beforeSegments: before,
+        afterSegments: after,
       },
     });
     if (!activeDetail || activeDetail.job.job_id !== jobId) return;
     const segment = saved[drag.segmentIndex];
     const action = drag.mode === "move" ? "移动" : drag.mode === "start" ? "入点调整" : "出点调整";
-    rememberStructureEdit(drag.before, saved, `第 ${segment.segment_index + 1} 段${action}`);
+    rememberStructureEdit(before, saved, `第 ${segment.segment_index + 1} 段${action}`);
     activeDetail.segments = saved;
-    activeSegmentId = segment.id;
+    editorSession.reconcile(saved, segment.id);
+    syncKaraokeTextDraft(karaokeDraftSegment(), true); renderEditorList();
     updateStructureUndoButton();
     syncKaraokeWaveformStatus();
     updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
@@ -4049,7 +4169,7 @@ async function commitKaraokeTimingDrag(): Promise<void> {
   } catch (error) {
     renderKaraokeTimeline();
     setSubtitleEditAction(`边界保存失败：${String(error)}`, true);
-  }
+  } finally { setEditorMutationBusy(false); }
 }
 
 function cancelKaraokeTimingDrag(): void {
@@ -4060,7 +4180,7 @@ function cancelKaraokeTimingDrag(): void {
 }
 
 function karaokeDraftSegment(): SubtitleSegment | undefined {
-  const segmentId = karaokeTextDraftDirty ? karaokeTextDraftSegmentId : activeSegmentId;
+  const segmentId = editorSession.selectedCueId;
   return activeDetail ? subtitleTimeline().get(segmentId) : undefined;
 }
 
@@ -4084,7 +4204,6 @@ function syncKaraokeTextDraft(segment: SubtitleSegment | undefined, force = fals
 function markKaraokeTextDirty(event?: Event): void {
   const segment = karaokeDraftSegment();
   if (!segment) return;
-  activeMedia?.pause();
   karaokeTextDraftSegmentId = segment.id;
   karaokeTextDraftDirty = true;
   if (karaokeSaveTextButton) karaokeSaveTextButton.disabled = false;
@@ -4120,10 +4239,11 @@ async function undoKaraokeTextSave(): Promise<void> {
   if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = true;
   try {
     const restored = await restoreSegment(entry.before);
+    if (activeDetail?.job.job_id !== restored.job_id) return;
     history?.pop();
     if (history?.length === 0) subtitleUndoHistory.delete(key);
     replaceActiveSegment(restored);
-    syncKaraokeTextDraft(restored, true);
+    if (editorSession.selectedCueId === restored.id) syncKaraokeTextDraft(restored, true);
     updateStructureUndoButton();
     updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
     setSubtitleEditAction("已撤销当前字幕上一次文字保存；历史仅保留在本次 App 会话。");
@@ -4137,7 +4257,9 @@ function updateKaraokePosition(milliseconds: number): void {
   if (currentArea !== "karaoke") return;
   if (karaokeCurrentTime) karaokeCurrentTime.textContent = formatPreciseTime(milliseconds);
   const playbackSegment = subtitleAt(milliseconds);
-  const segment = karaokeDraftSegment() ?? playbackSegment;
+  const segment = karaokeDraftSegment();
+  editorSession.playbackCueId = playbackSegment?.id ?? null;
+  editorCueList.mark(editorSession.selectedCueId, editorSession.playbackCueId, editorSession.followPlayback);
   if (karaokeSegmentTime) {
     karaokeSegmentTime.textContent = segment
       ? `${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)} · #${segment.segment_index + 1}`
@@ -4148,6 +4270,13 @@ function updateKaraokePosition(milliseconds: number): void {
     || karaokeCurrentSource?.value !== (segment?.source_text ?? "")
     || karaokeCurrentTranslation?.value !== (segment?.translated_text ?? "")
   )) syncKaraokeTextDraft(segment);
+  const timeFingerprint = `${segment?.id}:${segment?.start_ms}:${segment?.end_ms}`;
+  if (editorTimeFingerprint !== timeFingerprint && document.activeElement !== editorStart && document.activeElement !== editorEnd) {
+    editorTimeFingerprint = timeFingerprint;
+    editorStart.value = segment ? formatPreciseTime(segment.start_ms) : "";
+    editorEnd.value = segment ? formatPreciseTime(segment.end_ms) : "";
+  }
+  editorStart.disabled = !segment; editorEnd.disabled = !segment;
   const segmentIndex = segment ? subtitleTimeline().position(segment.id) : -1;
   const playhead = Math.round(milliseconds);
   if (karaokeCutSegmentButton) {
@@ -4196,10 +4325,10 @@ function seekKaraokeBy(milliseconds: number): void {
 }
 
 async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSegment | null): Promise<void> {
-  if (!activeDetail || workspaceActionBusy) return;
+  if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
   const jobId = activeDetail.job.job_id;
   const before = cloneSubtitleSegments(activeDetail.segments);
-  workspaceActionBusy = true;
+  setEditorMutationBusy(true);
   try {
     const after = await invoke<SubtitleSegment[]>("edit_subtitle_block", {request:{jobId, beforeSegments:before, removeId, insertion}});
     rememberStructureEdit(before, after, removeId ? "删除字幕块" : "插入字幕块", jobId);
@@ -4209,10 +4338,10 @@ async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSe
       setSubtitleEditAction("已保存，可用“撤销上次打轴”撤回；仅实际依赖被删除块的机器译文需要核对。");
     }
   } catch(error) { setSubtitleEditAction(`字幕块操作失败：${String(error)}`, true); }
-  finally { workspaceActionBusy = false; }
+  finally { setEditorMutationBusy(false); }
 }
-function openInsertSubtitleBlock(): void {
-  if (!activeDetail || workspaceActionBusy) return;
+async function openInsertSubtitleBlock(): Promise<void> {
+  if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
   if (karaokeTextDraftDirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
   if (!activeMedia || !Number.isFinite(activeMedia.duration) || activeMedia.duration <= 0) { setSubtitleEditAction("媒体时长尚未就绪，请等待加载或重新定位媒体。", true); return; }
   activeMedia.pause();
@@ -4244,9 +4373,11 @@ function openInsertSubtitleBlock(): void {
 }
 async function deleteCurrentSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;
+  const selectedId = editorSession.selectedCueId;
+  if (!await flushEditorStructureDrafts() || selectedId !== editorSession.selectedCueId) return;
   if (karaokeTextDraftDirty) { setSubtitleEditAction("删除前请先保存或放弃文字修改。", true); return; }
   const jobId=activeDetail.job.job_id;
-  const id=activeSegmentId;
+  const id=editorSession.selectedCueId;
   if (!id || !activeDetail.segments.some(s=>s.id===id)) { setSubtitleEditAction("请先选择要删除的字幕块。",true); return; }
   activeMedia?.pause();
   if (!await confirmAction({title:"删除当前字幕块？",message:"删除原文、译文及此块时间范围；不会移动其他字幕。学习收藏保留来源快照。当前会话可用“撤销上次打轴”恢复。",confirmLabel:"删除字幕块",danger:true})) return;
@@ -4255,6 +4386,7 @@ async function deleteCurrentSubtitleBlock(): Promise<void> {
 
 async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;
+  if (!await flushEditorStructureDrafts()) return;
   if (karaokeTextDraftDirty) {
     setSubtitleEditAction("Cut 前请先保存或放弃当前文字修改。", true);
     return;
@@ -4265,13 +4397,14 @@ async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
     setSubtitleEditAction("播放头必须位于一个字幕块内部才能切开。", true);
     return;
   }
+  const jobId = activeDetail.job.job_id;
   const before = cloneSubtitleSegments(activeDetail.segments);
-  workspaceActionBusy = true;
+  setEditorMutationBusy(true);
   setSubtitleEditAction(`正在播放头 ${formatPreciseTime(boundary)} 切开第 ${segment.segment_index + 1} 段…`);
   try {
     const after = await invoke<SubtitleSegment[]>("split_subtitle", {
       request: {
-        jobId: activeDetail.job.job_id,
+        jobId,
         segmentId: segment.id,
         boundaryMs: boundary,
         leftSourceText: segment.source_text,
@@ -4280,23 +4413,26 @@ async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
         rightTranslatedText: segment.translated_text,
       },
     });
+    if (activeDetail?.job.job_id !== jobId) return;
     rememberStructureEdit(before, after, `第 ${segment.segment_index + 1} 段 Cut`);
     applySubtitleStructure(after, segment.id);
-    setSubtitleEditAction("已在播放头切开；为保证连续播放观感，文字暂时复制到两块，可回到文字粗修继续整理。 ");
+    setSubtitleEditAction("已在播放头切开；为保证连续播放观感，文字暂时复制到两块，请在当前编辑框继续整理。 ");
   } catch (error) {
     setSubtitleEditAction(`切开失败：${String(error)}`, true);
   } finally {
-    workspaceActionBusy = false;
+    setEditorMutationBusy(false);
   }
 }
 
 async function joinKaraokeSegmentWithNext(): Promise<void> {
-  if (!activeDetail || !activeSegmentId || workspaceActionBusy) return;
+  if (!activeDetail || !editorSession.selectedCueId || workspaceActionBusy) return;
+  const selectedId = editorSession.selectedCueId;
+  if (!await flushEditorStructureDrafts() || selectedId !== editorSession.selectedCueId) return;
   if (karaokeTextDraftDirty) {
     setSubtitleEditAction("Join 前请先保存或放弃当前文字修改。", true);
     return;
   }
-  const index = activeDetail.segments.findIndex((item) => item.id === activeSegmentId);
+  const index = activeDetail.segments.findIndex((item) => item.id === editorSession.selectedCueId);
   const left = activeDetail.segments[index];
   const right = activeDetail.segments[index + 1];
   if (!left || !right) return;
@@ -4304,13 +4440,14 @@ async function joinKaraokeSegmentWithNext(): Promise<void> {
     setSubtitleEditAction("两块之间存在空白；请保留为两个字幕块，或先独立修剪到同一边界。", true);
     return;
   }
+  const jobId = activeDetail.job.job_id;
   const before = cloneSubtitleSegments(activeDetail.segments);
-  workspaceActionBusy = true;
+  setEditorMutationBusy(true);
   setSubtitleEditAction(`正在连接第 ${left.segment_index + 1}、${right.segment_index + 1} 段…`);
   try {
     const after = await invoke<SubtitleSegment[]>("merge_subtitles", {
       request: {
-        jobId: activeDetail.job.job_id,
+        jobId,
         leftSegmentId: left.id,
         rightSegmentId: right.id,
         sourceText: joinedSubtitleText(left.source_text, right.source_text, activeSourceLanguage()),
@@ -4319,13 +4456,14 @@ async function joinKaraokeSegmentWithNext(): Promise<void> {
           : null,
       },
     });
+    if (activeDetail?.job.job_id !== jobId) return;
     rememberStructureEdit(before, after, `第 ${left.segment_index + 1}、${right.segment_index + 1} 段 Join`);
     applySubtitleStructure(after, left.id);
     setSubtitleEditAction("已连接相接的字幕块；文字已顺序拼接。 ");
   } catch (error) {
     setSubtitleEditAction(`连接失败：${String(error)}`, true);
   } finally {
-    workspaceActionBusy = false;
+    setEditorMutationBusy(false);
   }
 }
 
@@ -4343,6 +4481,7 @@ function scheduleKaraokeAnimation(): void {
 }
 
 function showWorkspaceSection(section: WorkspaceSection): void {
+  if (section === "review" && currentArea === "karaoke") { closeEditorTools(); return; }
   currentWorkspaceSection = section;
   for (const tab of workspaceSectionTabs) {
     const selected = tab.dataset.workspaceSection === section;
@@ -4355,21 +4494,24 @@ function showWorkspaceSection(section: WorkspaceSection): void {
   }
 }
 
-async function openJob(jobId: string, initialSection: WorkspaceSection = "translation"): Promise<void> {
+async function openJob(jobId: string, initialSection?: WorkspaceSection): Promise<void> {
   if (!jobId || !workspaceMessage) return;
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;
   showWorkspace(true);
-  showWorkspaceSection(initialSection);
+  showWorkspaceSection(initialSection ?? "review");
+  document.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回任务";
   window.scrollTo({ top: 0, behavior: "auto" });
   workspaceMessage.textContent = "正在读取 字幕工作区…";
   setWorkspaceAction("");
   if (subtitleList) subtitleList.innerHTML = `<div class="empty-state">正在读取字幕…</div>`;
   try {
-    activeDetail = await invoke<JobDetail>("get_job_detail", { jobId });
+    const detail = await invoke<JobDetail>("get_job_detail", { jobId });
     if (requestId !== navigationRequestId || currentArea !== "workspace") return;
-    renderWorkspace(activeDetail);
+    activeDetail = detail;
+    if ((initialSection === undefined || initialSection === "review") && detail.segments.length > 0 && matchesTerminalStatus(detail.job.status)) { await enterSubtitleEditor(jobId); return; }
+    renderWorkspace(detail);
     await refreshTranslationStatus();
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "workspace") return;
@@ -4394,7 +4536,7 @@ function renderWorkspace(detail: JobDetail): void {
   if (segmentCount) segmentCount.textContent = `${detail.segments.length} 段`;
   if (openSubtitleEditorButton) {
     openSubtitleEditorButton.disabled = detail.segments.length === 0 || !matchesTerminalStatus(detail.job.status);
-    openSubtitleEditorButton.title = openSubtitleEditorButton.disabled ? "转写结束并产生字幕后才能进入字幕编辑" : "打开当前任务的高级字幕编辑";
+    openSubtitleEditorButton.title = openSubtitleEditorButton.disabled ? "转写结束并产生字幕后才能进入字幕编辑" : "打开当前任务的统一字幕编辑器";
   }
   renderGlossaryOptions();
   const sourceTrackOption = videoSubtitleTrack?.querySelector<HTMLOptionElement>('option[value="source"]');
@@ -4420,12 +4562,12 @@ function renderWorkspace(detail: JobDetail): void {
       ? "选择移动后的原音频或视频；不会改动字幕和任务音频"
       : "";
   }
-  mountMedia(detail.playback_path, detail.audio_fallback_path);
+  if (currentArea !== "karaoke") mountMedia(detail.playback_path, detail.audio_fallback_path);
   if (sourceMediaMissing && mediaMessage) {
     mediaMessage.textContent = "原媒体已移动或删除；当前使用任务内保存的音频。可重新定位原媒体以恢复画面和视频烧录。";
   }
-  renderSubtitleList(detail.segments);
-  updateActiveSubtitle(0);
+  if (currentArea !== "karaoke") renderSubtitleList(detail.segments);
+  if (currentArea !== "karaoke") updateActiveSubtitle(0);
   renderSubtitleOverlayButton();
   updateTranslationControls();
   renderActiveTaskTranslationActivity();
@@ -4448,7 +4590,9 @@ async function relinkActiveJobMedia(): Promise<void> {
       setWorkspaceAction("已取消重新定位。");
       return;
     }
-    await openJob(activeDetail.job.job_id, currentWorkspaceSection);
+    setWorkspaceBusy(false);
+    if (currentArea === "karaoke") await enterSubtitleEditor(activeDetail.job.job_id);
+    else await openJob(activeDetail.job.job_id, currentWorkspaceSection);
     setWorkspaceAction(`已重新定位原媒体：${updated.input_path ?? ""}`);
   } catch (error) {
     setWorkspaceAction(`重新定位原媒体失败：${String(error)}`, true);
@@ -4596,6 +4740,8 @@ function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment
 function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?: string): void {
   if (!activeDetail) return;
   activeDetail.segments = segments;
+  editorSession.reconcile(segments, expandedSegmentId);
+  if (currentArea === "karaoke") { syncKaraokeTextDraft(karaokeDraftSegment(), true); renderEditorList(); }
   if (segmentCount) segmentCount.textContent = `${segments.length} 段`;
   if (currentArea === "workspace") renderSubtitleListPreservingView(segments, expandedSegmentId);
   else {
@@ -4618,30 +4764,35 @@ function joinedSubtitleText(left: string, right: string, language: LanguageCode)
 }
 
 async function undoSubtitleStructure(): Promise<void> {
-  if (!activeDetail || !undoSubtitleStructureButton) return;
+  if (!activeDetail || !undoSubtitleStructureButton || !await flushEditorStructureDrafts()) return;
   if (karaokeTextDraftDirty) {
     setSubtitleEditAction("撤销打轴前请先保存或放弃当前文字修改。", true);
     return;
   }
-  const history = subtitleStructureUndoHistory.get(activeDetail.job.job_id);
+  const jobId = activeDetail.job.job_id;
+  const selectedId = editorSession.selectedCueId;
+  const history = subtitleStructureUndoHistory.get(jobId);
   const entry = history?.at(-1);
   if (!entry) return;
   undoSubtitleStructureButton.disabled = true;
+  setEditorMutationBusy(true);
   try {
     const restored = await invoke<SubtitleSegment[]>("restore_subtitle_structure", {
       request: {
-        jobId: activeDetail.job.job_id,
+        jobId,
         beforeSegments: entry.before,
         afterSegments: entry.after,
       },
     });
+    if (activeDetail?.job.job_id !== jobId) return;
     history?.pop();
     if (history?.length === 0) subtitleStructureUndoHistory.delete(activeDetail.job.job_id);
-    applySubtitleStructure(restored, restored[0]?.id);
+    applySubtitleStructure(restored, selectedId ?? undefined);
     setSubtitleEditAction(`已撤销${entry.label}。撤销历史只在当前 App 会话内保留。`);
   } catch (error) {
     setSubtitleEditAction(`无法撤销结构修改：${String(error)}`, true);
   } finally {
+    setEditorMutationBusy(false);
     updateStructureUndoButton();
   }
 }
@@ -4653,6 +4804,7 @@ function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleS
   if (activeDetail?.job.job_id !== saved.job_id) return;
   if (before) activeDetail.segments = activeDetail.segments.map(cue => cue.id === saved.id ? saved : cue);
   const pending = subtitleDrafts.pending(draft);
+  if (currentArea === "karaoke") renderEditorList();
   const status = draft.error ? `保存失败，草稿已保留：${draft.error}`
     : draft.saving ? "正在自动保存…" : pending ? "等待自动保存…" : savedSegmentState(saved);
   const card = subtitleList?.querySelector<HTMLElement>(`[data-segment-id="${CSS.escape(saved.id)}"]`);
@@ -4681,111 +4833,13 @@ function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleS
   if (before) { updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000); updateStructureUndoButton(); }
 }
 
-function renderSubtitleList(segments: SubtitleSegment[], expandedSegmentId?: string): void {
+function renderSubtitleList(segments: SubtitleSegment[], _expandedSegmentId?: string): void {
+  if (currentArea === "karaoke") { renderEditorList(); return; }
   if (!subtitleList) return;
   subtitleList.replaceChildren();
-  if (segments.length === 0) {
-    subtitleList.innerHTML = `<div class="empty-state"><strong>还没有字幕。</strong><span>任务完成后重新读取；正在执行的任务会继续保留在后台。</span></div>`;
-    return;
-  }
-
-  for (const segment of segments) {
-    const card = document.createElement("article");
-    card.className = "subtitle-card";
-    card.dataset.segmentId = segment.id;
-    const draft = subtitleDrafts.ensure(segment);
-    card.dataset.dirty = String(subtitleDrafts.pending(draft));
-
-    const meta = document.createElement("div");
-    meta.className = "subtitle-meta";
-    const time = document.createElement("button");
-    time.className = "timecode";
-    time.type = "button";
-    time.textContent = `${formatTime(segment.start_ms)} → ${formatTime(segment.end_ms)}`;
-    time.addEventListener("click", () => seekTo(segment.start_ms));
-    const flags = document.createElement("span");
-    flags.className = "edit-flags";
-    flags.textContent = editFlags(segment);
-    meta.append(time, flags);
-
-    const sourceLabel = document.createElement("label");
-    sourceLabel.textContent = `${languageLabel(activeSourceLanguage())}原文`;
-    const sourceInput = document.createElement("textarea");
-    sourceInput.className = "subtitle-input source-input";
-    sourceInput.rows = 2;
-    sourceInput.value = draft.value.source;
-    sourceLabel.append(sourceInput);
-
-    const translationLabel = document.createElement("label");
-    translationLabel.textContent = languageLabel(activeTargetLanguage());
-    const translationInput = document.createElement("textarea");
-    translationInput.className = "subtitle-input translation-input";
-    translationInput.rows = 2;
-    translationInput.placeholder = "尚无翻译";
-    translationInput.value = draft.value.translation;
-    translationLabel.append(translationInput);
-
-    const footer = document.createElement("div");
-    footer.className = "subtitle-footer";
-    const state = document.createElement("span");
-    state.className = "subtitle-save-state";
-    state.textContent = draft.error ? `保存失败，草稿已保留：${draft.error}` : subtitleDrafts.pending(draft) ? "等待自动保存…" : savedSegmentState(segment);
-    if (segment.translation_stale) state.classList.add("warning");
-    const save = document.createElement("button");
-    save.type = "button";
-    save.textContent = "立即保存";
-    save.dataset.saveDraft = "true";
-    save.disabled = !subtitleDrafts.pending(draft);
-    const discard = document.createElement("button");
-    discard.type = "button";
-    discard.className = "secondary";
-    discard.textContent = "放弃修改";
-    discard.dataset.discardDraft = "true";
-    discard.disabled = !subtitleDrafts.pending(draft) || draft.saving;
-    const undo = document.createElement("button");
-    undo.type = "button";
-    undo.className = "secondary";
-    undo.textContent = "撤回上次编辑";
-    undo.dataset.undoDraft = "true";
-    undo.disabled = !canUndoSegment(segment);
-    const translate = document.createElement("button");
-    translate.type = "button";
-    translate.className = "translate-segment secondary";
-    translate.textContent = segment.translated_text ? "重译本段" : "翻译本段";
-    const capture = document.createElement("button");
-    capture.type = "button";
-    capture.className = "capture-glossary-term secondary";
-    capture.textContent = "修正加入词表";
-    const markDirty = (event: Event): void => {
-      const current = activeDetail?.segments.find(cue => cue.id === segment.id) ?? segment;
-      subtitleDrafts.edit(current, {source: sourceInput.value, translation: translationInput.value}, (event as InputEvent).isComposing);
-    };
-    for (const input of [sourceInput, translationInput]) {
-      input.addEventListener("input", markDirty);
-      input.addEventListener("compositionend", markDirty);
-      input.addEventListener("blur", () => void subtitleDrafts.flush(cueKey(segment)).catch(() => {}));
-    }
-    discard.addEventListener("click", () => {
-      subtitleDrafts.discard(segment);
-      sourceInput.value = draft.value.source;
-      translationInput.value = draft.value.translation;
-    });
-
-    save.addEventListener("click", () => void saveSegment(segment));
-    undo.addEventListener("click", () => void undoSegment(segment, undo, state));
-    translate.addEventListener("click", () => void translateSegment(segment, sourceInput, translationInput, state));
-    capture.addEventListener("click", () => void captureGlossaryCorrection(segment, sourceInput, state));
-    const actions = document.createElement("div");
-    actions.className = "subtitle-actions";
-    actions.append(capture, discard, undo, translate, save);
-    footer.append(state, actions);
-
-    card.append(meta, sourceLabel, translationLabel, footer);
-    subtitleList.append(card);
-  }
-  highlightSegment(activeSegmentId);
-  updateTranslationControls();
-  updateStructureUndoButton();
+  const message = document.createElement("p");
+  message.textContent = segments.length ? `已生成 ${segments.length} 段；完整识别后进入字幕编辑。` : "识别尚未完成，可在任务列表查看进度与已保存原文。";
+  subtitleList.append(message);
 }
 
 function savedSegmentState(segment: SubtitleSegment): string {
@@ -4861,6 +4915,7 @@ async function undoSegment(
   state.classList.remove("warning");
   try {
     const restored = await restoreSegment(entry.before);
+    if (activeDetail?.job.job_id !== restored.job_id) return;
     history?.pop();
     if (history?.length === 0) subtitleUndoHistory.delete(key);
     replaceActiveSegment(restored);
@@ -4884,6 +4939,7 @@ function replaceActiveSegment(updated: SubtitleSegment): void {
   if (activeDetail.job.job_id !== updated.job_id) return;
   activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
   subtitleDrafts.ensure(updated);
+  if (currentArea === "karaoke") { syncKaraokeTextDraft(karaokeDraftSegment()); renderEditorList(); }
 }
 
 async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
@@ -4900,9 +4956,7 @@ async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
 
 async function translateSegment(
   segment: SubtitleSegment,
-  sourceInput: HTMLTextAreaElement,
-  translationInput: HTMLTextAreaElement,
-  state: HTMLSpanElement,
+  state: HTMLElement,
 ): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
   const jobId = activeDetail.job.job_id;
@@ -6272,7 +6326,7 @@ async function deleteGlossaryEditor(): Promise<void> {
 function captureGlossaryCorrection(
   segment: SubtitleSegment,
   sourceInput: HTMLTextAreaElement,
-  state: HTMLSpanElement,
+  state: HTMLElement,
 ): void {
   const glossaryId = workspaceGlossary?.value;
   if (!glossaryId) {
@@ -6531,6 +6585,7 @@ settingsForm?.addEventListener("submit", (event) => {
 });
 document.querySelector<HTMLButtonElement>("#finish-settings")?.addEventListener("click", () => void saveSettings(true));
 document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
+  if (currentArea === "karaoke") { closeEditorTools(); return; }
   void showTopLevelArea("workbench").then(() => refresh());
 });
 document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
@@ -6629,7 +6684,7 @@ karaokeWaveform?.addEventListener("pointerdown", (event) => {
       return;
     }
     activeMedia?.pause();
-    activeSegmentId = activeDetail.segments[hit.segmentIndex]?.id ?? activeSegmentId;
+    selectEditorCue(activeDetail.segments[hit.segmentIndex].id);
     updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
     karaokeTimingDrag = {
       pointerId: event.pointerId,
@@ -6797,7 +6852,8 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
     seekTo(startMs, false);
     updateActiveSubtitle(startMs);
     void loadKaraokeWaveform(startMs);
-    karaokeWaveform?.scrollIntoView({ behavior: "smooth", block: "center" });
+    editorRepairDialog.close();
+    if (editorRoot.classList.contains("editor-waveform-hidden")) editorRoot.querySelector<HTMLButtonElement>('[data-editor-toggle="waveform"]')?.click();
     return;
   }
   const signalId = target.dataset.signalId ?? target.dataset.repairSignal;
@@ -6817,8 +6873,8 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
   setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
-  const drawer = document.querySelector<HTMLDetailsElement>(".karaoke-repair-drawer");
-  if (drawer) { drawer.open = true; drawer.scrollIntoView({behavior:"smooth", block:"start"}); }
+  if (!editorRepairDialog.open) editorRepairDialog.showModal();
+  retranscriptionStartInput?.focus();
 });
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
 document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());
@@ -6836,14 +6892,7 @@ for (const input of [karaokeCurrentSource, karaokeCurrentTranslation]) {
 karaokeSaveTextButton?.addEventListener("click", () => void saveKaraokeTextDraft());
 karaokeDiscardTextButton?.addEventListener("click", discardKaraokeTextDraft);
 karaokeUndoTextButton?.addEventListener("click", () => void undoKaraokeTextSave());
-karaokeOpenWorkspaceButton?.addEventListener("click", () => {
-  if (!activeDetail) return;
-  if (karaokeTextDraftDirty) {
-    setSubtitleEditAction("返回字幕校对前，请先保存或放弃当前文字修改。", true);
-    return;
-  }
-  void openJob(activeDetail.job.job_id, "review");
-});
+karaokeOpenWorkspaceButton?.addEventListener("click", () => void showEditorTools("translation"));
 exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
 editSubtitleStylesButton?.addEventListener("click", () => void openSubtitleStyleDialog());
@@ -6986,7 +7035,7 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
     || target instanceof HTMLTextAreaElement
     || target instanceof HTMLSelectElement
     || target instanceof HTMLButtonElement
-    || (target instanceof HTMLElement && target.isContentEditable);
+    || (target instanceof HTMLElement && (target.isContentEditable || target.getAttribute("role") === "separator"));
 }
 
 document.addEventListener("keydown", (event) => {
@@ -6996,7 +7045,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (!activeDetail || !activeMedia || event.altKey || isTextEntryTarget(event.target)) return;
-  if (document.querySelector("dialog[open]")) return;
+  if (document.querySelector("dialog[open]") || workspaceView?.classList.contains("editor-task-tools")) return;
   if (currentArea === "karaoke" && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
     void cutKaraokeSegmentAtPlayhead();
     event.preventDefault();
@@ -7173,16 +7222,6 @@ async function showPartialTranscript(jobId: string): Promise<void> {
   }
 }
 
-// Keep the existing typed controls; reorganize their ownership without duplicate forms.
-const repairPanel = document.querySelector<HTMLElement>(".retranscription-range");
-const editorSurface = document.querySelector<HTMLElement>(".karaoke-editor");
-const reviewPanel = document.querySelector<HTMLDetailsElement>("#asr-quality-review");
-if (repairPanel && editorSurface) {
-  const drawer = document.createElement("details"); drawer.className = "karaoke-repair-drawer";
-  drawer.innerHTML = "<summary>重新识别与候选</summary>";
-  drawer.append(repairPanel); editorSurface.append(drawer);
-  if (reviewPanel) editorSurface.insertBefore(reviewPanel, drawer);
-}
 window.addEventListener("atogaki-theme-change", () => renderKaraokeTimeline());
 let providerEditor: HTMLDivElement | null = null;
 function renderProviderCards(): void {
@@ -7411,29 +7450,6 @@ function addOfflineTools(): void {
       if (learningMessage) learningMessage.textContent = String(error);
     }
   };
-  const search = document.createElement("section");
-  search.className = "subtitle-search";
-  search.innerHTML =
-    '<input type="search" aria-label="搜索当前字幕" placeholder="搜索当前任务的原文或译文"/><div class="subtitle-search-results"></div>';
-  subtitleList?.before(search);
-  search.querySelector("input")!.oninput = (event) => {
-    const query = (event.target as HTMLInputElement).value;
-    const results = query.trim()
-      ? (activeDetail?.segments.filter((segment) =>
-          matchesQuery(query, [segment.source_text, segment.translated_text]),
-        ) ?? [])
-      : [];
-    const host = search.querySelector("div")!;
-    host.innerHTML = results
-      .map(
-        (segment) =>
-          `<button type="button" class="secondary" data-search-time="${segment.start_ms}">${formatTime(segment.start_ms)} · ${escapeHtml(segment.source_text)}</button>`,
-      )
-      .join("");
-    host
-      .querySelectorAll<HTMLButtonElement>("[data-search-time]")
-      .forEach((button) => (button.onclick = () => seekTo(Number(button.dataset.searchTime))));
-  };
   for (const host of document.querySelectorAll(".playback-tools")) {
     const tools = document.createElement("div");
     tools.className = "offline-tools loop-tools";
@@ -7505,18 +7521,16 @@ function addOfflineTools(): void {
   candidateTools.className = "offline-tools";
   candidateTools.innerHTML =
     '<button type="button" class="secondary" data-full-candidate>生成全片本地候选</button><button type="button" class="secondary" data-candidate-history>历史候选</button><button type="button" class="secondary" data-cancel-candidate>取消候选运行</button><div class="candidate-history"></div>';
-  repairPanel?.append(candidateTools);
+  document.querySelector(".retranscription-range")?.append(candidateTools);
   candidateTools.querySelector<HTMLButtonElement>("[data-full-candidate]")!.onclick = async () => {
     if (!activeDetail || retranscriptionBusy) return;
+    const jobId = activeDetail.job.job_id;
     activeRepairSignalId=null;
     retranscriptionBusy = true;
     setRetranscriptionMessage("正在生成全片候选；不会覆盖当前工作区。", false);
     try {
-      showRetranscriptionPreview(
-        await invoke<RetranscriptionPreview>("preview_full_retranscription", {
-          jobId: activeDetail.job.job_id,
-        }),
-      );
+      const preview = await invoke<RetranscriptionPreview>("preview_full_retranscription", { jobId });
+      if (activeDetail?.job.job_id === jobId) showRetranscriptionPreview(preview);
     } catch (e) {
       setRetranscriptionMessage(String(e), true);
     } finally {
@@ -7539,6 +7553,7 @@ function addOfflineTools(): void {
       const runs = await invoke<
         Array<CandidateLabelInput & { status:string; reopenable?:boolean; released?:boolean; cleanable?:boolean; adopted?:boolean }>
       >("list_asr_runs", { jobId });
+      if (activeDetail?.job.job_id !== jobId) return;
       const host = candidateTools.querySelector(".candidate-history")!;
       host.innerHTML =
         runs
@@ -7559,12 +7574,8 @@ function addOfflineTools(): void {
         (button) =>
           (button.onclick = async () => {
             try {
-              showRetranscriptionPreview(
-                await invoke<RetranscriptionPreview>("reopen_asr_candidate", {
-                  jobId,
-                  runId: button.dataset.reopenRun,
-                }),
-              );
+              const preview = await invoke<RetranscriptionPreview>("reopen_asr_candidate", { jobId, runId: button.dataset.reopenRun });
+              if (activeDetail?.job.job_id === jobId) showRetranscriptionPreview(preview);
             } catch (e) {
               setRetranscriptionMessage(`此运行没有可重开的候选：${String(e)}`, true);
             }
