@@ -126,6 +126,7 @@ pub async fn execute_translation_group(
         .collect::<Vec<_>>();
     let response = provider
         .translate(TranslationRequest {
+            semantic_groups: Vec::new(),
             options,
             before_context: group.before_context,
             targets: group.targets,

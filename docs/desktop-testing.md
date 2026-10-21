@@ -226,3 +226,9 @@ ATOGAKI_FFMPEG="$PWD/src-tauri/binaries/ffmpeg-$(rustc --print host-tuple)" \
 - 桌面翻译使用 DeepL 云端 API，会发送当前任务的原文字幕；单段和全部重译还会发送 SQLite 中前后约 30 秒的原文作为局部上下文。API key 可由设置界面写入系统凭据库，环境变量仅作兼容回退；设置加载只返回是否已配置和来源，不回显密钥。
 - 桌面 SRT/ASS 与 MP4 烧录均使用 SQLite，并支持选择目标位置、覆盖确认与 Finder 定位；现有 CLI `translate`/`export` 仍读取任务 JSON，两条入口的数据源不同，不要用 CLI 命令验证桌面人工编辑。
 - 当前候选包以 macOS ad-hoc 签名、未公证的 `.app` 为主；Windows Credential Manager、Linux Secret Service、安装包权限与可重复窗口自动化需要在对应平台补测。
+
+## 长素材流式播放与短组翻译回归（0054）
+
+使用隔离数据目录和完整签名 App，打开超过 4 GiB 的真实视频及数千段字幕，验证原媒体／任务 WAV 都能载入时长、播放、暂停和定位到一小时之后；往返切换保留位置、速率、音量与暂停状态，当前字幕和可见波形随之更新。任务 WAV 成功不能代替原视频验证；实际声音还需人工试听。检查本机监听仅为 `127.0.0.1`，退出测试 App 后端口关闭。需要请求证据时显式设置 `ATOGAKI_MEDIA_DIAGNOSTICS=1`，日志仅含方法、Range、Origin 和文件大小，不包含 token／媒体内容。
+
+DeepSeek 自动／手动翻译用本地模拟 provider 验证短组打包、四路实际请求上限、失败后成功组保留、继续只补缺失部分、在途人工编辑保护、取消与稳定前缀缓存复用。检查组 journal 的 `attempt_scope`，不得把语义组数量当成 HTTP 请求次数。真实云端吞吐和译文质量须使用另行获用户授权的样本，不由本地模拟结果代替。

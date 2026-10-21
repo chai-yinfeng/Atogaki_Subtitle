@@ -36,7 +36,17 @@ pub struct TranslationTargetSegment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct TranslationSemanticGroup {
+    pub before_context_ids: Vec<String>,
+    pub target_ids: Vec<String>,
+    pub after_context_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TranslationRequest {
+    /// Wire-only semantic boundaries. Empty on individual cacheable requests.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_groups: Vec<TranslationSemanticGroup>,
     pub options: TranslationOptions,
     pub before_context: Vec<TranslationContextSegment>,
     pub targets: Vec<TranslationTargetSegment>,
@@ -69,6 +79,11 @@ pub trait TranslationProvider: Debug + Send + Sync {
     /// Freeze mutable provider selection for an entire multi-group execution.
     fn execution_snapshot(&self) -> Option<Arc<dyn TranslationProvider>> {
         None
+    }
+
+    /// Number of semantic groups that may wait for this provider concurrently.
+    fn group_concurrency(&self) -> usize {
+        if self.status().id == "deepseek" { 4 } else { 1 }
     }
 
     /// Translate the target segments while preserving their stable IDs.
@@ -215,6 +230,7 @@ mod tests {
         assert_eq!(provider.status().id, "echo");
         let response = provider
             .translate(TranslationRequest {
+                semantic_groups: Vec::new(),
                 options: TranslationOptions::default(),
                 before_context: Vec::new(),
                 targets: vec![TranslationTargetSegment {

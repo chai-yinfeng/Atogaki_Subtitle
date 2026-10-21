@@ -350,6 +350,7 @@ mod tests {
         .unwrap();
         let response = provider
             .translate(TranslationRequest {
+                semantic_groups: Vec::new(),
                 options: TranslationOptions::new(
                     LanguageCode::Japanese,
                     LanguageCode::SimplifiedChinese,

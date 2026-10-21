@@ -20,6 +20,7 @@ pub mod subtitle_font_service;
 pub mod subtitle_segmentation;
 pub mod subtitle_style_service;
 pub mod transcription_options;
+pub mod translation_batching;
 pub mod translation_options;
 pub mod translation_planner;
 pub mod translation_provider;
@@ -71,7 +72,8 @@ pub use translation_planner::{
 pub use translation_provider::{
     MutableTranslationProvider, TranslationContextSegment, TranslationFuture, TranslationProvider,
     TranslationProviderStatus, TranslationRequest, TranslationResponse, TranslationResult,
-    TranslationTargetSegment, TranslationUsage, UnconfiguredTranslationProvider,
+    TranslationSemanticGroup, TranslationTargetSegment, TranslationUsage,
+    UnconfiguredTranslationProvider,
 };
 pub use translation_use_case::{
     TranslationExecutionSummary, execute_translation_group, translate_transcript,

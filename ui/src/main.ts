@@ -4517,6 +4517,7 @@ function mountMedia(
       if (!isCurrent()) return;
       if (positionMs > 0 && Number.isFinite(element.duration)) element.currentTime = Math.min(positionMs / 1_000, Math.max(0, element.duration - 0.25));
       if (autoplay) void element.play().catch(() => { if (isCurrent()) message.textContent += " · 请点击播放"; });
+      if (positionMs > 0) message.textContent = `${isFallback ? "任务音频" : activeDetail?.job.input_path ?? "原媒体"} · 已恢复到 ${formatTime(element.currentTime * 1_000)}`;
       updatePlaybackControls();
       updateActiveSubtitle(element.currentTime * 1_000);
     });
@@ -4551,7 +4552,7 @@ function mountMedia(
       });
       host.insertAdjacentElement("afterend", switchMedia);
     }
-    element.src = path.startsWith("atogaki-media:") || path.startsWith("http://atogaki-media.localhost/")
+    element.src = /^http:\/\/127\.0\.0\.1:\d+\/media\/[a-f0-9-]+$/.test(path)
       ? path
       : convertFileSrc(path);
     updatePlaybackControls();

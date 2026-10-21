@@ -2334,6 +2334,7 @@ mod tests {
 
         let error = provider
             .translate(TranslationRequest {
+                semantic_groups: Vec::new(),
                 options: TranslationOptions::default(),
                 before_context: Vec::new(),
                 targets: vec![TranslationTargetSegment {

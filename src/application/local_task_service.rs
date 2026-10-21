@@ -2029,6 +2029,7 @@ mod tests {
             release: Arc<tokio::sync::Semaphore>,
             calls: AtomicUsize,
             fail_once: AtomicBool,
+            targets: AtomicUsize,
         }
         impl TranslationProvider for Cloud {
             fn status(&self) -> TranslationProviderStatus {
@@ -2044,6 +2045,8 @@ mod tests {
             fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
                 Box::pin(async move {
                     self.calls.fetch_add(1, Ordering::SeqCst);
+                    self.targets
+                        .fetch_add(request.targets.len(), Ordering::SeqCst);
                     self.started.send(()).unwrap();
                     self.release.acquire().await.unwrap().forget();
                     if self.fail_once.swap(false, Ordering::SeqCst) {
@@ -2127,6 +2130,7 @@ printf '{"transcription":[{"offsets":{"from":6000,"to":7000},"text":"Sentence %s
             release: release.clone(),
             calls: AtomicUsize::new(0),
             fail_once: AtomicBool::new(false),
+            targets: AtomicUsize::new(0),
         });
         let mut jobs = vec![];
         for _ in 0..3 {
@@ -2197,7 +2201,7 @@ printf '{"transcription":[{"offsets":{"from":6000,"to":7000},"text":"Sentence %s
         .await
         .unwrap();
         assert_eq!(
-            cloud.calls.load(Ordering::SeqCst),
+            cloud.targets.load(Ordering::SeqCst),
             9,
             "each prefix result reused by final translation"
         );
@@ -2289,7 +2293,7 @@ printf '{"transcription":[{"offsets":{"from":6000,"to":7000},"text":"Sentence %s
                 expected
             );
         }
-        assert_eq!(cloud.calls.load(Ordering::SeqCst), 13);
+        assert_eq!(cloud.targets.load(Ordering::SeqCst), 13);
         drop(service);
         db.close().await;
         fs::remove_dir_all(root).unwrap();

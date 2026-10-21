@@ -260,6 +260,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "atogaki-subtitle",
+ "axum",
  "csv",
  "flate2",
  "futures-util",

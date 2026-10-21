@@ -143,7 +143,7 @@ impl OpenAiCompatibleTranslationProvider {
         request: &TranslationRequest,
         prepared: &[(String, ProtectedText)],
     ) -> serde_json::Value {
-        let user_payload = json!({
+        let mut user_payload = json!({
             "source_language": request.options.source_language.as_str(),
             "target_language": request.options.target_language.as_str(),
             "before_context": request.before_context.iter().map(|segment| json!({
@@ -159,13 +159,25 @@ impl OpenAiCompatibleTranslationProvider {
                 "source_text": segment.source_text,
             })).collect::<Vec<_>>(),
         });
+        if !request.semantic_groups.is_empty() {
+            user_payload["semantic_groups"] = serde_json::json!(request.semantic_groups);
+            user_payload["context_segments"] = user_payload["before_context"].take();
+            user_payload
+                .as_object_mut()
+                .unwrap()
+                .remove("before_context");
+            user_payload
+                .as_object_mut()
+                .unwrap()
+                .remove("after_context");
+        }
         let style = request
             .style_instruction
             .as_deref()
             .filter(|style| !style.trim().is_empty())
             .unwrap_or(&self.style_instruction);
         let system_prompt = format!(
-            "You translate segmented spoken-language subtitles into {}. Use the surrounding context only to resolve meaning; do not translate or return context segments. Preserve every target segment_id exactly once. Every translated_text must contain at least one visible character. Translate short grammatical fragments and punctuation-bearing fragments using their context; never omit them or return an empty string. Preserve every token shaped like [[ATOGAKI_TERM_N]] exactly. Return JSON only with this schema: {{\"translations\":[{{\"segment_id\":\"...\",\"translated_text\":\"...\"}}]}}. Do not merge, split, omit, reorder semantically, or add commentary. Translation style: {}",
+            "You translate segmented spoken-language subtitles into {}. Each semantic_groups entry lists the before/after context IDs and target IDs for one independent semantic group; context IDs may also refer to other targets. Use the surrounding context only to resolve meaning; do not translate or return context segments. Preserve every target segment_id exactly once. Every translated_text must contain at least one visible character. Translate short grammatical fragments and punctuation-bearing fragments using their context; never omit them or return an empty string. Preserve every token shaped like [[ATOGAKI_TERM_N]] exactly. Return JSON only with this schema: {{\"translations\":[{{\"segment_id\":\"...\",\"translated_text\":\"...\"}}]}}. Do not merge, split, omit, reorder semantically, or add commentary. Translation style: {}",
             request.options.target_language.display_name_zh(),
             if style.is_empty() {
                 "accurate and natural spoken subtitles"
@@ -503,6 +515,7 @@ mod tests {
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         );
         let request = TranslationRequest {
+            semantic_groups: Vec::new(),
             options: Default::default(),
             targets: vec![TranslationTargetSegment {
                 segment_id: "cue-1".into(),
@@ -608,6 +621,7 @@ mod tests {
         )
         .unwrap();
         let request = TranslationRequest {
+            semantic_groups: Vec::new(),
             options: crate::application::TranslationOptions::default()
                 .with_protected_terms(["盗作".to_string()]),
             before_context: Vec::new(),
@@ -634,6 +648,35 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("must contain at least one visible character")
+        );
+
+        let mut packed = request.clone();
+        packed.before_context = vec![crate::application::TranslationContextSegment {
+            segment_id: "ctx".into(),
+            source_text: "surrounding speech".into(),
+        }];
+        packed.semantic_groups = vec![
+            crate::application::translation_provider::TranslationSemanticGroup {
+                before_context_ids: vec!["ctx".into()],
+                target_ids: vec!["s1".into()],
+                after_context_ids: vec![],
+            },
+        ];
+        let wire = provider.build_request_body(&packed, &prepared);
+        let content = wire["messages"][1]["content"].as_str().unwrap();
+        let payload: serde_json::Value =
+            serde_json::from_str(content.split_once('\n').unwrap().1).unwrap();
+        assert_eq!(payload["semantic_groups"][0]["target_ids"][0], "s1");
+        assert_eq!(
+            payload["context_segments"][0]["source_text"],
+            "surrounding speech"
+        );
+        assert!(payload.get("before_context").is_none());
+        assert!(
+            wire["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("自然口语")
         );
 
         let prepared_by_id = prepared.into_iter().collect::<HashMap<_, _>>();
@@ -718,6 +761,7 @@ mod tests {
         )
         .unwrap();
         let request = TranslationRequest {
+            semantic_groups: Vec::new(),
             options: crate::application::TranslationOptions::default(),
             before_context: Vec::new(),
             targets: vec![

@@ -39,10 +39,18 @@ impl StageScheduler {
         self: &Arc<Self>,
         provider: Arc<dyn TranslationProvider>,
     ) -> Arc<dyn TranslationProvider> {
-        Arc::new(ScheduledTranslationProvider {
+        let batch = provider.status().id == "deepseek";
+        let scheduled: Arc<dyn TranslationProvider> = Arc::new(ScheduledTranslationProvider {
             scheduler: self.clone(),
             provider,
-        })
+        });
+        if batch {
+            Arc::new(super::translation_batching::BatchingProvider::new(
+                scheduled,
+            ))
+        } else {
+            scheduled
+        }
     }
 }
 
@@ -133,6 +141,7 @@ mod tests {
     }
     fn request() -> TranslationRequest {
         TranslationRequest {
+            semantic_groups: Vec::new(),
             options: TranslationOptions::default(),
             before_context: vec![],
             targets: vec![],

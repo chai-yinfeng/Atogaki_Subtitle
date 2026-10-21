@@ -95,6 +95,9 @@ impl CachedProvider {
     }
 }
 impl TranslationProvider for CachedProvider {
+    fn group_concurrency(&self) -> usize {
+        self.provider.group_concurrency()
+    }
     fn status(&self) -> TranslationProviderStatus {
         self.provider.status()
     }
@@ -133,10 +136,10 @@ impl TranslationProvider for CachedProvider {
             let started = std::time::Instant::now();
             let outcome = self.provider.translate(request.clone()).await;
             let elapsed_ms = started.elapsed().as_millis();
-            // Actual attempts remain immutable even when a cache is replaced or
+            // Semantic group attempts remain immutable even when a cache is replaced or
             // a later source/context version makes this response unusable.
             let attempt = serde_json::json!({
-                "schema_version": 1, "profile_sha256": self.profile_sha256,
+                "schema_version": 2, "attempt_scope": "semantic_group", "profile_sha256": self.profile_sha256,
                 "started_at_unix_ms": started_at_unix_ms, "elapsed_ms": elapsed_ms,
                 "execution": self.profile_snapshot,
                 "input_sha256": key, "request": request,
@@ -302,11 +305,7 @@ impl EarlyTranslationSession {
                 })
             })
             .collect::<Vec<_>>();
-        let concurrency = if self.cache.status().id == "deepseek" {
-            4
-        } else {
-            1
-        };
+        let concurrency = self.cache.group_concurrency();
         let mut translated = groups
             .iter()
             .filter(|g| self.cached_group(g).is_ok())
@@ -391,6 +390,7 @@ impl EarlyTranslationSession {
     }
     fn cached_group(&self, group: &TranslationGroup) -> Result<TranslationResponse> {
         let request = TranslationRequest {
+            semantic_groups: Vec::new(),
             options: self.options.clone(),
             before_context: group.before_context.clone(),
             targets: group.targets.clone(),

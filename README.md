@@ -29,6 +29,8 @@ Hy-MT2 1.8B 是日常本地翻译推荐，7B 需要更多内存与处理时间�
 
 v0.1.2 已接入阶段队列：默认同时识别两个任务，DeepSeek 文本翻译最多四个请求并发，并可在同一任务的稳定原文前缀上提前进行；成功结果持久保存，完整识别后核对并复用。局部本地识别共享设备限额，Hy-MT2 在完整识别后独占设备翻译。修复长电影在 VAD 右上下文末尾时间轻微越界时无法继续的问题，并显示失败块与产物位置。新增累计执行计时，排除中断等待，并按成功分组更新提前翻译进度。发行说明见 [v0.1.2](docs/release-notes/v0.1.2.md)；设计与验证见 [0052](docs/decisions/0052-staged-concurrency-and-early-translation.md) 和 [阶段管线验证](docs/staged-pipeline-validation.md)。
 
+未发行开发分支已增加英文新任务的语言默认切分、长字幕时间轴索引、DeepSeek 短组请求打包与本机流式播放，保留逐组恢复和人工编辑保护。完整视频和任务 WAV 可手动切换；这些改动尚未包含在上面的 v0.1.2 下载中。结构和验收边界见 [0054](docs/decisions/0054-request-batching-and-loopback-media.md)。
+
 ## 安装与首次配置
 
 macOS 下载 `Atogaki-v0.1.2-macos-arm64.dmg` 及相邻 `.sha256`；Windows 继续使用 alpha.10 的 NSIS 安装器。从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。

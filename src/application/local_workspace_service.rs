@@ -792,11 +792,7 @@ impl LocalWorkspaceService {
             .collect::<HashMap<_, _>>();
         let options_json =
             serde_json::to_string(&options).context("failed to snapshot translation options")?;
-        let concurrency = if provider.id == "deepseek" {
-            crate::application::stage_scheduler::CLOUD_TRANSLATION_CONCURRENCY
-        } else {
-            1
-        };
+        let concurrency = frozen.group_concurrency();
         let prepared = Arc::new(PreparedTranslation {
             frozen,
             provider,
@@ -1837,7 +1833,7 @@ mod tests {
         database
             .sync_snapshot(&JobSnapshot {
                 manifest: manifest.clone(),
-                segments: (0..8)
+                segments: (0..50)
                     .map(|i| {
                         TranscriptSegment::new(
                             i * 1000,
@@ -1868,17 +1864,110 @@ mod tests {
         );
         assert!(service.translate_pending(&manifest.job_id).await.is_err());
         let saved = database.list_segments(&manifest.job_id).await.unwrap();
-        assert_eq!(
-            saved.iter().filter(|s| s.translated_text.is_some()).count(),
-            3
+        let completed = saved.iter().filter(|s| s.translated_text.is_some()).count();
+        assert!(
+            (36..=38).contains(&completed),
+            "other in-flight batches survive"
         );
         let resumed = service.translate_pending(&manifest.job_id).await.unwrap();
-        assert_eq!(resumed.requested_count, 5);
-        assert_eq!(resumed.translated_count, 5);
+        assert_eq!(resumed.requested_count, 50 - completed);
+        assert_eq!(resumed.translated_count, 50 - completed);
         assert_eq!(peak.load(Ordering::SeqCst), 4);
         assert!(resumed.segments.iter().all(|s| s.translated_text.is_some()));
         database.close().await;
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn packed_request_preserves_manual_translation_and_commits_unrelated_group() {
+        #[derive(Debug)]
+        struct Blocked {
+            started: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+        impl TranslationProvider for Blocked {
+            fn status(&self) -> TranslationProviderStatus {
+                TranslationProviderStatus {
+                    id: "deepseek".into(),
+                    name: "fixture".into(),
+                    configured: true,
+                    model: None,
+                    endpoint_kind: "test".into(),
+                    configuration_hint: None,
+                }
+            }
+            fn translate<'a>(&'a self, request: TranslationRequest) -> TranslationFuture<'a> {
+                Box::pin(async move {
+                    assert_eq!(request.semantic_groups.len(), 2);
+                    self.started.notify_one();
+                    self.release.notified().await;
+                    Ok(TranslationResponse {
+                        translations: request
+                            .targets
+                            .into_iter()
+                            .map(|t| TranslationResult {
+                                segment_id: t.segment_id,
+                                translated_text: "machine".into(),
+                            })
+                            .collect(),
+                        model: None,
+                        usage: TranslationUsage::default(),
+                    })
+                })
+            }
+        }
+        let root =
+            std::env::temp_dir().join(format!("atogaki-batch-edit-{}", uuid::Uuid::new_v4()));
+        let job = Job::create_in(&root).unwrap();
+        let manifest = JobManifest::new(&job, None, None, LanguagePair::default());
+        let database = LocalDatabase::open(root.join("index.sqlite"))
+            .await
+            .unwrap();
+        let first = TranscriptSegment::new(0, 900, "First sentence.".into());
+        let second = TranscriptSegment::new(120_000, 120_900, "Other sentence.".into());
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first.clone(), second.clone()],
+            })
+            .await
+            .unwrap();
+        let provider = Arc::new(Blocked {
+            started: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let scheduler = crate::application::stage_scheduler::StageScheduler::new(2);
+        let service = LocalWorkspaceService::with_provider(
+            database.clone(),
+            scheduler.translation_provider(provider.clone()),
+        );
+        let worker = service.clone();
+        let id = manifest.job_id.clone();
+        let run = tokio::spawn(async move { worker.translate_pending(&id).await });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            provider.started.notified(),
+        )
+        .await
+        .unwrap();
+        service
+            .update_subtitle(
+                &manifest.job_id,
+                &first.id,
+                first.source_text.clone(),
+                Some("human edit".into()),
+                0,
+                900,
+            )
+            .await
+            .unwrap();
+        provider.release.notify_one();
+        assert!(run.await.unwrap().is_err());
+        let saved = database.list_segments(&manifest.job_id).await.unwrap();
+        assert_eq!(saved[0].translated_text.as_deref(), Some("human edit"));
+        assert_eq!(saved[1].translated_text.as_deref(), Some("machine"));
+        database.close().await;
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

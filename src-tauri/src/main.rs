@@ -4,14 +4,13 @@ mod credential_store;
 mod desktop_settings;
 mod dictionary_download;
 mod dictionary_lookup;
+mod media_server;
 mod model_download;
 mod theme_artwork;
 
 use std::{
     collections::HashMap,
     ffi::OsString,
-    fs::File,
-    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -45,8 +44,8 @@ use atogaki_subtitle::{
         waveform::WaveformWindow,
     },
 };
+use media_server::PlaybackMediaRegistry;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
@@ -78,31 +77,6 @@ struct DesktopState {
     model_download_service: ModelDownloadService,
     dictionary_download_service: DictionaryDownloadService,
     dictionary_lookup_service: dictionary_lookup::DictionaryLookupService,
-}
-
-#[derive(Clone, Default)]
-struct PlaybackMediaRegistry {
-    files: Arc<Mutex<HashMap<String, PathBuf>>>,
-}
-
-impl PlaybackMediaRegistry {
-    fn register(&self, path: &Path) -> Result<String, String> {
-        let path = path.canonicalize().map_err(|error| {
-            format!("failed to resolve local media {}: {error}", path.display())
-        })?;
-        let mut hasher = Sha256::new();
-        hasher.update(path.to_string_lossy().as_bytes());
-        let token = format!("{:x}", hasher.finalize());
-        self.files
-            .lock()
-            .map_err(|_| "local media registry lock was poisoned".to_string())?
-            .insert(token.clone(), path);
-        Ok(playback_media_url(&token))
-    }
-
-    fn resolve(&self, token: &str) -> Option<PathBuf> {
-        self.files.lock().ok()?.get(token).cloned()
-    }
 }
 
 const SUBTITLE_OVERLAY_LABEL: &str = "subtitle-overlay";
@@ -1684,6 +1658,7 @@ async fn test_translation_connection(
             .map_err(|e| e.to_string())?;
         let response = provider
             .translate(atogaki_subtitle::application::TranslationRequest {
+                semantic_groups: Vec::new(),
                 options: atogaki_subtitle::application::TranslationOptions::new(
                     LanguageCode::English,
                     LanguageCode::SimplifiedChinese,
@@ -2521,188 +2496,6 @@ fn allow_asset_file(app: &AppHandle, path: Option<&str>) -> Result<Option<String
     Ok(Some(path.display().to_string()))
 }
 
-fn playback_media_url(token: &str) -> String {
-    #[cfg(any(target_os = "windows", target_os = "android"))]
-    return format!("http://atogaki-media.localhost/{token}");
-    #[cfg(not(any(target_os = "windows", target_os = "android")))]
-    format!("atogaki-media://localhost/{token}")
-}
-
-fn media_content_type(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "mp4" | "m4v" => "video/mp4",
-        "mov" => "video/quicktime",
-        "webm" => "video/webm",
-        "mkv" => "video/x-matroska",
-        "mp3" => "audio/mpeg",
-        "m4a" | "aac" => "audio/mp4",
-        "wav" => "audio/wav",
-        _ => "application/octet-stream",
-    }
-}
-
-fn parse_byte_ranges(header: &str, length: u64) -> Result<Vec<(u64, u64)>, ()> {
-    let value = header.strip_prefix("bytes=").ok_or(())?;
-    if length == 0 {
-        return Err(());
-    }
-    value
-        .split(',')
-        .map(|part| {
-            let (start, end) = part.trim().split_once('-').ok_or(())?;
-            let (start, end) = if start.is_empty() {
-                let suffix = end.parse::<u64>().map_err(|_| ())?.min(length);
-                if suffix == 0 {
-                    return Err(());
-                }
-                (length - suffix, length - 1)
-            } else {
-                let start = start.parse::<u64>().map_err(|_| ())?;
-                let end = if end.is_empty() {
-                    length - 1
-                } else {
-                    end.parse::<u64>().map_err(|_| ())?.min(length - 1)
-                };
-                (start, end)
-            };
-            if start >= length || end < start {
-                return Err(());
-            }
-            Ok((start, end))
-        })
-        .collect()
-}
-
-fn playback_media_response(
-    request: tauri::http::Request<Vec<u8>>,
-    registry: &PlaybackMediaRegistry,
-) -> tauri::http::Response<Vec<u8>> {
-    use tauri::http::{Method, StatusCode, header};
-
-    let token = request.uri().path().trim_start_matches('/');
-    let Some(path) = registry.resolve(token) else {
-        return tauri::http::Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Vec::new())
-            .expect("valid missing-media response");
-    };
-    let Ok(mut file) = File::open(&path) else {
-        return tauri::http::Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Vec::new())
-            .expect("valid missing-media response");
-    };
-    let Ok(length) = file.metadata().map(|metadata| metadata.len()) else {
-        return tauri::http::Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(Vec::new())
-            .expect("valid media-error response");
-    };
-    let content_type = media_content_type(&path);
-    let base = tauri::http::Response::builder()
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .header(header::ACCEPT_RANGES, "bytes");
-    if request.method() == Method::HEAD {
-        return base
-            .header(header::CONTENT_TYPE, content_type)
-            .header(header::CONTENT_LENGTH, length)
-            .body(Vec::new())
-            .expect("valid media HEAD response");
-    }
-
-    if let Some(range) = request.headers().get(header::RANGE) {
-        let ranges = range
-            .to_str()
-            .map_err(|_| ())
-            .and_then(|value| parse_byte_ranges(value, length));
-        let Ok(mut ranges) = ranges else {
-            return base
-                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                .header(header::CONTENT_RANGE, format!("bytes */{length}"))
-                .body(Vec::new())
-                .expect("valid unsatisfied-range response");
-        };
-        const MAX_RANGE_LENGTH: u64 = 2 * 1024 * 1024;
-        for (start, end) in &mut ranges {
-            *end = (*end).min(start.saturating_add(MAX_RANGE_LENGTH - 1));
-        }
-        if ranges.len() == 1 {
-            let (start, end) = ranges[0];
-            let mut body = Vec::with_capacity((end - start + 1) as usize);
-            if file.seek(SeekFrom::Start(start)).is_err()
-                || Read::by_ref(&mut file)
-                    .take(end - start + 1)
-                    .read_to_end(&mut body)
-                    .is_err()
-            {
-                return tauri::http::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Vec::new())
-                    .expect("valid media read-error response");
-            }
-            return base
-                .status(StatusCode::PARTIAL_CONTENT)
-                .header(header::CONTENT_TYPE, content_type)
-                .header(
-                    header::CONTENT_RANGE,
-                    format!("bytes {start}-{end}/{length}"),
-                )
-                .header(header::CONTENT_LENGTH, body.len())
-                .body(body)
-                .expect("valid partial media response");
-        }
-
-        let boundary = "atogaki-media-boundary";
-        let mut body = Vec::new();
-        for (start, end) in ranges {
-            let _ = write!(
-                body,
-                "--{boundary}\r\nContent-Type: {content_type}\r\nContent-Range: bytes {start}-{end}/{length}\r\n\r\n"
-            );
-            if file.seek(SeekFrom::Start(start)).is_err()
-                || Read::by_ref(&mut file)
-                    .take(end - start + 1)
-                    .read_to_end(&mut body)
-                    .is_err()
-            {
-                return tauri::http::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Vec::new())
-                    .expect("valid media read-error response");
-            }
-            body.extend_from_slice(b"\r\n");
-        }
-        let _ = write!(body, "--{boundary}--\r\n");
-        return base
-            .status(StatusCode::PARTIAL_CONTENT)
-            .header(
-                header::CONTENT_TYPE,
-                format!("multipart/byteranges; boundary={boundary}"),
-            )
-            .header(header::CONTENT_LENGTH, body.len())
-            .body(body)
-            .expect("valid multipart media response");
-    }
-
-    let mut body = Vec::new();
-    if file.read_to_end(&mut body).is_err() {
-        return tauri::http::Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(Vec::new())
-            .expect("valid media read-error response");
-    }
-    base.header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_LENGTH, body.len())
-        .body(body)
-        .expect("valid full media response")
-}
-
 async fn pick_local_file(
     app: &AppHandle,
     title: &str,
@@ -2813,19 +2606,9 @@ fn validated_data_dir_override(value: Option<OsString>) -> Result<Option<PathBuf
 }
 
 fn main() {
-    let media_registry = PlaybackMediaRegistry::default();
-    let protocol_media_registry = media_registry.clone();
     tauri::Builder::default()
-        .register_asynchronous_uri_scheme_protocol(
-            "atogaki-media",
-            move |_context, request, responder| {
-                let registry = protocol_media_registry.clone();
-                std::thread::spawn(move || {
-                    responder.respond(playback_media_response(request, &registry));
-                });
-            },
-        )
         .setup(move |app| {
+            let media_registry = tauri::async_runtime::block_on(PlaybackMediaRegistry::start())?;
             let data_dir = validated_data_dir_override(std::env::var_os("ATOGAKI_DATA_DIR"))?
                 .unwrap_or(app.path().app_data_dir()?);
             let config = AppConfig {
@@ -3063,8 +2846,7 @@ mod tests {
     };
 
     use super::{
-        DesktopJobSummary, PlaybackMediaRegistry, SubmitTranscriptionRequest,
-        desktop_transcription_options, parse_byte_ranges, playback_media_response,
+        DesktopJobSummary, SubmitTranscriptionRequest, desktop_transcription_options,
         validated_data_dir_override,
     };
     use atogaki_subtitle::{
@@ -3177,63 +2959,6 @@ mod tests {
         );
         assert_eq!(options.source_language, LanguageCode::English);
         fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn playback_ranges_support_open_suffix_and_multiple_requests() {
-        assert_eq!(parse_byte_ranges("bytes=2-4", 10), Ok(vec![(2, 4)]));
-        assert_eq!(parse_byte_ranges("bytes=7-", 10), Ok(vec![(7, 9)]));
-        assert_eq!(parse_byte_ranges("bytes=-3", 10), Ok(vec![(7, 9)]));
-        assert_eq!(
-            parse_byte_ranges("bytes=0-1,8-9", 10),
-            Ok(vec![(0, 1), (8, 9)])
-        );
-        assert!(parse_byte_ranges("bytes=20-30", 10).is_err());
-    }
-
-    #[test]
-    fn playback_protocol_serves_standard_single_and_multipart_ranges() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("atogaki-media-test-{nonce}.mp4"));
-        fs::write(&path, b"0123456789").unwrap();
-        let registry = PlaybackMediaRegistry::default();
-        let url = registry.register(&path).unwrap();
-
-        let single = playback_media_response(
-            tauri::http::Request::builder()
-                .uri(&url)
-                .header("range", "bytes=2-4")
-                .body(Vec::new())
-                .unwrap(),
-            &registry,
-        );
-        assert_eq!(single.status(), tauri::http::StatusCode::PARTIAL_CONTENT);
-        assert_eq!(single.headers()["content-range"], "bytes 2-4/10");
-        assert_eq!(single.body(), b"234");
-
-        let multipart = playback_media_response(
-            tauri::http::Request::builder()
-                .uri(&url)
-                .header("range", "bytes=0-1,8-9")
-                .body(Vec::new())
-                .unwrap(),
-            &registry,
-        );
-        let multipart_text = String::from_utf8(multipart.body().clone()).unwrap();
-        assert_eq!(multipart.status(), tauri::http::StatusCode::PARTIAL_CONTENT);
-        assert!(
-            multipart.headers()["content-type"]
-                .to_str()
-                .unwrap()
-                .starts_with("multipart/byteranges")
-        );
-        assert!(multipart_text.contains("Content-Range: bytes 0-1/10\r\n\r\n01\r\n"));
-        assert!(multipart_text.contains("Content-Range: bytes 8-9/10\r\n\r\n89\r\n"));
-        assert!(multipart_text.ends_with("--atogaki-media-boundary--\r\n"));
-        fs::remove_file(path).unwrap();
     }
 
     #[test]
