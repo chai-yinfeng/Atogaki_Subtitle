@@ -1,3 +1,4 @@
+import { mountEditorMenus } from "./editor-menus";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { setupImageThemes } from "./appearance";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -1004,7 +1005,6 @@ const karaokeZoomInput = document.querySelector<HTMLInputElement>("#karaoke-zoom
 const karaokeZoomLabel = document.querySelector<HTMLOutputElement>("#karaoke-zoom-label");
 const karaokeWaveformGainInput = document.querySelector<HTMLInputElement>("#karaoke-waveform-gain");
 const karaokeWaveformGainLabel = document.querySelector<HTMLOutputElement>("#karaoke-waveform-gain-label");
-const karaokeFollowPlayheadButton = document.querySelector<HTMLButtonElement>("#karaoke-follow-playhead");
 const karaokeWaveformStatus = document.querySelector<HTMLDivElement>("#karaoke-waveform-status");
 const karaokeWaveform = document.querySelector<HTMLCanvasElement>("#karaoke-waveform");
 const karaokeSegmentTime = document.querySelector<HTMLSpanElement>("#karaoke-segment-time");
@@ -1283,6 +1283,7 @@ const editorEnd = document.querySelector<HTMLInputElement>("#editor-cue-end")!;
 let editorTimeFingerprint = "";
 const editorRepairDialog = document.querySelector<HTMLDialogElement>("#editor-repair-dialog")!;
 const editorLayout = mountEditorLayout(editorRoot);
+const editorMenus = mountEditorMenus(editorRoot);
 const currentCueEditor = mountCurrentCueEditor<SubtitleSegment>(editorRoot, {
   drafts: subtitleDrafts, current: karaokeDraftSegment, canUndo: canUndoSegment,
   undo: undoKaraokeTextSave, status: setSubtitleEditAction, lock: lockEditorCue,
@@ -1349,7 +1350,7 @@ async function resumeEditorFollow(): Promise<void> {
   if (!await flushEditorStructureDrafts() || request !== editorFollowRequest || navigation !== navigationRequestId || activeDetail?.job.job_id !== jobId || currentArea !== "karaoke") return;
   editorSession.resumePlayback();
   karaokeFollowPlayhead = true;
-  syncKaraokeFollowButton();
+  syncTimelineFollowState();
   editorTimeFingerprint = "";
   updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
   currentCueEditor.sync(karaokeDraftSegment(), true);
@@ -1454,7 +1455,6 @@ editorRoot.addEventListener("click", event => {
   else if (action === "close-repair") repairTool.close();
   else if (action === "save-time") void saveEditorCueTime();
   else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id) { selectEditorCue(id); editorCueList.reveal(id); } }
-  else if (action === "edit-playing" && editorSession.playbackCueId) selectEditorCue(editorSession.playbackCueId);
   else if (action === "reveal-playing") { editorSession.listAutoScroll = true; editorCueList.reveal(editorSession.playbackCueId); syncEditorFollow(); }
   else if (action === "follow") void resumeEditorFollow();
   else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void translateSegment(cue, karaokeTimingMessage); }
@@ -1462,7 +1462,8 @@ editorRoot.addEventListener("click", event => {
   else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
 });
 
-window.addEventListener("pagehide", () => { editorLayout.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); taskTools.dispose(); repairTool.dispose(); });
+window.addEventListener("pagehide", () => { editorLayout.dispose();
+  editorMenus.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); taskTools.dispose(); repairTool.dispose(); });
 
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
@@ -3415,7 +3416,7 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
   activeRepairSignalId = null;
   if (retranscriptionStartInput) retranscriptionStartInput.value = "";
   if (retranscriptionEndInput) retranscriptionEndInput.value = "";
-  syncKaraokeFollowButton();
+  syncTimelineFollowState();
   renderKaraokeTimeline();
   karaokeMediaMessage.textContent = "正在读取字幕编辑任务…";
   if (karaokeJobTitle) karaokeJobTitle.textContent = "正在打开任务…";
@@ -3783,7 +3784,7 @@ function renderKaraokeTimeline(): void {
     canvas.width = width;
     canvas.height = height;
   }
-  const theme = getComputedStyle(document.documentElement);
+  const theme = getComputedStyle(editorRoot);
   const accent = theme.getPropertyValue("--accent").trim();
   const accentSoft = theme.getPropertyValue("--accent-soft").trim();
   const context = canvas.getContext("2d");
@@ -3792,7 +3793,7 @@ function renderKaraokeTimeline(): void {
   const cssWidth = width / scale;
   const cssHeight = height / scale;
   context.clearRect(0, 0, cssWidth, cssHeight);
-  context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--surface-soft").trim() || "#f8f5ec";
+  context.fillStyle = theme.getPropertyValue("--surface-soft").trim() || "#f8f5ec";
   context.fillRect(0, 0, cssWidth, cssHeight);
   const waveform = karaokeWaveformWindow;
   if (!waveform || waveform.peaks.length === 0) {
@@ -3855,8 +3856,8 @@ function renderKaraokeTimeline(): void {
       context.stroke();
     }
 
-    const trackTop = waveformTop + waveformHeight + 14;
-    const trackHeight = Math.max(38, cssHeight - trackTop - 10);
+    const trackTop = waveformTop + waveformHeight + (cssHeight < 100 ? 6 : 14);
+    const trackHeight = Math.max(14, cssHeight - trackTop - 4);
     for (const segment of timelineSegments) {
       if (segment.end_ms < waveform.start_ms || segment.start_ms > waveform.end_ms) continue;
       const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
@@ -3952,8 +3953,8 @@ function karaokeTimelineHitAtPoint(clientX: number, clientY: number): KaraokeTim
   const bounds = canvas.getBoundingClientRect();
   const localY = clientY - bounds.top;
   const waveformHeight = Math.max(12, (bounds.height - 56) * 0.5);
-  const trackTop = 28 + waveformHeight + 14;
-  if (localY < trackTop || localY > bounds.height - 8) return null;
+  const trackTop = 28 + waveformHeight + (bounds.height < 100 ? 6 : 14);
+  if (localY < trackTop || localY > bounds.height - 4) return null;
   const range = waveform.end_ms - waveform.start_ms;
   for (let index = segments.length - 1; index >= 0; index -= 1) {
     const segment = segments[index];
@@ -4157,15 +4158,15 @@ function updateKaraokePosition(milliseconds: number): void {
   renderKaraokeTimeline();
 }
 
-function syncKaraokeFollowButton(): void {
-  karaokeFollowPlayheadButton?.classList.toggle("active", karaokeFollowPlayhead);
-  if (karaokeFollowPlayheadButton) karaokeFollowPlayheadButton.textContent = karaokeFollowPlayhead ? "波形跟随中" : "恢复播放跟随";
+function syncTimelineFollowState(): void {
+  const state = document.querySelector("#editor-wave-follow-state");
+  if (state) state.textContent = karaokeFollowPlayhead ? "视窗跟随中" : "视窗已暂停 · 点击跟随播放恢复";
 }
 
 function moveKaraokeWindow(direction: number): void {
   if (!activeDetail) return;
   karaokeFollowPlayhead = false;
-  syncKaraokeFollowButton();
+  syncTimelineFollowState();
   const nextStart = Math.max(0, karaokeViewStartMs + karaokeWindowDurationMs() * 0.8 * direction);
   void loadKaraokeWaveform(nextStart, true);
 }
@@ -6464,13 +6465,12 @@ document.querySelector<HTMLButtonElement>("#karaoke-step-forward")?.addEventList
 document.querySelector<HTMLButtonElement>("#karaoke-step-forward-small")?.addEventListener("click", () => seekKaraokeBy(10));
 document.querySelector<HTMLButtonElement>("#karaoke-window-back")?.addEventListener("click", () => moveKaraokeWindow(-1));
 document.querySelector<HTMLButtonElement>("#karaoke-window-forward")?.addEventListener("click", () => moveKaraokeWindow(1));
-karaokeFollowPlayheadButton?.addEventListener("click", () => void resumeEditorFollow());
 karaokeZoomInput?.addEventListener("input", () => {
   const oldWindow = karaokeWaveformWindow ? karaokeWaveformWindow.end_ms - karaokeWaveformWindow.start_ms : 30_000;
   const center = karaokeViewStartMs + oldWindow / 2;
   syncKaraokeZoomLabel();
   karaokeFollowPlayhead = false;
-  syncKaraokeFollowButton();
+  syncTimelineFollowState();
   scheduleKaraokeWaveformReload(Math.max(0, center - karaokeWindowDurationMs() / 2));
 });
 karaokeWaveformGainInput?.addEventListener("input", () => {
@@ -6516,7 +6516,7 @@ karaokeWaveform?.addEventListener("pointerdown", (event) => {
     };
   }
   karaokeFollowPlayhead = false;
-  syncKaraokeFollowButton();
+  syncTimelineFollowState();
   karaokeWaveform.setPointerCapture(event.pointerId);
   event.preventDefault();
 });
@@ -6580,7 +6580,7 @@ karaokeWaveform?.addEventListener("wheel", (event) => {
     syncKaraokeZoomLabel();
     const newStart = anchor - ratio * karaokeWindowDurationMs();
     karaokeFollowPlayhead = false;
-    syncKaraokeFollowButton();
+    syncTimelineFollowState();
     scheduleKaraokeWaveformReload(Math.max(0, newStart));
     event.preventDefault();
     return;
@@ -6591,7 +6591,7 @@ karaokeWaveform?.addEventListener("wheel", (event) => {
     const maximum = Math.max(0, karaokeWaveformWindow.duration_ms - duration);
     karaokeViewStartMs = Math.max(0, Math.min(maximum, karaokeViewStartMs + horizontalDelta / bounds.width * duration));
     karaokeFollowPlayhead = false;
-    syncKaraokeFollowButton();
+    syncTimelineFollowState();
     scheduleKaraokeWaveformReload(karaokeViewStartMs);
     event.preventDefault();
   }
@@ -6607,7 +6607,7 @@ karaokeWaveform?.addEventListener("gesturestart", ((event: KaraokeGestureEvent) 
     ratio,
   };
   karaokeFollowPlayhead = false;
-  syncKaraokeFollowButton();
+  syncTimelineFollowState();
   event.preventDefault();
 }) as EventListener, { passive: false });
 karaokeWaveform?.addEventListener("gesturechange", ((event: KaraokeGestureEvent) => {
@@ -6632,7 +6632,7 @@ karaokeWaveform?.addEventListener("click", (event) => {
   const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
   const milliseconds = karaokeWaveformWindow.start_ms + ratio * (karaokeWaveformWindow.end_ms - karaokeWaveformWindow.start_ms);
   karaokeFollowPlayhead = false;
-  syncKaraokeFollowButton();
+  syncTimelineFollowState();
   seekTo(milliseconds, false);
   updateActiveSubtitle(milliseconds);
 });
@@ -6655,7 +6655,7 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
     if (!Number.isFinite(startMs)) return;
     activeMedia?.pause();
     karaokeFollowPlayhead = false;
-    syncKaraokeFollowButton();
+    syncTimelineFollowState();
     if (karaokeWaveformReloadTimer !== null) {
       window.clearTimeout(karaokeWaveformReloadTimer);
       karaokeWaveformReloadTimer = null;

@@ -1,37 +1,44 @@
-export type EditorLayout = { version: 2; video: boolean; waveform: boolean; videoRatio: number; topRatio: number; editorRatio: number };
-export const defaultEditorLayout: EditorLayout = { version: 2, video: true, waveform: true, videoRatio: 34, topRatio: 30, editorRatio: 40 };
+export type EditorLayout = { version: 3; video: boolean; waveform: boolean; videoRatio: number; topRatio: number; waveRatio: number };
+export const defaultEditorLayout: EditorLayout = { version: 3, video: true, waveform: true, videoRatio: 44, topRatio: 67, waveRatio: 34 };
 const limit = (value: unknown, fallback: number, min: number, max: number): number => typeof value === "number" && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 export function readEditorLayout(raw: string | null): EditorLayout {
   try {
     const value = JSON.parse(raw ?? "null");
-    if (value?.version !== 1 && value?.version !== 2) return { ...defaultEditorLayout };
-    const topRatio = value.version === 1 ? 30 : limit(value.topRatio, 30, 22, 44);
-    return { version: 2, video: typeof value.video === "boolean" ? value.video : true,
+    if (![1, 2, 3].includes(value?.version)) return { ...defaultEditorLayout };
+    // Old horizontal sizes were chosen for video + waveform alone. Reset all
+    // ratios to suit the larger video + stacked right workspace; keep folds.
+    return { version: 3, video: typeof value.video === "boolean" ? value.video : true,
       waveform: typeof value.waveform === "boolean" ? value.waveform : true,
-      videoRatio: limit(value.videoRatio, 34, 20, 55), topRatio, editorRatio: value.version === 1 ? 40 : limit(value.editorRatio, Math.min(40, 80 - topRatio), 28, Math.min(50, 80 - topRatio)) };
+      videoRatio: value.version === 3 ? limit(value.videoRatio, 44, 25, 65) : 44,
+      topRatio: value.version === 3 ? limit(value.topRatio, 67, 45, 78) : 67,
+      waveRatio: value.version === 3 ? limit(value.waveRatio, 34, 20, 55) : 34 };
   } catch { return { ...defaultEditorLayout }; }
 }
+type Ratio = "videoRatio" | "topRatio" | "waveRatio";
 /** One owner for resize handlers and layout preferences; hiding video keeps media mounted. */
 export function mountEditorLayout(root: HTMLElement): { dispose(): void; refresh(): void } {
-  const key = "atogaki.editorLayout.v2";
+  const key = "atogaki.editorLayout.v3";
   let layout = readEditorLayout(null);
-  try { layout = readEditorLayout(localStorage.getItem(key) ?? localStorage.getItem("atogaki.editorLayout.v1")); } catch { /* Preferences are optional. */ }
+  try { layout = readEditorLayout(localStorage.getItem(key) ?? localStorage.getItem("atogaki.editorLayout.v2") ?? localStorage.getItem("atogaki.editorLayout.v1")); } catch { /* Preferences are optional. */ }
   const events = new AbortController();
-  let drag: { pointerId: number; field: "videoRatio" | "topRatio" | "editorRatio"; origin: number; value: number; extent: number; target: HTMLElement } | null = null;
+  let drag: { pointerId: number; field: Ratio; origin: number; value: number; extent: number; target: HTMLElement } | null = null;
   const render = () => {
     root.classList.toggle("editor-video-hidden", !layout.video);
     root.classList.toggle("editor-waveform-hidden", !layout.waveform);
+    const mediaHost = root.querySelector<HTMLElement>("#karaoke-media-host");
+    if (mediaHost) mediaHost.inert = !layout.video;
     root.style.setProperty("--editor-video-ratio", `${layout.videoRatio}fr`);
-    root.style.setProperty("--editor-wave-width", `${100 - layout.videoRatio}fr`);
+    root.style.setProperty("--editor-right-width", `${100 - layout.videoRatio}fr`);
     root.style.setProperty("--editor-top-ratio", `${layout.topRatio}fr`);
-    root.style.setProperty("--editor-edit-ratio", `${layout.editorRatio}fr`);
-    root.style.setProperty("--editor-list-ratio", `${100 - layout.topRatio - layout.editorRatio}fr`);
+    root.style.setProperty("--editor-list-ratio", `${100 - layout.topRatio}fr`);
+    root.style.setProperty("--editor-wave-ratio", `${layout.waveRatio}fr`);
+    root.style.setProperty("--editor-edit-ratio", `${100 - layout.waveRatio}fr`);
     for (const panel of ["video", "waveform"] as const) {
       const toggle = root.querySelector<HTMLButtonElement>(`[data-editor-toggle="${panel}"]`);
       toggle?.setAttribute("aria-expanded", String(layout[panel]));
       if (toggle) toggle.textContent = `${layout[panel] ? "收起" : "展开"}${panel === "video" ? "视频" : "波形"}`;
     }
-    root.querySelectorAll<HTMLElement>("[data-editor-resize]").forEach(handle => handle.setAttribute("aria-valuenow", String(Math.round(layout[handle.dataset.editorResize as "videoRatio"])))) ;
+    root.querySelectorAll<HTMLElement>("[data-editor-resize]").forEach(handle => handle.setAttribute("aria-valuenow", String(Math.round(layout[handle.dataset.editorResize as Ratio]))));
   };
   const persist = () => { try { localStorage.setItem(key, JSON.stringify(layout)); } catch { /* Layout still works without storage. */ } };
   root.addEventListener("click", event => {
@@ -43,7 +50,7 @@ export function mountEditorLayout(root: HTMLElement): { dispose(): void; refresh
     render(); persist();
   }, { signal: events.signal });
   root.querySelectorAll<HTMLElement>("[data-editor-resize]").forEach(handle => {
-    const field = handle.dataset.editorResize as "videoRatio" | "topRatio" | "editorRatio";
+    const field = handle.dataset.editorResize as Ratio;
     const change = (value: number) => { layout = readEditorLayout(JSON.stringify({ ...layout, [field]: value })); render(); };
     handle.addEventListener("keydown", event => {
       const negative = field === "videoRatio" ? "ArrowLeft" : "ArrowUp", positive = field === "videoRatio" ? "ArrowRight" : "ArrowDown";
@@ -54,7 +61,7 @@ export function mountEditorLayout(root: HTMLElement): { dispose(): void; refresh
     handle.addEventListener("pointerdown", event => {
       if (event.button !== 0) return;
       event.preventDefault(); handle.setPointerCapture(event.pointerId);
-      const bounds = root.querySelector<HTMLElement>(field === "videoRatio" ? ".editor-top" : ".editor-panels")!.getBoundingClientRect();
+      const bounds = root.querySelector<HTMLElement>(field === "videoRatio" ? ".editor-top" : field === "waveRatio" ? ".editor-right" : ".editor-panels")!.getBoundingClientRect();
       drag = { pointerId: event.pointerId, field, origin: field === "videoRatio" ? event.clientX : event.clientY, value: layout[field], extent: field === "videoRatio" ? bounds.width : bounds.height, target: handle };
     }, { signal: events.signal });
     handle.addEventListener("pointermove", event => {

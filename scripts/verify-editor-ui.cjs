@@ -23,11 +23,17 @@ const panelOrder=await page.evaluate(()=>{
  return {video:rect('#editor-video-panel'),wave:rect('#editor-wave-panel'),edit:rect('.karaoke-current-segment'),list:rect('.editor-list-panel')};
 });
 const cueSpace=await page.evaluate(()=>{const box=s=>document.querySelector(s).getBoundingClientRect();return {navTop:box('.editor-cue-navigation').top,timeTop:box('.editor-timing-fields').top,toolbarBottom:box('.editor-cue-toolbar').bottom,textTop:box('#karaoke-current-source').top,textHeight:box('#karaoke-current-source').height};});
-assert.ok(Math.abs(cueSpace.navTop-cueSpace.timeTop)<12);
-assert.ok(cueSpace.toolbarBottom<=cueSpace.textTop && cueSpace.textHeight>=70);
+assert.ok(cueSpace.navTop<=cueSpace.timeTop);
+assert.ok(cueSpace.toolbarBottom<=cueSpace.textTop && cueSpace.textHeight>=60);
 assert.equal(panelOrder.video.y,panelOrder.wave.y);
 assert.ok(panelOrder.video.right<=panelOrder.wave.x);
 assert.ok(panelOrder.wave.bottom<=panelOrder.edit.y && panelOrder.edit.bottom<=panelOrder.list.y);
+assert.equal(panelOrder.video.bottom,panelOrder.edit.bottom);
+assert.equal(panelOrder.edit.x,panelOrder.wave.x);
+assert.ok(await page.evaluate(()=>{
+ const a=document.querySelector('#karaoke-current-source').getBoundingClientRect(),b=document.querySelector('#karaoke-current-translation').getBoundingClientRect();
+ return a.bottom<b.top && a.width>document.querySelector('.editor-right').clientWidth*.9 && a.x===b.x;
+}));
 
 await page.screenshot({path:path.join(output,'editor-1180.png')});
 console.log('startup errors',errors);
@@ -96,7 +102,7 @@ assert.ok(await page.locator('#karaoke-media-host audio').evaluate(audio=>audio=
 assert.equal(await page.locator('#karaoke-media-host audio').evaluate(audio=>audio.currentTime),beforePosition);
 await page.locator('[data-editor-toggle="video"]').click();
 await page.locator('[data-editor-resize="videoRatio"]').focus();await page.keyboard.press('ArrowRight');
-assert.equal(await page.locator('[data-editor-resize="videoRatio"]').getAttribute('aria-valuenow'),'36');
+assert.equal(await page.locator('[data-editor-resize="videoRatio"]').getAttribute('aria-valuenow'),'46');
 // Explicit time save preserves typed values while playback advances.
 await page.locator('#editor-cue-start').fill('00:00:03.100');
 await page.locator('#editor-cue-end').fill('00:00:05.700');
@@ -132,7 +138,7 @@ assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.cmd==
 // Reload validates cross-session layout preferences and restores the same panel sizes.
 await page.reload();await page.locator('.job-open').first().click();
 await page.locator('#editor-cue-list .editor-cue-row').first().waitFor();
-assert.equal(await page.locator('[data-editor-resize="videoRatio"]').getAttribute('aria-valuenow'),'36');
+assert.equal(await page.locator('[data-editor-resize="videoRatio"]').getAttribute('aria-valuenow'),'46');
 assert.equal(await page.locator('#subtitle-list textarea').count(),0);
 // The same region still mounts as a read-only progress page for active jobs.
 await page.evaluate(()=>{window.__test.job.status='transcribing';window.__test.job.segment_count=0;});
