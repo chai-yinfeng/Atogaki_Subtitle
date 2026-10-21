@@ -1347,6 +1347,7 @@ function renderEditorList(): void {
   if (currentArea !== "karaoke" || !activeDetail) return;
   const cues = visibleEditorCues();
   editorCueList.render(cues, editorSession.selectedCueId, editorSession.playbackCueId);
+  if (editorSession.listAutoScroll) editorCueList.reveal(editorSession.playbackCueId);
   document.querySelector("#editor-match-count")!.textContent = `${cues.length} / ${activeDetail.segments.length} 段`;
   syncEditorSelectionMessage();
 }

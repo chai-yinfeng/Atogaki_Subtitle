@@ -38,7 +38,13 @@ const assert=require('node:assert/strict');
  const clock=await p.locator('#karaoke-current-time').innerText();
  await p.evaluate(()=>{window.__originalMedia.currentTime=19;for(const event of ['timeupdate','loadedmetadata','error','play'])window.__originalMedia.dispatchEvent(new Event(event));});
  assert.equal(await p.locator('#karaoke-current-time').innerText(),clock);assert.equal(await audio.count(),1);
+ await audio.evaluate(async a=>{await new Promise(r=>{a.addEventListener('seeked',r,{once:true});a.currentTime=18;});});
  await p.locator('[data-editor-action="back"]').click();assert.equal(await p.locator('#karaoke-media-host audio').count(),0);
+ await p.locator('.job-open').first().click();
+ await p.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.currentTime>=17.9);
+ assert.ok(await p.locator('#editor-cue-list').evaluate(e=>e.scrollTop>0));
+ assert.equal(await p.locator('[data-cue-id="cue-6"]').getAttribute('aria-current'),'true');
+ await p.locator('[data-editor-action="back"]').click();
  // Shared listening player restores and persists position without an editor instance.
  await p.locator('#show-listening').click();await p.locator('[data-listen-job]').first().click();
  const listening=p.locator('#listening-media-host audio');await listening.waitFor();
