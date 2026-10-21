@@ -1,30 +1,31 @@
-export type EditorLayout = { version: 1; video: boolean; waveform: boolean; videoRatio: number; topRatio: number; waveformRatio: number };
-export const defaultEditorLayout: EditorLayout = { version: 1, video: true, waveform: true, videoRatio: 34, topRatio: 39, waveformRatio: 25 };
+export type EditorLayout = { version: 2; video: boolean; waveform: boolean; videoRatio: number; topRatio: number; editorRatio: number };
+export const defaultEditorLayout: EditorLayout = { version: 2, video: true, waveform: true, videoRatio: 34, topRatio: 30, editorRatio: 40 };
 const limit = (value: unknown, fallback: number, min: number, max: number): number => typeof value === "number" && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 export function readEditorLayout(raw: string | null): EditorLayout {
   try {
     const value = JSON.parse(raw ?? "null");
-    if (value?.version !== 1) return { ...defaultEditorLayout };
-    return { version: 1, video: typeof value.video === "boolean" ? value.video : true,
+    if (value?.version !== 1 && value?.version !== 2) return { ...defaultEditorLayout };
+    const topRatio = value.version === 1 ? 30 : limit(value.topRatio, 30, 22, 44);
+    return { version: 2, video: typeof value.video === "boolean" ? value.video : true,
       waveform: typeof value.waveform === "boolean" ? value.waveform : true,
-      videoRatio: limit(value.videoRatio, 34, 20, 55), topRatio: limit(value.topRatio, 39, 28, 52), waveformRatio: limit(value.waveformRatio, 25, 18, 32) };
+      videoRatio: limit(value.videoRatio, 34, 20, 55), topRatio, editorRatio: value.version === 1 ? 40 : limit(value.editorRatio, Math.min(40, 80 - topRatio), 28, Math.min(50, 80 - topRatio)) };
   } catch { return { ...defaultEditorLayout }; }
 }
 /** One owner for resize handlers and layout preferences; hiding video keeps media mounted. */
 export function mountEditorLayout(root: HTMLElement): { dispose(): void; refresh(): void } {
-  const key = "atogaki.editorLayout.v1";
+  const key = "atogaki.editorLayout.v2";
   let layout = readEditorLayout(null);
-  try { layout = readEditorLayout(localStorage.getItem(key)); } catch { /* Preferences are optional. */ }
+  try { layout = readEditorLayout(localStorage.getItem(key) ?? localStorage.getItem("atogaki.editorLayout.v1")); } catch { /* Preferences are optional. */ }
   const events = new AbortController();
-  let drag: { pointerId: number; field: "videoRatio" | "topRatio" | "waveformRatio"; origin: number; value: number; extent: number; target: HTMLElement } | null = null;
+  let drag: { pointerId: number; field: "videoRatio" | "topRatio" | "editorRatio"; origin: number; value: number; extent: number; target: HTMLElement } | null = null;
   const render = () => {
     root.classList.toggle("editor-video-hidden", !layout.video);
     root.classList.toggle("editor-waveform-hidden", !layout.waveform);
     root.style.setProperty("--editor-video-ratio", `${layout.videoRatio}fr`);
-    root.style.setProperty("--editor-text-ratio", `${100 - layout.videoRatio}fr`);
+    root.style.setProperty("--editor-wave-width", `${100 - layout.videoRatio}fr`);
     root.style.setProperty("--editor-top-ratio", `${layout.topRatio}fr`);
-    root.style.setProperty("--editor-wave-ratio", `${layout.waveformRatio}fr`);
-    root.style.setProperty("--editor-list-ratio", `${100 - layout.topRatio - (layout.waveform ? layout.waveformRatio : 0)}fr`);
+    root.style.setProperty("--editor-edit-ratio", `${layout.editorRatio}fr`);
+    root.style.setProperty("--editor-list-ratio", `${100 - layout.topRatio - layout.editorRatio}fr`);
     for (const panel of ["video", "waveform"] as const) {
       const toggle = root.querySelector<HTMLButtonElement>(`[data-editor-toggle="${panel}"]`);
       toggle?.setAttribute("aria-expanded", String(layout[panel]));
@@ -42,7 +43,7 @@ export function mountEditorLayout(root: HTMLElement): { dispose(): void; refresh
     render(); persist();
   }, { signal: events.signal });
   root.querySelectorAll<HTMLElement>("[data-editor-resize]").forEach(handle => {
-    const field = handle.dataset.editorResize as "videoRatio" | "topRatio" | "waveformRatio";
+    const field = handle.dataset.editorResize as "videoRatio" | "topRatio" | "editorRatio";
     const change = (value: number) => { layout = readEditorLayout(JSON.stringify({ ...layout, [field]: value })); render(); };
     handle.addEventListener("keydown", event => {
       const negative = field === "videoRatio" ? "ArrowLeft" : "ArrowUp", positive = field === "videoRatio" ? "ArrowRight" : "ArrowDown";

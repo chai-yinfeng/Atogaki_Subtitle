@@ -24,10 +24,16 @@ test('navigation follows filtered order; revision staleness and unresolved revie
   session.reconcile(cues,'c'); assert.equal(session.selectedCueId,'c');
 });
 test('layout rejects corrupt and future settings, and clamps finite ratios', () => {
-  for (const raw of [null,'bad','{"version":2,"video":false}']) assert.deepEqual(readEditorLayout(raw), defaultEditorLayout);
-  const saved=readEditorLayout(JSON.stringify({version:1,video:false,waveform:false,videoRatio:999,topRatio:-10,waveformRatio:32}));
-  assert.deepEqual(saved,{version:1,video:false,waveform:false,videoRatio:55,topRatio:28,waveformRatio:32});
+  for (const raw of [null,'bad','{"version":3,"video":false}']) assert.deepEqual(readEditorLayout(raw), defaultEditorLayout);
+  const saved=readEditorLayout(JSON.stringify({version:2,video:false,waveform:false,videoRatio:999,topRatio:-10,editorRatio:99}));
+  assert.deepEqual(saved,{version:2,video:false,waveform:false,videoRatio:55,topRatio:22,editorRatio:50});
   assert.equal(readEditorLayout(JSON.stringify({version:1,video:'false',videoRatio:null})).video,true);
+});
+
+test('layout v1 migrates visibility and horizontal ratio without reusing old row meanings', () => {
+  const layout=readEditorLayout(JSON.stringify({version:1,video:false,waveform:true,videoRatio:42,topRatio:52,waveformRatio:18}));
+  assert.deepEqual(layout,{...defaultEditorLayout,video:false,videoRatio:42});
+  assert.equal(readEditorLayout(JSON.stringify({version:2,topRatio:44,editorRatio:50})).editorRatio,36);
 });
 
 test('timing gesture preserves text saved during the drag and rejects changed boundaries', () => {

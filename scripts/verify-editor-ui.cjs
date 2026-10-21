@@ -15,6 +15,14 @@ await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await
 await page.locator('#editor-cue-list .editor-cue-row').first().waitFor();
 assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.cmd==='get_job_detail').length),1);
 assert.equal(await page.locator('.editor-workspace-label').innerText(),'字幕编辑');
+const panelOrder=await page.evaluate(()=>{
+ const rect=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x,y:r.y,bottom:r.bottom,right:r.right};};
+ return {video:rect('#editor-video-panel'),wave:rect('#editor-wave-panel'),edit:rect('.karaoke-current-segment'),list:rect('.editor-list-panel')};
+});
+assert.equal(panelOrder.video.y,panelOrder.wave.y);
+assert.ok(panelOrder.video.right<=panelOrder.wave.x);
+assert.ok(panelOrder.wave.bottom<=panelOrder.edit.y && panelOrder.edit.bottom<=panelOrder.list.y);
+
 await page.screenshot({path:path.join(output,'editor-1180.png')});
 console.log('startup errors',errors);
 console.log('layout',await page.evaluate(()=>({viewport:[innerWidth,innerHeight],height:document.documentElement.scrollHeight,panels:[...document.querySelectorAll('.editor-top,#editor-wave-panel,.editor-list-panel')].map(e=>({class:e.className,rect:{h:e.clientHeight,w:e.clientWidth}})),rows:document.querySelectorAll('.editor-cue-row').length})));
