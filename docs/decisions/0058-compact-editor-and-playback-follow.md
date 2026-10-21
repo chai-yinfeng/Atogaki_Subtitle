@@ -47,3 +47,10 @@
 `editor-timeline-gestures.ts` 持有一次 pointer／pan／playhead／pinch 的状态、指针捕获与监听器。离开任务 reset、失去捕获、pointercancel、Escape 和 dispose 均取消未提交预览并释放捕获；拖动中阻止其他缩放手势叠加。`timeline-timing.ts` 以纯函数约束 10 ms 吸附、相邻边界及媒体范围，预览不修改主字幕数组。会话从模块读取临时预览，提交前仍 flush 原草稿并以当前文本重基，通过既有 backend 保存；任务身份和导航代次在 flush 后再次核对。
 
 手势模块不调用 Tauri，不创建播放器、草稿或第二套持久化。34 项前端测试、类型／构建、既有四组 WebKit 回归及新增手势专项通过；专项覆盖 Escape、捕获丢失、取消后再次拖动、pan、ctrl-wheel、Safari pinch 去重、离开任务与播放头 seek。正式本机仍运行上一个已安装里程碑，后续完整构建时再更新。
+
+
+## 共享播放器边界
+
+`media-player.ts` 是编辑与收听共用的唯一媒体元素所有者，通过注入的 URL 解析、播放位置和状态回调接入应用。mount／fallback／stop／dispose 统一释放旧元素监听器、src 和 RAF；回退仍最多一次，保留位置、播放意图、音量、静音和速度。事件与迟到 play Promise 同时检查元素、挂载代次和任务身份。stop 先失效旧事件，再由会话保存旧位置，最后卸载；等待保存期间挂载的新媒体不会被旧 stop 清除。
+
+原 WebKit 在 src 加载后会恢复默认速度；现在同时维护 defaultPlaybackRate 与 playbackRate，元数据完成后恢复配置，用户控制和原生速度变化也更新默认值。39 项前端测试、既有五组 WebKit 及共享播放器专项通过。共享播放器专项使用真实媒体事件验证回退状态、旧事件、收听恢复／保存和双源失败停止；原生最终构建仍需在后续里程碑复查。

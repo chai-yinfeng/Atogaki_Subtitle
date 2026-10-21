@@ -1,3 +1,4 @@
+import { createMediaPlayer } from "./media-player";
 import type { TimingGesture } from "./timeline-timing";
 import { mountTimelineGestures } from "./editor-timeline-gestures";
 import { mountEditorTimeline } from "./editor-timeline-view";
@@ -1150,8 +1151,13 @@ let latestJobs: LocalJob[] = [];
 let currentArea: TopLevelArea = "workbench";
 let renderedJobsFingerprint: string | null = null;
 let activeDetail: JobDetail | null = null;
-let activeMedia: HTMLMediaElement | null = null;
-let mediaSessionId = 0;
+const mediaPlayer = createMediaPlayer({
+  currentJob: id => activeDetail?.job.job_id === id,
+  resolve: convertFileSrc, isAudio: isAudioPath, time: formatTime,
+  position: updateActiveSubtitle, progress: schedulePlaybackPositionSave,
+  changed: updatePlaybackControls, persist: () => void persistPlaybackPosition(),
+  frameEnabled: () => currentArea === "karaoke",
+});
 let navigationRequestId = 0;
 let activeSegmentId: string | null = null;
 let subtitleOverlayVisible = false;
@@ -1211,7 +1217,6 @@ let karaokeWaveformRequestId = 0;
 let karaokeViewStartMs = 0;
 let karaokeFollowPlayhead = true;
 let karaokeWaveformLoading = false;
-let karaokeAnimationFrame: number | null = null;
 let karaokeSelectedJobId: string | null = null;
 let karaokeResumeMs = 0;
 let karaokeWaveformGain = 1;
@@ -1290,7 +1295,7 @@ const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
     karaokeFollowPlayhead = true;
     syncTimelineFollowState();
     editorTimeFingerprint = "";
-    updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
+    updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
     currentCueEditor.sync(karaokeDraftSegment(), true);
     editorCueList.reveal(editorSession.playbackCueId);
   },
@@ -1298,13 +1303,13 @@ const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
 const timelineGestures = mountTimelineGestures<SubtitleSegment>(karaokeWaveform!, karaokeZoomInput!, editorRoot, {
   snapshot: () => activeDetail && karaokeWaveformWindow && currentArea === "karaoke" ? {
     jobId: activeDetail.job.job_id, cues: activeDetail.segments, waveform: karaokeWaveformWindow,
-    currentMs: (activeMedia?.currentTime ?? 0) * 1_000, viewStartMs: karaokeViewStartMs, durationMs: karaokeWindowDurationMs(),
+    currentMs: (mediaPlayer.media?.currentTime ?? 0) * 1_000, viewStartMs: karaokeViewStartMs, durationMs: karaokeWindowDurationMs(),
   } : null,
   select: id => {
     if (currentCueEditor.dirty) { setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true); return false; }
     return selectEditorCue(id);
   },
-  pause: () => activeMedia?.pause(),
+  pause: () => mediaPlayer.media?.pause(),
   seek: ms => { seekTo(ms, false); updateActiveSubtitle(ms); },
   stopFollowing: () => { karaokeFollowPlayhead = false; syncTimelineFollowState(); },
   pan: start => { karaokeViewStartMs = start; scheduleKaraokeWaveformReload(start); },
@@ -1343,7 +1348,7 @@ function selectEditorCue(id: string): boolean {
   editorStart.value = formatPreciseTime(cue.start_ms); editorEnd.value = formatPreciseTime(cue.end_ms);
   currentCueEditor.sync(cue, true);
   editorCueList.mark(id, editorSession.playbackCueId);
-  updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
+  updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
   renderEditorList();
   return true;
 }
@@ -1424,6 +1429,7 @@ window.addEventListener("pagehide", () => {
   editorFollow.dispose();
   editorTimeline.dispose();
   timelineGestures.dispose();
+  mediaPlayer.dispose();
   editorCueList.dispose();
   currentCueEditor.dispose();
   taskTools.dispose();
@@ -2742,15 +2748,9 @@ async function stopActivePlayback(): Promise<void> {
   playbackLoop = null; loopStartMs = null;
   document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
 
-  const media = activeMedia;
   const detail = activeDetail;
   const area = currentArea;
-  mediaSessionId += 1;
   karaokeWaveformRequestId += 1;
-  if (karaokeAnimationFrame !== null) {
-    window.cancelAnimationFrame(karaokeAnimationFrame);
-    karaokeAnimationFrame = null;
-  }
   timelineGestures.reset();
   currentCueEditor.clear();
   if (karaokeWaveformReloadTimer !== null) {
@@ -2759,22 +2759,14 @@ async function stopActivePlayback(): Promise<void> {
   }
   karaokePendingWaveformStartMs = 0;
   editorCueList.clear(); editorFilterCache = null;
-  activeMedia = null;
   if (playbackPositionSaveTimer !== null) {
     window.clearTimeout(playbackPositionSaveTimer);
     playbackPositionSaveTimer = null;
   }
-  if (media) {
-    media.pause();
-    if (area === "listening" && detail) {
-      await savePlaybackPosition(detail.job.job_id, media);
-    } else if (area === "karaoke" && detail) {
-      karaokeResumeMs = Math.round(media.currentTime * 1_000);
-    }
-    media.removeAttribute("src");
-    media.load();
-    media.remove();
-  }
+  await mediaPlayer.stop(async media => {
+    if (area === "listening" && detail) await savePlaybackPosition(detail.job.job_id, media);
+    else if (area === "karaoke" && detail) karaokeResumeMs = Math.round(media.currentTime * 1_000);
+  });
   activeSegmentId = null;
   updatePlaybackControls();
   hideSubtitleOverlay();
@@ -2844,7 +2836,7 @@ async function openListeningJob(
     mountMedia(detail.playback_path, detail.audio_fallback_path, listeningMediaHost, listeningMediaMessage, resumeMs);
     updateActiveSubtitle(resumeMs);
     renderSubtitleOverlayButton();
-    if (autoplay && activeMedia) await activeMedia.play();
+    if (autoplay && mediaPlayer.media) await mediaPlayer.media.play();
   } catch (error) {
     if (requestId !== navigationRequestId || currentArea !== "listening") return;
     listeningMediaMessage.textContent = `无法打开节目：${String(error)}`;
@@ -3490,7 +3482,7 @@ function setRetranscriptionMessage(message: string, isError = false): void {
 }
 
 function usePlayheadSubtitleForRetranscription(reportGap = true): void {
-  const position = (activeMedia?.currentTime ?? 0) * 1_000;
+  const position = (mediaPlayer.media?.currentTime ?? 0) * 1_000;
   const segment = activeDetail?.segments.find(cue => cue.start_ms <= position && position < cue.end_ms);
   if (!segment) {
     if (reportGap) setRetranscriptionMessage("播放头位于字幕空白处。请移动到字幕段，或手动选择要补识别的范围。", true);
@@ -3695,7 +3687,7 @@ async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promis
   const requestId = ++karaokeWaveformRequestId;
   const waveformJobId = activeDetail.job.job_id;
   const windowDuration = karaokeWindowDurationMs();
-  const knownDuration = karaokeWaveformWindow?.duration_ms ?? Math.round((activeMedia?.duration ?? 0) * 1_000);
+  const knownDuration = karaokeWaveformWindow?.duration_ms ?? Math.round((mediaPlayer.media?.duration ?? 0) * 1_000);
   const unclampedStart = alignStart ? anchorMs : anchorMs - windowDuration / 2;
   const maximumStart = Math.max(0, knownDuration - windowDuration);
   const startMs = knownDuration > 0
@@ -3745,7 +3737,7 @@ function renderKaraokeTimeline(): void {
     waveform, cues: [...positions].sort((a,b) => a-b).map(i => all[i]),
     selectedCueId: editorSession.selectedCueId, playbackCueId: editorSession.playbackCueId,
     draggedCueId: drag ? all[drag.segmentIndex]?.id ?? null : null,
-    gain: karaokeWaveformGain, currentMs: Math.round((activeMedia?.currentTime ?? 0) * 1_000),
+    gain: karaokeWaveformGain, currentMs: Math.round((mediaPlayer.media?.currentTime ?? 0) * 1_000),
     emptyMessage: activeDetail ? "正在准备波形…" : "选择一个字幕任务",
   });
 }
@@ -3795,7 +3787,7 @@ async function commitKaraokeTimingDrag(drag: TimingGesture<SubtitleSegment>): Pr
     currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList();
     updateStructureUndoButton();
     syncKaraokeWaveformStatus();
-    updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
+    updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
     renderKaraokeTimeline();
     setSubtitleEditAction(`第 ${segment.segment_index + 1} 段已保存为 ${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)}；相邻空白保持不变。`);
   } catch (error) {
@@ -3829,7 +3821,7 @@ async function undoKaraokeTextSave(): Promise<void> {
     replaceActiveSegment(restored);
     if (editorSession.selectedCueId === restored.id) currentCueEditor.sync(restored, true);
     updateStructureUndoButton();
-    updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
+    updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
     setSubtitleEditAction("已撤销当前字幕上一次文字保存；历史仅保留在本次 App 会话。");
   } catch (error) {
     if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = false;
@@ -3895,10 +3887,10 @@ function syncTimelineFollowState(): void {
 }
 
 function seekKaraokeBy(milliseconds: number): void {
-  if (!activeMedia) return;
-  const durationMs = Number.isFinite(activeMedia.duration) ? activeMedia.duration * 1_000 : Number.MAX_SAFE_INTEGER;
-  seekTo(Math.max(0, Math.min(durationMs, activeMedia.currentTime * 1_000 + milliseconds)), false);
-  updateKaraokePosition(activeMedia.currentTime * 1_000);
+  if (!mediaPlayer.media) return;
+  const durationMs = Number.isFinite(mediaPlayer.media.duration) ? mediaPlayer.media.duration * 1_000 : Number.MAX_SAFE_INTEGER;
+  seekTo(Math.max(0, Math.min(durationMs, mediaPlayer.media.currentTime * 1_000 + milliseconds)), false);
+  updateKaraokePosition(mediaPlayer.media.currentTime * 1_000);
 }
 
 async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSegment | null): Promise<void> {
@@ -3920,14 +3912,14 @@ async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSe
 async function openInsertSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
   if (currentCueEditor.dirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
-  if (!activeMedia || !Number.isFinite(activeMedia.duration) || activeMedia.duration <= 0) { setSubtitleEditAction("媒体时长尚未就绪，请等待加载或重新定位媒体。", true); return; }
-  activeMedia.pause();
+  if (!mediaPlayer.media || !Number.isFinite(mediaPlayer.media.duration) || mediaPlayer.media.duration <= 0) { setSubtitleEditAction("媒体时长尚未就绪，请等待加载或重新定位媒体。", true); return; }
+  mediaPlayer.media.pause();
   const jobId = activeDetail.job.job_id;
-  const position = Math.round((activeMedia?.currentTime ?? 0) * 1000 / 10) * 10;
+  const position = Math.round((mediaPlayer.media?.currentTime ?? 0) * 1000 / 10) * 10;
   const current = activeDetail.segments.find(s=>s.start_ms <= position && s.end_ms > position);
   const start = current?.end_ms ?? position;
   const next = activeDetail.segments.find(s=>s.start_ms >= start);
-  const duration = Number.isFinite(activeMedia?.duration) ? Math.round(activeMedia!.duration*1000) : start+2000;
+  const duration = Number.isFinite(mediaPlayer.media?.duration) ? Math.round(mediaPlayer.media!.duration*1000) : start+2000;
   const end = Math.min(start+2000, next?.start_ms ?? duration, duration);
   const dialog = document.createElement("dialog"); dialog.className="rename-job-dialog insert-block-dialog";
   dialog.innerHTML='<form><h2>插入字幕块</h2><p>在空白区间新增字幕，不移动已有块。</p><label>开始<input name="start" required></label><label>结束<input name="end" required></label><label>原文<textarea name="source" rows="3" required></textarea></label><label>译文（可选）<textarea name="translation" rows="2"></textarea></label><p role="status"></p><div class="confirmation-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit">插入</button></div></form>';
@@ -3956,7 +3948,7 @@ async function deleteCurrentSubtitleBlock(): Promise<void> {
   const jobId=activeDetail.job.job_id;
   const id=editorSession.selectedCueId;
   if (!id || !activeDetail.segments.some(s=>s.id===id)) { setSubtitleEditAction("请先选择要删除的字幕块。",true); return; }
-  activeMedia?.pause();
+  mediaPlayer.media?.pause();
   if (!await confirmAction({title:"删除当前字幕块？",message:"删除原文、译文及此块时间范围；不会移动其他字幕。学习收藏保留来源快照。当前会话可用“撤销上次打轴”恢复。",confirmLabel:"删除字幕块",danger:true})) return;
   if (activeDetail?.job.job_id===jobId) await changeKaraokeBlock(id,null);
 }
@@ -3964,7 +3956,7 @@ async function deleteCurrentSubtitleBlock(): Promise<void> {
 async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;
   const selectedId = editorSession.selectedCueId;
-  const boundary = Math.round((activeMedia?.currentTime ?? 0) * 1_000 / 10) * 10;
+  const boundary = Math.round((mediaPlayer.media?.currentTime ?? 0) * 1_000 / 10) * 10;
   lockEditorCue();
   if (!await flushEditorStructureDrafts() || editorSession.selectedCueId !== selectedId) return;
   if (currentCueEditor.dirty) {
@@ -4046,18 +4038,6 @@ async function joinKaraokeSegmentWithNext(): Promise<void> {
   }
 }
 
-function scheduleKaraokeAnimation(): void {
-  if (karaokeAnimationFrame !== null || currentArea !== "karaoke" || !activeMedia || activeMedia.paused) return;
-  const tick = () => {
-    if (currentArea !== "karaoke" || !activeMedia || activeMedia.paused) {
-      karaokeAnimationFrame = null;
-      return;
-    }
-    updateActiveSubtitle(activeMedia.currentTime * 1_000);
-    karaokeAnimationFrame = window.requestAnimationFrame(tick);
-  };
-  karaokeAnimationFrame = window.requestAnimationFrame(tick);
-}
 
 function showWorkspaceSection(section: WorkspaceSection): void {
   if (section === "review" && currentArea === "karaoke") { closeEditorTools(); return; }
@@ -4194,92 +4174,9 @@ function mountMedia(
   message: HTMLParagraphElement | null = mediaMessage,
   resumeMs = 0,
 ): void {
-  if (!host || !message) return;
-  const sessionId = ++mediaSessionId;
-  activeMedia = null;
-  updatePlaybackControls();
-  host.replaceChildren();
-  const firstPath = primaryPath ?? fallbackPath;
-  if (!firstPath) {
-    message.textContent = "没有找到可播放的本地媒体；任务可能仍在处理或源文件已移动。";
-    return;
-  }
-
-  const loadPath = (path: string, isFallback: boolean, positionMs = resumeMs, autoplay = false, volume = 1, muted = false, playbackRate = Number(activePlaybackRateSelect()?.value || "1")): void => {
-    const previous = activeMedia;
-    activeMedia = null;
-    if (previous) { previous.pause(); previous.removeAttribute("src"); previous.load(); }
-    const element = document.createElement(isFallback || isAudioPath(activeDetail?.job.input_path ?? path) ? "audio" : "video");
-    element.controls = true;
-    element.preload = "metadata";
-    const isCurrent = () => activeMedia === element && mediaSessionId === sessionId;
-    let shouldPlay = autoplay;
-    let metadataLoaded = false;
-    const fallbackMessage = "原素材播放失败，已自动使用任务音频。";
-    element.addEventListener("timeupdate", () => {
-      if (!isCurrent()) return;
-      updateActiveSubtitle(element.currentTime * 1_000);
-      schedulePlaybackPositionSave();
-    });
-    element.addEventListener("seeked", () => {
-      if (isCurrent()) updateActiveSubtitle(element.currentTime * 1_000);
-    });
-    element.addEventListener("play", () => {
-      if (isCurrent()) { shouldPlay = true; updatePlaybackControls(); }
-    });
-    element.addEventListener("pause", () => {
-      if (!isCurrent()) return;
-      if (!element.error) shouldPlay = false;
-      updatePlaybackControls();
-      void persistPlaybackPosition();
-    });
-    element.addEventListener("ended", () => {
-      if (!isCurrent()) return;
-      updatePlaybackControls();
-      void persistPlaybackPosition();
-    });
-    element.addEventListener("ratechange", () => {
-      if (isCurrent()) updatePlaybackControls();
-    });
-    element.addEventListener("loadedmetadata", () => {
-      if (!isCurrent()) return;
-      metadataLoaded = true;
-      if (positionMs > 0 && Number.isFinite(element.duration)) element.currentTime = Math.min(positionMs / 1_000, Math.max(0, element.duration - 0.25));
-      if (shouldPlay) void element.play().catch(() => { if (isCurrent()) message.textContent += " · 请点击播放"; });
-      if (positionMs > 0) message.textContent = `${isFallback ? fallbackMessage : activeDetail?.job.input_path ?? "原素材"} · 已恢复到 ${formatTime(element.currentTime * 1_000)}`;
-      updatePlaybackControls();
-      updateActiveSubtitle(element.currentTime * 1_000);
-    });
-    element.addEventListener(
-      "error",
-      () => {
-        if (!isCurrent()) return;
-        if (!isFallback && fallbackPath && fallbackPath !== path) {
-          loadPath(fallbackPath, true, metadataLoaded ? element.currentTime * 1_000 : positionMs, shouldPlay, element.volume, element.muted, element.playbackRate);
-        } else {
-          message.textContent = "媒体加载失败。可能是文件已移动，或系统 WebView 不支持这种编码。";
-        }
-      },
-      { once: true },
-    );
-    activeMedia = element;
-    element.playbackRate = playbackRate;
-    element.volume = volume;
-    element.muted = muted;
-    host.replaceChildren(element);
-    element.src = /^http:\/\/127\.0\.0\.1:\d+\/media\/[a-f0-9-]+$/.test(path)
-      ? path
-      : convertFileSrc(path);
-    updatePlaybackControls();
-    if (!isFallback) {
-      const displayPath = activeDetail?.job.input_path ?? path;
-      message.textContent = positionMs > 0 ? `${displayPath} · 已恢复到 ${formatTime(positionMs)}` : displayPath;
-    } else {
-      message.textContent = `${primaryPath ? fallbackMessage : "原素材不可用，已使用任务音频。"} · ${formatTime(positionMs)}`;
-    }
-  };
-
-  loadPath(firstPath, firstPath === fallbackPath && primaryPath === null);
+  if (!host || !message || !activeDetail) return;
+  mediaPlayer.mount({ jobId: activeDetail.job.job_id, inputPath: activeDetail.job.input_path,
+    primaryPath, fallbackPath, host, message, resumeMs, playbackRate: Number(activePlaybackRateSelect()?.value || "1") });
 }
 
 function cloneSubtitleSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
@@ -4330,7 +4227,7 @@ function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?:
     syncKaraokeWaveformStatus();
     renderKaraokeTimeline();
   }
-  updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+  updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
   lastSubtitleOverlayKey = "";
   updateStructureUndoButton();
 }
@@ -4413,7 +4310,7 @@ function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleS
     setSubtitleEditAction(status, !!draft.error);
   }
   if (before) updateTranslationControls();
-  if (before) { updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000); updateStructureUndoButton(); }
+  if (before) { updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000); updateStructureUndoButton(); }
 }
 
 function renderSubtitleList(segments: SubtitleSegment[], _expandedSegmentId?: string): void {
@@ -4492,7 +4389,7 @@ async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
   activeDetail.translation_context_stale_ids = detail.translation_context_stale_ids;
   renderSubtitleListPreservingView(activeDetail.segments);
   updateTranslationControls();
-  updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+  updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
 }
 
 async function translateSegment(
@@ -4514,7 +4411,7 @@ async function translateSegment(
     if (activeDetail?.job.job_id === jobId) {
       replaceActiveSegment(translated);
       renderSubtitleListPreservingView(activeDetail.segments, segment.id);
-      updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+      updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
     }
     try {
       await reloadTranslatedWorkspace(jobId);
@@ -4580,10 +4477,10 @@ function parseTimecode(value: string): number | null {
 }
 
 function seekTo(milliseconds: number, autoplay = true): void {
-  if (!activeMedia) return;
-  const durationMs = Number.isFinite(activeMedia.duration) ? activeMedia.duration * 1_000 : milliseconds;
-  activeMedia.currentTime = Math.max(0, Math.min(milliseconds, durationMs)) / 1_000;
-  if (autoplay) void activeMedia.play().catch(() => undefined);
+  if (!mediaPlayer.media) return;
+  const durationMs = Number.isFinite(mediaPlayer.media.duration) ? mediaPlayer.media.duration * 1_000 : milliseconds;
+  mediaPlayer.media.currentTime = Math.max(0, Math.min(milliseconds, durationMs)) / 1_000;
+  if (autoplay) void mediaPlayer.media.play().catch(() => undefined);
 }
 
 function activePlaybackRateSelect(): HTMLSelectElement | null {
@@ -4593,7 +4490,7 @@ function activePlaybackRateSelect(): HTMLSelectElement | null {
 }
 
 function schedulePlaybackPositionSave(): void {
-  if (currentArea !== "listening" || !activeMedia || Date.now() - lastPlaybackPositionSavedAt < 5_000) return;
+  if (currentArea !== "listening" || !mediaPlayer.media || Date.now() - lastPlaybackPositionSavedAt < 5_000) return;
   if (playbackPositionSaveTimer !== null) return;
   playbackPositionSaveTimer = window.setTimeout(() => {
     playbackPositionSaveTimer = null;
@@ -4602,8 +4499,8 @@ function schedulePlaybackPositionSave(): void {
 }
 
 async function persistPlaybackPosition(): Promise<void> {
-  if (currentArea !== "listening" || !activeDetail || !activeMedia) return;
-  await savePlaybackPosition(activeDetail.job.job_id, activeMedia);
+  if (currentArea !== "listening" || !activeDetail || !mediaPlayer.media) return;
+  await savePlaybackPosition(activeDetail.job.job_id, mediaPlayer.media);
 }
 
 async function savePlaybackPosition(jobId: string, media: HTMLMediaElement): Promise<void> {
@@ -4615,33 +4512,33 @@ async function savePlaybackPosition(jobId: string, media: HTMLMediaElement): Pro
 }
 
 function updatePlaybackControls(): void {
-  const disabled = !activeMedia;
+  const disabled = !mediaPlayer.media;
   for (const button of [previousSubtitleButton, rewindMediaButton, togglePlaybackButton, forwardMediaButton, nextSubtitleButton, listeningPreviousSubtitleButton, listeningRewindMediaButton, listeningTogglePlaybackButton, listeningForwardMediaButton, listeningNextSubtitleButton, karaokeTogglePlaybackButton]) {
     if (button) button.disabled = disabled;
   }
   for (const select of [playbackRateSelect, listeningPlaybackRateSelect, karaokePlaybackRateSelect]) if (select) select.disabled = disabled;
-  if (togglePlaybackButton) togglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
-  if (listeningTogglePlaybackButton) listeningTogglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
-  if (karaokeTogglePlaybackButton) karaokeTogglePlaybackButton.textContent = activeMedia && !activeMedia.paused ? "暂停" : "播放";
-  if (activeMedia) for (const select of [playbackRateSelect, listeningPlaybackRateSelect, karaokePlaybackRateSelect]) if (select) select.value = String(activeMedia.playbackRate);
-  scheduleKaraokeAnimation();
-  if (subtitleOverlayVisible) syncSubtitleOverlay(subtitleAt((activeMedia?.currentTime ?? 0) * 1_000));
+  if (togglePlaybackButton) togglePlaybackButton.textContent = mediaPlayer.media && !mediaPlayer.media.paused ? "暂停" : "播放";
+  if (listeningTogglePlaybackButton) listeningTogglePlaybackButton.textContent = mediaPlayer.media && !mediaPlayer.media.paused ? "暂停" : "播放";
+  if (karaokeTogglePlaybackButton) karaokeTogglePlaybackButton.textContent = mediaPlayer.media && !mediaPlayer.media.paused ? "暂停" : "播放";
+  if (mediaPlayer.media) for (const select of [playbackRateSelect, listeningPlaybackRateSelect, karaokePlaybackRateSelect]) if (select) select.value = String(mediaPlayer.media.playbackRate);
+  mediaPlayer.refreshAnimation();
+  if (subtitleOverlayVisible) syncSubtitleOverlay(subtitleAt((mediaPlayer.media?.currentTime ?? 0) * 1_000));
 }
 
 function togglePlayback(): void {
-  if (!activeMedia) return;
-  if (activeMedia.paused) void activeMedia.play().catch(() => undefined);
-  else activeMedia.pause();
+  if (!mediaPlayer.media) return;
+  if (mediaPlayer.media.paused) void mediaPlayer.media.play().catch(() => undefined);
+  else mediaPlayer.media.pause();
 }
 
 function seekRelative(seconds: number): void {
-  if (!activeMedia) return;
-  seekTo((activeMedia.currentTime + seconds) * 1_000, false);
+  if (!mediaPlayer.media) return;
+  seekTo((mediaPlayer.media.currentTime + seconds) * 1_000, false);
 }
 
 function seekAdjacentSubtitle(direction: -1 | 1): void {
-  if (!activeMedia || !activeDetail || activeDetail.segments.length === 0) return;
-  const currentMs = activeMedia.currentTime * 1_000;
+  if (!mediaPlayer.media || !activeDetail || activeDetail.segments.length === 0) return;
+  const currentMs = mediaPlayer.media.currentTime * 1_000;
   const activeIndex = activeDetail.segments.findIndex((segment) => segment.id === activeSegmentId);
   let targetIndex: number;
   if (activeIndex >= 0) {
@@ -4658,11 +4555,11 @@ function seekAdjacentSubtitle(direction: -1 | 1): void {
 
 function changePlaybackRate(direction: -1 | 1): void {
   const rateSelect = activePlaybackRateSelect();
-  if (!activeMedia || !rateSelect) return;
+  if (!mediaPlayer.media || !rateSelect) return;
   const rates = Array.from(rateSelect.options).map((option) => Number(option.value));
-  const currentIndex = rates.findIndex((rate) => rate === activeMedia?.playbackRate);
+  const currentIndex = rates.findIndex((rate) => rate === mediaPlayer.media?.playbackRate);
   const nextIndex = Math.max(0, Math.min(rates.length - 1, (currentIndex < 0 ? rates.indexOf(1) : currentIndex) + direction));
-  activeMedia.playbackRate = rates[nextIndex];
+  mediaPlayer.setRate(rates[nextIndex]);
 }
 
 function executePlaybackAction(action: PlaybackAction): void {
@@ -4692,8 +4589,8 @@ function subtitleOverlayPayload(segment: SubtitleSegment | undefined): SubtitleO
     translatedText: segment?.translated_text ?? null,
     sourceLanguage: activeSourceLanguage(),
     targetLanguage: activeTargetLanguage(),
-    playing: Boolean(activeMedia && !activeMedia.paused),
-    playbackRate: activeMedia?.playbackRate ?? 1,
+    playing: Boolean(mediaPlayer.media && !mediaPlayer.media.paused),
+    playbackRate: mediaPlayer.media?.playbackRate ?? 1,
   };
 }
 
@@ -4726,7 +4623,7 @@ async function openSubtitleOverlay(): Promise<void> {
   subtitleOverlayVisible = true;
   lastSubtitleOverlayKey = "";
   renderSubtitleOverlayButton();
-  const segment = subtitleAt((activeMedia?.currentTime ?? 0) * 1_000);
+  const segment = subtitleAt((mediaPlayer.media?.currentTime ?? 0) * 1_000);
   try {
     await invoke("open_subtitle_overlay", { payload: subtitleOverlayPayload(segment) });
     syncSubtitleOverlay(segment);
@@ -4747,9 +4644,9 @@ function hideSubtitleOverlay(): void {
 }
 
 function updateActiveSubtitle(milliseconds: number): void {
-  if (activeMedia && playbackLoop && activeMedia.currentTime * 1000 >= playbackLoop.endMs) {
-    if (playbackLoop.repeat) activeMedia.currentTime = playbackLoop.startMs / 1000;
-    else { activeMedia.pause(); playbackLoop = null; }
+  if (mediaPlayer.media && playbackLoop && mediaPlayer.media.currentTime * 1000 >= playbackLoop.endMs) {
+    if (playbackLoop.repeat) mediaPlayer.media.currentTime = playbackLoop.startMs / 1000;
+    else { mediaPlayer.media.pause(); playbackLoop = null; }
   }
 
   const segment = subtitleAt(milliseconds);
@@ -4789,7 +4686,7 @@ function markUserSubtitleScrolling(host: HTMLElement): void {
   if (state.resumeTimer !== null) window.clearTimeout(state.resumeTimer);
   state.resumeTimer = window.setTimeout(() => {
     state.resumeTimer = null;
-    if (Date.now() < state.userScrollingUntil || !activeMedia || activeMedia.paused) return;
+    if (Date.now() < state.userScrollingUntil || !mediaPlayer.media || mediaPlayer.media.paused) return;
     highlightSegment(activeSegmentId);
   }, 3_050);
 }
@@ -4805,7 +4702,7 @@ function registerSubtitleFollowHost(host: HTMLElement | null): void {
 
 function followActiveSubtitle(host: HTMLElement, card: HTMLElement): void {
   const state = subtitleFollowState(host);
-  if (!activeMedia || activeMedia.paused || Date.now() < state.userScrollingUntil) return;
+  if (!mediaPlayer.media || mediaPlayer.media.paused || Date.now() < state.userScrollingUntil) return;
   if (host.scrollHeight <= host.clientHeight + 1) return;
   const targetTop = Math.max(
     0,
@@ -4870,7 +4767,7 @@ async function translateAllSubtitles(onlyPending: boolean): Promise<void> {
     if (activeDetail?.job.job_id === jobId) {
       activeDetail.segments = result.segments;
       renderSubtitleListPreservingView(activeDetail.segments);
-      updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+      updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
     }
     try {
       await reloadTranslatedWorkspace(jobId);
@@ -5230,7 +5127,7 @@ async function previewSubtitleStyleDraft(automatic = false): Promise<void> {
     return;
   }
   const jobId = activeDetail.job.job_id;
-  const timestampMs = Math.max(0, Math.round((activeMedia?.currentTime ?? 0) * 1_000));
+  const timestampMs = Math.max(0, Math.round((mediaPlayer.media?.currentTime ?? 0) * 1_000));
   setSubtitleStyleBusy(true);
   if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在通过 FFmpeg/libass 生成预览帧…";
   try {
@@ -5996,7 +5893,7 @@ async function applyPreviewedGlossary(): Promise<void> {
     activeDetail.segments = applied.segments;
     clearGlossaryPreview();
     renderSubtitleListPreservingView(activeDetail.segments);
-    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
+    updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
     setWorkspaceAction(
       `已修正 ${applied.changed_segments} 段并保存到本地；${applied.stale_translations} 段译文需要重译。`,
     );
@@ -6169,7 +6066,7 @@ togglePlaybackButton?.addEventListener("click", togglePlayback);
 forwardMediaButton?.addEventListener("click", () => seekRelative(5));
 nextSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(1));
 playbackRateSelect?.addEventListener("change", () => {
-  if (activeMedia && playbackRateSelect) activeMedia.playbackRate = Number(playbackRateSelect.value);
+  if (playbackRateSelect) mediaPlayer.setRate(Number(playbackRateSelect.value));
 });
 listeningPreviousSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(-1));
 listeningRewindMediaButton?.addEventListener("click", () => seekRelative(-5));
@@ -6177,12 +6074,12 @@ listeningTogglePlaybackButton?.addEventListener("click", togglePlayback);
 listeningForwardMediaButton?.addEventListener("click", () => seekRelative(5));
 listeningNextSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(1));
 listeningPlaybackRateSelect?.addEventListener("change", () => {
-  if (activeMedia && listeningPlaybackRateSelect) activeMedia.playbackRate = Number(listeningPlaybackRateSelect.value);
+  if (listeningPlaybackRateSelect) mediaPlayer.setRate(Number(listeningPlaybackRateSelect.value));
 });
 syncKaraokeZoomLabel();
 karaokeTogglePlaybackButton?.addEventListener("click", togglePlayback);
 karaokePlaybackRateSelect?.addEventListener("change", () => {
-  if (activeMedia && karaokePlaybackRateSelect) activeMedia.playbackRate = Number(karaokePlaybackRateSelect.value);
+  if (karaokePlaybackRateSelect) mediaPlayer.setRate(Number(karaokePlaybackRateSelect.value));
 });
 document.querySelector<HTMLButtonElement>("#karaoke-step-back-small")?.addEventListener("click", () => seekKaraokeBy(-10));
 document.querySelector<HTMLButtonElement>("#karaoke-step-back")?.addEventListener("click", () => seekKaraokeBy(-100));
@@ -6210,7 +6107,7 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
     if (target.dataset.jobId !== activeDetail?.job.job_id || currentArea !== "karaoke") return;
     const startMs = Number(target.dataset.startMs);
     if (!Number.isFinite(startMs)) return;
-    activeMedia?.pause();
+    mediaPlayer.media?.pause();
     karaokeFollowPlayhead = false;
     syncTimelineFollowState();
     if (karaokeWaveformReloadTimer !== null) {
@@ -6398,7 +6295,7 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (!activeDetail || !activeMedia || event.altKey || isTextEntryTarget(event.target)) return;
+  if (!activeDetail || !mediaPlayer.media || event.altKey || isTextEntryTarget(event.target)) return;
   if (document.querySelector("dialog[open]") || workspaceView?.classList.contains("editor-task-tools")) return;
   if (currentArea === "karaoke" && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
     void cutKaraokeSegmentAtPlayhead();
@@ -6518,7 +6415,7 @@ void listen<boolean>("subtitle-overlay-visibility", (event) => {
   renderSubtitleOverlayButton();
 });
 void listen<{ action: PlaybackAction }>("subtitle-overlay-playback-action", (event) => {
-  if (!activeDetail || !activeMedia) return;
+  if (!activeDetail || !mediaPlayer.media) return;
   executePlaybackAction(event.payload.action);
 });
 window.setInterval(() => void refresh(), 2_000);
@@ -6807,8 +6704,8 @@ function addOfflineTools(): void {
     tools.querySelectorAll<HTMLButtonElement>("[data-loop]").forEach(
       (button) =>
         (button.onclick = () => {
-          if (!activeMedia) return;
-          const time = activeMedia.currentTime * 1000,
+          if (!mediaPlayer.media) return;
+          const time = mediaPlayer.media.currentTime * 1000,
             cue = subtitleAt(time),
             action = button.dataset.loop;
           if (action === "off") {
@@ -6836,8 +6733,8 @@ function addOfflineTools(): void {
                   : {
                       startMs: Math.max(cue.start_ms, cue.end_ms - 1000),
                       endMs: Math.min(
-                        Number.isFinite(activeMedia.duration)
-                          ? activeMedia.duration * 1000
+                        Number.isFinite(mediaPlayer.media.duration)
+                          ? mediaPlayer.media.duration * 1000
                           : cue.end_ms + 500,
                         cue.end_ms + 500,
                       ),
@@ -6845,8 +6742,8 @@ function addOfflineTools(): void {
                     };
           }
           if (playbackLoop) {
-            activeMedia.currentTime = playbackLoop.startMs / 1000;
-            void activeMedia.play();
+            mediaPlayer.media.currentTime = playbackLoop.startMs / 1000;
+            void mediaPlayer.media.play();
           }
           document
             .querySelectorAll<HTMLElement>(".loop-state")

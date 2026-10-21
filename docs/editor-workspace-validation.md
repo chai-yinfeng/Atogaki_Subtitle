@@ -92,3 +92,8 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 ## 时间轴手势生命周期抽取
 
 34 项前端测试、类型／生产构建、cargo fmt --check 与 git diff --check 通过。原四组 WebKit 回归继续通过；新增 `verify-editor-gestures.cjs` 验证 Escape、lostpointercapture、pointercancel、取消后新拖动、背景平移、ctrl-wheel 与 Safari gesture 去重、任务离开取消及重新进入后的播放头 seek。预览按开始时的视窗比例计算，不因新波形响应改变拖动比例；提交重新核对任务与导航代次，并复用原保存接口。此里程碑未重装本机 App，也没有将前端测试当作原生手势／Windows 结果。
+
+
+## 共享播放器生命周期抽取
+
+`media-player.test.mjs` 用可控媒体环境验证回退状态、移除事件、单一 RAF、任务身份、迟到 play 失败和异步 stop 不清除新实例；前端合计 39 项通过。类型／构建、cargo fmt --check、git diff --check 通过。既有五组 WebKit 回归通过；新增 `verify-media-player.cjs` 用真实 WebKit 媒体事件验证 1.5×／静音／音量／位置回退、旧事件不影响时钟、收听 4.5 秒恢复与 9 秒保存、两源损坏只回退一次并停止。专项曾发现 src 加载重置速度，修正默认速度与 metadata 恢复后通过。此模块提交尚未覆盖正在使用的正式 App。
