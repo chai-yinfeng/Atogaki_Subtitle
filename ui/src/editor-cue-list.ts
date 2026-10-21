@@ -1,7 +1,7 @@
 import type { EditorCue } from "./editor-session";
 import { cueRowHeight, cueWindow } from "./editor-virtual-window";
 export type CueRow = EditorCue & { segment_index: number };
-type ListCallbacks<T> = { select(id: string): void; seek(id: string): void; browse(): void; time(ms: number): string; status(cue: T): string };
+type ListCallbacks<T> = { select(id: string): boolean; seek(id: string): void; browse(): void; time(ms: number): string; status(cue: T): string };
 /** Own only viewport rows. Cue snapshots and drafts live outside the DOM. */
 export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callbacks: ListCallbacks<T>) {
   const events = new AbortController();
@@ -22,6 +22,8 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
     row.classList.toggle("selected", cue.id === selected);
     row.classList.toggle("playing", cue.id === playback);
     row.setAttribute("aria-selected", String(cue.id === selected));
+    if (cue.id === playback) row.setAttribute("aria-current", "true");
+    else row.removeAttribute("aria-current");
     row.setAttribute("aria-rowindex", String((positions.get(cue.id) ?? 0) + 1));
     row.tabIndex = cue.id === selected ? 0 : -1;
   };
@@ -85,12 +87,11 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
   host.addEventListener("click", event => {
     const id = rowForEvent(event)?.dataset.cueId;
     if (!id) return;
-    callbacks.select(id);
-    if ((event.target as HTMLElement).closest("[data-cue-time]")) callbacks.seek(id);
+    if (callbacks.select(id) && (event.target as HTMLElement).closest("[data-cue-time]")) callbacks.seek(id);
   }, { signal: events.signal });
   host.addEventListener("dblclick", event => {
     const id = rowForEvent(event)?.dataset.cueId;
-    if (id && !(event.target as HTMLElement).closest("[data-cue-time]")) callbacks.seek(id);
+    if (id && !(event.target as HTMLElement).closest("[data-cue-time]") && callbacks.select(id)) callbacks.seek(id);
   }, { signal: events.signal });
   host.addEventListener("keydown", event => {
     const row = rowForEvent(event);
@@ -99,12 +100,19 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
       const current = positions.get(row?.dataset.cueId ?? selected ?? "") ?? 0;
       const index = event.key === "Home" ? 0 : event.key === "End" ? cues.length - 1
         : Math.max(0, Math.min(cues.length - 1, current + (event.key === "ArrowUp" ? -1 : 1)));
-      if (cues[index]) { callbacks.select(cues[index].id); reveal(cues[index].id); rows.get(cues[index].id)?.focus({ preventScroll: true }); }
+      if (cues[index] && callbacks.select(cues[index].id)) { reveal(cues[index].id); rows.get(cues[index].id)?.focus({ preventScroll: true }); }
     } else if (row?.dataset.cueId && (event.key === "Enter" || event.key === " ") && event.target === row) {
       event.preventDefault(); callbacks.select(row.dataset.cueId);
     }
   }, { signal: events.signal });
-  for (const event of ["wheel", "touchstart", "pointerdown"] as const) host.addEventListener(event, callbacks.browse, { passive: true, signal: events.signal });
+  for (const event of ["wheel", "touchmove"] as const) host.addEventListener(event, callbacks.browse, { passive: true, signal: events.signal });
+  host.addEventListener("pointerdown", event => {
+    // The scrollbar is manual browsing; selecting a row is a separate action.
+    if (!rowForEvent(event)) callbacks.browse();
+  }, { passive: true, signal: events.signal });
+  host.addEventListener("keydown", event => {
+    if (["PageUp", "PageDown"].includes(event.key)) callbacks.browse();
+  }, { signal: events.signal });
   host.addEventListener("scroll", schedule, { passive: true, signal: events.signal });
   const resize = new ResizeObserver(schedule); resize.observe(host);
   return {

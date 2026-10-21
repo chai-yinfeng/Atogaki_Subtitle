@@ -3,6 +3,7 @@ import { cueKey, type Draft, type SubtitleDrafts, type TextCue } from "./subtitl
 type EditorOptions<T extends TextCue> = {
   drafts: SubtitleDrafts<T>;
   current(): T | undefined;
+  lock(): void;
   canUndo(cue: T): boolean;
   undo(): Promise<void>;
   status(message: string, error?: boolean): void;
@@ -33,11 +34,13 @@ export function mountCurrentCueEditor<T extends TextCue>(root: HTMLElement, opti
     if (draft?.error) options.status(draft.error, true);
   };
   const edit = (composing: boolean) => {
+    options.lock();
     const cue = options.current();
     if (!cue || !isShowing(cue)) return;
     options.drafts.edit(cue, { source: source.value, translation: translation.value }, composing);
   };
   for (const input of [source, translation]) {
+    input.addEventListener("focus", options.lock, { signal: events.signal });
     input.addEventListener("input", event => edit((event as InputEvent).isComposing ?? false), { signal: events.signal });
     input.addEventListener("compositionstart", () => edit(true), { signal: events.signal });
     input.addEventListener("compositionend", () => edit(false), { signal: events.signal });

@@ -1285,12 +1285,12 @@ const editorRepairDialog = document.querySelector<HTMLDialogElement>("#editor-re
 const editorLayout = mountEditorLayout(editorRoot);
 const currentCueEditor = mountCurrentCueEditor<SubtitleSegment>(editorRoot, {
   drafts: subtitleDrafts, current: karaokeDraftSegment, canUndo: canUndoSegment,
-  undo: undoKaraokeTextSave, status: setSubtitleEditAction,
+  undo: undoKaraokeTextSave, status: setSubtitleEditAction, lock: lockEditorCue,
 });
 const editorCueList = mountEditorCueList<SubtitleSegment>(document.querySelector<HTMLElement>("#editor-cue-list")!, {
   select: selectEditorCue,
   seek: id => { const cue = activeDetail ? subtitleTimeline().get(id) : undefined; if (cue) seekTo(cue.start_ms); },
-  browse: () => { editorSession.followPlayback = false; syncEditorFollow(); },
+  browse: () => { editorSession.listAutoScroll = false; syncEditorFollow(); },
   time: formatPreciseTime,
   status: cue => {
     const draft = subtitleDrafts.entries.get(cueKey(cue));
@@ -1314,31 +1314,82 @@ function visibleEditorCues(): SubtitleSegment[] {
   return result;
 }
 
+let editorFollowRequest = 0;
+function lockEditorCue(): void {
+  editorFollowRequest++;
+  editorSession.lock();
+  syncEditorFollow();
+}
 function syncEditorFollow(): void {
   const button = editorRoot.querySelector<HTMLButtonElement>('[data-editor-action="follow"]');
   button?.setAttribute("aria-pressed", String(editorSession.followPlayback));
   if (button) button.textContent = editorSession.followPlayback ? "正在跟随播放" : "跟随播放";
+  const reveal = editorRoot.querySelector<HTMLButtonElement>('[data-editor-action="reveal-playing"]');
+  if (reveal) reveal.hidden = editorSession.listAutoScroll;
+  syncEditorSelectionMessage();
+}
+function syncEditorSelectionMessage(): void {
+  const cues = visibleEditorCues();
+  const id = editorSession.selectedCueId;
+  const hidden = id && !cues.some(cue => cue.id === id);
+  const mode = editorSession.followPlayback ? (id ? "跟随播放中" : "当前位置没有字幕") : "已锁定编辑段";
+  const message = `${mode}${hidden ? " · 当前段不在筛选结果中" : ""}${!editorSession.listAutoScroll ? " · 列表自动滚动已暂停" : ""} · 单击锁定编辑，双击或时间码定位播放`;
+  const host = document.querySelector("#editor-selection-message")!;
+  if (host.textContent !== message) host.textContent = message;
+}
+function editorTimingDirty(): boolean {
+  const cue = karaokeDraftSegment();
+  return !!cue && (editorStart.value !== formatPreciseTime(cue.start_ms) || editorEnd.value !== formatPreciseTime(cue.end_ms));
+}
+async function resumeEditorFollow(): Promise<void> {
+  if (workspaceActionBusy || !activeDetail) return;
+  if (editorTimingDirty()) { setSubtitleEditAction("请先保存时间，或在时间输入框按 Escape 恢复，再跟随播放。", true); return; }
+  const navigation = navigationRequestId;
+  const jobId = activeDetail.job.job_id, request = ++editorFollowRequest;
+  if (!await flushEditorStructureDrafts() || request !== editorFollowRequest || navigation !== navigationRequestId || activeDetail?.job.job_id !== jobId || currentArea !== "karaoke") return;
+  editorSession.resumePlayback();
+  karaokeFollowPlayhead = true;
+  syncKaraokeFollowButton();
+  editorTimeFingerprint = "";
+  updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
+  currentCueEditor.sync(karaokeDraftSegment(), true);
+  editorCueList.reveal(editorSession.playbackCueId);
+  syncEditorFollow();
 }
 function renderEditorList(): void {
   if (currentArea !== "karaoke" || !activeDetail) return;
   const cues = visibleEditorCues();
   editorCueList.render(cues, editorSession.selectedCueId, editorSession.playbackCueId);
   document.querySelector("#editor-match-count")!.textContent = `${cues.length} / ${activeDetail.segments.length} 段`;
-  document.querySelector("#editor-selection-message")!.textContent = editorSession.selectedCueId && !cues.some(cue => cue.id === editorSession.selectedCueId) ? "当前编辑段不在筛选结果中；编辑内容保持不变。" : "单击编辑 · 双击或点击时间码播放";
+  syncEditorSelectionMessage();
 }
-function selectEditorCue(id: string): void {
+function selectEditorCue(id: string): boolean {
   const cue = activeDetail ? subtitleTimeline().get(id) : undefined;
-  if (!cue || workspaceActionBusy) return;
+  if (!cue || workspaceActionBusy) return false;
   const previous = karaokeDraftSegment();
-  if (previous && previous.id !== id && subtitleDrafts.entries.get(cueKey(previous))?.composing) { setSubtitleEditAction("请先完成输入法选字，再切换字幕。", true); return; }
-  editorSession.selectedCueId = id;
+  if (previous && previous.id !== id && editorTimingDirty()) { setSubtitleEditAction("请先保存时间，或在时间输入框按 Escape 恢复，再切换字幕。", true); return false; }
+  if (previous && previous.id !== id && subtitleDrafts.entries.get(cueKey(previous))?.composing) { setSubtitleEditAction("请先完成输入法选字，再切换字幕。", true); return false; }
+  lockEditorCue();
+  editorSession.lock(id);
   editorTimeFingerprint = "";
   editorStart.value = formatPreciseTime(cue.start_ms); editorEnd.value = formatPreciseTime(cue.end_ms);
   currentCueEditor.sync(cue, true);
   editorCueList.mark(id, editorSession.playbackCueId);
   updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
   renderEditorList();
+  return true;
 }
+for (const input of [editorStart, editorEnd]) input.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  event.preventDefault(); event.stopPropagation();
+  const cue = karaokeDraftSegment();
+  editorStart.value = cue ? formatPreciseTime(cue.start_ms) : "";
+  editorEnd.value = cue ? formatPreciseTime(cue.end_ms) : "";
+  setSubtitleEditAction("已恢复当前段尚未保存的时间输入。");
+});
+editorRoot.addEventListener("focusin", event => {
+  if ((event.target as HTMLElement).closest(".karaoke-current-segment")) lockEditorCue();
+});
 function setEditorMutationBusy(busy: boolean): void {
   workspaceActionBusy = busy;
   const panel = editorRoot.querySelector<HTMLElement>(".karaoke-current-segment");
@@ -1348,7 +1399,7 @@ async function flushEditorStructureDrafts(): Promise<boolean> {
   const jobId = activeDetail?.job.job_id;
   try {
     await subtitleDrafts.flushAll();
-    if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === jobId && subtitleDrafts.pending(draft))) throw new Error("请完成输入法选字后再执行操作");
+    if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === jobId && (draft.composing || subtitleDrafts.pending(draft)))) throw new Error("请完成输入法选字或保存草稿后再执行操作");
   }
   catch (error) { setSubtitleEditAction(`文字保存失败，操作未执行：${String(error)}`, true); return false; }
   return !!jobId && activeDetail?.job.job_id === jobId;
@@ -1404,8 +1455,8 @@ editorRoot.addEventListener("click", event => {
   else if (action === "save-time") void saveEditorCueTime();
   else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id) { selectEditorCue(id); editorCueList.reveal(id); } }
   else if (action === "edit-playing" && editorSession.playbackCueId) selectEditorCue(editorSession.playbackCueId);
-  else if (action === "reveal-playing") { editorCueList.reveal(editorSession.playbackCueId); }
-  else if (action === "follow") { editorSession.followPlayback = !editorSession.followPlayback; syncEditorFollow(); if (editorSession.followPlayback) editorCueList.reveal(editorSession.playbackCueId); }
+  else if (action === "reveal-playing") { editorSession.listAutoScroll = true; editorCueList.reveal(editorSession.playbackCueId); syncEditorFollow(); }
+  else if (action === "follow") void resumeEditorFollow();
   else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void translateSegment(cue, karaokeTimingMessage); }
   else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
   else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
@@ -4058,9 +4109,13 @@ function updateKaraokePosition(milliseconds: number): void {
   if (currentArea !== "karaoke") return;
   if (karaokeCurrentTime) karaokeCurrentTime.textContent = formatPreciseTime(milliseconds);
   const playbackSegment = subtitleAt(milliseconds);
+  const previousId = editorSession.selectedCueId, previousPlayback = editorSession.playbackCueId;
+  // A recovered/failed draft must never be displaced by a clock update.
+  if (editorSession.followPlayback && currentCueEditor.dirty) lockEditorCue();
+  editorSession.updatePlayback(playbackSegment?.id ?? null);
   const segment = karaokeDraftSegment();
-  editorSession.playbackCueId = playbackSegment?.id ?? null;
-  editorCueList.mark(editorSession.selectedCueId, editorSession.playbackCueId, editorSession.followPlayback);
+  editorCueList.mark(editorSession.selectedCueId, editorSession.playbackCueId, editorSession.listAutoScroll);
+  if (previousId !== editorSession.selectedCueId || previousPlayback !== editorSession.playbackCueId) syncEditorSelectionMessage();
   if (karaokeSegmentTime) {
     karaokeSegmentTime.textContent = segment
       ? `${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)} · #${segment.segment_index + 1}`
@@ -4077,7 +4132,8 @@ function updateKaraokePosition(milliseconds: number): void {
   const segmentIndex = segment ? subtitleTimeline().position(segment.id) : -1;
   const playhead = Math.round(milliseconds);
   if (karaokeCutSegmentButton) {
-    karaokeCutSegmentButton.disabled = !playbackSegment
+    karaokeCutSegmentButton.disabled = !segment || segment.id !== playbackSegment?.id
+      || !playbackSegment
       || !activeDetail
       || !matchesTerminalStatus(activeDetail.job.status)
       || playhead <= playbackSegment.start_ms
@@ -4103,7 +4159,7 @@ function updateKaraokePosition(milliseconds: number): void {
 
 function syncKaraokeFollowButton(): void {
   karaokeFollowPlayheadButton?.classList.toggle("active", karaokeFollowPlayhead);
-  if (karaokeFollowPlayheadButton) karaokeFollowPlayheadButton.textContent = karaokeFollowPlayhead ? "正在跟随播放头" : "跟随播放头";
+  if (karaokeFollowPlayheadButton) karaokeFollowPlayheadButton.textContent = karaokeFollowPlayhead ? "波形跟随中" : "恢复播放跟随";
 }
 
 function moveKaraokeWindow(direction: number): void {
@@ -4189,9 +4245,9 @@ async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
     return;
   }
   const boundary = Math.round((activeMedia?.currentTime ?? 0) * 1_000 / 10) * 10;
-  const segment = activeDetail.segments.find((item) => boundary > item.start_ms && boundary < item.end_ms);
-  if (!segment) {
-    setSubtitleEditAction("播放头必须位于一个字幕块内部才能切开。", true);
+  const segment = karaokeDraftSegment();
+  if (!segment || boundary <= segment.start_ms || boundary >= segment.end_ms) {
+    setSubtitleEditAction("播放头必须位于当前编辑段内部才能切开。", true);
     return;
   }
   const jobId = activeDetail.job.job_id;
@@ -4539,6 +4595,7 @@ function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment
 function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?: string): void {
   if (!activeDetail) return;
   activeDetail.segments = segments;
+  if (currentArea === "karaoke") lockEditorCue();
   editorSession.reconcile(segments, expandedSegmentId);
   if (currentArea === "karaoke") { currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList(); }
   if (segmentCount) segmentCount.textContent = `${segments.length} 段`;
@@ -6407,11 +6464,7 @@ document.querySelector<HTMLButtonElement>("#karaoke-step-forward")?.addEventList
 document.querySelector<HTMLButtonElement>("#karaoke-step-forward-small")?.addEventListener("click", () => seekKaraokeBy(10));
 document.querySelector<HTMLButtonElement>("#karaoke-window-back")?.addEventListener("click", () => moveKaraokeWindow(-1));
 document.querySelector<HTMLButtonElement>("#karaoke-window-forward")?.addEventListener("click", () => moveKaraokeWindow(1));
-karaokeFollowPlayheadButton?.addEventListener("click", () => {
-  karaokeFollowPlayhead = !karaokeFollowPlayhead;
-  syncKaraokeFollowButton();
-  if (karaokeFollowPlayhead) void loadKaraokeWaveform((activeMedia?.currentTime ?? 0) * 1_000);
-});
+karaokeFollowPlayheadButton?.addEventListener("click", () => void resumeEditorFollow());
 karaokeZoomInput?.addEventListener("input", () => {
   const oldWindow = karaokeWaveformWindow ? karaokeWaveformWindow.end_ms - karaokeWaveformWindow.start_ms : 30_000;
   const center = karaokeViewStartMs + oldWindow / 2;

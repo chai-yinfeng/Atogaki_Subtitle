@@ -56,3 +56,7 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 ## 正式本机试装（2026-10-21）
 
 用户授权后，从 `ed48fc2` 构建正式 identifier 的 release App 并覆盖 `/Applications/Atogaki.app`。四个 sidecar、完整签名及五个可执行文件与构建产物 SHA-256 一致。原生窗口确认 14 个正式任务，打开 3,089 段真实长任务检查紧凑工具栏与扩展正文。启动后全部 20 张数据库内容表摘要与安装前一致，未执行真实识别、翻译或字幕修改。安装／清理记录见 [本机安装记录](local-editor-installation.md)。
+
+## 0058 第一阶段：跟随与锁定
+
+默认跟随句子、点击／键盘选择／聚焦输入后锁定；列表手动浏览只暂停滚动。原生播放行样式增强为整行底色与符号，Cut 限定编辑段。前端 30 项、类型与生产构建、cargo fmt --check、git diff --check 通过。`scripts/verify-editor-follow.cjs` 在 WebKit 合成任务验证默认跟随、编辑锁定、独立浏览、空白区、输入框聚焦、IME、异步保存期间继续输入／取消恢复、失败保存、时间输入保护、筛选隐藏播放句及 Cut 目标；现有 `verify-editor-ui.cjs` 仍验证锁定后的播放不切走编辑、工具与布局、草稿和失败重试。未用这些前端结果替代原生窗口和真实素材长时性能验收。

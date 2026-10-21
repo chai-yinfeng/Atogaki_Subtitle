@@ -1,4 +1,4 @@
-/** UI selection is independent from playback and from the processing range. */
+/** Playback and edit identity stay distinct; follow mode coordinates the view. */
 export type EditorCue = { id: string; start_ms: number; end_ms: number; source_text: string; translated_text: string | null; translation_stale: boolean };
 export type CueFilter = "all" | "untranslated" | "stale" | "review";
 export class EditorSession {
@@ -10,6 +10,7 @@ export class EditorSession {
   query = "";
   filter: CueFilter = "all";
   followPlayback = true;
+  listAutoScroll = true;
   open(jobId: string, cues: readonly EditorCue[]): void {
     if (jobId !== this.jobId) {
       this.jobId = jobId;
@@ -17,9 +18,23 @@ export class EditorSession {
       this.playbackCueId = null;
       this.processingRange = null;
       this.timelineViewport = { startMs: 0, endMs: 30_000 };
-      this.query = ""; this.filter = "all"; this.followPlayback = true;
+      this.query = ""; this.filter = "all"; this.followPlayback = true; this.listAutoScroll = true;
     }
     this.reconcile(cues);
+  }
+  lock(id = this.selectedCueId): void {
+    this.followPlayback = false;
+    this.listAutoScroll = false;
+    this.selectedCueId = id;
+  }
+  updatePlayback(id: string | null): void {
+    this.playbackCueId = id;
+    if (this.followPlayback) this.selectedCueId = id;
+  }
+  resumePlayback(): void {
+    this.followPlayback = true;
+    this.listAutoScroll = true;
+    this.selectedCueId = this.playbackCueId;
   }
   reconcile(cues: readonly EditorCue[], preferredId?: string): void {
     if (preferredId && cues.some(cue => cue.id === preferredId)) this.selectedCueId = preferredId;

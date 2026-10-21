@@ -5,7 +5,7 @@ import { readEditorLayout, defaultEditorLayout } from '../src/editor-layout.ts';
 const cue = (id, source_text = id, translated_text = '译文') => ({ id, start_ms:0, end_ms:1000, source_text, translated_text, translation_stale:false });
 test('playback, filtering and same-task reopen preserve the editing cue', () => {
   const session = new EditorSession(), cues = [cue('a'),cue('b')];
-  session.open('job-a',cues); session.selectedCueId='b'; session.playbackCueId='a';
+  session.open('job-a',cues); session.lock('b'); session.updatePlayback('a');
   session.query='a'; assert.deepEqual(session.visible(cues,new Set()).map(c=>c.id),['a']);
   assert.equal(session.selectedCueId,'b');
   session.open('job-a',cues); assert.equal(session.selectedCueId,'b');
@@ -43,4 +43,17 @@ test('timing gesture preserves text saved during the drag and rejects changed bo
   assert.equal(result[0].start_ms,100); assert.deepEqual(result[1],other);
   assert.throws(()=>mergeDraggedCueTiming([{...saved,end_ms:900}],initial,{...initial,start_ms:100}),/时间已变化/);
   assert.throws(()=>mergeDraggedCueTiming([],initial,initial),/时间已变化/);
+});
+
+test('follow tracks cues and gaps; editing locks until explicit resume, browsing is independent', () => {
+  const session = new EditorSession(); session.open('job',[cue('a'),cue('b')]);
+  session.updatePlayback('b'); assert.equal(session.selectedCueId,'b');
+  session.listAutoScroll=false; session.updatePlayback('a');
+  assert.equal(session.followPlayback,true); assert.equal(session.selectedCueId,'a');
+  session.lock('b'); session.updatePlayback('a');
+  assert.equal(session.selectedCueId,'b'); assert.equal(session.playbackCueId,'a');
+  assert.equal(session.followPlayback,false); assert.equal(session.listAutoScroll,false);
+  session.resumePlayback(); assert.equal(session.selectedCueId,'a'); assert.equal(session.listAutoScroll,true);
+  session.updatePlayback(null); assert.equal(session.selectedCueId,null);
+  session.lock('b'); session.updatePlayback(null); assert.equal(session.selectedCueId,'b');
 });
