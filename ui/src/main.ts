@@ -1415,7 +1415,7 @@ editorRoot.addEventListener("click", event => {
   else if (action === "repair") openEditorRepair();
   else if (action === "close-repair") repairTool.close();
   else if (action === "save-time") void saveEditorCueTime();
-  else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id) { selectEditorCue(id); editorCueList.reveal(id); } }
+  else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id && selectEditorCue(id)) editorCueList.reveal(id); }
   else if (action === "reveal-playing") { editorSession.listAutoScroll = true; editorCueList.reveal(editorSession.playbackCueId); syncEditorFollow(); }
   else if (action === "follow") void resumeEditorFollow();
   else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void translateSegment(cue, karaokeTimingMessage); }
@@ -4049,12 +4049,14 @@ async function deleteCurrentSubtitleBlock(): Promise<void> {
 
 async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;
-  if (!await flushEditorStructureDrafts()) return;
+  const selectedId = editorSession.selectedCueId;
+  const boundary = Math.round((activeMedia?.currentTime ?? 0) * 1_000 / 10) * 10;
+  lockEditorCue();
+  if (!await flushEditorStructureDrafts() || editorSession.selectedCueId !== selectedId) return;
   if (currentCueEditor.dirty) {
     setSubtitleEditAction("Cut 前请先保存或放弃当前文字修改。", true);
     return;
   }
-  const boundary = Math.round((activeMedia?.currentTime ?? 0) * 1_000 / 10) * 10;
   const segment = karaokeDraftSegment();
   if (!segment || boundary <= segment.start_ms || boundary >= segment.end_ms) {
     setSubtitleEditAction("播放头必须位于当前编辑段内部才能切开。", true);
@@ -6303,8 +6305,8 @@ karaokeWaveform?.addEventListener("pointerdown", (event) => {
       setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true);
       return;
     }
+    if (!selectEditorCue(activeDetail.segments[hit.segmentIndex].id)) return;
     activeMedia?.pause();
-    selectEditorCue(activeDetail.segments[hit.segmentIndex].id);
     updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
     karaokeTimingDrag = {
       pointerId: event.pointerId,
