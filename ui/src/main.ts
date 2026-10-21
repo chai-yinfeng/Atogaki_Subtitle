@@ -4474,14 +4474,13 @@ function mountMedia(
   activeMedia = null;
   updatePlaybackControls();
   host.replaceChildren();
-  if (host.nextElementSibling?.classList.contains("media-source-switch")) host.nextElementSibling.remove();
   const firstPath = primaryPath ?? fallbackPath;
   if (!firstPath) {
     message.textContent = "没有找到可播放的本地媒体；任务可能仍在处理或源文件已移动。";
     return;
   }
 
-  const loadPath = (path: string, isFallback: boolean, positionMs = resumeMs, autoplay = false, volume = 1, muted = false): void => {
+  const loadPath = (path: string, isFallback: boolean, positionMs = resumeMs, autoplay = false, volume = 1, muted = false, playbackRate = Number(activePlaybackRateSelect()?.value || "1")): void => {
     const previous = activeMedia;
     activeMedia = null;
     if (previous) { previous.pause(); previous.removeAttribute("src"); previous.load(); }
@@ -4489,6 +4488,9 @@ function mountMedia(
     element.controls = true;
     element.preload = "metadata";
     const isCurrent = () => activeMedia === element && mediaSessionId === sessionId;
+    let shouldPlay = autoplay;
+    let metadataLoaded = false;
+    const fallbackMessage = "原素材播放失败，已自动使用任务音频。";
     element.addEventListener("timeupdate", () => {
       if (!isCurrent()) return;
       updateActiveSubtitle(element.currentTime * 1_000);
@@ -4498,10 +4500,11 @@ function mountMedia(
       if (isCurrent()) updateActiveSubtitle(element.currentTime * 1_000);
     });
     element.addEventListener("play", () => {
-      if (isCurrent()) updatePlaybackControls();
+      if (isCurrent()) { shouldPlay = true; updatePlaybackControls(); }
     });
     element.addEventListener("pause", () => {
       if (!isCurrent()) return;
+      if (!element.error) shouldPlay = false;
       updatePlaybackControls();
       void persistPlaybackPosition();
     });
@@ -4515,9 +4518,10 @@ function mountMedia(
     });
     element.addEventListener("loadedmetadata", () => {
       if (!isCurrent()) return;
+      metadataLoaded = true;
       if (positionMs > 0 && Number.isFinite(element.duration)) element.currentTime = Math.min(positionMs / 1_000, Math.max(0, element.duration - 0.25));
-      if (autoplay) void element.play().catch(() => { if (isCurrent()) message.textContent += " · 请点击播放"; });
-      if (positionMs > 0) message.textContent = `${isFallback ? "任务音频" : activeDetail?.job.input_path ?? "原媒体"} · 已恢复到 ${formatTime(element.currentTime * 1_000)}`;
+      if (shouldPlay) void element.play().catch(() => { if (isCurrent()) message.textContent += " · 请点击播放"; });
+      if (positionMs > 0) message.textContent = `${isFallback ? fallbackMessage : activeDetail?.job.input_path ?? "原素材"} · 已恢复到 ${formatTime(element.currentTime * 1_000)}`;
       updatePlaybackControls();
       updateActiveSubtitle(element.currentTime * 1_000);
     });
@@ -4526,8 +4530,7 @@ function mountMedia(
       () => {
         if (!isCurrent()) return;
         if (!isFallback && fallbackPath && fallbackPath !== path) {
-          message.textContent = "原媒体编码无法由系统播放器读取，已切换到任务音频。";
-          loadPath(fallbackPath, true, element.currentTime * 1_000, !element.paused, element.volume, element.muted);
+          loadPath(fallbackPath, true, metadataLoaded ? element.currentTime * 1_000 : positionMs, shouldPlay, element.volume, element.muted, element.playbackRate);
         } else {
           message.textContent = "媒体加载失败。可能是文件已移动，或系统 WebView 不支持这种编码。";
         }
@@ -4535,23 +4538,10 @@ function mountMedia(
       { once: true },
     );
     activeMedia = element;
-    element.playbackRate = Number(activePlaybackRateSelect()?.value || "1");
+    element.playbackRate = playbackRate;
     element.volume = volume;
     element.muted = muted;
     host.replaceChildren(element);
-    if (host.nextElementSibling?.classList.contains("media-source-switch")) host.nextElementSibling.remove();
-    if (primaryPath && fallbackPath && primaryPath !== fallbackPath) {
-      const switchMedia = document.createElement("button");
-      switchMedia.type = "button";
-      switchMedia.className = "secondary media-source-switch";
-      switchMedia.textContent = isFallback ? "返回原媒体" : "改用任务音频";
-      switchMedia.title = isFallback ? "返回原文件，保留播放位置" : "原媒体无声或不兼容时，使用识别任务已保存的 WAV；保留播放位置";
-      switchMedia.addEventListener("click", () => {
-        if (!isCurrent()) return;
-        loadPath(isFallback ? primaryPath : fallbackPath, !isFallback, element.currentTime * 1_000, !element.paused, element.volume, element.muted);
-      });
-      host.insertAdjacentElement("afterend", switchMedia);
-    }
     element.src = /^http:\/\/127\.0\.0\.1:\d+\/media\/[a-f0-9-]+$/.test(path)
       ? path
       : convertFileSrc(path);
@@ -4560,7 +4550,7 @@ function mountMedia(
       const displayPath = activeDetail?.job.input_path ?? path;
       message.textContent = positionMs > 0 ? `${displayPath} · 已恢复到 ${formatTime(positionMs)}` : displayPath;
     } else {
-      message.textContent = `任务音频 · ${formatTime(positionMs)} · 使用已保存的 WAV，可返回原媒体`;
+      message.textContent = `${primaryPath ? fallbackMessage : "原素材不可用，已使用任务音频。"} · ${formatTime(positionMs)}`;
     }
   };
 

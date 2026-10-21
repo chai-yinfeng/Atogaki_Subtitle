@@ -25,3 +25,7 @@
 macOS 增加 `NSAllowsLocalNetworking`，使系统媒体栈可连接本机 HTTP；保留其他 ATS 默认保护，不启用全局 arbitrary loads。依据 [Apple NSAllowsLocalNetworking 文档](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking)。播放器保留任务 WAV 回退与播放状态；显式启用 `ATOGAKI_MEDIA_DIAGNOSTICS` 时只记录方法、Range、Origin 和大小，不输出 token、路径、媒体内容。
 
 继续使用同步整片响应会随电影大小占用内存；另行转码完整视频会增加磁盘与等待，且不能解决通用服务的内存风险，因此本轮不采用。流式传输不扩展系统解码能力：不支持的编码仍需任务音频回退。Windows 共享代码经编译／自动测试后仍需原生实机验收，不能用 macOS 结果替代。
+
+## 试用调整：自动回退
+
+用户反馈手动切源按钮影响字幕编辑布局，且不属于日常工作流。移除手动切源入口，始终优先完整原素材；原素材缺失时使用已有任务音频，系统播放器报告加载／解码错误时自动回退一次。回退保留播放位置、播放／暂停意图、速率与音量，并以状态文字解释原因。加载前的错误保留待恢复位置，不以尚未载入的 currentTime=0 覆盖它。任务音频再次失败则显示错误，不循环重试。没有可靠错误信号的静音不能仅以声音较小或等待时长判为解码失败，避免正常素材被误切换。
