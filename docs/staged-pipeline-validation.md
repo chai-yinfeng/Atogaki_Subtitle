@@ -128,3 +128,5 @@ cargo test --release --lib real_two_job_metal_pipeline -- --ignored --nocapture
 完整签名 App 使用独立 `atogaki-auto-media-dl41nomw` 数据目录，原媒体设为不可解码的短 MP4 测试文件，已验证粗修和高级编辑均自动挂载 3 小时 23 分 WAV、提示“原素材播放失败，已自动使用任务音频”，没有手动切源按钮。后段定位到 01:40:25.630，播放至 01:40:38.342 并暂停，字幕和波形跟随。再将隔离 WAV 替换为不可解码测试文件，原媒体失败后仅回退一次，最终显示媒体加载错误，不循环重试；测试后恢复隔离 WAV 链接，正式音频不写入。
 
 前端 21 测试通过，类型／生产构建、两套 Rust 格式、diff 检查、完整 sidecar App 构建与签名通过。Rust 业务与接口未修改，沿用上一提交核心 147／壳层 33 的通过记录。安装前确认正式数据库没有活动任务、共 14 个任务，并完成 SQLite backup、字幕／学习／词表摘要和旧 App 备份；覆盖安装与启动结果另记下段。未调用真实云端或发布新发行资产。
+
+随后从干净提交 `c195265` 执行 `scripts/install-current-macos-app.sh`，完整配置重新构建并覆盖 `/Applications/Atogaki.app`；安装前无 Atogaki 进程。五个可执行文件与源 App SHA-256 一致，deep/strict 签名通过。原生启动正式 Application，确认正式数据路径与 14 个任务，《教父》3,089 段仍全部已翻译。默认原 MP4 控件显示 3 小时 23 分，正常播放到 11 秒后暂停，没有切源按钮或回退提示；保留窗口供用户继续测试。启动后再次核对字幕／学习／词表内容摘要全部不变，没有云端调用。旧 App 与数据库备份在忽略目录 `local-artifacts/install-backups/auto-media-*/`，收据为 `local-artifacts/install-backups/latest-auto-media.json`。本机为包含未发行改动的开发测试构建，版本元数据仍为 0.1.2，公开 tag／资产未改。
