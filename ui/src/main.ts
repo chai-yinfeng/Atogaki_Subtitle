@@ -308,11 +308,6 @@ type TranslationStatus = {
   configuration_hint: string | null;
 };
 
-type RecognitionDefaults = {
-  whisperModelPath: string | null;
-  vadModelPath: string | null;
-};
-
 type DesktopSettings = {
   onboardingCompleted: boolean;
   needsOnboarding: boolean;
@@ -1014,7 +1009,6 @@ const karaokeWaveformStatus = document.querySelector<HTMLDivElement>("#karaoke-w
 const karaokeWaveform = document.querySelector<HTMLCanvasElement>("#karaoke-waveform");
 const karaokeSegmentTime = document.querySelector<HTMLSpanElement>("#karaoke-segment-time");
 const karaokeCurrentSource = document.querySelector<HTMLTextAreaElement>("#karaoke-current-source");
-const karaokeCurrentTranslation = document.querySelector<HTMLTextAreaElement>("#karaoke-current-translation");
 const karaokeUndoTextButton = document.querySelector<HTMLButtonElement>("#karaoke-undo-text");
 const karaokeCutSegmentButton = document.querySelector<HTMLButtonElement>("#karaoke-cut-segment");
 const karaokeJoinSegmentButton = document.querySelector<HTMLButtonElement>("#karaoke-join-segment");
@@ -1243,7 +1237,6 @@ let activeLearningItemId: string | null = null;
 let activeLearningProviderId = "summary";
 let learningActionBusy = false;
 let learningLookupBusy = false;
-let workspaceElapsedTimer: number | null = null;
 type TaskTranslationActivity = { message: string; startedAt: number };
 const taskTranslationActivities = new Map<string, TaskTranslationActivity>();
 let taskTranslationElapsedTimer: number | null = null;
@@ -1791,14 +1784,6 @@ function renderAsrCredentialStatus(status: AsrCredentialStatus): void {
     geminiApiKeyStatus.classList.toggle("warning", !status.configured);
   }
   if (settingsGeminiApiKey) settingsGeminiApiKey.value = "";
-}
-
-async function loadAsrCredentialStatus(): Promise<void> {
-  try {
-    renderAsrCredentialStatus(await invoke<AsrCredentialStatus>("asr_credential_status"));
-  } catch (error) {
-    if (geminiApiKeyStatus) geminiApiKeyStatus.textContent = `无法读取 Gemini 配置：${String(error)}`;
-  }
 }
 
 async function saveGeminiCredential(clear: boolean): Promise<void> {
@@ -2357,18 +2342,6 @@ function setSubtitleEditAction(message: string, isError = false): void {
     return;
   }
   setWorkspaceAction(message, isError);
-}
-
-function startWorkspaceElapsed(message: string): () => void {
-  const startedAt = Date.now();
-  const update = () => setWorkspaceAction(`${message} · 已运行 ${formatElapsed((Date.now() - startedAt) / 1_000)}`);
-  if (workspaceElapsedTimer !== null) window.clearInterval(workspaceElapsedTimer);
-  update();
-  workspaceElapsedTimer = window.setInterval(update, 1_000);
-  return () => {
-    if (workspaceElapsedTimer !== null) window.clearInterval(workspaceElapsedTimer);
-    workspaceElapsedTimer = null;
-  };
 }
 
 function renderActiveTaskTranslationActivity(): void {
@@ -4714,48 +4687,6 @@ function renderSubtitleListPreservingView(segments: SubtitleSegment[], expandedS
   requestAnimationFrame(restoreScroll);
 }
 
-async function saveSegment(segment: SubtitleSegment): Promise<void> {
-  await subtitleDrafts.flush(cueKey(segment), true).catch(() => {});
-}
-
-
-async function undoSegment(
-  segment: SubtitleSegment,
-  button: HTMLButtonElement,
-  state: HTMLSpanElement,
-): Promise<void> {
-  if (!activeDetail) return;
-  const draft = subtitleDrafts.entries.get(cueKey(segment));
-  if (draft && subtitleDrafts.pending(draft)) return;
-  const key = subtitleUndoKey(segment);
-  const history = subtitleUndoHistory.get(key);
-  const entry = history?.at(-1);
-  const current = activeDetail.segments.find((item) => item.id === segment.id);
-  if (!entry || !current || entry.afterFingerprint !== subtitleValueFingerprint(current)) {
-    state.textContent = "无法撤销：字幕在保存后已重新读取或再次改变。";
-    state.classList.add("warning");
-    button.disabled = true;
-    return;
-  }
-  button.disabled = true;
-  state.textContent = "正在撤销上次保存…";
-  state.classList.remove("warning");
-  try {
-    const restored = await restoreSegment(entry.before);
-    if (activeDetail?.job.job_id !== restored.job_id) return;
-    history?.pop();
-    if (history?.length === 0) subtitleUndoHistory.delete(key);
-    replaceActiveSegment(restored);
-    renderSubtitleListPreservingView(activeDetail.segments, segment.id);
-    updateActiveSubtitle((activeMedia?.currentTime ?? 0) * 1_000);
-    setWorkspaceAction("已撤回该段上一次文字编辑；此撤回历史仅在当前 App 会话内保留。");
-  } catch (error) {
-    state.textContent = `撤销失败：${String(error)}`;
-    state.classList.add("warning");
-    button.disabled = false;
-  }
-}
-
 async function restoreSegment(snapshot: SubtitleSegment): Promise<SubtitleSegment> {
   return editorBackend.restoreText(snapshot);
 }
@@ -6963,10 +6894,12 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
 registerSubtitleFollowHost(subtitleList);
 registerSubtitleFollowHost(listeningSubtitleList);
 if (karaokeWaveform) {
-  new ResizeObserver(() => {
+  const viewportObserver = new ResizeObserver(() => {
     renderKaraokeTimeline();
     if (activeDetail && currentArea === "karaoke") void loadKaraokeWaveform(karaokeViewStartMs, true);
-  }).observe(karaokeWaveform);
+  });
+  viewportObserver.observe(karaokeWaveform);
+  window.addEventListener("pagehide", () => viewportObserver.disconnect(), { once: true });
 }
 syncVadControls();
 renderSubtitleOverlayButton();

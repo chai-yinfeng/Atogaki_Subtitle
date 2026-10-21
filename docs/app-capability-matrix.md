@@ -18,6 +18,8 @@ _冻结日期：2026-09-18_
 
 桌面 App 同时稳定保留任务队列、run／质量信号审查、字幕与时间轴编辑、translation stale 保护、学习资料、SRT／ASS 导出和视频烧录。
 
+字幕校对使用同一工作面：上方视频／波形时间轴，中间当前句双语编辑，下方虚拟列表。完整识别任务直接进入字幕编辑，处理中任务保留只读进度；翻译、复核与导出按需打开。模块整理不扩大平台或制作能力范围，见 [0055](decisions/0055-unified-subtitle-editor.md) 与 [0057](decisions/0057-editor-view-lifecycles.md)。
+
 以下能力不进入当前桌面范围：Gemini 全片新任务、Gemini Live、Muse Voice Transcribe、实时音频采集、E2E live translate、新 ASR／MT 模型试验、可变 prefix-commit policy，以及只为跑 benchmark 暴露的参数。它们先通过 CLI/evaluation harness 产出可复现 artifact 和报告。
 
 ## 桌面晋升门禁

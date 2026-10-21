@@ -100,3 +100,5 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 四区默认布局为上方视频／时间轴、中间当前句编辑、下方虚拟字幕列表。`editor-session` 区分编辑与播放选择；`editor-layout` 持有版本化本机布局偏好；`editor-cue-list` 只呈现视口行。`current-cue-editor` 使用原 SubtitleDrafts 管理输入交互，`editor-backend` 集中适配文字／时间持久化，`task-tools` 持有工具 DOM 的挂载与焦点生命周期。工具模板与视图逻辑独立于主入口，关闭工具不重建媒体或草稿。
 
 主入口仍协调播放器、时间轴和部分处理用例，后续每次抽取一条边界，不能将当前结构写成已经完成全模块拆分。任务卡片通过 SQLite 摘要读取，恢复与采用仍完整验证来源证据；见 [0056](decisions/0056-editor-virtual-list-and-task-summary.md) 和 [0057](decisions/0057-editor-view-lifecycles.md)。
+
+前端类型检查启用 `noUnusedLocals`／`noUnusedParameters`，删除项先通过调用搜索确认。旧粗修保存／撤销入口已移除；现有两类历史继续由唯一字幕编辑工作面使用，不统一命令历史。
