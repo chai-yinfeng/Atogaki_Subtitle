@@ -1,4 +1,6 @@
-import { mountEditorTimeline, timelineGeometry, timelineCueHit } from "./editor-timeline-view";
+import type { TimingGesture } from "./timeline-timing";
+import { mountTimelineGestures } from "./editor-timeline-gestures";
+import { mountEditorTimeline } from "./editor-timeline-view";
 import { mountEditorFollow } from "./editor-follow";
 import { mountEditorMenus } from "./editor-menus";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -22,7 +24,7 @@ import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
 import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
 applyTheme(readTheme());
-import { matchesQuery, highlightSaved, candidateTextDiff, playheadHandleContains, timelineTimeAtX } from "./offline-tools";
+import { matchesQuery, highlightSaved, candidateTextDiff } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
 let playbackLoop: {startMs:number;endMs:number;repeat:boolean} | null = null;
 let loopStartMs: number | null = null;
@@ -248,33 +250,6 @@ type PendingLearningSelection = {
   selectedText: string;
   selectionStartUtf16: number;
   selectionEndUtf16: number;
-};
-
-type KaraokeTimingDrag = {
-  pointerId: number;
-  segmentIndex: number;
-  mode: "move" | "start" | "end";
-  pointerStartX: number;
-  before: SubtitleSegment[];
-  draft: SubtitleSegment[];
-  moved: boolean;
-};
-
-type KaraokeTimelineHit = {
-  segmentIndex: number;
-  mode: "move" | "start" | "end";
-};
-
-type KaraokePanDrag = {
-  pointerId: number;
-  pointerStartX: number;
-  viewStartMs: number;
-  moved: boolean;
-};
-
-type KaraokeGestureEvent = Event & {
-  scale: number;
-  clientX: number;
 };
 
 type TranslationRun = {
@@ -1239,14 +1214,9 @@ let karaokeWaveformLoading = false;
 let karaokeAnimationFrame: number | null = null;
 let karaokeSelectedJobId: string | null = null;
 let karaokeResumeMs = 0;
-let karaokeTimingDrag: KaraokeTimingDrag | null = null;
-let karaokePanDrag: KaraokePanDrag | null = null;
-let karaokePlayheadDrag: { pointerId: number; startMs: number; endMs: number } | null = null;
-let karaokeSuppressClick = false;
 let karaokeWaveformGain = 1;
 let karaokeWaveformReloadTimer: number | null = null;
 let karaokePendingWaveformStartMs = 0;
-let karaokeGestureStart: { durationMs: number; anchorMs: number; ratio: number } | null = null;
 let activeRetranscriptionPreview: RetranscriptionPreview | null = null;
 let retranscriptionBusy = false;
 let asrQualitySignals: AsrQualitySignal[] = [];
@@ -1324,6 +1294,31 @@ const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
     currentCueEditor.sync(karaokeDraftSegment(), true);
     editorCueList.reveal(editorSession.playbackCueId);
   },
+});
+const timelineGestures = mountTimelineGestures<SubtitleSegment>(karaokeWaveform!, karaokeZoomInput!, editorRoot, {
+  snapshot: () => activeDetail && karaokeWaveformWindow && currentArea === "karaoke" ? {
+    jobId: activeDetail.job.job_id, cues: activeDetail.segments, waveform: karaokeWaveformWindow,
+    currentMs: (activeMedia?.currentTime ?? 0) * 1_000, viewStartMs: karaokeViewStartMs, durationMs: karaokeWindowDurationMs(),
+  } : null,
+  select: id => {
+    if (currentCueEditor.dirty) { setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true); return false; }
+    return selectEditorCue(id);
+  },
+  pause: () => activeMedia?.pause(),
+  seek: ms => { seekTo(ms, false); updateActiveSubtitle(ms); },
+  stopFollowing: () => { karaokeFollowPlayhead = false; syncTimelineFollowState(); },
+  pan: start => { karaokeViewStartMs = start; scheduleKaraokeWaveformReload(start); },
+  zoomValue: () => Number(karaokeZoomInput?.value ?? "66"),
+  zoom: value => { karaokeZoomInput!.value = String(value); syncKaraokeZoomLabel(); },
+  zoomForDuration: karaokeZoomValueForDuration,
+  preview: drag => {
+    const cue = drag.draft[drag.segmentIndex];
+    const action = drag.mode === "move" ? "移动" : drag.mode === "start" ? "修剪入点" : "修剪出点";
+    setSubtitleEditAction(`预览：${action}第 ${cue.segment_index + 1} 段至 ${formatPreciseTime(cue.start_ms)} → ${formatPreciseTime(cue.end_ms)}；松开后保存。`);
+    renderKaraokeTimeline();
+  },
+  commit: commitKaraokeTimingDrag,
+  cancelled: () => { renderKaraokeTimeline(); setSubtitleEditAction("已放弃本次边界拖动。"); },
 });
 function lockEditorCue(): void { editorFollow.lock(); }
 function syncEditorFollow(): void { editorFollow.sync(); }
@@ -1423,10 +1418,17 @@ editorRoot.addEventListener("click", event => {
   else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
 });
 
-window.addEventListener("pagehide", () => { editorLayout.dispose();
+window.addEventListener("pagehide", () => {
+  editorLayout.dispose();
   editorMenus.dispose();
   editorFollow.dispose();
-  editorTimeline.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); taskTools.dispose(); repairTool.dispose(); });
+  editorTimeline.dispose();
+  timelineGestures.dispose();
+  editorCueList.dispose();
+  currentCueEditor.dispose();
+  taskTools.dispose();
+  repairTool.dispose();
+}, { once: true });
 
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
@@ -2749,10 +2751,7 @@ async function stopActivePlayback(): Promise<void> {
     window.cancelAnimationFrame(karaokeAnimationFrame);
     karaokeAnimationFrame = null;
   }
-  karaokeTimingDrag = null;
-  karaokePanDrag = null;
-  karaokePlayheadDrag = null;
-  karaokeGestureStart = null;
+  timelineGestures.reset();
   currentCueEditor.clear();
   if (karaokeWaveformReloadTimer !== null) {
     window.clearTimeout(karaokeWaveformReloadTimer);
@@ -3736,48 +3735,19 @@ async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promis
 
 function renderKaraokeTimeline(): void {
   const waveform = karaokeWaveformWindow;
-  const all = karaokeTimingDrag?.draft ?? activeDetail?.segments ?? [];
-  const original = karaokeTimingDrag?.before ?? all;
+  const drag = timelineGestures.timing;
+  const all = drag?.draft ?? activeDetail?.segments ?? [];
+  const original = drag?.before ?? all;
   const index = subtitleTimeline(original);
   const positions = new Set(waveform ? index.visible(waveform.start_ms, waveform.end_ms).map(cue => index.position(cue.id)) : []);
-  if (karaokeTimingDrag) positions.add(karaokeTimingDrag.segmentIndex);
+  if (drag) positions.add(drag.segmentIndex);
   editorTimeline.render({
     waveform, cues: [...positions].sort((a,b) => a-b).map(i => all[i]),
     selectedCueId: editorSession.selectedCueId, playbackCueId: editorSession.playbackCueId,
-    draggedCueId: karaokeTimingDrag ? all[karaokeTimingDrag.segmentIndex]?.id ?? null : null,
+    draggedCueId: drag ? all[drag.segmentIndex]?.id ?? null : null,
     gain: karaokeWaveformGain, currentMs: Math.round((activeMedia?.currentTime ?? 0) * 1_000),
     emptyMessage: activeDetail ? "正在准备波形…" : "选择一个字幕任务",
   });
-}
-
-function karaokePlayheadHandleAtPoint(clientX: number, clientY: number): boolean {
-  if (!karaokeWaveform || !karaokeWaveformWindow || !activeMedia) return false;
-  const bounds = karaokeWaveform.getBoundingClientRect();
-  return playheadHandleContains(clientX - bounds.left, clientY - bounds.top,
-    bounds.width, activeMedia.currentTime * 1000,
-    karaokeWaveformWindow.start_ms, karaokeWaveformWindow.end_ms);
-}
-
-function updateKaraokePlayheadDrag(clientX: number): void {
-  if (!karaokePlayheadDrag || !karaokeWaveform) return;
-  const bounds = karaokeWaveform.getBoundingClientRect();
-  const time = timelineTimeAtX(clientX - bounds.left, bounds.width,
-    karaokePlayheadDrag.startMs, karaokePlayheadDrag.endMs);
-  seekTo(time, false);
-  updateActiveSubtitle(time);
-  renderKaraokeTimeline();
-}
-
-function karaokeTimelineHitAtPoint(clientX: number, clientY: number): KaraokeTimelineHit | null {
-  const canvas = karaokeWaveform;
-  const waveform = karaokeWaveformWindow;
-  const segments = karaokeTimingDrag?.draft ?? activeDetail?.segments;
-  if (!canvas || !waveform || !segments) return null;
-  const bounds = canvas.getBoundingClientRect();
-  const localY = clientY - bounds.top;
-  const { trackTop } = timelineGeometry(bounds.height);
-  if (localY < trackTop || localY > bounds.height - 4) return null;
-  return timelineCueHit(segments, clientX - bounds.left, bounds.width, waveform.start_ms, waveform.end_ms);
 }
 
 function karaokeTimingAnomalySummary(segments: SubtitleSegment[]): string {
@@ -3800,49 +3770,14 @@ function syncKaraokeWaveformStatus(): void {
   karaokeWaveformStatus.textContent = `${formatPreciseTime(waveform.start_ms)} — ${formatPreciseTime(waveform.end_ms)} · 每个可视峰值约 ${Math.max(1, Math.round(waveform.point_duration_ms))} ms${anomaly ? ` · ${anomaly}` : " · 单轨无重叠"} · 拖动顶部红色把手定位；拖动波形背景平移`;
 }
 
-function updateKaraokeTimingDrag(clientX: number): void {
-  const drag = karaokeTimingDrag;
-  const waveform = karaokeWaveformWindow;
-  const canvas = karaokeWaveform;
-  if (!drag || !waveform || !canvas) return;
-  const bounds = canvas.getBoundingClientRect();
-  const delta = Math.round(((clientX - drag.pointerStartX) / bounds.width * (waveform.end_ms - waveform.start_ms)) / 10) * 10;
-  const original = drag.before[drag.segmentIndex];
-  const segment = drag.draft[drag.segmentIndex];
-  const previous = drag.draft[drag.segmentIndex - 1];
-  const next = drag.draft[drag.segmentIndex + 1];
-  const durationLimit = waveform.duration_ms || Number.MAX_SAFE_INTEGER;
-  if (drag.mode === "move") {
-    const minimumDelta = (previous?.end_ms ?? 0) - original.start_ms;
-    const maximumDelta = (next?.start_ms ?? durationLimit) - original.end_ms;
-    const boundedDelta = Math.max(minimumDelta, Math.min(maximumDelta, delta));
-    segment.start_ms = original.start_ms + boundedDelta;
-    segment.end_ms = original.end_ms + boundedDelta;
-  } else if (drag.mode === "start") {
-    const minimum = previous?.end_ms ?? 0;
-    segment.start_ms = Math.max(minimum, Math.min(segment.end_ms - 10, original.start_ms + delta));
-  } else {
-    const maximum = next?.start_ms ?? durationLimit;
-    segment.end_ms = Math.max(segment.start_ms + 10, Math.min(maximum, original.end_ms + delta));
-  }
-  drag.moved = segment.start_ms !== original.start_ms || segment.end_ms !== original.end_ms;
-  if (karaokeTimingMessage) {
-    const action = drag.mode === "move" ? "移动" : drag.mode === "start" ? "修剪入点" : "修剪出点";
-    karaokeTimingMessage.textContent = `预览：${action}第 ${segment.segment_index + 1} 段至 ${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)}；松开后保存。`;
-    karaokeTimingMessage.classList.remove("warning");
-  }
-  renderKaraokeTimeline();
-}
-
-async function commitKaraokeTimingDrag(): Promise<void> {
-  const drag = karaokeTimingDrag;
-  karaokeTimingDrag = null;
-  if (!drag || !drag.moved || !activeDetail) {
+async function commitKaraokeTimingDrag(drag: TimingGesture<SubtitleSegment>): Promise<void> {
+  if (!drag.moved || activeDetail?.job.job_id !== drag.jobId) {
     renderKaraokeTimeline();
     return;
   }
-  if (!await flushEditorStructureDrafts() || !activeDetail) { renderKaraokeTimeline(); return; }
-  const jobId = activeDetail.job.job_id;
+  const navigation = navigationRequestId;
+  if (!await flushEditorStructureDrafts() || navigation !== navigationRequestId || activeDetail?.job.job_id !== drag.jobId) { renderKaraokeTimeline(); return; }
+  const jobId = drag.jobId;
   const before = cloneSubtitleSegments(activeDetail.segments);
   let after: SubtitleSegment[];
   try { after = mergeDraggedCueTiming(before, drag.before[drag.segmentIndex], drag.draft[drag.segmentIndex]); }
@@ -3850,13 +3785,7 @@ async function commitKaraokeTimingDrag(): Promise<void> {
   setSubtitleEditAction("正在原子保存字幕块时间…");
   setEditorMutationBusy(true);
   try {
-    const saved = await invoke<SubtitleSegment[]>("save_subtitle_timing", {
-      request: {
-        jobId,
-        beforeSegments: before,
-        afterSegments: after,
-      },
-    });
+    const saved = await editorBackend.saveTiming(jobId, before, after);
     if (!activeDetail || activeDetail.job.job_id !== jobId) return;
     const segment = saved[drag.segmentIndex];
     const action = drag.mode === "move" ? "移动" : drag.mode === "start" ? "入点调整" : "出点调整";
@@ -3873,13 +3802,6 @@ async function commitKaraokeTimingDrag(): Promise<void> {
     renderKaraokeTimeline();
     setSubtitleEditAction(`边界保存失败：${String(error)}`, true);
   } finally { setEditorMutationBusy(false); }
-}
-
-function cancelKaraokeTimingDrag(): void {
-  karaokeTimingDrag = null;
-  karaokeSuppressClick = false;
-  renderKaraokeTimeline();
-  setSubtitleEditAction("已放弃本次边界拖动。");
 }
 
 function karaokeDraftSegment(): SubtitleSegment | undefined {
@@ -3970,14 +3892,6 @@ function updateKaraokePosition(milliseconds: number): void {
 function syncTimelineFollowState(): void {
   const state = document.querySelector("#editor-wave-follow-state");
   if (state) state.textContent = karaokeFollowPlayhead ? "视窗跟随中" : "视窗已暂停 · 点击跟随播放恢复";
-}
-
-function moveKaraokeWindow(direction: number): void {
-  if (!activeDetail) return;
-  karaokeFollowPlayhead = false;
-  syncTimelineFollowState();
-  const nextStart = Math.max(0, karaokeViewStartMs + karaokeWindowDurationMs() * 0.8 * direction);
-  void loadKaraokeWaveform(nextStart, true);
 }
 
 function seekKaraokeBy(milliseconds: number): void {
@@ -6274,178 +6188,10 @@ document.querySelector<HTMLButtonElement>("#karaoke-step-back-small")?.addEventL
 document.querySelector<HTMLButtonElement>("#karaoke-step-back")?.addEventListener("click", () => seekKaraokeBy(-100));
 document.querySelector<HTMLButtonElement>("#karaoke-step-forward")?.addEventListener("click", () => seekKaraokeBy(100));
 document.querySelector<HTMLButtonElement>("#karaoke-step-forward-small")?.addEventListener("click", () => seekKaraokeBy(10));
-document.querySelector<HTMLButtonElement>("#karaoke-window-back")?.addEventListener("click", () => moveKaraokeWindow(-1));
-document.querySelector<HTMLButtonElement>("#karaoke-window-forward")?.addEventListener("click", () => moveKaraokeWindow(1));
-karaokeZoomInput?.addEventListener("input", () => {
-  const oldWindow = karaokeWaveformWindow ? karaokeWaveformWindow.end_ms - karaokeWaveformWindow.start_ms : 30_000;
-  const center = karaokeViewStartMs + oldWindow / 2;
-  syncKaraokeZoomLabel();
-  karaokeFollowPlayhead = false;
-  syncTimelineFollowState();
-  scheduleKaraokeWaveformReload(Math.max(0, center - karaokeWindowDurationMs() / 2));
-});
 karaokeWaveformGainInput?.addEventListener("input", () => {
   karaokeWaveformGain = Number(karaokeWaveformGainInput.value);
   if (karaokeWaveformGainLabel) karaokeWaveformGainLabel.value = `${karaokeWaveformGain.toFixed(karaokeWaveformGain % 1 ? 2 : 0)}×`;
   renderKaraokeTimeline();
-});
-karaokeWaveform?.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0 || !activeDetail || !karaokeWaveformWindow
-    || karaokeTimingDrag || karaokePanDrag || karaokePlayheadDrag) return;
-  const handleHit = karaokePlayheadHandleAtPoint(event.clientX, event.clientY);
-  const hit = handleHit ? null : karaokeTimelineHitAtPoint(event.clientX, event.clientY);
-  if (handleHit) {
-    activeMedia?.pause();
-    karaokePlayheadDrag = { pointerId: event.pointerId,
-      startMs: karaokeWaveformWindow.start_ms, endMs: karaokeWaveformWindow.end_ms };
-    karaokeSuppressClick = true;
-    karaokeWaveform.style.cursor = "ew-resize";
-  } else if (hit) {
-    if (currentCueEditor.dirty) {
-      setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true);
-      return;
-    }
-    if (!selectEditorCue(activeDetail.segments[hit.segmentIndex].id)) return;
-    activeMedia?.pause();
-    updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
-    karaokeTimingDrag = {
-      pointerId: event.pointerId,
-      segmentIndex: hit.segmentIndex,
-      mode: hit.mode,
-      pointerStartX: event.clientX,
-      before: cloneSubtitleSegments(activeDetail.segments),
-      draft: cloneSubtitleSegments(activeDetail.segments),
-      moved: false,
-    };
-    karaokeSuppressClick = true;
-  } else {
-    karaokePanDrag = {
-      pointerId: event.pointerId,
-      pointerStartX: event.clientX,
-      viewStartMs: karaokeViewStartMs,
-      moved: false,
-    };
-  }
-  karaokeFollowPlayhead = false;
-  syncTimelineFollowState();
-  karaokeWaveform.setPointerCapture(event.pointerId);
-  event.preventDefault();
-});
-karaokeWaveform?.addEventListener("pointermove", (event) => {
-  if (!karaokeTimingDrag && !karaokePanDrag && !karaokePlayheadDrag) {
-    const hit = karaokeTimelineHitAtPoint(event.clientX, event.clientY);
-    karaokeWaveform.style.cursor = karaokePlayheadHandleAtPoint(event.clientX, event.clientY) ? "ew-resize" : hit?.mode === "move" ? "grab" : hit ? "ew-resize" : "crosshair";
-    return;
-  }
-  if (karaokePlayheadDrag?.pointerId === event.pointerId) updateKaraokePlayheadDrag(event.clientX);
-  if (karaokeTimingDrag?.pointerId === event.pointerId) updateKaraokeTimingDrag(event.clientX);
-  if (karaokePanDrag?.pointerId === event.pointerId && karaokeWaveformWindow) {
-    const bounds = karaokeWaveform.getBoundingClientRect();
-    const deltaPixels = event.clientX - karaokePanDrag.pointerStartX;
-    karaokePanDrag.moved ||= Math.abs(deltaPixels) >= 3;
-    if (karaokePanDrag.moved) {
-      const duration = karaokeWindowDurationMs();
-      const maximum = Math.max(0, karaokeWaveformWindow.duration_ms - duration);
-      karaokeViewStartMs = Math.max(0, Math.min(maximum, karaokePanDrag.viewStartMs - deltaPixels / bounds.width * duration));
-      karaokeWaveform.style.cursor = "grabbing";
-      scheduleKaraokeWaveformReload(karaokeViewStartMs);
-    }
-  }
-  event.preventDefault();
-});
-karaokeWaveform?.addEventListener("pointerup", (event) => {
-  if (karaokePlayheadDrag?.pointerId === event.pointerId) {
-    updateKaraokePlayheadDrag(event.clientX);
-    karaokePlayheadDrag = null;
-    karaokeSuppressClick = true;
-  }
-  if (karaokeTimingDrag?.pointerId === event.pointerId) void commitKaraokeTimingDrag();
-  if (karaokePanDrag?.pointerId === event.pointerId) {
-    karaokeSuppressClick = karaokePanDrag.moved;
-    karaokePanDrag = null;
-  }
-  if (karaokeWaveform.hasPointerCapture(event.pointerId)) karaokeWaveform.releasePointerCapture(event.pointerId);
-  event.preventDefault();
-});
-karaokeWaveform?.addEventListener("pointercancel", () => {
-  karaokePlayheadDrag = null;
-  karaokePanDrag = null;
-  cancelKaraokeTimingDrag();
-});
-karaokeWaveform?.addEventListener("lostpointercapture", () => {
-  karaokePlayheadDrag = null;
-});
-karaokeWaveform?.addEventListener("wheel", (event) => {
-  if (karaokePlayheadDrag) { event.preventDefault(); return; }
-  if (!karaokeWaveformWindow || !karaokeZoomInput) return;
-  const bounds = karaokeWaveform.getBoundingClientRect();
-  if (event.ctrlKey || event.metaKey) {
-    if (karaokeGestureStart) {
-      event.preventDefault();
-      return;
-    }
-    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    const oldDuration = karaokeWindowDurationMs();
-    const anchor = karaokeViewStartMs + ratio * oldDuration;
-    karaokeZoomInput.value = String(Math.max(0, Math.min(100, Number(karaokeZoomInput.value) + event.deltaY * 0.08)));
-    syncKaraokeZoomLabel();
-    const newStart = anchor - ratio * karaokeWindowDurationMs();
-    karaokeFollowPlayhead = false;
-    syncTimelineFollowState();
-    scheduleKaraokeWaveformReload(Math.max(0, newStart));
-    event.preventDefault();
-    return;
-  }
-  const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.shiftKey ? event.deltaY : 0;
-  if (horizontalDelta !== 0) {
-    const duration = karaokeWindowDurationMs();
-    const maximum = Math.max(0, karaokeWaveformWindow.duration_ms - duration);
-    karaokeViewStartMs = Math.max(0, Math.min(maximum, karaokeViewStartMs + horizontalDelta / bounds.width * duration));
-    karaokeFollowPlayhead = false;
-    syncTimelineFollowState();
-    scheduleKaraokeWaveformReload(karaokeViewStartMs);
-    event.preventDefault();
-  }
-}, { passive: false });
-karaokeWaveform?.addEventListener("gesturestart", ((event: KaraokeGestureEvent) => {
-  if (!karaokeWaveformWindow || !karaokeZoomInput) return;
-  const bounds = karaokeWaveform!.getBoundingClientRect();
-  const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-  const durationMs = karaokeWindowDurationMs();
-  karaokeGestureStart = {
-    durationMs,
-    anchorMs: karaokeViewStartMs + ratio * durationMs,
-    ratio,
-  };
-  karaokeFollowPlayhead = false;
-  syncTimelineFollowState();
-  event.preventDefault();
-}) as EventListener, { passive: false });
-karaokeWaveform?.addEventListener("gesturechange", ((event: KaraokeGestureEvent) => {
-  if (!karaokeGestureStart || !karaokeZoomInput) return;
-  const durationMs = Math.max(2_000, Math.min(120_000, karaokeGestureStart.durationMs / Math.max(0.05, event.scale)));
-  karaokeZoomInput.value = String(karaokeZoomValueForDuration(durationMs));
-  syncKaraokeZoomLabel();
-  scheduleKaraokeWaveformReload(Math.max(0, karaokeGestureStart.anchorMs - karaokeGestureStart.ratio * karaokeWindowDurationMs()));
-  event.preventDefault();
-}) as EventListener, { passive: false });
-karaokeWaveform?.addEventListener("gestureend", ((event: Event) => {
-  karaokeGestureStart = null;
-  event.preventDefault();
-}) as EventListener, { passive: false });
-karaokeWaveform?.addEventListener("click", (event) => {
-  if (karaokeSuppressClick) {
-    karaokeSuppressClick = false;
-    return;
-  }
-  if (!karaokeWaveformWindow) return;
-  const bounds = karaokeWaveform.getBoundingClientRect();
-  const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-  const milliseconds = karaokeWaveformWindow.start_ms + ratio * (karaokeWaveformWindow.end_ms - karaokeWaveformWindow.start_ms);
-  karaokeFollowPlayhead = false;
-  syncTimelineFollowState();
-  seekTo(milliseconds, false);
-  updateActiveSubtitle(milliseconds);
 });
 karaokeCutSegmentButton?.addEventListener("click", () => void cutKaraokeSegmentAtPlayhead());
 karaokeJoinSegmentButton?.addEventListener("click", () => void joinKaraokeSegmentWithNext());
@@ -6652,11 +6398,6 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (karaokeTimingDrag && event.key === "Escape") {
-    cancelKaraokeTimingDrag();
-    event.preventDefault();
-    return;
-  }
   if (!activeDetail || !activeMedia || event.altKey || isTextEntryTarget(event.target)) return;
   if (document.querySelector("dialog[open]") || workspaceView?.classList.contains("editor-task-tools")) return;
   if (currentArea === "karaoke" && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {

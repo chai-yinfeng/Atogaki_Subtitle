@@ -40,3 +40,10 @@
 `editor-timeline-view.ts` 接收可见 cue、波形、播放／编辑 ID、增益与时钟快照，只负责绘制、静态位图缓存与 ResizeObserver。播放头与播放段边框独立绘制；缓存更新／dispose 释放旧位图，dispose 断开 observer。共享 `timelineGeometry` 保证紧凑画布的字幕轨道仍在可见范围内，`timelineCueHit` 按最近边界处理相邻块的热区冲突。波形 DTO 放在 `editor-types.ts`，视图不导入 Tauri 或草稿服务。
 
 可见范围索引、手势和波形请求仍由主入口协调，后续单独抽取；折叠后不再因播放或零尺寸 resize 请求波形。32 项单元测试、类型／构建与四组 WebKit 功能回归通过，未把这一抽取视为滚动／长时内存门禁通过。
+
+
+## 时间轴手势边界
+
+`editor-timeline-gestures.ts` 持有一次 pointer／pan／playhead／pinch 的状态、指针捕获与监听器。离开任务 reset、失去捕获、pointercancel、Escape 和 dispose 均取消未提交预览并释放捕获；拖动中阻止其他缩放手势叠加。`timeline-timing.ts` 以纯函数约束 10 ms 吸附、相邻边界及媒体范围，预览不修改主字幕数组。会话从模块读取临时预览，提交前仍 flush 原草稿并以当前文本重基，通过既有 backend 保存；任务身份和导航代次在 flush 后再次核对。
+
+手势模块不调用 Tauri，不创建播放器、草稿或第二套持久化。34 项前端测试、类型／构建、既有四组 WebKit 回归及新增手势专项通过；专项覆盖 Escape、捕获丢失、取消后再次拖动、pan、ctrl-wheel、Safari pinch 去重、离开任务与播放头 seek。正式本机仍运行上一个已安装里程碑，后续完整构建时再更新。

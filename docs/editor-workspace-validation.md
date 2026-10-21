@@ -87,3 +87,8 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 `8a85af0` 的最终隔离 QA 包验证合成 H.264 视频的画面比例和播放、中性色波形及动态播放段边框；首轮隐藏页旧调色问题已在最终窗口确认修正。实际 Cut 后 20→21 段，撤销回 20 段；SQLite 核验 cue ID、原译文、起止时间及编辑标记均恢复，integrity_check=ok。正式完整四 sidecar release 包已签名、核验并覆盖本机；真实 3,089 段任务已打开、短暂定位播放后暂停，20 张数据库表内容均与安装前一致。详见 [安装记录](local-editor-installation.md)。
 
 当前紧凑工作台、跟随／锁定与两条视图边界已交付。整个第三阶段仍有播放器、时间轴手势、处理用例和 Rust 大模块的后续工作；性能观察项和 Windows 实机结果继续保留，未由本次 UI 回归替代。
+
+
+## 时间轴手势生命周期抽取
+
+34 项前端测试、类型／生产构建、cargo fmt --check 与 git diff --check 通过。原四组 WebKit 回归继续通过；新增 `verify-editor-gestures.cjs` 验证 Escape、lostpointercapture、pointercancel、取消后新拖动、背景平移、ctrl-wheel 与 Safari gesture 去重、任务离开取消及重新进入后的播放头 seek。预览按开始时的视窗比例计算，不因新波形响应改变拖动比例；提交重新核对任务与导航代次，并复用原保存接口。此里程碑未重装本机 App，也没有将前端测试当作原生手势／Windows 结果。
