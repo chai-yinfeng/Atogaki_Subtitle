@@ -1,3 +1,4 @@
+import { mountEditorFollow } from "./editor-follow";
 import { mountEditorMenus } from "./editor-menus";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { setupImageThemes } from "./appearance";
@@ -1291,7 +1292,7 @@ const currentCueEditor = mountCurrentCueEditor<SubtitleSegment>(editorRoot, {
 const editorCueList = mountEditorCueList<SubtitleSegment>(document.querySelector<HTMLElement>("#editor-cue-list")!, {
   select: selectEditorCue,
   seek: id => { const cue = activeDetail ? subtitleTimeline().get(id) : undefined; if (cue) seekTo(cue.start_ms); },
-  browse: () => { editorSession.listAutoScroll = false; syncEditorFollow(); },
+  browse: () => editorFollow.browse(),
   time: formatPreciseTime,
   status: cue => {
     const draft = subtitleDrafts.entries.get(cueKey(cue));
@@ -1315,48 +1316,25 @@ function visibleEditorCues(): SubtitleSegment[] {
   return result;
 }
 
-let editorFollowRequest = 0;
-function lockEditorCue(): void {
-  editorFollowRequest++;
-  editorSession.lock();
-  syncEditorFollow();
-}
-function syncEditorFollow(): void {
-  const button = editorRoot.querySelector<HTMLButtonElement>('[data-editor-action="follow"]');
-  button?.setAttribute("aria-pressed", String(editorSession.followPlayback));
-  if (button) button.textContent = editorSession.followPlayback ? "正在跟随播放" : "跟随播放";
-  const reveal = editorRoot.querySelector<HTMLButtonElement>('[data-editor-action="reveal-playing"]');
-  if (reveal) reveal.hidden = editorSession.listAutoScroll;
-  syncEditorSelectionMessage();
-}
-function syncEditorSelectionMessage(): void {
-  const cues = visibleEditorCues();
-  const id = editorSession.selectedCueId;
-  const hidden = id && !cues.some(cue => cue.id === id);
-  const mode = editorSession.followPlayback ? (id ? "跟随播放中" : "当前位置没有字幕") : "已锁定编辑段";
-  const message = `${mode}${hidden ? " · 当前段不在筛选结果中" : ""}${!editorSession.listAutoScroll ? " · 列表自动滚动已暂停" : ""} · 单击锁定编辑，双击或时间码定位播放`;
-  const host = document.querySelector("#editor-selection-message")!;
-  if (host.textContent !== message) host.textContent = message;
-}
-function editorTimingDirty(): boolean {
-  const cue = karaokeDraftSegment();
-  return !!cue && (editorStart.value !== formatPreciseTime(cue.start_ms) || editorEnd.value !== formatPreciseTime(cue.end_ms));
-}
-async function resumeEditorFollow(): Promise<void> {
-  if (workspaceActionBusy || !activeDetail) return;
-  if (editorTimingDirty()) { setSubtitleEditAction("请先保存时间，或在时间输入框按 Escape 恢复，再跟随播放。", true); return; }
-  const navigation = navigationRequestId;
-  const jobId = activeDetail.job.job_id, request = ++editorFollowRequest;
-  if (!await flushEditorStructureDrafts() || request !== editorFollowRequest || navigation !== navigationRequestId || activeDetail?.job.job_id !== jobId || currentArea !== "karaoke") return;
-  editorSession.resumePlayback();
-  karaokeFollowPlayhead = true;
-  syncTimelineFollowState();
-  editorTimeFingerprint = "";
-  updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
-  currentCueEditor.sync(karaokeDraftSegment(), true);
-  editorCueList.reveal(editorSession.playbackCueId);
-  syncEditorFollow();
-}
+const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
+  session: editorSession, current: karaokeDraftSegment, visible: visibleEditorCues,
+  busy: () => workspaceActionBusy, jobId: () => activeDetail?.job.job_id ?? null,
+  navigation: () => navigationRequestId, active: () => currentArea === "karaoke",
+  flush: flushEditorStructureDrafts, time: formatPreciseTime, status: setSubtitleEditAction,
+  resumed: () => {
+    karaokeFollowPlayhead = true;
+    syncTimelineFollowState();
+    editorTimeFingerprint = "";
+    updateKaraokePosition((activeMedia?.currentTime ?? 0) * 1_000);
+    currentCueEditor.sync(karaokeDraftSegment(), true);
+    editorCueList.reveal(editorSession.playbackCueId);
+  },
+});
+function lockEditorCue(): void { editorFollow.lock(); }
+function syncEditorFollow(): void { editorFollow.sync(); }
+function syncEditorSelectionMessage(): void { editorFollow.syncMessage(); }
+function editorTimingDirty(): boolean { return editorFollow.timingDirty(); }
+async function resumeEditorFollow(): Promise<void> { await editorFollow.resume(); }
 function renderEditorList(): void {
   if (currentArea !== "karaoke" || !activeDetail) return;
   const cues = visibleEditorCues();
@@ -1370,8 +1348,7 @@ function selectEditorCue(id: string): boolean {
   const previous = karaokeDraftSegment();
   if (previous && previous.id !== id && editorTimingDirty()) { setSubtitleEditAction("请先保存时间，或在时间输入框按 Escape 恢复，再切换字幕。", true); return false; }
   if (previous && previous.id !== id && subtitleDrafts.entries.get(cueKey(previous))?.composing) { setSubtitleEditAction("请先完成输入法选字，再切换字幕。", true); return false; }
-  lockEditorCue();
-  editorSession.lock(id);
+  editorFollow.lock(id);
   editorTimeFingerprint = "";
   editorStart.value = formatPreciseTime(cue.start_ms); editorEnd.value = formatPreciseTime(cue.end_ms);
   currentCueEditor.sync(cue, true);
@@ -1380,17 +1357,6 @@ function selectEditorCue(id: string): boolean {
   renderEditorList();
   return true;
 }
-for (const input of [editorStart, editorEnd]) input.addEventListener("keydown", event => {
-  if (event.key !== "Escape") return;
-  event.preventDefault(); event.stopPropagation();
-  const cue = karaokeDraftSegment();
-  editorStart.value = cue ? formatPreciseTime(cue.start_ms) : "";
-  editorEnd.value = cue ? formatPreciseTime(cue.end_ms) : "";
-  setSubtitleEditAction("已恢复当前段尚未保存的时间输入。");
-});
-editorRoot.addEventListener("focusin", event => {
-  if ((event.target as HTMLElement).closest(".karaoke-current-segment")) lockEditorCue();
-});
 function setEditorMutationBusy(busy: boolean): void {
   workspaceActionBusy = busy;
   const panel = editorRoot.querySelector<HTMLElement>(".karaoke-current-segment");
@@ -1463,7 +1429,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => { editorLayout.dispose();
-  editorMenus.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); taskTools.dispose(); repairTool.dispose(); });
+  editorMenus.dispose();
+  editorFollow.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); taskTools.dispose(); repairTool.dispose(); });
 
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
