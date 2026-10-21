@@ -11,6 +11,8 @@ import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-s
 import { mountEditorLayout } from "./editor-layout";
 import { mountEditorCueList } from "./editor-cue-list";
 import { mountCurrentCueEditor } from "./current-cue-editor";
+import { mountTaskTools, mountToolDialog } from "./task-tools";
+import { taskToolsTemplate } from "./task-tools-template";
 import { createEditorBackend } from "./editor-backend";
 import type { SubtitleSegment } from "./editor-types";
 import { SubtitleTimeline } from "./subtitle-timeline";
@@ -705,128 +707,7 @@ app.innerHTML = `
       <div id="learning-item-list" class="learning-item-list"></div>
     </section>
 ${editorTemplate(primaryShortcutModifier)}
-    <section id="workspace-view" class="workspace hidden" aria-labelledby="workspace-title">
-      <div class="workspace-heading">
-        <button id="back-to-jobs" class="secondary" type="button">← 返回任务</button>
-        <div>
-          <p class="eyebrow">TASK WORKSPACE</p>
-          <h2 id="workspace-title">任务进度</h2>
-          <p id="workspace-message" class="workspace-message"></p>
-        </div>
-        <button id="reload-detail" type="button" class="secondary">重新读取</button>
-      </div>
-      <nav class="workspace-sections" role="tablist" aria-label="任务工具">
-        <button id="workspace-tab-translation" class="workspace-section-tab active" type="button" role="tab" aria-selected="true" aria-controls="workspace-translation-panel" data-workspace-section="translation">
-          <strong>翻译与词表</strong><span>批量翻译与识别修正</span>
-        </button>
-        <button id="workspace-tab-review" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-review-panel" data-workspace-section="review">
-          <strong>任务进度</strong><span>识别进度与只读预览</span>
-        </button>
-        <button id="workspace-tab-export" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-export-panel" data-workspace-section="export">
-          <strong>导出成品</strong><span>字幕文件与烧录视频</span>
-        </button>
-      </nav>
-      <p id="workspace-action-message" class="workspace-action-message" role="status"></p>
-      <section id="workspace-review-panel" class="workspace-panel hidden" role="tabpanel" aria-labelledby="workspace-tab-review" data-workspace-panel="review">
-        <div class="module-heading compact">
-          <div><p class="eyebrow">SUBTITLE REVIEW</p><h2>任务进度</h2><p>识别完成后直接进入字幕编辑。</p></div>
-          <button id="open-subtitle-editor" type="button">进入字幕编辑 →</button>
-        </div>
-        <div class="review-grid">
-          <section class="media-panel" aria-label="媒体播放器">
-            <div class="panel-heading compact"><div><p class="eyebrow">PLAYBACK</p><h3>媒体与当前字幕</h3></div></div>
-          <div id="media-host" class="media-host"></div>
-          <div class="playback-tools" aria-label="播放快捷操作">
-            <button id="previous-subtitle" type="button" class="secondary" title="上一句（[）">上一句</button>
-            <button id="rewind-media" type="button" class="secondary" title="后退 5 秒（← 或 J）">−5 秒</button>
-            <button id="toggle-playback" type="button" title="播放／暂停（空格或 K）">播放</button>
-            <button id="forward-media" type="button" class="secondary" title="前进 5 秒（→ 或 L）">+5 秒</button>
-            <button id="next-subtitle" type="button" class="secondary" title="下一句（]）">下一句</button>
-            <label>速度
-              <select id="playback-rate" aria-label="播放速度">
-                <option value="0.5">0.5×</option>
-                <option value="0.75">0.75×</option>
-                <option value="1" selected>1×</option>
-                <option value="1.25">1.25×</option>
-                <option value="1.5">1.5×</option>
-                <option value="2">2×</option>
-              </select>
-            </label>
-          </div>
-          <p class="shortcut-help">快捷键：空格/K 播放暂停 · ←/J 与 →/L 跳 5 秒 · [ ] 切换字幕 · , . 调整速度 · O 开关悬浮字幕</p>
-          <p id="media-message" class="media-message"></p>
-          <div class="current-caption" aria-live="polite">
-            <p id="current-source">播放时将在这里显示当前原文。</p>
-            <p id="current-translation">简体中文翻译</p>
-          </div>
-          </section>
-          <section class="timeline" aria-labelledby="timeline-title">
-            <div class="section-heading">
-              <h2 id="timeline-title">任务进度</h2>
-              <span id="segment-count"></span>
-            </div>
-            <div id="subtitle-list" class="subtitle-list"></div>
-          </section>
-        </div>
-      </section>
-      <section id="workspace-translation-panel" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-translation" data-workspace-panel="translation">
-        <div class="module-heading">
-          <div><p class="eyebrow">LANGUAGE WORKFLOW</p><h2>翻译与识别修正</h2><p>这里的操作会更新当前字幕工作区；原始识别快照保持不变。</p></div>
-        </div>
-        <section class="workspace-toolbar module-card" aria-label="翻译与词表">
-          <div>
-            <strong>简体中文翻译</strong>
-            <span id="translation-status">正在读取翻译配置…</span>
-            <span id="translation-run-status" class="muted"></span>
-          </div>
-          <div class="workspace-action-buttons">
-            <button id="translate-pending" type="button">补译缺失／过期段</button>
-            <button id="translate-all" class="secondary" type="button">全体翻译／重译</button>
-          </div>
-          <div class="workspace-glossary-row">
-            <div>
-              <strong>识别词表修正</strong>
-              <span id="job-glossary-status">当前任务未记录识别词表</span>
-            </div>
-            <select id="workspace-glossary"><option value="">选择词表…</option></select>
-            <button id="preview-glossary" type="button" class="secondary">预览应用</button>
-            <button id="manage-workspace-glossary" type="button" class="secondary">管理完整词表</button>
-          </div>
-          <div class="workspace-glossary-inspection">
-            <section>
-              <strong>可应用的修正映射</strong>
-              <p>这里只列出会修改当前原文的规则；纯提示词不会改写已有字幕。</p>
-              <div id="workspace-glossary-mappings" class="glossary-mapping-list muted">请选择词表。</div>
-            </section>
-            <details>
-              <summary>查看转写时冻结的词表快照</summary>
-              <p>该快照只用于说明本任务当时的识别输入，不会随当前词表修改而变化。</p>
-              <pre id="job-glossary-snapshot">当前任务没有词表快照。</pre>
-            </details>
-          </div>
-          <div id="glossary-preview" class="glossary-preview hidden"></div>
-        </section>
-      </section>
-      <section id="workspace-export-panel" class="workspace-panel hidden" role="tabpanel" aria-labelledby="workspace-tab-export" data-workspace-panel="export">
-        <div class="module-heading">
-          <div><p class="eyebrow">DELIVERABLES</p><h2>导出成品</h2><p>每次导出都读取当前已保存的字幕；未保存草稿不会进入文件或视频。</p></div>
-        </div>
-        <div class="export-grid">
-          <article class="export-card">
-            <div><span class="module-number">01</span><h3>字体、样式与预览</h3><p>设置任务级原文／译文样式，并用最终烧录所用的 FFmpeg/libass 生成真实预览帧。</p></div>
-            <div class="export-card-actions"><button id="edit-subtitle-styles" type="button">设置并预览…</button></div>
-          </article>
-          <article class="export-card">
-            <div><span class="module-number">02</span><h3>字幕文件</h3><p>按需要选择原文、译文或双语 SRT/ASS；SRT 只保留文字和时间，ASS 保留完整样式。</p></div>
-            <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 ${fileManagerLabel} 中显示</button></div>
-          </article>
-          <article class="export-card">
-            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>把当前字幕和已保存样式冻结为一次独立烧录任务；提交后仍可返回字幕编辑继续工作。</p></div>
-            <div class="export-card-actions"><button id="render-video" type="button">导出带字幕视频…</button></div>
-          </article>
-        </div>
-      </section>
-    </section>
+${taskToolsTemplate(fileManagerLabel)}
     <dialog id="glossary-dialog" class="glossary-dialog">
       <div class="dialog-heading">
         <div><p class="eyebrow">RECOGNITION GLOSSARIES</p><h2>识别词表</h2></div>
@@ -1109,10 +990,10 @@ const listeningView = document.querySelector<HTMLElement>("#listening-view");
 const learningView = document.querySelector<HTMLElement>("#learning-view");
 const karaokeView = document.querySelector<HTMLElement>("#karaoke-view");
 const shell = document.querySelector<HTMLElement>(".shell");
-const workspaceView = document.querySelector<HTMLElement>("#workspace-view");
+const workspaceView = document.querySelector<HTMLElement>("#workspace-view")!;
 const workspaceSectionTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-workspace-section]"));
 const workspaceSectionPanels = Array.from(document.querySelectorAll<HTMLElement>("[data-workspace-panel]"));
-const openSubtitleEditorButton = document.querySelector<HTMLButtonElement>("#open-subtitle-editor");
+const openSubtitleEditorButton = workspaceView.querySelector<HTMLButtonElement>("#open-subtitle-editor");
 const jobList = document.querySelector<HTMLDivElement>("#job-list");
 const jobCount = document.querySelector<HTMLSpanElement>("#job-count");
 const jobManagementMessage = document.querySelector<HTMLParagraphElement>("#job-management-message");
@@ -1159,21 +1040,21 @@ const taskPromptSummary = document.querySelector<HTMLSpanElement>("#task-prompt-
 const taskPromptPreview = document.querySelector<HTMLElement>("#task-prompt-preview");
 const taskMessage = document.querySelector<HTMLSpanElement>("#task-message");
 const submitButton = document.querySelector<HTMLButtonElement>("#submit-task");
-const workspaceTitle = document.querySelector<HTMLHeadingElement>("#workspace-title");
-const workspaceMessage = document.querySelector<HTMLParagraphElement>("#workspace-message");
-const mediaHost = document.querySelector<HTMLDivElement>("#media-host");
-const mediaMessage = document.querySelector<HTMLParagraphElement>("#media-message");
+const workspaceTitle = workspaceView.querySelector<HTMLHeadingElement>("#workspace-title");
+const workspaceMessage = workspaceView.querySelector<HTMLParagraphElement>("#workspace-message");
+const mediaHost = workspaceView.querySelector<HTMLDivElement>("#media-host");
+const mediaMessage = workspaceView.querySelector<HTMLParagraphElement>("#media-message");
 const relinkJobMediaButton = document.querySelector<HTMLButtonElement>("#relink-job-media");
-const previousSubtitleButton = document.querySelector<HTMLButtonElement>("#previous-subtitle");
-const rewindMediaButton = document.querySelector<HTMLButtonElement>("#rewind-media");
-const togglePlaybackButton = document.querySelector<HTMLButtonElement>("#toggle-playback");
-const forwardMediaButton = document.querySelector<HTMLButtonElement>("#forward-media");
-const nextSubtitleButton = document.querySelector<HTMLButtonElement>("#next-subtitle");
-const playbackRateSelect = document.querySelector<HTMLSelectElement>("#playback-rate");
-const subtitleList = document.querySelector<HTMLDivElement>("#subtitle-list");
-const segmentCount = document.querySelector<HTMLSpanElement>("#segment-count");
-const currentSource = document.querySelector<HTMLParagraphElement>("#current-source");
-const currentTranslation = document.querySelector<HTMLParagraphElement>("#current-translation");
+const previousSubtitleButton = workspaceView.querySelector<HTMLButtonElement>("#previous-subtitle");
+const rewindMediaButton = workspaceView.querySelector<HTMLButtonElement>("#rewind-media");
+const togglePlaybackButton = workspaceView.querySelector<HTMLButtonElement>("#toggle-playback");
+const forwardMediaButton = workspaceView.querySelector<HTMLButtonElement>("#forward-media");
+const nextSubtitleButton = workspaceView.querySelector<HTMLButtonElement>("#next-subtitle");
+const playbackRateSelect = workspaceView.querySelector<HTMLSelectElement>("#playback-rate");
+const subtitleList = workspaceView.querySelector<HTMLDivElement>("#subtitle-list");
+const segmentCount = workspaceView.querySelector<HTMLSpanElement>("#segment-count");
+const currentSource = workspaceView.querySelector<HTMLParagraphElement>("#current-source");
+const currentTranslation = workspaceView.querySelector<HTMLParagraphElement>("#current-translation");
 const listeningJobList = document.querySelector<HTMLDivElement>("#listening-job-list");
 const listeningJobCount = document.querySelector<HTMLSpanElement>("#listening-job-count");
 const listeningJobTitle = document.querySelector<HTMLHeadingElement>("#listening-job-title");
@@ -1202,24 +1083,24 @@ const learningDictionaryTitle = document.querySelector<HTMLHeadingElement>("#lea
 const learningDictionarySubtitle = document.querySelector<HTMLParagraphElement>("#learning-dictionary-subtitle");
 const learningProviderTabs = document.querySelector<HTMLElement>("#learning-provider-tabs");
 const learningProviderPanel = document.querySelector<HTMLElement>("#learning-provider-panel");
-const translationStatusText = document.querySelector<HTMLSpanElement>("#translation-status");
-const translationRunStatusText = document.querySelector<HTMLSpanElement>("#translation-run-status");
-const translatePendingButton = document.querySelector<HTMLButtonElement>("#translate-pending");
-const translateAllButton = document.querySelector<HTMLButtonElement>("#translate-all");
+const translationStatusText = workspaceView.querySelector<HTMLSpanElement>("#translation-status");
+const translationRunStatusText = workspaceView.querySelector<HTMLSpanElement>("#translation-run-status");
+const translatePendingButton = workspaceView.querySelector<HTMLButtonElement>("#translate-pending");
+const translateAllButton = workspaceView.querySelector<HTMLButtonElement>("#translate-all");
 const openSubtitleOverlayButton = document.querySelector<HTMLButtonElement>("#open-subtitle-overlay");
-const exportButton = document.querySelector<HTMLButtonElement>("#export-subtitles");
-const renderVideoButton = document.querySelector<HTMLButtonElement>("#render-video");
-const editSubtitleStylesButton = document.querySelector<HTMLButtonElement>("#edit-subtitle-styles");
-const revealExportButton = document.querySelector<HTMLButtonElement>("#reveal-export");
+const exportButton = workspaceView.querySelector<HTMLButtonElement>("#export-subtitles");
+const renderVideoButton = workspaceView.querySelector<HTMLButtonElement>("#render-video");
+const editSubtitleStylesButton = workspaceView.querySelector<HTMLButtonElement>("#edit-subtitle-styles");
+const revealExportButton = workspaceView.querySelector<HTMLButtonElement>("#reveal-export");
 const subtitleExportDialog = document.querySelector<HTMLDialogElement>("#subtitle-export-dialog");
 const subtitleExportForm = document.querySelector<HTMLFormElement>("#subtitle-export-form");
 const subtitleExportMessage = document.querySelector<HTMLSpanElement>("#subtitle-export-message");
-const workspaceActionMessage = document.querySelector<HTMLParagraphElement>("#workspace-action-message");
-const workspaceGlossary = document.querySelector<HTMLSelectElement>("#workspace-glossary");
-const jobGlossaryStatus = document.querySelector<HTMLSpanElement>("#job-glossary-status");
-const workspaceGlossaryMappings = document.querySelector<HTMLDivElement>("#workspace-glossary-mappings");
-const jobGlossarySnapshot = document.querySelector<HTMLElement>("#job-glossary-snapshot");
-const glossaryPreviewHost = document.querySelector<HTMLDivElement>("#glossary-preview");
+const workspaceActionMessage = workspaceView.querySelector<HTMLParagraphElement>("#workspace-action-message");
+const workspaceGlossary = workspaceView.querySelector<HTMLSelectElement>("#workspace-glossary");
+const jobGlossaryStatus = workspaceView.querySelector<HTMLSpanElement>("#job-glossary-status");
+const workspaceGlossaryMappings = workspaceView.querySelector<HTMLDivElement>("#workspace-glossary-mappings");
+const jobGlossarySnapshot = workspaceView.querySelector<HTMLElement>("#job-glossary-snapshot");
+const glossaryPreviewHost = workspaceView.querySelector<HTMLDivElement>("#glossary-preview");
 const glossaryDialog = document.querySelector<HTMLDialogElement>("#glossary-dialog");
 const glossaryListHost = document.querySelector<HTMLDivElement>("#glossary-list");
 const glossaryName = document.querySelector<HTMLInputElement>("#glossary-name");
@@ -1498,25 +1379,23 @@ async function saveEditorCueTime(): Promise<void> {
   } catch (error) { setSubtitleEditAction(`时间保存失败：${String(error)}`, true); }
   finally { setEditorMutationBusy(false); }
 }
-let editorToolReturnFocus: HTMLElement | null = null;
+const taskTools = mountTaskTools(workspaceView, editorRoot, closeEditorTools);
+const repairTool = mountToolDialog(editorRepairDialog, () => asrQualitySignalsHost?.replaceChildren());
+function openEditorRepair(): void {
+  repairTool.open();
+  if (activeDetail) void loadAsrQualitySignals(activeDetail.job.job_id);
+}
 async function showEditorTools(section: WorkspaceSection): Promise<void> {
   if (!activeDetail || !await flushEditorStructureDrafts()) return;
-  editorToolReturnFocus = document.activeElement as HTMLElement;
-  workspaceView?.classList.remove("hidden");
-  workspaceView?.classList.add("editor-task-tools");
-  workspaceView?.setAttribute("role", "region");
-  editorRoot.inert = true;
+  taskTools.mountOverlay();
   renderWorkspace(activeDetail);
   showWorkspaceSection(section);
-  document.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回字幕编辑";
-  document.querySelector<HTMLButtonElement>("#back-to-jobs")?.focus();
+  workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回字幕编辑";
+  workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")?.focus();
   await refreshTranslationStatus();
 }
 function closeEditorTools(): void {
-  workspaceView?.classList.add("hidden"); workspaceView?.classList.remove("editor-task-tools");
-  workspaceView?.removeAttribute("role");
-  editorRoot.inert = false;
-  editorToolReturnFocus?.focus();
+  taskTools.unmount();
   currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList();
 }
 editorSearch.addEventListener("input", () => { editorSession.query = editorSearch.value; renderEditorList(); });
@@ -1527,8 +1406,8 @@ editorRoot.addEventListener("click", event => {
   const action = button.dataset.editorAction;
   if (action === "back") void showTopLevelArea("workbench").catch(error => setSubtitleEditAction(String(error), true));
   else if (action === "export") void showEditorTools("export");
-  else if (action === "repair") editorRepairDialog.showModal();
-  else if (action === "close-repair") editorRepairDialog.close();
+  else if (action === "repair") openEditorRepair();
+  else if (action === "close-repair") repairTool.close();
   else if (action === "save-time") void saveEditorCueTime();
   else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id) { selectEditorCue(id); editorCueList.reveal(id); } }
   else if (action === "edit-playing" && editorSession.playbackCueId) selectEditorCue(editorSession.playbackCueId);
@@ -1538,17 +1417,8 @@ editorRoot.addEventListener("click", event => {
   else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
   else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
 });
-workspaceView?.addEventListener("keydown", event => {
-  if (!workspaceView.classList.contains("editor-task-tools")) return;
-  if (event.key === "Escape") { event.preventDefault(); closeEditorTools(); }
-  if (event.key === "Tab") {
-    const controls = [...workspaceView.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter(item => item.getClientRects().length);
-    const first = controls[0], last = controls.at(-1);
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-  }
-});
-window.addEventListener("pagehide", () => { editorLayout.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); });
+
+window.addEventListener("pagehide", () => { editorLayout.dispose(); editorCueList.dispose(); currentCueEditor.dispose(); taskTools.dispose(); repairTool.dispose(); });
 
 function languageLabel(language: string): string {
   if (language === "ja") return "日语";
@@ -2460,7 +2330,7 @@ function updateTranslationControls(): void {
   if (revealExportButton) {
     revealExportButton.disabled = taskBusy || !lastExportedSubtitlePath;
   }
-  const previewButton = document.querySelector<HTMLButtonElement>("#preview-glossary");
+  const previewButton = workspaceView.querySelector<HTMLButtonElement>("#preview-glossary");
   if (previewButton) {
     previewButton.disabled = taskBusy || !hasSegments || !workspaceGlossary?.value;
   }
@@ -2865,7 +2735,7 @@ async function refreshActiveJob(): Promise<void> {
 function showWorkspace(show: boolean): void {
   shell?.classList.toggle("workspace-open", show);
   homeView?.classList.toggle("hidden", show);
-  workspaceView?.classList.toggle("hidden", !show);
+  if (show) taskTools.mountPage(); else taskTools.unmount();
   listeningView?.classList.add("hidden");
   learningView?.classList.add("hidden");
   karaokeView?.classList.add("hidden");
@@ -2877,7 +2747,7 @@ async function stopActivePlayback(): Promise<void> {
   if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
-  editorRepairDialog.close();
+  repairTool.close();
   if (workspaceView?.classList.contains("editor-task-tools")) closeEditorTools();
   playbackLoop = null; loopStartMs = null;
   document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
@@ -2933,7 +2803,7 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editor
   listeningSubtitleList?.replaceChildren();
   currentArea = area;
   shell?.classList.toggle("workspace-open", area === "karaoke");
-  workspaceView?.classList.add("hidden");
+  taskTools.unmount();
   homeView?.classList.toggle("hidden", area !== "workbench");
   listeningView?.classList.toggle("hidden", area !== "listening");
   learningView?.classList.toggle("hidden", area !== "learning");
@@ -3576,8 +3446,8 @@ async function saveAsrReviewDecision(
 let showProcessedSignals = false;
 async function loadAsrQualitySignals(jobId: string): Promise<void> {
   if (!asrQualitySignalsHost) return;
-  const disclosure = document.querySelector<HTMLDetailsElement>("#asr-quality-review");
-  const summary = document.querySelector<HTMLElement>("#asr-quality-summary");
+  const disclosure = editorRepairDialog.querySelector<HTMLDetailsElement>("#asr-quality-review");
+  const summary = editorRepairDialog.querySelector<HTMLElement>("#asr-quality-summary");
   if (disclosure && disclosure.dataset.jobId !== jobId) {
     disclosure.open = false;
     disclosure.dataset.jobId = jobId;
@@ -3590,6 +3460,7 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
     if (activeDetail?.job.job_id !== jobId) return;
     asrQualitySignals = allSignals;
     renderEditorList();
+    if (!editorRepairDialog.open) { asrQualitySignalsHost.replaceChildren(); return; }
     const processedCount = allSignals.filter(s => s.latest_decision === "false_positive" || s.latest_decision === "resolved").length;
     const signals = allSignals.filter(s => showProcessedSignals || (s.latest_decision !== "false_positive" && s.latest_decision !== "resolved"));
     if (activeDetail?.job.job_id !== jobId) return;
@@ -4456,7 +4327,7 @@ async function openJob(jobId: string, initialSection?: WorkspaceSection): Promis
   if (requestId !== navigationRequestId) return;
   showWorkspace(true);
   showWorkspaceSection(initialSection ?? "review");
-  document.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回任务";
+  workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回任务";
   window.scrollTo({ top: 0, behavior: "auto" });
   workspaceMessage.textContent = "正在读取 字幕工作区…";
   setWorkspaceAction("");
@@ -6540,11 +6411,11 @@ settingsForm?.addEventListener("submit", (event) => {
   void saveSettings(false);
 });
 document.querySelector<HTMLButtonElement>("#finish-settings")?.addEventListener("click", () => void saveSettings(true));
-document.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
+workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
   if (currentArea === "karaoke") { closeEditorTools(); return; }
   void showTopLevelArea("workbench").then(() => refresh());
 });
-document.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
+workspaceView.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
   if (activeDetail) void openJob(activeDetail.job.job_id, currentWorkspaceSection);
 });
 relinkJobMediaButton?.addEventListener("click", () => void relinkActiveJobMedia());
@@ -6783,12 +6654,12 @@ karaokeWaveform?.addEventListener("click", (event) => {
 });
 karaokeCutSegmentButton?.addEventListener("click", () => void cutKaraokeSegmentAtPlayhead());
 karaokeJoinSegmentButton?.addEventListener("click", () => void joinKaraokeSegmentWithNext());
-document.querySelector("#retranscription-use-current")?.addEventListener("click", () => usePlayheadSubtitleForRetranscription());
+editorRepairDialog.querySelector("#retranscription-use-current")?.addEventListener("click", () => usePlayheadSubtitleForRetranscription());
 retranscriptionUseWindowButton?.addEventListener("click", useVisibleWindowForRetranscription);
 retranscriptionExpandSegmentsButton?.addEventListener("click", expandRetranscriptionRangeToSegments);
 retranscriptionProvider?.addEventListener("change", () => {
   const cloud = retranscriptionProvider.value === "gemini-transcribe";
-  document.querySelector<HTMLElement>("#gemini-upload-consent")?.classList.toggle("hidden", !cloud);
+  editorRepairDialog.querySelector<HTMLElement>("#gemini-upload-consent")?.classList.toggle("hidden", !cloud);
   if (!cloud && authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
 });
 asrQualitySignalsHost?.addEventListener("click", (event) => {
@@ -6808,7 +6679,7 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
     seekTo(startMs, false);
     updateActiveSubtitle(startMs);
     void loadKaraokeWaveform(startMs);
-    editorRepairDialog.close();
+    repairTool.close();
     if (editorRoot.classList.contains("editor-waveform-hidden")) editorRoot.querySelector<HTMLButtonElement>('[data-editor-toggle="waveform"]')?.click();
     return;
   }
@@ -6829,7 +6700,7 @@ asrQualitySignalsHost?.addEventListener("click", (event) => {
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
   setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
-  if (!editorRepairDialog.open) editorRepairDialog.showModal();
+  if (!editorRepairDialog.open) openEditorRepair();
   retranscriptionStartInput?.focus();
 });
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
@@ -6926,13 +6797,13 @@ subtitleExportDialog?.addEventListener("cancel", (event) => {
   subtitleExportResolver = null;
 });
 document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());
-document.querySelector<HTMLButtonElement>("#manage-workspace-glossary")?.addEventListener("click", () => void openGlossaryManager(workspaceGlossary?.value));
+workspaceView.querySelector<HTMLButtonElement>("#manage-workspace-glossary")?.addEventListener("click", () => void openGlossaryManager(workspaceGlossary?.value));
 document.querySelector<HTMLButtonElement>("#close-glossaries")?.addEventListener("click", () => glossaryDialog?.close());
 document.querySelector<HTMLButtonElement>("#new-glossary")?.addEventListener("click", () => void editGlossary(null));
 document.querySelector<HTMLButtonElement>("#add-glossary-term")?.addEventListener("click", () => addGlossaryTermRow());
 document.querySelector<HTMLButtonElement>("#save-glossary")?.addEventListener("click", () => void saveGlossaryEditor());
 deleteGlossaryButton?.addEventListener("click", () => void deleteGlossaryEditor());
-document.querySelector<HTMLButtonElement>("#preview-glossary")?.addEventListener("click", () => void previewGlossaryApplication());
+workspaceView.querySelector<HTMLButtonElement>("#preview-glossary")?.addEventListener("click", () => void previewGlossaryApplication());
 workspaceGlossary?.addEventListener("change", () => {
   clearGlossaryPreview();
   void renderWorkspaceGlossaryInspection();
@@ -7536,7 +7407,7 @@ function addOfflineTools(): void {
   taskChoice.className = "offline-tools";
   taskChoice.innerHTML =
     '<label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="gemini">Gemini</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地翻译</option><option value="openai-compatible">高级兼容服务</option></select></label><button type="button" class="secondary">设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>';
-  document.querySelector("#workspace-translation-panel")?.prepend(taskChoice);
+  workspaceView.querySelector("#workspace-translation-panel")?.prepend(taskChoice);
   taskChoice.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
     if (!activeDetail) return;
     try {

@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-09-16_
+_最后更新：2026-10-21_
 
 ## 仓库组织
 
@@ -94,3 +94,9 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 现有 SQLite 字幕、人工编辑、学习来源、样式和导出继续作为迁移兼容边界。新增 run／artifact／cue 来源与翻译依赖版本，不以重新识别结果直接重建工作区；持久候选采用仍执行范围和 revision 校验。`JobRunner`、局部识别和桌面入口逐步共享 provider 用例，Whisper 专用参数留在 adapter 配置内。
 
 实时 session 与离线 run 分开，E2E 仅为实验路线。接口草案、模型部署、评估样本与分阶段验收见 [管线演进计划](pipeline-evolution.md)。
+
+## 字幕编辑前端的渐进边界
+
+四区默认布局为上方视频／时间轴、中间当前句编辑、下方虚拟字幕列表。`editor-session` 区分编辑与播放选择；`editor-layout` 持有版本化本机布局偏好；`editor-cue-list` 只呈现视口行。`current-cue-editor` 使用原 SubtitleDrafts 管理输入交互，`editor-backend` 集中适配文字／时间持久化，`task-tools` 持有工具 DOM 的挂载与焦点生命周期。工具模板与视图逻辑独立于主入口，关闭工具不重建媒体或草稿。
+
+主入口仍协调播放器、时间轴和部分处理用例，后续每次抽取一条边界，不能将当前结构写成已经完成全模块拆分。任务卡片通过 SQLite 摘要读取，恢复与采用仍完整验证来源证据；见 [0056](decisions/0056-editor-virtual-list-and-task-summary.md) 和 [0057](decisions/0057-editor-view-lifecycles.md)。

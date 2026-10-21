@@ -15,6 +15,9 @@ await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await
 await page.locator('#editor-cue-list .editor-cue-row').first().waitFor();
 assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.cmd==='get_job_detail').length),1);
 assert.equal(await page.locator('.editor-workspace-label').innerText(),'字幕编辑');
+assert.equal(await page.locator('#workspace-view').count(),0);
+assert.equal(await page.locator('#editor-repair-dialog').count(),0);
+
 const panelOrder=await page.evaluate(()=>{
  const rect=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x,y:r.y,bottom:r.bottom,right:r.right};};
  return {video:rect('#editor-video-panel'),wave:rect('#editor-wave-panel'),edit:rect('.karaoke-current-segment'),list:rect('.editor-list-panel')};
@@ -52,6 +55,21 @@ await page.locator('#karaoke-open-workspace').click();await page.locator('.edito
 assert.equal(await page.locator('.editor-task-tools #workspace-tab-review').isVisible(),false);
 assert.equal(await page.locator('#back-to-jobs').innerText(),'← 返回字幕编辑');
 await page.locator('#back-to-jobs').click();assert.equal(await page.locator('#karaoke-current-source').inputValue(),'第二段修改');
+assert.equal(await page.locator('#workspace-view').count(),0);
+for(let i=0;i<2;i++) {
+ await page.locator('#karaoke-open-workspace').click();
+ await page.locator('#back-to-jobs').waitFor();await page.keyboard.press('Escape');
+ assert.equal(await page.locator('#workspace-view').count(),0);
+ assert.equal(await page.locator('#karaoke-view').evaluate(root=>root.inert),false);
+}
+await page.locator('[data-editor-action="repair"]').click();
+await page.locator('#editor-repair-dialog[open]').waitFor();
+await page.locator('#asr-quality-review').evaluate(details=>details.open=true);
+await page.locator('.asr-quality-signal').waitFor();
+await page.locator('[data-editor-action="close-repair"]').click();
+assert.equal(await page.locator('#editor-repair-dialog').count(),0);
+assert.equal(await page.locator('#karaoke-current-source').inputValue(),'第二段修改');
+
 await page.locator('[data-editor-reset]').click();
 await page.setViewportSize({width:960,height:640});await page.screenshot({path:path.join(output,'editor-960.png')});
 assert.ok(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight));
@@ -105,6 +123,14 @@ await page.reload();await page.locator('.job-open').first().click();
 await page.locator('#editor-cue-list .editor-cue-row').first().waitFor();
 assert.equal(await page.locator('[data-editor-resize="videoRatio"]').getAttribute('aria-valuenow'),'36');
 assert.equal(await page.locator('#subtitle-list textarea').count(),0);
+// The same region still mounts as a read-only progress page for active jobs.
+await page.evaluate(()=>{window.__test.job.status='transcribing';window.__test.job.segment_count=0;});
+await page.locator('[data-editor-action="back"]').click();
+await page.locator('.job-open').first().click();await page.locator('#workspace-view').waitFor();
+assert.match(await page.locator('#workspace-title').innerText(),/任务进度/);
+assert.equal(await page.locator('#subtitle-list textarea').count(),0);
+await page.locator('#back-to-jobs').click();
+assert.equal(await page.locator('#workspace-view').count(),0);
 assert.deepEqual(errors,[]);console.log('PASS: selection, independent drafts, filters, tool return, folding, playback, time save, IME, failure retry, layout persistence');
 await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});

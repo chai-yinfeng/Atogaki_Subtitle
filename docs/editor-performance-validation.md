@@ -47,4 +47,8 @@ ATOGAKI_EDITOR_ENGINE=webkit node scripts/verify-editor-ui.cjs
 
 本机原始 JSON 与六份 Playwright trace 在忽略目录 `local-artifacts/editor-performance/2026-10-21/`；原生 Instruments trace 在 `/tmp/atogaki-editor-native/phase2-webcontent.trace`。这些不是公开发行资产，不进入 Git。临时 App 为 `/tmp/atogaki-editor-native/Atogaki.app`；未覆盖正式 `/Applications/Atogaki.app`。
 
-虚拟列表、局部索引和摘要接口已交付；工具静态模板的延迟挂载、滚动帧改善与持续内存仍是剩余项，不能标记全部性能门禁完成。
+虚拟列表、局部索引和摘要接口已交付；滚动帧改善与持续内存仍是剩余项，不能标记全部性能门禁完成。
+
+## 第三阶段补充：工具生命周期
+
+翻译／导出区域、识别复核 dialog 已按需连接与卸载文档，复核条目在关闭时释放；单份表单实例保留输入，尚未进行代码分包或延迟分配全部控件。WebKit 回归新增隐藏工具无连接 DOM、重复开关／Escape／编辑焦点和进行中任务只读页。此后界面布局已改变，前述测量保留为第二阶段当时的对比，不直接当作新布局的绝对指标。
