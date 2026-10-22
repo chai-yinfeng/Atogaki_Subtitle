@@ -35,3 +35,15 @@
 本次仅新增一份一致性 SQLite 快照，不复制模型、媒体或整个数据目录。保留上一版 `/Applications/.Atogaki.previous.20261021-compact` 和稳定版 `/Applications/.Atogaki.previous-20261020T210406Z`。验证新包和两份回退签名后，移除被取代的 `.Atogaki.previous.20261021-editor` 及三份过时临时 QA App；合计约 310 MiB 逻辑副本内容，物理释放量受 APFS 影响。旧 QA 数据、trace 与证据全部保留。
 
 本次记录位于忽略目录 `local-artifacts/install-backups/20261021-compact/`：一致性快照、20 表前后摘要、构建／安装／回退文件清单，以及轮换清理前后记录。没有新增公开发行资产。后续整体模块拆分、滚动 P95／长时内存和 Windows 原生验证仍按路线图推进，不能把本机试装当作这些项目全部完成。
+
+## 模块与处理工具试装（86c46c8）
+
+从干净提交 `86c46c8` 完整构建四 sidecar release 包，正式 identifier 与 0.1.2 版本号保持；五个可执行文件、完整文件清单与深度签名均通过核验。已原子覆盖并启动 `/Applications/Atogaki.app`。安装前应用暂停且无未保存文字，使用正常退出路径；正式 14 个任务均已完成，没有中断后台运行。
+
+启动后与打开 3,089 段真实电影任务后，全部 20 张表摘要均与安装前一致，14 个任务／9,976 段保留，integrity_check=ok。原文／译文上下排列，视频与右侧波形＋编辑框、底部列表以及原有布局比例保留；媒体播放和跟随正常，最后暂停于原任务 00:01:46.991／第 15 段供用户试用。正式字幕未执行文字、时间、结构或候选操作，也没有调用识别或云端翻译。清理确认 AX、候选历史自动保护、焦点返回及采用／撤销使用隔离合成数据验证，64 项前端、九组 WebKit 和完整原生构建通过。
+
+本次保留上一版 `/Applications/.Atogaki.previous.20261021-modules`（8a85af0）及稳定版 `/Applications/.Atogaki.previous-20261020T210406Z`（0.1.1）。新包启动与数据一致性通过后，核对清单再删除被取代的 `.Atogaki.previous.20261021-compact` 和旧 `/tmp/atogaki-compact-native/Atogaki.app`，两份 App 合计 175,985,912 字节，约 168 MiB 逻辑内容；旧 QA 数据、合成媒体和证据仍保留。
+
+新的一致性 SQLite 快照与上次 `20261021-compact/before-install.sqlite` 的 SHA-256 完全相同。保留旧文件并校验 integrity_check 后，新快照路径改为相对链接，恢复路径和字节内容不变，不再保留另一份 34,852,864 字节（约 33 MiB）的副本。其他独立数据恢复点、模型、主题、媒体与 ASR 来源均未清理；APFS 共享块使上述逻辑大小不能视为精确空闲增量。
+
+预检、安装、两次 20 表验证、签名文件清单、截图／AX、轮换清理与快照去重记录在忽略目录 `local-artifacts/install-backups/20261021-modules/`。本次为本机试装，没有生成或更新公开 Release。剩余 Rust／repository 与处理工具拆分、滚动 P95／长时内存、文档整理和 Windows 验收继续按路线图推进。
