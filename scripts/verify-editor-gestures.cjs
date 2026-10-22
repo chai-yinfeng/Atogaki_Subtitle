@@ -54,7 +54,10 @@ const assert=require('node:assert/strict');
  await p.locator('[data-editor-action="follow"]').click();
  const headBox=await canvas.boundingBox();
  await p.mouse.move(headBox.x+2,headBox.y+28);await p.mouse.down();await p.mouse.move(headBox.x+headBox.width*.25,headBox.y+28,{steps:3});await p.mouse.up();
- assert.ok(await p.locator('#karaoke-media-host audio').evaluate(a=>a.currentTime>5));
+ // WebKit applies currentTime asynchronously during successive pointer moves.
+ const headTarget=await p.evaluate(()=>{const r=window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1).args.request;return (r.startMs+(r.endMs-r.startMs)*.25)/1000;});
+ await p.waitForFunction(target=>Math.abs(document.querySelector('#karaoke-media-host audio').currentTime-target)<.15,headTarget,{polling:50,timeout:10000});
+ assert.ok(await p.locator('#karaoke-media-host audio').evaluate((a,target)=>Math.abs(a.currentTime-target)<.15,headTarget));
  assert.equal(await p.locator('[data-editor-action="follow"]').getAttribute('aria-pressed'),'true');
  assert.deepEqual(errors,[]);console.log('PASS: Escape, capture loss, fresh drag, cancel, pan, ctrl-wheel, pinch, task navigation and playhead seek');
  await b.close();

@@ -1,3 +1,5 @@
+import { mountReviewSignals } from "./editor-review-signals";
+import { mountCandidateHistory } from "./editor-candidate-history";
 import { createEditorProcessing } from "./editor-processing";
 import { createProcessingBackend } from "./editor-processing-backend";
 import type { RetranscriptionCandidate, RetranscriptionPreview, AsrQualitySignal } from "./editor-processing-types";
@@ -27,7 +29,7 @@ import { createEditorBackend } from "./editor-backend";
 import type { SubtitleSegment } from "./editor-types";
 import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
-import { applyTheme, readTheme, candidateLabel, type CandidateLabelInput } from "./themes";
+import { applyTheme, readTheme, candidateLabel } from "./themes";
 applyTheme(readTheme());
 import { matchesQuery, highlightSaved, candidateTextDiff } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
@@ -951,7 +953,6 @@ const retranscriptionUseWindowButton = document.querySelector<HTMLButtonElement>
 const retranscriptionExpandSegmentsButton = document.querySelector<HTMLButtonElement>("#retranscription-expand-segments");
 const previewRetranscriptionButton = document.querySelector<HTMLButtonElement>("#preview-retranscription");
 const retranscriptionMessage = document.querySelector<HTMLParagraphElement>("#retranscription-message");
-const asrQualitySignalsHost = document.querySelector<HTMLDivElement>("#asr-quality-signals");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
 const modelPath = document.querySelector<HTMLInputElement>("#model-path");
 const sourceLanguage = document.querySelector<HTMLSelectElement>("#source-language");
@@ -1362,16 +1363,18 @@ async function saveEditorCueTime(): Promise<void> {
   finally { setEditorMutationBusy(false); }
 }
 const taskTools = mountTaskTools(workspaceView, editorRoot, closeEditorTools);
-const repairTool = mountToolDialog(editorRepairDialog, () => asrQualitySignalsHost?.replaceChildren());
+const repairTool = mountToolDialog(editorRepairDialog, () => { reviewSignals.clear(); candidateHistory.clear(); });
+const processingBackend = createProcessingBackend(invoke);
 const editorProcessing = createEditorProcessing({
-  backend: createProcessingBackend(invoke),
+  backend: processingBackend,
   context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
   visible: () => editorRepairDialog.open || !!retranscriptionDialog?.open,
   segments: () => activeDetail?.segments ?? [],
   busyChanged: (busy, phase) => {
     if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = busy;
     if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = busy;
-    document.querySelectorAll<HTMLButtonElement>(".refresh-comparison, [data-full-candidate]").forEach(button => button.disabled = busy);
+    editorRepairDialog.querySelectorAll<HTMLButtonElement>("[data-full-candidate]").forEach(button => button.disabled = busy);
+    retranscriptionDialog?.querySelectorAll<HTMLButtonElement>(".refresh-comparison").forEach(button => button.disabled = busy);
     document.querySelectorAll<HTMLButtonElement>("#close-retranscription-preview, #cancel-retranscription").forEach(button => button.disabled = phase === "adopt");
   },
   mutationLock: setEditorMutationBusy,
@@ -1388,6 +1391,42 @@ const editorProcessing = createEditorProcessing({
   time: formatTime,
 });
 retranscriptionDialog?.addEventListener("cancel", event => { if (editorProcessing.adopting) event.preventDefault(); });
+const candidateHistory = mountCandidateHistory(editorRepairDialog.querySelector<HTMLElement>(".retranscription-range")!, {
+  context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
+  visible: () => editorRepairDialog.open,
+  list: processingBackend.runs,
+  release: processingBackend.release,
+  confirmRelease: () => confirmAction({ title: "清理这个未采用候选？", message: "释放候选的音频缓存和识别产物，保留运行摘要。清理后无法再打开该候选；当前字幕不变。", confirmLabel: "清理产物", danger: true }),
+  released: (runId, bytes) => {
+    if (editorProcessing.preview?.preview_id === runId) { editorProcessing.clearPreview(runId); retranscriptionDialog?.close(); }
+    setRetranscriptionMessage(`已清理候选产物，本次释放 ${formatBytes(bytes)}。`);
+  },
+  failed: error => setRetranscriptionMessage(String(error), true),
+  label: candidateLabel,
+  full: () => { activeRepairSignalId = null; void editorProcessing.previewFull(); },
+  cancel: () => void editorProcessing.cancel(),
+  reopen: runId => { void editorProcessing.reopen(runId); },
+});
+const reviewSignals = mountReviewSignals(editorRepairDialog, {
+  time: formatPreciseTime, escape: escapeHtml,
+  review: (signalId, decision) => { void saveAsrReviewDecision(signalId, decision); },
+  locate: signal => {
+    if (currentArea !== "karaoke" || signal.start_ms === null) return;
+    mediaPlayer.media?.pause(); karaokeFollowPlayhead = false; syncTimelineFollowState();
+    seekTo(signal.start_ms, false); updateActiveSubtitle(signal.start_ms);
+    void loadKaraokeWaveform(signal.start_ms); repairTool.close();
+    if (editorRoot.classList.contains("editor-waveform-hidden")) editorRoot.querySelector<HTMLButtonElement>('[data-editor-toggle="waveform"]')?.click();
+  },
+  repair: signal => {
+    if (signal.start_ms === null || signal.end_ms === null || !retranscriptionStartInput || !retranscriptionEndInput) return;
+    activeRepairSignalId = signal.id;
+    if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
+    retranscriptionStartInput.value = formatPreciseTime(signal.start_ms);
+    retranscriptionEndInput.value = formatPreciseTime(signal.end_ms);
+    setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
+    retranscriptionStartInput.focus();
+  },
+});
 function openEditorRepair(): void {
   repairTool.open();
   editorProcessing.opened();
@@ -1436,6 +1475,8 @@ window.addEventListener("pagehide", () => {
   editorCueList.dispose();
   currentCueEditor.dispose();
   taskTools.dispose();
+  reviewSignals.dispose();
+  candidateHistory.dispose();
   editorProcessing.dispose();
   repairTool.dispose();
 }, { once: true });
@@ -1550,6 +1591,7 @@ function confirmAction(options: {
   confirmationMessage.textContent = options.message;
   acceptConfirmationButton.textContent = options.confirmLabel;
   acceptConfirmationButton.classList.toggle("danger", options.danger ?? false);
+  confirmationDialog.inert = false;
   confirmationDialog.showModal();
   document.querySelector<HTMLButtonElement>("#cancel-confirmation")?.focus();
   return new Promise<boolean>((resolve) => {
@@ -3423,58 +3465,15 @@ async function saveAsrReviewDecision(
   }
 }
 
-let showProcessedSignals = false;
 async function loadAsrQualitySignals(jobId: string): Promise<void> {
   const navigation = navigationRequestId;
-  if (!asrQualitySignalsHost) return;
-  const disclosure = editorRepairDialog.querySelector<HTMLDetailsElement>("#asr-quality-review");
-  const summary = editorRepairDialog.querySelector<HTMLElement>("#asr-quality-summary");
-  if (disclosure && disclosure.dataset.jobId !== jobId) {
-    disclosure.open = false;
-    disclosure.dataset.jobId = jobId;
-    showProcessedSignals = false;
-    if (summary) summary.textContent = "转录待复核提示 · 正在读取";
-    asrQualitySignalsHost.innerHTML = "";
-  }
+  reviewSignals.prepare(jobId);
   try {
-    const allSignals = await editorProcessing.signals(jobId);
-    if (!allSignals) return;
-    if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
-    asrQualitySignals = allSignals;
-    renderEditorList();
-    if (!editorRepairDialog.open) { asrQualitySignalsHost.replaceChildren(); return; }
-    const processedCount = allSignals.filter(s => s.latest_decision === "false_positive" || s.latest_decision === "resolved").length;
-    const signals = allSignals.filter(s => showProcessedSignals || (s.latest_decision !== "false_positive" && s.latest_decision !== "resolved"));
-    if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
-    if (summary) summary.textContent = `转录待复核提示 · ${signals.length} 项，${signals.filter(signal => signal.latest_decision === null).length} 项待复核${!showProcessedSignals && processedCount ? ` · 已隐藏 ${processedCount} 项` : ""}`;
-    const filterBar = `<label class="asr-review-filter"><input type="checkbox" data-show-processed ${showProcessedSignals ? "checked" : ""}>显示已处理（${processedCount}）</label>`;
-    if (signals.length === 0) {
-      asrQualitySignalsHost.innerHTML = filterBar + `<p class="media-message">${processedCount ? '误报和已解决提示已隐藏。可勾选“显示已处理”找回。' : '未发现自动提示，仍可根据试听结果手动选择重新识别的范围。'}</p>`;
-      return;
-    }
-    const signalLabels: Record<AsrQualitySignal["signal_kind"], string> = {
-      boundary_repetition: "边界文字重复", repeated_loop: "相邻字幕重复",
-      abnormal_speech_rate: "文字与时长不匹配", speech_during_silence: "静音区出现文字", manual_concern: "接缝待复核",
-    };
-    asrQualitySignalsHost.innerHTML = filterBar + '<p class="media-message">以下提示由转录结果自动检查产生，不是重跑或翻译历史，也不代表一定识别错误。点击提示可定位时间轴；试听后可确认问题或标记误报。选取范围后，再点击“识别并预览”生成候选。</p>' + signals.map((signal) => {
-      const range = signal.start_ms === null || signal.end_ms === null
-        ? "未指定范围"
-        : `${formatPreciseTime(signal.start_ms)} → ${formatPreciseTime(signal.end_ms)}`;
-      const review = signal.latest_decision === "confirmed_problem" ? "已确认问题"
-        : signal.latest_decision === "false_positive" ? "已标记误报"
-          : signal.latest_decision === "resolved" ? "已修复" : "待审查";
-      const checked = signal.latest_decision !== null;
-      return `${checked ? `<details class="reviewed-signal"><summary>${range} · ${escapeHtml(signalLabels[signal.signal_kind])} · ${review}</summary>` : ""}<article class="asr-quality-signal" data-severity="${signal.severity}">
-        <div>${signal.start_ms === null || signal.end_ms === null
-          ? `<p>${escapeHtml(signal.message)}</p><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review}</span>`
-          : `<button type="button" class="asr-quality-locate" data-locate-signal="${signal.id}" data-job-id="${jobId}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}" aria-label="定位 ${range}：${escapeHtml(signal.message)}"><span class="asr-quality-message">${escapeHtml(signal.message)}</span><span>${range} · ${escapeHtml(signalLabels[signal.signal_kind] ?? "待复核")} · ${review} · 点击定位</span></button>`}</div>
-        <div class="asr-quality-actions"><button type="button" class="secondary" data-asr-review="confirmed_problem" data-signal-id="${signal.id}">确认问题</button><button type="button" class="secondary" data-asr-review="false_positive" data-signal-id="${signal.id}">误报</button><button type="button" class="secondary" data-asr-review="resolved" data-signal-id="${signal.id}">已解决</button>${signal.start_ms === null || signal.end_ms === null ? "" : `<button type="button" data-repair-signal="${signal.id}" data-start-ms="${signal.start_ms}" data-end-ms="${signal.end_ms}">选取此范围</button>`}</div>
-      </article>${checked ? "</details>" : ""}`;
-    }).join("");
+    const signals = await editorProcessing.signals(jobId);
+    if (!signals || activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
+    asrQualitySignals = signals; renderEditorList(); reviewSignals.show(jobId, signals);
   } catch (error) {
-    if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
-    if (summary) summary.textContent = "转录待复核提示 · 读取失败";
-    asrQualitySignalsHost.innerHTML = `<p class="media-message warning">无法读取 ASR 审查信号：${escapeHtml(String(error))}</p>`;
+    if (activeDetail?.job.job_id === jobId && navigation === navigationRequestId) reviewSignals.failed(error);
   }
 }
 
@@ -6010,43 +6009,7 @@ retranscriptionProvider?.addEventListener("change", () => {
   editorRepairDialog.querySelector<HTMLElement>("#gemini-upload-consent")?.classList.toggle("hidden", !cloud);
   if (!cloud && authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
 });
-asrQualitySignalsHost?.addEventListener("click", (event) => {
-  const target = event.target instanceof Element ? event.target.closest("button") : null;
-  if (!(target instanceof HTMLButtonElement)) return;
-  if (target.dataset.locateSignal) {
-    if (target.dataset.jobId !== activeDetail?.job.job_id || currentArea !== "karaoke") return;
-    const startMs = Number(target.dataset.startMs);
-    if (!Number.isFinite(startMs)) return;
-    mediaPlayer.media?.pause();
-    karaokeFollowPlayhead = false;
-    syncTimelineFollowState();
-    seekTo(startMs, false);
-    updateActiveSubtitle(startMs);
-    void loadKaraokeWaveform(startMs);
-    repairTool.close();
-    if (editorRoot.classList.contains("editor-waveform-hidden")) editorRoot.querySelector<HTMLButtonElement>('[data-editor-toggle="waveform"]')?.click();
-    return;
-  }
-  const signalId = target.dataset.signalId ?? target.dataset.repairSignal;
-  if (!signalId) return;
-  if (target.dataset.asrReview) {
-    void saveAsrReviewDecision(
-      signalId,
-      target.dataset.asrReview as "confirmed_problem" | "false_positive" | "resolved",
-    );
-    return;
-  }
-  const startMs = Number(target.dataset.startMs);
-  const endMs = Number(target.dataset.endMs);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || !retranscriptionStartInput || !retranscriptionEndInput) return;
-  activeRepairSignalId = signalId;
-  if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
-  retranscriptionStartInput.value = formatPreciseTime(startMs);
-  retranscriptionEndInput.value = formatPreciseTime(endMs);
-  setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
-  if (!editorRepairDialog.open) openEditorRepair();
-  retranscriptionStartInput?.focus();
-});
+
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
 document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());
 document.querySelector<HTMLButtonElement>("#cancel-retranscription")?.addEventListener("click", () => retranscriptionDialog?.close());
@@ -6668,49 +6631,6 @@ function addOfflineTools(): void {
     input?.addEventListener("input", () => {
       if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
     });
-  const candidateTools = document.createElement("div");
-  candidateTools.className = "offline-tools";
-  candidateTools.innerHTML =
-    '<button type="button" class="secondary" data-full-candidate>生成全片本地候选</button><button type="button" class="secondary" data-candidate-history>历史候选</button><button type="button" class="secondary" data-cancel-candidate>取消候选运行</button><div class="candidate-history"></div>';
-  document.querySelector(".retranscription-range")?.append(candidateTools);
-  candidateTools.querySelector<HTMLButtonElement>("[data-full-candidate]")!.onclick = () => { activeRepairSignalId = null; void editorProcessing.previewFull(); };
-  candidateTools.querySelector<HTMLButtonElement>("[data-cancel-candidate]")!.onclick = () => void editorProcessing.cancel();
-  candidateTools.querySelector<HTMLButtonElement>("[data-candidate-history]")!.onclick = async () => {
-    if (!activeDetail) return;
-    const jobId = activeDetail.job.job_id, navigation = navigationRequestId;
-    try {
-      const runs = await invoke<
-        Array<CandidateLabelInput & { status:string; reopenable?:boolean; released?:boolean; cleanable?:boolean; adopted?:boolean }>
-      >("list_asr_runs", { jobId });
-      if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
-      const host = candidateTools.querySelector(".candidate-history")!;
-      host.innerHTML =
-        runs
-          .map((r) => `<article class="candidate-history-row"><div><strong>${escapeHtml(candidateLabel(r))}</strong><span>${r.released ? "产物已清理" : r.adopted ? "已采用，保留来源" : r.is_candidate === false ? "原始识别，保留来源" : ({succeeded:"可对照",failed:"运行失败",running:"识别中",queued:"排队中"} as Record<string,string>)[r.status] ?? r.status}</span></div>${r.status === "succeeded" && r.reopenable ? `<button type="button" class="secondary" data-reopen-run="${escapeHtml(r.id)}">对照</button>` : ""}${r.cleanable ? `<button type="button" class="secondary" data-release-run="${escapeHtml(r.id)}">${r.released ? "再次清理残留" : "清理产物"}</button>` : ""}</article>`)
-          .join("") || "还没有成功候选。";
-      host.querySelectorAll<HTMLButtonElement>("[data-release-run]").forEach(button => button.onclick = async () => {
-        const runId = button.dataset.releaseRun!;
-        if (!await confirmAction({title:"清理这个未采用候选？", message:"释放候选的音频缓存和识别产物，保留运行摘要。清理后无法再打开该候选；当前字幕不变。", confirmLabel:"清理产物", danger:true})) return;
-        button.disabled = true;
-        try {
-          const bytes = await invoke<number>("release_asr_candidate", {jobId, runId});
-          if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
-          if (editorProcessing.preview?.preview_id === runId) { editorProcessing.clearPreview(runId); retranscriptionDialog?.close(); }
-          setRetranscriptionMessage(`已清理候选产物，本次释放 ${formatBytes(bytes)}。`);
-          candidateTools.querySelector<HTMLButtonElement>("[data-candidate-history]")?.click();
-        } catch(error) { if (activeDetail?.job.job_id === jobId && navigation === navigationRequestId) setRetranscriptionMessage(String(error), true); button.disabled = false; }
-      });
-      host.querySelectorAll<HTMLButtonElement>("[data-reopen-run]").forEach(
-        (button) =>
-          (button.onclick = async () => {
-            if (activeDetail?.job.job_id === jobId && navigation === navigationRequestId) await editorProcessing.reopen(button.dataset.reopenRun!);
-          }),
-      );
-    } catch (e) {
-      if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
-      setRetranscriptionMessage(String(e), true);
-    }
-  };
   const taskChoice = document.createElement("div");
   taskChoice.className = "offline-tools";
   taskChoice.innerHTML =
@@ -6818,10 +6738,6 @@ updateTaskPipelineSummary();
 
 document.querySelector("#karaoke-insert-block")?.addEventListener("click",openInsertSubtitleBlock);
 document.querySelector("#karaoke-delete-block")?.addEventListener("click",()=>void deleteCurrentSubtitleBlock());
-asrQualitySignalsHost?.addEventListener("change",event=>{
-  const input=event.target as HTMLInputElement;
-  if (input.matches("[data-show-processed]")) { showProcessedSignals=input.checked; if(activeDetail) void loadAsrQualitySignals(activeDetail.job.job_id); }
-});
 
 const appearanceHost = document.querySelector<HTMLElement>(".appearance-settings");
 if (appearanceHost) void setupImageThemes(appearanceHost).catch(error => { if(settingsMessage) settingsMessage.textContent=String(error); });

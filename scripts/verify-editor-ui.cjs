@@ -76,7 +76,7 @@ await page.locator('#editor-repair-dialog[open]').waitFor();
 assert.equal(await page.locator('.shell > header').evaluate(node=>node.inert),true);
 await page.locator('[data-editor-action="close-repair"]').focus();
 await page.keyboard.press('Shift+Tab');
-assert.equal(await page.evaluate(()=>document.activeElement.id),'asr-quality-summary');
+assert.equal(await page.evaluate(()=>document.activeElement.hasAttribute('data-cancel-candidate')),true);
 await page.keyboard.press('Tab');
 assert.equal(await page.evaluate(()=>document.activeElement.dataset.editorAction),'close-repair');
 

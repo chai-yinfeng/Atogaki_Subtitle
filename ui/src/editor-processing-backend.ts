@@ -1,9 +1,12 @@
+import type { CandidateRun } from "./editor-candidate-history";
 import type { SubtitleSegment } from "./editor-types";
 import type { AsrQualitySignal, CandidateProgress, PreviewRequest, RetranscriptionPreview, ReviewDecision } from "./editor-processing-types";
 type Invoke = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 /** Preserve command payloads and backend revision/transaction validation. */
 export function createProcessingBackend(invoke: Invoke) {
   return {
+    runs(jobId: string) { return invoke<CandidateRun[]>("list_asr_runs", { jobId }); },
+    release(jobId: string, runId: string) { return invoke<number>("release_asr_candidate", { jobId, runId }); },
     preview(request: PreviewRequest) { return invoke<RetranscriptionPreview>("preview_retranscription", { request }); },
     full(jobId: string) { return invoke<RetranscriptionPreview>("preview_full_retranscription", { jobId }); },
     refresh(jobId: string, runId: string) { return invoke<RetranscriptionPreview>("refresh_asr_comparison", { jobId, runId }); },
