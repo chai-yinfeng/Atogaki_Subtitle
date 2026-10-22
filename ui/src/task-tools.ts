@@ -34,7 +34,7 @@ export function mountTaskTools(region: HTMLElement, editor: HTMLElement, close: 
   };
   region.addEventListener("keydown", event => {
     if (!region.classList.contains("editor-task-tools")) return;
-    if (event.key === "Escape") { event.preventDefault(); close(); }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
     if (event.key !== "Tab") return;
     const controls = focusableControls(region);
     const first = controls[0], last = controls.at(-1);
@@ -57,28 +57,31 @@ export function mountTaskTools(region: HTMLElement, editor: HTMLElement, close: 
 }
 
 /** Keep processing controls out of the document until explicitly opened. */
-export function mountToolDialog(dialog: HTMLDialogElement, hidden: () => void) {
+export function mountToolDialog(dialog: HTMLDialogElement, hidden: () => void, canClose: () => boolean = () => true) {
   const anchor = document.createComment("processing-tool-mount");
   dialog.before(anchor);
   const parked = document.createDocumentFragment();
   parked.append(dialog);
   const events = new AbortController();
   let background: { node: HTMLElement; inert: boolean }[] = [];
+  let mounted = false, previousInert = false;
   let returnFocus: HTMLElement | null = null;
   dialog.setAttribute("role", "region");
   dialog.setAttribute("aria-label", dialog.querySelector("h2")?.textContent ?? "任务工具");
   const unmount = () => {
-    if (dialog.open) return;
+    if (dialog.open || !mounted) return;
+    mounted = false;
+    dialog.inert = previousInert;
     for (const item of background) item.node.inert = item.inert;
     background = [];
     parked.append(dialog); hidden();
     if (returnFocus?.isConnected) returnFocus.focus();
     returnFocus = null;
   };
-  const close = () => { dialog.close(); unmount(); };
+  const close = (force = false) => { if (!force && !canClose()) return; dialog.close(); unmount(); };
   dialog.addEventListener("close", unmount, { signal: events.signal });
   dialog.addEventListener("keydown", event => {
-    if (event.key === "Escape") { event.preventDefault(); close(); }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
     if (event.key !== "Tab") return;
     const controls = focusableControls(dialog);
     const first = controls[0], last = controls.at(-1);
@@ -88,6 +91,7 @@ export function mountToolDialog(dialog: HTMLDialogElement, hidden: () => void) {
   return {
     open() {
       if (dialog.open) return;
+      previousInert = dialog.inert; dialog.inert = false; mounted = true;
       returnFocus = document.activeElement as HTMLElement | null;
       if (!dialog.isConnected) anchor.after(dialog);
       let branch: HTMLElement = dialog;
@@ -103,6 +107,6 @@ export function mountToolDialog(dialog: HTMLDialogElement, hidden: () => void) {
       dialog.querySelector<HTMLButtonElement>("button")?.focus();
     },
     close,
-    dispose() { events.abort(); close(); anchor.remove(); },
+    dispose() { events.abort(); close(true); anchor.remove(); },
   };
 }

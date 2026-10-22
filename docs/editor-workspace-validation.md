@@ -115,3 +115,20 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 独立 QA 包重新构建并签名，继续使用 `/tmp/atogaki-compact-native/data`。原生 AX 与截图确认：在 48.000 秒暂停、开启跟随后离开任务再进入，编辑框显示第 17 段，列表可见区也定位到第 17 段并显示黄色播放行与选中边框。隔离 cue 的 ID、原译文、时间和编辑标记与原始 20 段快照一致，integrity_check=ok。截图和摘要在忽略目录 `local-artifacts/editor-modules-20261021/`。
 
 新模块只更新了隔离 QA 包，正式 `/Applications/Atogaki.app` 仍为上一轮 `8a85af0` 的已验收版本，未中断用户正式试用或新增安装备份。原生坐标拖动仍受 CUA `noWindowsAvailable` 限制；部分观察还返回 ScreenCaptureKit 捕获错误，重新连接同一存活进程后可继续 AX 检查，未据此重启测试或将拖动计为通过。QA 实例和本地测试服务已关闭。
+
+## 原生候选与连续定位复查（790957e＋本次修复）
+
+从 `790957e` 加本次候选边界修复构建独立 identifier 的 debug QA App，深度签名校验通过；数据位于 `/tmp/atogaki-modules-native-790957e/data`，两份任务各 20 段、60 秒合成 H.264 视频和两份持久合成候选。候选直接构造于隔离存储，没有运行 ASR／云端；不把它当成真实 provider 质量验证。SQLite 最终 integrity_check=ok，foreign_key_check 无记录。
+
+原生观察与操作证明：
+
+- A 从 12 秒附近离开后，切换 B 从 0 秒／第 1 段开始；B 在 6 秒暂停重开，时钟与编辑框仍为 6 秒／第 3 段。
+- 十次 +100 ms 从 6.000 秒累加到 7.000 秒；实际坐标拖动把播放头移至约 11.949 秒和 13.005 秒，锁定编辑段未被拖动抢走。恢复跟随后编辑框与黄色播放行均为第 5 段，视频时间画面与 13 秒位置一致。
+- 旧 showModal 候选预览画面可见，但原生 AX 全部控件消失；改用显式具名区域与嵌套背景／焦点边界后，关闭、重新对照、保留和采用控件均可访问且能正常调用。
+- 仅把隔离任务 revision 从 0 加到 1，真实采用请求显示 revision 冲突，字幕不变；重新对照不创建 ASR run，再采用成功。SQLite 证明指定范围替换为候选 cue，范围外 19 段与任务 B 的 20 段完全不变，采用审计记录存在。
+- 刷新历史后已采用候选没有清理入口，来源证据保留。未采用候选清理确认画面已出现，Escape 取消后文件保留；该通用确认框仍有 AX 控件消失问题，实际清理与按钮可访问性不计通过。没有删除这两份候选。
+- 原生点击撤销打轴恢复采用前全部 40 段的 ID、原译文、时间及编辑标记，保留采用证据。
+
+本轮修复还让重开候选读取错误在当前工具显示，避免仅写入未打开的预览；浏览器回归覆盖嵌套祖先 inert、内层关闭后外层仍阻止背景、内层 Tab 循环、采用中 Escape／关闭锁及错误重试。62 项前端测试、九组 WebKit、类型／构建、cargo fmt --check、git diff --check 通过。原生包构建验证了本次源码和 Tauri 嵌入，但未打四 sidecar 正式 release，也未覆盖 `/Applications/Atogaki.app`。
+
+截图、AX 与 JSON 摘要保存在忽略目录 `local-artifacts/editor-native-790957e/`（构建摘要、fixture 身份、拖动跟随、候选控件、采用与撤销前后摘要）。合成数据库留在 `/tmp`，未提交 Git；正式数据库未接入本次测试。QA 进程已正常退出。持续内存、滚动 P95、原生 pinch／捕获丢失、通用确认框的 AX 以及 Windows 仍分别保留待验收。

@@ -81,12 +81,14 @@ export function createEditorProcessing(options: Options, timers: Timers = {
     try {
       const result = await request;
       if (!current(ticket) || result.job_id !== ticket.jobId) return;
-      finish(ticket);
       if (!options.visible()) return;
       preview = result; previewSignalId = ticket.signalId; options.previewed(result); options.status("候选已生成；关闭预览不会修改任何字幕。");
     } catch (error) {
       if (!current(ticket)) return;
-      if (ticket.phase === "comparison") options.comparisonStatus(`无法读取候选对照：${String(error)}`, true);
+      if (ticket.phase === "comparison") {
+        const message = `无法读取候选对照：${String(error)}`;
+        options.comparisonStatus(message, true); options.status(message, true);
+      }
       else options.status(`候选识别失败：${String(error)}`, true);
     } finally { finish(ticket); }
   };

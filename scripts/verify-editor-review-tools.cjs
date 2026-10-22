@@ -40,7 +40,7 @@ const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
   // Full-candidate completion while parked must re-enable retained controls.
   await page.evaluate(()=>window.__test.held.preview=true);await page.locator('[data-full-candidate]').click();await page.waitForFunction(()=>window.__test.pending.some(r=>r.kind==='preview'));await close();
   await page.evaluate(()=>window.__test.pending.find(r=>r.kind==='preview').resolve());await page.waitForTimeout(50);await open();
-  assert.equal(await page.locator('[data-full-candidate]').isDisabled(),false);assert.equal(await page.locator('#retranscription-dialog').evaluate(d=>d.open),false);
+  assert.equal(await page.locator('[data-full-candidate]').isDisabled(),false);assert.equal(await page.locator('#retranscription-dialog').count(),0);
   // A completed release belongs to the originating task even after navigation.
   await page.evaluate(()=>{window.__test.held.history=false;window.__test.held.release=true;window.__test.historyRows=[{id:'late',provider_name:'迟到清理',model_identity:'test',scope_start_ms:0,scope_end_ms:2800,created_at_unix:1,status:'succeeded',cleanable:true,reopenable:true}]});
   await page.locator('[data-candidate-history]').click();await page.locator('[data-release-run="late"]').click();await page.locator('#accept-confirmation').click();await page.waitForFunction(()=>window.__test.pending.some(r=>r.kind==='release'));

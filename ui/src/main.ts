@@ -1375,14 +1375,14 @@ const editorProcessing = createEditorProcessing({
     if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = busy;
     editorRepairDialog.querySelectorAll<HTMLButtonElement>("[data-full-candidate]").forEach(button => button.disabled = busy);
     retranscriptionDialog?.querySelectorAll<HTMLButtonElement>(".refresh-comparison").forEach(button => button.disabled = busy);
-    document.querySelectorAll<HTMLButtonElement>("#close-retranscription-preview, #cancel-retranscription").forEach(button => button.disabled = phase === "adopt");
+    retranscriptionDialog?.querySelectorAll<HTMLButtonElement>("#close-retranscription-preview, #cancel-retranscription").forEach(button => button.disabled = phase === "adopt");
   },
   mutationLock: setEditorMutationBusy,
   previewed: showRetranscriptionPreview,
   adopted: (before, after, preview, signalId) => {
     rememberStructureEdit(before, after, `局部重新识别 ${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)}`, preview.job_id);
     applySubtitleStructure(after, preview.candidate_segments[0]?.id);
-    retranscriptionDialog?.close(); activeRepairSignalId = null;
+    candidateTool.close(); activeRepairSignalId = null;
     if (signalId) void saveAsrReviewDecision(signalId, "resolved");
     setSubtitleEditAction(`已替换所选范围为 ${preview.candidate_segments.length} 段新识别字幕；新段需要重新翻译，可用会话撤销恢复。`);
   },
@@ -1391,6 +1391,8 @@ const editorProcessing = createEditorProcessing({
   time: formatTime,
 });
 retranscriptionDialog?.addEventListener("cancel", event => { if (editorProcessing.adopting) event.preventDefault(); });
+const candidateTool = mountToolDialog(retranscriptionDialog!, () => {}, () => !editorProcessing.adopting);
+retranscriptionDialog?.classList.add("editor-candidate-dialog");
 const candidateHistory = mountCandidateHistory(editorRepairDialog.querySelector<HTMLElement>(".retranscription-range")!, {
   context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
   visible: () => editorRepairDialog.open,
@@ -1398,7 +1400,7 @@ const candidateHistory = mountCandidateHistory(editorRepairDialog.querySelector<
   release: processingBackend.release,
   confirmRelease: () => confirmAction({ title: "清理这个未采用候选？", message: "释放候选的音频缓存和识别产物，保留运行摘要。清理后无法再打开该候选；当前字幕不变。", confirmLabel: "清理产物", danger: true }),
   released: (runId, bytes) => {
-    if (editorProcessing.preview?.preview_id === runId) { editorProcessing.clearPreview(runId); retranscriptionDialog?.close(); }
+    if (editorProcessing.preview?.preview_id === runId) { editorProcessing.clearPreview(runId); candidateTool.close(); }
     setRetranscriptionMessage(`已清理候选产物，本次释放 ${formatBytes(bytes)}。`);
   },
   failed: error => setRetranscriptionMessage(String(error), true),
@@ -1478,6 +1480,7 @@ window.addEventListener("pagehide", () => {
   reviewSignals.dispose();
   candidateHistory.dispose();
   editorProcessing.dispose();
+  candidateTool.dispose();
   repairTool.dispose();
 }, { once: true });
 
@@ -2789,9 +2792,9 @@ async function stopActivePlayback(): Promise<void> {
   if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
+  candidateTool.close();
   repairTool.close();
   editorProcessing.reset();
-  retranscriptionDialog?.close();
   if (workspaceView?.classList.contains("editor-task-tools")) closeEditorTools();
   playbackLoop = null; loopStartMs = null;
   document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
@@ -3579,8 +3582,7 @@ function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
     diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")||"未知")} · 工作区版本：${preview.workspace_revision ?? "历史候选，采用前需重新对照"}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
     retranscriptionDialog.querySelector(".retranscription-comparison")?.after(diff);
   }
-  if (retranscriptionDialog) retranscriptionDialog.inert = false;
-  if(!retranscriptionDialog?.open)retranscriptionDialog?.showModal();
+  candidateTool.open();
 }
 
 async function previewSelectedRange(): Promise<void> {
@@ -6010,8 +6012,8 @@ retranscriptionProvider?.addEventListener("change", () => {
 });
 
 previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
-document.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => retranscriptionDialog?.close());
-document.querySelector<HTMLButtonElement>("#cancel-retranscription")?.addEventListener("click", () => retranscriptionDialog?.close());
+retranscriptionDialog?.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => candidateTool.close());
+retranscriptionDialog?.querySelector<HTMLButtonElement>("#cancel-retranscription")?.addEventListener("click", () => candidateTool.close());
 confirmRetranscriptionButton?.addEventListener("click", () => void confirmSelectedRangeReplacement());
 saveGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(false));
 clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(true));

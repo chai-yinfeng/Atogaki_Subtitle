@@ -22,7 +22,7 @@ module.exports.installProcessingFixture = async page => {
     const value={...test.previews[args.runId],comparison_id:`comparison-${++test.processingSerial}`,original_segments:segments(args.jobId).slice(0,1).map(c=>({...c}))};
     test.previews[args.runId]=value;return defer('refresh',args.jobId,value);
    }
-   if(cmd==='reopen_asr_candidate')return defer('reopen',args.jobId,test.previews[args.runId]);
+   if(cmd==='reopen_asr_candidate'){if(test.failReopen)throw Error('candidate payload unavailable');return defer('reopen',args.jobId,test.previews[args.runId]);}
    if(cmd==='confirm_retranscription'){
     if(test.confirmConflict)throw Error('revision conflict: workspace changed');
     const jobId=args.request.jobId,after=segments(jobId).map((c,i)=>i?{...c}:{...c,source_text:`采用 ${jobId}`,source_edited:true});

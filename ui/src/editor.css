@@ -123,3 +123,6 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; background: #eceff3; }
 .editor-repair-dialog[open] { position: fixed; inset: 8dvh 0 auto; z-index: 30; box-shadow: 0 0 0 100vmax #0008; }
 
 #karaoke-timing-message.warning { color: var(--accent); }
+
+/* Match the accessible processing region while isolating nested focus/background. */
+.editor-candidate-dialog[open] { position: fixed; inset: 10dvh 0 auto; z-index: 40; max-height: 80dvh; box-shadow: 0 0 0 100vmax #0008; }

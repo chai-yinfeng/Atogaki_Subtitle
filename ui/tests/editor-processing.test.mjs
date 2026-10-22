@@ -38,3 +38,7 @@ test('signal reads accept only the latest request and release resources on dispo
  const h=harness(),a=h.processing.signals('a'),b=h.processing.signals('a');h.requests[1].resolve(['new']);assert.deepEqual(await b,['new']);h.requests[0].resolve(['old']);assert.equal(await a,null);
  const p=h.processing.previewFull();h.processing.dispose();assert.equal(h.timers.size,0);h.requests[2].resolve(preview());await p;assert.equal(h.processing.preview,null);
 });
+test('reopen errors reach the visible processing tool before a preview exists',async()=>{
+ const h=harness(),read=h.processing.reopen('missing');h.requests[0].reject(Error('payload unavailable'));await read;
+ assert.match(h.events.filter(e=>e[0]==='status').at(-1)[1],/payload unavailable/);assert.equal(h.processing.busy,false);
+});
