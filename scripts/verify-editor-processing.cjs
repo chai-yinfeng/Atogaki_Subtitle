@@ -1,0 +1,28 @@
+const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE),assert=require('node:assert/strict');
+const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
+(async()=>{
+ const browser=await webkit.launch({headless:true});
+ try {
+  const p=await browser.newPage({viewport:{width:1180,height:760}});
+  await installProcessingFixture(p);await p.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await p.locator('.job-open').first().click();
+  await p.locator('[data-editor-action="repair"]').click();await p.locator('#preview-retranscription').click();await p.locator('#retranscription-dialog[open]').waitFor();
+  assert.equal(await p.locator('#retranscription-dialog').evaluate(d=>d.inert),false);
+  await p.evaluate(()=>window.__test.confirmConflict=true);await p.locator('#confirm-retranscription').click();await p.waitForFunction(()=>document.querySelector('#retranscription-confirm-message')?.textContent.includes('revision conflict'));
+  assert.equal(await p.locator('#karaoke-current-source').inputValue(),'第 1 句：今日は音楽と日常について話します。');
+  await p.locator('.refresh-comparison').click();await p.waitForFunction(()=>document.querySelector('#confirm-retranscription')?.disabled===false);
+  await p.evaluate(()=>{window.__test.confirmConflict=false;window.__test.held.adopt=true});await p.locator('#confirm-retranscription').click();await p.waitForFunction(()=>window.__test.pending.some(r=>r.kind==='adopt'));
+  assert.equal(await p.locator('#close-retranscription-preview').isDisabled(),true);
+  await p.keyboard.press('Escape');assert.equal(await p.locator('#retranscription-dialog').evaluate(d=>d.open),true);
+  await p.evaluate(()=>window.__test.pending.find(r=>r.kind==='adopt').resolve());await p.locator('#retranscription-dialog').waitFor({state:'hidden'});
+  assert.equal(await p.locator('#karaoke-current-source').inputValue(),'采用 editor-test');
+  await p.locator('[data-editor-action="close-repair"]').click();await p.locator('[data-editor-action="back"]').click();await p.locator('.job-open').nth(1).click();
+  assert.equal(await p.locator('#karaoke-current-source').inputValue(),'任务 B 第 1 段');
+  await p.locator('[data-editor-action="repair"]').click();await p.evaluate(()=>window.__test.held.preview=true);await p.locator('#preview-retranscription').click();await p.waitForFunction(()=>window.__test.pending.some(r=>r.kind==='preview'&&r.jobId==='job-b'));
+  await p.locator('[data-editor-action="close-repair"]').click();await p.locator('[data-editor-action="back"]').click();await p.locator('.job-open').first().click();await p.locator('[data-editor-action="repair"]').click();const beforeLate=await p.locator('#karaoke-current-source').inputValue();assert.equal(beforeLate,'采用 editor-test');await p.locator('#preview-retranscription').click();await p.waitForFunction(()=>window.__test.pending.some(r=>r.kind==='preview'&&r.jobId==='editor-test'));
+  await p.evaluate(()=>window.__test.pending.find(r=>r.kind==='preview'&&r.jobId==='job-b').resolve());await p.waitForTimeout(100);
+  assert.equal(await p.locator('#preview-retranscription').isDisabled(),true);assert.equal(await p.locator('#retranscription-dialog').evaluate(d=>d.open),false);
+  await p.evaluate(()=>window.__test.pending.find(r=>r.kind==='preview'&&r.jobId==='editor-test').resolve());await p.locator('#retranscription-dialog[open]').waitFor();
+  assert.equal(await p.locator('#karaoke-current-source').inputValue(),beforeLate);
+  console.log('PASS: candidate modal, conflict/refresh, adoption lock, delayed cross-task isolation');
+ } finally {await browser.close()}
+})().catch(e=>{console.error(e);process.exitCode=1});

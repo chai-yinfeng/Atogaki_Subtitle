@@ -1,3 +1,6 @@
+import { createEditorProcessing } from "./editor-processing";
+import { createProcessingBackend } from "./editor-processing-backend";
+import type { RetranscriptionCandidate, RetranscriptionPreview, AsrQualitySignal } from "./editor-processing-types";
 import { createEditorWaveform } from "./editor-waveform";
 import { createMediaPlayer } from "./media-player";
 import type { TimingGesture } from "./timeline-timing";
@@ -128,32 +131,6 @@ type GlossaryApplyResult = {
 };
 
 
-
-type RetranscriptionCandidate = {
-  id: string;
-  start_ms: number;
-  end_ms: number;
-  source_text: string;
-  translated_text: string | null;
-  source_edited: boolean;
-  translation_stale: boolean;
-};
-
-type RetranscriptionPreview = {
-  comparison_id?: string | null;
-  workspace_revision?: number | null;
-  preview_id: string;
-  job_id: string;
-  start_ms: number;
-  end_ms: number;
-  original_segments: SubtitleSegment[];
-  candidate_segments: RetranscriptionCandidate[];
-  context_mode: "isolated" | "provider-managed";
-  provider_name?: string;
-  model_identity?: string;
-  timing_granularities?: string[];
-  configuration?: Record<string, unknown>;
-};
 
 type BatchTranslationResult = {
   segments: SubtitleSegment[];
@@ -312,19 +289,6 @@ type AsrCredentialStatus = {
   providerName: string;
   configured: boolean;
   credentialStore: string;
-};
-
-type AsrQualitySignal = {
-  id: string;
-  job_id: string;
-  run_id: string;
-  signal_kind: "repeated_loop" | "boundary_repetition" | "abnormal_speech_rate" | "speech_during_silence" | "manual_concern";
-  severity: "info" | "warning" | "critical";
-  start_ms: number | null;
-  end_ms: number | null;
-  message: string;
-  latest_decision: "confirmed_problem" | "false_positive" | "resolved" | null;
-  latest_decision_note: string | null;
 };
 
 type ModelCatalogItem = {
@@ -1217,8 +1181,6 @@ let karaokeFollowPlayhead = true;
 let karaokeSelectedJobId: string | null = null;
 let karaokeResumeMs = 0;
 let karaokeWaveformGain = 1;
-let activeRetranscriptionPreview: RetranscriptionPreview | null = null;
-let retranscriptionBusy = false;
 let asrQualitySignals: AsrQualitySignal[] = [];
 let activeRepairSignalId: string | null = null;
 let currentWorkspaceSection: WorkspaceSection = "translation";
@@ -1401,8 +1363,34 @@ async function saveEditorCueTime(): Promise<void> {
 }
 const taskTools = mountTaskTools(workspaceView, editorRoot, closeEditorTools);
 const repairTool = mountToolDialog(editorRepairDialog, () => asrQualitySignalsHost?.replaceChildren());
+const editorProcessing = createEditorProcessing({
+  backend: createProcessingBackend(invoke),
+  context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
+  visible: () => editorRepairDialog.open || !!retranscriptionDialog?.open,
+  segments: () => activeDetail?.segments ?? [],
+  busyChanged: (busy, phase) => {
+    if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = busy;
+    if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = busy;
+    document.querySelectorAll<HTMLButtonElement>(".refresh-comparison, [data-full-candidate]").forEach(button => button.disabled = busy);
+    document.querySelectorAll<HTMLButtonElement>("#close-retranscription-preview, #cancel-retranscription").forEach(button => button.disabled = phase === "adopt");
+  },
+  mutationLock: setEditorMutationBusy,
+  previewed: showRetranscriptionPreview,
+  adopted: (before, after, preview, signalId) => {
+    rememberStructureEdit(before, after, `局部重新识别 ${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)}`, preview.job_id);
+    applySubtitleStructure(after, preview.candidate_segments[0]?.id);
+    retranscriptionDialog?.close(); activeRepairSignalId = null;
+    if (signalId) void saveAsrReviewDecision(signalId, "resolved");
+    setSubtitleEditAction(`已替换所选范围为 ${preview.candidate_segments.length} 段新识别字幕；新段需要重新翻译，可用会话撤销恢复。`);
+  },
+  status: setRetranscriptionMessage,
+  comparisonStatus: message => { if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = message; },
+  time: formatTime,
+});
+retranscriptionDialog?.addEventListener("cancel", event => { if (editorProcessing.adopting) event.preventDefault(); });
 function openEditorRepair(): void {
   repairTool.open();
+  editorProcessing.opened();
   if (activeDetail) void loadAsrQualitySignals(activeDetail.job.job_id);
 }
 async function showEditorTools(section: WorkspaceSection): Promise<void> {
@@ -1448,6 +1436,7 @@ window.addEventListener("pagehide", () => {
   editorCueList.dispose();
   currentCueEditor.dispose();
   taskTools.dispose();
+  editorProcessing.dispose();
   repairTool.dispose();
 }, { once: true });
 
@@ -2759,6 +2748,8 @@ async function stopActivePlayback(): Promise<void> {
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
   repairTool.close();
+  editorProcessing.reset();
+  retranscriptionDialog?.close();
   if (workspaceView?.classList.contains("editor-task-tools")) closeEditorTools();
   playbackLoop = null; loopStartMs = null;
   document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
@@ -2785,6 +2776,7 @@ async function stopActivePlayback(): Promise<void> {
 
 async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editorDetail?: JobDetail): Promise<void> {
   closeLearningSelection();
+  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;
@@ -2823,6 +2815,7 @@ async function openListeningJob(
   autoplay = false,
 ): Promise<void> {
   if (!jobId || !listeningMediaMessage) return;
+  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId || currentArea !== "listening") return;
@@ -3364,6 +3357,7 @@ async function playLearningSource(itemId: string): Promise<void> {
 async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<void> {
   if (!jobId || !karaokeMediaMessage) return;
   const reopeningSelectedJob = karaokeSelectedJobId === jobId;
+  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
@@ -3376,7 +3370,6 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
   editorWaveform.reset();
   currentCueEditor.clear();
   karaokeFollowPlayhead = true;
-  activeRetranscriptionPreview = null;
   activeRepairSignalId = null;
   if (retranscriptionStartInput) retranscriptionStartInput.value = "";
   if (retranscriptionEndInput) retranscriptionEndInput.value = "";
@@ -3419,21 +3412,20 @@ async function saveAsrReviewDecision(
   decision: "confirmed_problem" | "false_positive" | "resolved",
 ): Promise<void> {
   if (!activeDetail) return;
-  const jobId = activeDetail.job.job_id;
+  const jobId = activeDetail.job.job_id, navigation = navigationRequestId;
   try {
-    await invoke<void>("save_asr_review_decision", {
-      request: { signalId, decision, note: null },
-    });
-    if (activeDetail?.job.job_id !== jobId) return;
+    if (!await editorProcessing.review(signalId, decision)) return;
+    if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
     await loadAsrQualitySignals(jobId);
   } catch (error) {
-    if (activeDetail?.job.job_id !== jobId) return;
+    if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
     setRetranscriptionMessage(`保存审查结论失败：${String(error)}`, true);
   }
 }
 
 let showProcessedSignals = false;
 async function loadAsrQualitySignals(jobId: string): Promise<void> {
+  const navigation = navigationRequestId;
   if (!asrQualitySignalsHost) return;
   const disclosure = editorRepairDialog.querySelector<HTMLDetailsElement>("#asr-quality-review");
   const summary = editorRepairDialog.querySelector<HTMLElement>("#asr-quality-summary");
@@ -3445,14 +3437,15 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
     asrQualitySignalsHost.innerHTML = "";
   }
   try {
-    const allSignals = await invoke<AsrQualitySignal[]>("list_asr_quality_signals", { jobId });
-    if (activeDetail?.job.job_id !== jobId) return;
+    const allSignals = await editorProcessing.signals(jobId);
+    if (!allSignals) return;
+    if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
     asrQualitySignals = allSignals;
     renderEditorList();
     if (!editorRepairDialog.open) { asrQualitySignalsHost.replaceChildren(); return; }
     const processedCount = allSignals.filter(s => s.latest_decision === "false_positive" || s.latest_decision === "resolved").length;
     const signals = allSignals.filter(s => showProcessedSignals || (s.latest_decision !== "false_positive" && s.latest_decision !== "resolved"));
-    if (activeDetail?.job.job_id !== jobId) return;
+    if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
     if (summary) summary.textContent = `转录待复核提示 · ${signals.length} 项，${signals.filter(signal => signal.latest_decision === null).length} 项待复核${!showProcessedSignals && processedCount ? ` · 已隐藏 ${processedCount} 项` : ""}`;
     const filterBar = `<label class="asr-review-filter"><input type="checkbox" data-show-processed ${showProcessedSignals ? "checked" : ""}>显示已处理（${processedCount}）</label>`;
     if (signals.length === 0) {
@@ -3479,7 +3472,7 @@ async function loadAsrQualitySignals(jobId: string): Promise<void> {
       </article>${checked ? "</details>" : ""}`;
     }).join("");
   } catch (error) {
-    if (activeDetail?.job.job_id !== jobId) return;
+    if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
     if (summary) summary.textContent = "转录待复核提示 · 读取失败";
     asrQualitySignalsHost.innerHTML = `<p class="media-message warning">无法读取 ASR 审查信号：${escapeHtml(String(error))}</p>`;
   }
@@ -3570,7 +3563,6 @@ function renderRetranscriptionItems(
 }
 
 function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
-  activeRetranscriptionPreview = preview;
   if (retranscriptionPreviewSummary) {
     retranscriptionPreviewSummary.textContent = `${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)} · 当前 ${preview.original_segments.length} 段 · 候选 ${preview.candidate_segments.length} 段 · ${preview.provider_name ?? "识别候选"} · ${preview.model_identity ?? ""} · ${preview.context_mode === "isolated" ? "前文文字已隔离" : "独立识别候选"}`;
   }
@@ -3581,17 +3573,18 @@ function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
     retranscriptionDialog.querySelector(".candidate-diff")?.remove();
     retranscriptionDialog.querySelector(".refresh-comparison")?.remove();
     const refresh=document.createElement("button");refresh.type="button";refresh.className="secondary refresh-comparison";refresh.textContent="以当前字幕重新对照（不重跑识别）";
-    refresh.onclick=async()=>{try{showRetranscriptionPreview(await invoke<RetranscriptionPreview>("refresh_asr_comparison",{jobId:preview.job_id,runId:preview.preview_id}));}catch(e){if(retranscriptionConfirmMessage)retranscriptionConfirmMessage.textContent=String(e);}};
+    refresh.onclick=()=>void editorProcessing.refresh();
     retranscriptionDialog.querySelector(".retranscription-comparison")?.before(refresh);
     const diff=document.createElement("details");diff.className="candidate-diff";
     diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")||"未知")} · 工作区版本：${preview.workspace_revision ?? "历史候选，采用前需重新对照"}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
     retranscriptionDialog.querySelector(".retranscription-comparison")?.after(diff);
   }
+  if (retranscriptionDialog) retranscriptionDialog.inert = false;
   if(!retranscriptionDialog?.open)retranscriptionDialog?.showModal();
 }
 
 async function previewSelectedRange(): Promise<void> {
-  if (!activeDetail || retranscriptionBusy) return;
+  if (!activeDetail || editorProcessing.busy) return;
   if (currentCueEditor.dirty) {
     setRetranscriptionMessage("重新识别前请先保存或放弃当前文字修改。", true);
     return;
@@ -3606,62 +3599,16 @@ async function previewSelectedRange(): Promise<void> {
     return;
   }
   if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
-  retranscriptionBusy = true;
-  if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = true;
-  setRetranscriptionMessage(providerId === "gemini-transcribe"
-    ? "正在提取所选范围、上传至 Gemini 并请求 word timestamps…"
-    : "正在提取所选音频并用当前任务的模型和词表重新识别…");
-  try {
-    const preview = await invoke<RetranscriptionPreview>("preview_retranscription", {
-      request: {
-        jobId: activeDetail.job.job_id,
-        startMs: range.startMs,
-        endMs: range.endMs,
-        providerId,
-        authorizeCloudAudioUpload,
-        qualitySignalId: activeRepairSignalId,
-      },
-    });
-    if (!activeDetail || preview.job_id !== activeDetail.job.job_id) return;
-    showRetranscriptionPreview(preview);
-    setRetranscriptionMessage("候选已生成；关闭预览不会修改任何字幕。");
-  } catch (error) {
-    setRetranscriptionMessage(`局部重新识别失败：${String(error)}`, true);
-  } finally {
-    retranscriptionBusy = false;
-    if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = false;
-  }
+  await editorProcessing.previewRange({ ...range, providerId, authorizeCloudAudioUpload, qualitySignalId: activeRepairSignalId });
 }
 
 async function confirmSelectedRangeReplacement(): Promise<void> {
-  if (!activeDetail || !activeRetranscriptionPreview || retranscriptionBusy) return;
+  if (workspaceActionBusy || !activeDetail || !editorProcessing.preview || editorProcessing.busy) return;
   if (hasUnsavedSubtitleEdits()) {
     if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "采用候选前请先保存或放弃当前文字草稿。";
     return;
   }
-  const preview = activeRetranscriptionPreview;
-  const repairSignalId = activeRepairSignalId;
-  const before = cloneSubtitleSegments(activeDetail.segments);
-  retranscriptionBusy = true;
-  if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = true;
-  if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "正在原子替换所选范围…";
-  try {
-    const after = await invoke<SubtitleSegment[]>("confirm_retranscription", {
-      request: { jobId: activeDetail.job.job_id, previewId: preview.preview_id, comparisonId: preview.comparison_id ?? null },
-    });
-    rememberStructureEdit(before, after, `局部重新识别 ${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)}`);
-    applySubtitleStructure(after, preview.candidate_segments[0]?.id);
-    retranscriptionDialog?.close();
-    activeRetranscriptionPreview = null;
-    activeRepairSignalId = null;
-    if (repairSignalId) await saveAsrReviewDecision(repairSignalId, "resolved");
-    setSubtitleEditAction(`已替换所选范围为 ${preview.candidate_segments.length} 段新识别字幕；新段需要重新翻译，可用会话撤销恢复。`);
-  } catch (error) {
-    if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = `替换失败：${String(error)}`;
-  } finally {
-    retranscriptionBusy = false;
-    if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = false;
-  }
+  await editorProcessing.adopt();
 }
 
 function karaokeWindowDurationMs(): number {
@@ -4019,6 +3966,7 @@ async function openJob(jobId: string, initialSection?: WorkspaceSection): Promis
   if (!jobId || !workspaceMessage) return;
   const known = latestJobs.find(job => job.job_id === jobId);
   if ((initialSection === undefined || initialSection === "review") && known && known.segment_count > 0 && matchesTerminalStatus(known.status)) { await enterSubtitleEditor(jobId); return; }
+  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;
@@ -6725,38 +6673,16 @@ function addOfflineTools(): void {
   candidateTools.innerHTML =
     '<button type="button" class="secondary" data-full-candidate>生成全片本地候选</button><button type="button" class="secondary" data-candidate-history>历史候选</button><button type="button" class="secondary" data-cancel-candidate>取消候选运行</button><div class="candidate-history"></div>';
   document.querySelector(".retranscription-range")?.append(candidateTools);
-  candidateTools.querySelector<HTMLButtonElement>("[data-full-candidate]")!.onclick = async () => {
-    if (!activeDetail || retranscriptionBusy) return;
-    const jobId = activeDetail.job.job_id;
-    activeRepairSignalId=null;
-    retranscriptionBusy = true;
-    setRetranscriptionMessage("正在生成全片候选；不会覆盖当前工作区。", false);
-    try {
-      const preview = await invoke<RetranscriptionPreview>("preview_full_retranscription", { jobId });
-      if (activeDetail?.job.job_id === jobId) showRetranscriptionPreview(preview);
-    } catch (e) {
-      setRetranscriptionMessage(String(e), true);
-    } finally {
-      retranscriptionBusy = false;
-    }
-  };
-  candidateTools.querySelector<HTMLButtonElement>("[data-cancel-candidate]")!.onclick = async () => {
-    if (!activeDetail) return;
-    try {
-      await invoke("cancel_asr_candidate", { jobId: activeDetail.job.job_id });
-      setRetranscriptionMessage("已请求取消；云端请求会先完成上传文件清理。", false);
-    } catch (e) {
-      setRetranscriptionMessage(String(e), true);
-    }
-  };
+  candidateTools.querySelector<HTMLButtonElement>("[data-full-candidate]")!.onclick = () => { activeRepairSignalId = null; void editorProcessing.previewFull(); };
+  candidateTools.querySelector<HTMLButtonElement>("[data-cancel-candidate]")!.onclick = () => void editorProcessing.cancel();
   candidateTools.querySelector<HTMLButtonElement>("[data-candidate-history]")!.onclick = async () => {
     if (!activeDetail) return;
-    const jobId = activeDetail.job.job_id;
+    const jobId = activeDetail.job.job_id, navigation = navigationRequestId;
     try {
       const runs = await invoke<
         Array<CandidateLabelInput & { status:string; reopenable?:boolean; released?:boolean; cleanable?:boolean; adopted?:boolean }>
       >("list_asr_runs", { jobId });
-      if (activeDetail?.job.job_id !== jobId) return;
+      if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
       const host = candidateTools.querySelector(".candidate-history")!;
       host.innerHTML =
         runs
@@ -6768,23 +6694,20 @@ function addOfflineTools(): void {
         button.disabled = true;
         try {
           const bytes = await invoke<number>("release_asr_candidate", {jobId, runId});
-          if (activeRetranscriptionPreview?.preview_id === runId) { activeRetranscriptionPreview = null; retranscriptionDialog?.close(); }
+          if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
+          if (editorProcessing.preview?.preview_id === runId) { editorProcessing.clearPreview(runId); retranscriptionDialog?.close(); }
           setRetranscriptionMessage(`已清理候选产物，本次释放 ${formatBytes(bytes)}。`);
           candidateTools.querySelector<HTMLButtonElement>("[data-candidate-history]")?.click();
-        } catch(error) { setRetranscriptionMessage(String(error), true); button.disabled = false; }
+        } catch(error) { if (activeDetail?.job.job_id === jobId && navigation === navigationRequestId) setRetranscriptionMessage(String(error), true); button.disabled = false; }
       });
       host.querySelectorAll<HTMLButtonElement>("[data-reopen-run]").forEach(
         (button) =>
           (button.onclick = async () => {
-            try {
-              const preview = await invoke<RetranscriptionPreview>("reopen_asr_candidate", { jobId, runId: button.dataset.reopenRun });
-              if (activeDetail?.job.job_id === jobId) showRetranscriptionPreview(preview);
-            } catch (e) {
-              setRetranscriptionMessage(`此运行没有可重开的候选：${String(e)}`, true);
-            }
+            if (activeDetail?.job.job_id === jobId && navigation === navigationRequestId) await editorProcessing.reopen(button.dataset.reopenRun!);
           }),
       );
     } catch (e) {
+      if (activeDetail?.job.job_id !== jobId || navigation !== navigationRequestId) return;
       setRetranscriptionMessage(String(e), true);
     }
   };
@@ -6892,16 +6815,6 @@ document.querySelector("#task-form")?.before(pipelineSummary);
 for(const input of [modelPath,document.querySelector<HTMLSelectElement>("#task-translation-provider")])input?.addEventListener("change",updateTaskPipelineSummary);
 updateTaskPipelineSummary();
 
-window.setInterval(async()=>{
-  if(!retranscriptionBusy||!activeDetail)return;
-  const jobId=activeDetail.job.job_id;
-  try{
-    const progress=await invoke<{phase:string;completed_ms?:number;duration_ms?:number}|null>("asr_candidate_progress",{jobId});
-    if(!progress||!retranscriptionBusy||activeDetail?.job.job_id!==jobId)return;
-    const phase=({extracting_audio:"提取音频",transcribing:"识别",refining_segments:"生成字幕候选",candidate_ready:"候选已就绪",failed:"候选失败"} as Record<string,string>)[progress.phase]??progress.phase;
-    setRetranscriptionMessage(`${phase}${progress.duration_ms?` · ${formatTime(progress.completed_ms??0)} / ${formatTime(progress.duration_ms)}`:""}`,false);
-  }catch{/* Preserve the active operation's result or actionable error. */}
-},1000);
 
 document.querySelector("#karaoke-insert-block")?.addEventListener("click",openInsertSubtitleBlock);
 document.querySelector("#karaoke-delete-block")?.addEventListener("click",()=>void deleteCurrentSubtitleBlock());
