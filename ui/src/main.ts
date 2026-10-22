@@ -2816,7 +2816,7 @@ async function stopActivePlayback(): Promise<void> {
   hideSubtitleOverlay();
 }
 
-async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editorDetail?: JobDetail): Promise<void> {
+async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editorDetail?: JobDetail, editorJobId?: string): Promise<void> {
   closeLearningSelection();
   if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   const requestId = ++navigationRequestId;
@@ -2844,8 +2844,9 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editor
     await Promise.all([refreshLearningItems(), loadDictionarySettings()]);
     if (learningDictionaryDialog?.open) renderLearningDictionary();
   }
-  if (area === "karaoke" && karaokeSelectedJobId) {
-    await openKaraokeJob(karaokeSelectedJobId, editorDetail);
+  const editorTarget = editorJobId ?? karaokeSelectedJobId;
+  if (area === "karaoke" && editorTarget) {
+    await openKaraokeJob(editorTarget, editorDetail);
     if (currentArea !== "karaoke") return;
   }
   window.scrollTo({ top: 0, behavior: "auto" });
@@ -3992,8 +3993,7 @@ async function openJob(jobId: string, initialSection?: WorkspaceSection): Promis
 
 async function enterSubtitleEditor(jobId: string, detail?: JobDetail): Promise<void> {
   if (!jobId) return;
-  karaokeSelectedJobId = jobId;
-  await showTopLevelArea("karaoke", detail);
+  await showTopLevelArea("karaoke", detail, jobId);
 }
 
 function renderWorkspace(detail: JobDetail): void {
