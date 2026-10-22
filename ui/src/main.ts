@@ -2807,9 +2807,9 @@ async function stopActivePlayback(): Promise<void> {
     window.clearTimeout(playbackPositionSaveTimer);
     playbackPositionSaveTimer = null;
   }
-  await mediaPlayer.stop(async media => {
-    if (area === "listening" && detail) await savePlaybackPosition(detail.job.job_id, media);
-    else if (area === "karaoke" && detail) karaokeResumeMs = Math.round(media.currentTime * 1_000);
+  await mediaPlayer.stop(async (media, positionMs) => {
+    if (area === "listening" && detail) await savePlaybackPosition(detail.job.job_id, media, positionMs);
+    else if (area === "karaoke" && detail) karaokeResumeMs = Math.round(positionMs);
   });
   activeSegmentId = null;
   updatePlaybackControls();
@@ -3798,8 +3798,8 @@ function syncTimelineFollowState(): void {
 function seekKaraokeBy(milliseconds: number): void {
   if (!mediaPlayer.media) return;
   const durationMs = Number.isFinite(mediaPlayer.media.duration) ? mediaPlayer.media.duration * 1_000 : Number.MAX_SAFE_INTEGER;
-  seekTo(Math.max(0, Math.min(durationMs, mediaPlayer.media.currentTime * 1_000 + milliseconds)), false);
-  updateKaraokePosition(mediaPlayer.media.currentTime * 1_000);
+  seekTo(Math.max(0, Math.min(durationMs, mediaPlayer.positionMs + milliseconds)), false);
+  updateKaraokePosition(mediaPlayer.positionMs);
 }
 
 async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSegment | null): Promise<void> {
@@ -4387,8 +4387,7 @@ function parseTimecode(value: string): number | null {
 
 function seekTo(milliseconds: number, autoplay = true): void {
   if (!mediaPlayer.media) return;
-  const durationMs = Number.isFinite(mediaPlayer.media.duration) ? mediaPlayer.media.duration * 1_000 : milliseconds;
-  mediaPlayer.media.currentTime = Math.max(0, Math.min(milliseconds, durationMs)) / 1_000;
+  mediaPlayer.seek(milliseconds);
   if (autoplay) void mediaPlayer.media.play().catch(() => undefined);
 }
 
@@ -4412,8 +4411,8 @@ async function persistPlaybackPosition(): Promise<void> {
   await savePlaybackPosition(activeDetail.job.job_id, mediaPlayer.media);
 }
 
-async function savePlaybackPosition(jobId: string, media: HTMLMediaElement): Promise<void> {
-  const positionMs = Math.max(0, Math.round(media.currentTime * 1_000));
+async function savePlaybackPosition(jobId: string, media: HTMLMediaElement, intendedMs = media.currentTime * 1_000): Promise<void> {
+  const positionMs = Math.max(0, Math.round(intendedMs));
   lastPlaybackPositionSavedAt = Date.now();
   await invoke("save_playback_position", {
     request: { jobId, positionMs },
@@ -4442,7 +4441,7 @@ function togglePlayback(): void {
 
 function seekRelative(seconds: number): void {
   if (!mediaPlayer.media) return;
-  seekTo((mediaPlayer.media.currentTime + seconds) * 1_000, false);
+  seekTo(mediaPlayer.positionMs + seconds * 1_000, false);
 }
 
 function seekAdjacentSubtitle(direction: -1 | 1): void {
@@ -4554,7 +4553,7 @@ function hideSubtitleOverlay(): void {
 
 function updateActiveSubtitle(milliseconds: number): void {
   if (mediaPlayer.media && playbackLoop && mediaPlayer.media.currentTime * 1000 >= playbackLoop.endMs) {
-    if (playbackLoop.repeat) mediaPlayer.media.currentTime = playbackLoop.startMs / 1000;
+    if (playbackLoop.repeat) mediaPlayer.seek(playbackLoop.startMs);
     else { mediaPlayer.media.pause(); playbackLoop = null; }
   }
 
@@ -6611,7 +6610,7 @@ function addOfflineTools(): void {
                     };
           }
           if (playbackLoop) {
-            mediaPlayer.media.currentTime = playbackLoop.startMs / 1000;
+            mediaPlayer.seek(playbackLoop.startMs);
             void mediaPlayer.media.play();
           }
           document

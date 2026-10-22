@@ -21,7 +21,7 @@ function harness() {
 }
 test('fallback preserves playback, position, volume, mute and rate, and old elements lose all listeners',async()=>{
  const h=harness();h.player.mount(h.source);const video=h.player.media;
- assert.equal(video.kind,'video');video.emit('loadedmetadata');assert.equal(video.currentTime,70);
+ assert.equal(video.kind,'video');video.emit('loadedmetadata');assert.equal(video.currentTime,70);video.emit('seeked');
  video.currentTime=81.5;video.volume=.4;video.muted=true;video.playbackRate=1.5;await video.play();
  video.error={code:3};video.pause();video.emit('error');const audio=h.player.media;
  assert.notEqual(audio,video);assert.equal(audio.kind,'audio');assert.equal(video.src,'');assert.equal(video.loads,1);
@@ -60,4 +60,26 @@ test('a rejected play promise from an old element cannot alter the next task mes
  h.player.mount({...h.source,primaryPath:'/next.mp4',fallbackPath:null});const message=h.source.message.textContent;
  reject(new Error('old play rejected'));await Promise.resolve();await Promise.resolve();
  assert.equal(h.source.message.textContent,message);assert.equal(h.player.media.src,'asset:/next.mp4');h.player.dispose();
+});
+test('rapid seeks serialize native assignments and coalesce intermediate targets',()=>{
+ const h=harness();h.source.resumeMs=0;h.player.mount(h.source);const media=h.player.media;media.emit('loadedmetadata');
+ h.player.seek(2000);assert.equal(media.currentTime,2);media.seeking=true;
+ h.player.seek(5000);h.player.seek(7000);assert.equal(media.currentTime,2);assert.equal(h.player.positionMs,7000);
+ media.emit('timeupdate');assert.notEqual(h.positions.at(-1),2000);
+ media.seeking=false;media.emit('seeked');assert.equal(media.currentTime,7);
+ media.emit('seeked');assert.equal(h.positions.at(-1),7000);assert.equal(h.player.positionMs,7000);
+ h.player.seek(10000);h.player.seek(200000);assert.equal(h.player.positionMs,120000);h.player.seek(NaN);assert.equal(h.player.positionMs,120000);
+ h.player.seek(-100);assert.equal(h.player.positionMs,0);media.emit('seeked');assert.equal(media.currentTime,0);media.emit('seeked');h.player.dispose();
+});
+test('pre-metadata seek supersedes resume and fallback carries the latest queued intent',async()=>{
+ const h=harness();h.player.mount(h.source);const media=h.player.media;
+ h.player.seek(4000);assert.equal(media.currentTime,0);media.emit('loadedmetadata');assert.equal(media.currentTime,4);
+ h.player.seek(12000);media.emit('error');const fallback=h.player.media;fallback.emit('loadedmetadata');assert.equal(fallback.currentTime,12);
+ fallback.emit('seeked');h.player.seek(20000);h.player.seek(30000);
+ await h.player.stop(async (element,position)=>{assert.equal(element,fallback);assert.equal(position,30000)});media.emit('seeked');fallback.emit('seeked');assert.equal(h.player.media,null);h.player.dispose();
+});
+test('native-control seeks queue app seeks; obsolete elements cannot drain into the next task',()=>{
+ const h=harness();h.source.resumeMs=0;h.player.mount(h.source);const old=h.player.media;old.emit('loadedmetadata');old.seeking=true;
+ h.player.seek(9000);assert.equal(old.currentTime,0);old.seeking=false;old.emit('seeked');assert.equal(old.currentTime,9);
+ h.player.seek(18000);h.player.mount({...h.source,primaryPath:'/next.mp4'});const next=h.player.media;next.emit('loadedmetadata');old.emit('seeked');assert.equal(next.currentTime,0);h.player.dispose();
 });

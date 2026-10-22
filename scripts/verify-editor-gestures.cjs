@@ -53,11 +53,11 @@ const assert=require('node:assert/strict');
  assert.equal(await calls(),0);await p.locator('.job-open').first().click();await canvas.waitFor();
  await p.locator('[data-editor-action="follow"]').click();
  const headBox=await canvas.boundingBox();
+ await p.locator("#karaoke-media-host audio").evaluate(a=>a.addEventListener("seeked",()=>window.__headSeeked=a.currentTime));
  await p.mouse.move(headBox.x+2,headBox.y+28);await p.mouse.down();await p.mouse.move(headBox.x+headBox.width*.25,headBox.y+28,{steps:3});await p.mouse.up();
  // WebKit applies currentTime asynchronously during successive pointer moves.
  const headTarget=await p.evaluate(()=>{const r=window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1).args.request;return (r.startMs+(r.endMs-r.startMs)*.25)/1000;});
- await p.waitForFunction(target=>Math.abs(document.querySelector('#karaoke-media-host audio').currentTime-target)<.15,headTarget,{polling:50,timeout:10000});
- assert.ok(await p.locator('#karaoke-media-host audio').evaluate((a,target)=>Math.abs(a.currentTime-target)<.15,headTarget));
+ await p.waitForFunction(target=>{const a=document.querySelector('#karaoke-media-host audio');return !a.seeking && a.readyState>=2 && Math.abs(a.currentTime-target)<.15 && Math.abs(window.__headSeeked-target)<.15;},headTarget,{polling:50,timeout:10000}).catch(async error=>{console.error('final seek state',await p.locator('#karaoke-media-host audio').evaluate(a=>({time:a.currentTime,seeking:a.seeking,ready:a.readyState,seeked:window.__headSeeked})),{headTarget});throw error;});
  assert.equal(await p.locator('[data-editor-action="follow"]').getAttribute('aria-pressed'),'true');
  assert.deepEqual(errors,[]);console.log('PASS: Escape, capture loss, fresh drag, cancel, pan, ctrl-wheel, pinch, task navigation and playhead seek');
  await b.close();

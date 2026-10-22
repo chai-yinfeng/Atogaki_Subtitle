@@ -37,11 +37,14 @@ export function createMediaPlayer(options: Options, environment: Environment = {
   let frame: number | null = null;
   let disposed = false;
   let currentGuard = () => false;
+  let requestSeek = (_milliseconds: number) => {};
+  let position = () => media ? media.currentTime * 1_000 : 0;
   const cancelAnimation = () => { if (frame !== null) environment.cancelFrame(frame); frame = null; };
   const take = (invalidate = true) => {
     if (invalidate) generation++;
     events?.abort(); events = null; cancelAnimation();
     const previous = media; media = null; currentGuard = () => false;
+    requestSeek = () => {}; position = () => 0;
     previous?.pause();
     return previous;
   };
@@ -73,10 +76,32 @@ export function createMediaPlayer(options: Options, environment: Environment = {
       const current = () => !disposed && media === element && generation === request && options.currentJob(source.jobId);
       const on = (name: string, callback: EventListener) => element.addEventListener(name, callback, { signal: abort.signal });
       let shouldPlay = autoplay, metadataLoaded = false;
+      // WebKit can settle overlapping native seeks out of order. Keep one in
+      // flight and retain only the latest requested destination.
+      let pendingSeek: number | null = null, seekingTarget: number | null = null;
+      const intendedPosition = () => pendingSeek ?? seekingTarget ?? element.currentTime * 1_000;
+      const flushSeek = () => {
+        if (!current() || !metadataLoaded || pendingSeek === null || seekingTarget !== null || element.seeking) return;
+        const duration = Number.isFinite(element.duration) ? element.duration * 1_000 : pendingSeek;
+        const target = Math.max(0, Math.min(pendingSeek, duration));
+        pendingSeek = null;
+        if (Math.abs(element.currentTime * 1_000 - target) < 1) return;
+        seekingTarget = target;
+        element.currentTime = target / 1_000;
+      };
+      const seek = (milliseconds: number) => {
+        if (!current() || !Number.isFinite(milliseconds)) return;
+        const duration = metadataLoaded && Number.isFinite(element.duration) ? element.duration * 1_000 : Infinity;
+        pendingSeek = Math.max(0, Math.min(milliseconds, duration)); flushSeek();
+      };
       const fallbackMessage = "原素材播放失败，已自动使用任务音频。";
       element.controls = true; element.preload = "metadata";
-      on("timeupdate", () => { if (current()) { options.position(element.currentTime * 1_000); options.progress(); } });
-      on("seeked", () => { if (current()) options.position(element.currentTime * 1_000); });
+      on("timeupdate", () => { if (current() && pendingSeek === null && seekingTarget === null) { options.position(element.currentTime * 1_000); options.progress(); } });
+      on("seeked", () => {
+        if (!current()) return;
+        seekingTarget = null; flushSeek();
+        if (pendingSeek === null && seekingTarget === null) options.position(element.currentTime * 1_000);
+      });
       on("play", () => { if (current()) { shouldPlay = true; options.changed(); refreshAnimation(); } });
       on("pause", () => {
         if (!current()) return;
@@ -93,7 +118,8 @@ export function createMediaPlayer(options: Options, environment: Environment = {
         if (!current()) return;
         metadataLoaded = true;
         element.playbackRate = element.defaultPlaybackRate;
-        if (positionMs > 0 && Number.isFinite(element.duration)) element.currentTime = Math.min(positionMs / 1_000, Math.max(0, element.duration - .25));
+        if (pendingSeek === null && positionMs > 0 && Number.isFinite(element.duration)) pendingSeek = Math.min(positionMs, Math.max(0, element.duration * 1_000 - 250));
+        flushSeek();
         if (shouldPlay) void element.play().catch(() => { if (current()) source.message.textContent += " · 请点击播放"; });
         if (positionMs > 0) source.message.textContent = `${fallback ? fallbackMessage : source.inputPath ?? "原素材"} · 已恢复到 ${options.time(element.currentTime * 1_000)}`;
         options.changed(); options.position(element.currentTime * 1_000);
@@ -101,13 +127,13 @@ export function createMediaPlayer(options: Options, environment: Environment = {
       on("error", () => {
         if (!current()) return;
         if (!fallback && source.fallbackPath && source.fallbackPath !== path) {
-          loadPath(source.fallbackPath, true, metadataLoaded ? element.currentTime * 1_000 : positionMs, shouldPlay, element.volume, element.muted, element.playbackRate);
+          loadPath(source.fallbackPath, true, pendingSeek ?? seekingTarget ?? (metadataLoaded ? element.currentTime * 1_000 : positionMs), shouldPlay, element.volume, element.muted, element.playbackRate);
         } else {
           cancelAnimation(); element.pause();
           source.message.textContent = "媒体加载失败。可能是文件已移动，或系统 WebView 不支持这种编码。";
         }
       });
-      media = element; currentGuard = current;
+      media = element; currentGuard = current; requestSeek = seek; position = intendedPosition;
       element.defaultPlaybackRate = rate; element.playbackRate = rate; element.volume = volume; element.muted = muted;
       source.host.replaceChildren(element);
       element.src = /^http:\/\/127\.0\.0\.1:\d+\/media\/[a-f0-9-]+$/.test(path) ? path : options.resolve(path);
@@ -120,11 +146,12 @@ export function createMediaPlayer(options: Options, environment: Environment = {
     loadPath(firstPath, source.primaryPath === null && firstPath === source.fallbackPath);
   };
   return {
-    get media() { return media; }, mount, refreshAnimation,
+    get media() { return media; }, get positionMs() { return position(); },
+    seek(milliseconds: number) { requestSeek(milliseconds); }, mount, refreshAnimation,
     setRate(rate: number) { if (media) { media.defaultPlaybackRate = rate; media.playbackRate = rate; } },
-    async stop(beforeRelease?: (element: HTMLMediaElement) => Promise<void>) {
-      const previous = take(); options.changed();
-      try { if (previous) await beforeRelease?.(previous); }
+    async stop(beforeRelease?: (element: HTMLMediaElement, positionMs: number) => Promise<void>) {
+      const positionMs = position(), previous = take(); options.changed();
+      try { if (previous) await beforeRelease?.(previous, positionMs); }
       finally { release(previous); }
     },
     dispose() { disposed = true; release(take()); },
