@@ -22,6 +22,10 @@ export function createCandidateHistory(options: HistoryOptions) {
   let epoch = 0, request = 0, disposed = false;
   let rows: readonly CandidateRun[] = [];
   const pending = new Map<string, object>();
+  const publishRows = () => {
+    options.rows(rows);
+    for (const runId of pending.keys()) options.busy(runId, true);
+  };
   const matches = (context: Context, generation: number) => {
     const current = options.context();
     return !disposed && generation === epoch && options.visible() && current?.jobId === context.jobId && current.navigation === context.navigation;
@@ -32,8 +36,7 @@ export function createCandidateHistory(options: HistoryOptions) {
     try {
       const runs = await options.list(context.jobId);
       if (!matches(context, generation) || revision !== request) return;
-      rows = runs; options.rows(rows);
-      for (const runId of pending.keys()) options.busy(runId, true);
+      rows = runs; publishRows();
     } catch (error) { if (matches(context, generation) && revision === request) options.failed(error); }
   };
   const reset = () => {
@@ -41,13 +44,22 @@ export function createCandidateHistory(options: HistoryOptions) {
   };
   return {
     refresh,
+    markAdopted(runId: string) {
+      if (disposed) return;
+      // Invalidate older reads before exposing the committed adoption locally.
+      request++;
+      if (!rows.some(run => run.id === runId)) return;
+      rows = rows.map(run => run.id === runId ? { ...run, adopted: true, cleanable: false } : run);
+      publishRows();
+    },
     async release(runId: string) {
       const context = options.context(), generation = epoch;
       if (!context || !matches(context, generation) || pending.has(runId) || !rows.some(run => run.id === runId && run.cleanable)) return;
-      const ticket = {}; pending.set(runId, ticket); options.busy(runId, true);
+      const ticket = {}; pending.set(runId, ticket);
       const current = () => pending.get(runId) === ticket && matches(context, generation);
       try {
         if (!await options.confirmRelease() || !current() || !rows.some(run => run.id === runId && run.cleanable)) return;
+        options.busy(runId, true);
         const bytes = await options.release(context.jobId, runId);
         if (!current()) return;
         options.released(runId, bytes);
@@ -79,8 +91,11 @@ export function mountCandidateHistory(root: HTMLElement, options: ViewOptions) {
   toolbar.innerHTML = '<button type="button" class="secondary" data-full-candidate>生成全片本地候选</button><button type="button" class="secondary" data-candidate-history>历史候选</button><button type="button" class="secondary" data-cancel-candidate>取消候选运行</button><div class="candidate-history"></div>';
   root.append(toolbar);
   const host = toolbar.querySelector<HTMLDivElement>(".candidate-history")!;
+  let requested = false;
   const history = createCandidateHistory({ ...options,
     rows(runs) {
+      const focused = document.activeElement instanceof HTMLButtonElement && host.contains(document.activeElement)
+        ? document.activeElement.dataset.reopenRun ?? document.activeElement.dataset.releaseRun : null;
       host.replaceChildren();
       for (const run of runs) {
         const row = document.createElement("article"), info = document.createElement("div"), title = document.createElement("strong"), status = document.createElement("span");
@@ -96,23 +111,38 @@ export function mountCandidateHistory(root: HTMLElement, options: ViewOptions) {
         host.append(row);
       }
       if (!runs.length) host.textContent = "还没有成功候选。";
+      if (focused) {
+        const replacement = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => (button.dataset.reopenRun ?? button.dataset.releaseRun) === focused);
+        (replacement ?? toolbar.querySelector<HTMLButtonElement>("[data-candidate-history]"))?.focus();
+      }
     },
     busy(runId, busy) {
-      host.querySelectorAll<HTMLButtonElement>("[data-release-run], [data-reopen-run]").forEach(button => {
+      const controls = [...host.querySelectorAll<HTMLButtonElement>("[data-release-run], [data-reopen-run]")];
+      controls.forEach(button => {
         if ((button.dataset.releaseRun ?? button.dataset.reopenRun) === runId) button.disabled = busy;
       });
+      if (!busy && options.visible() && document.activeElement === document.body) {
+        (controls.find(button => (button.dataset.releaseRun ?? button.dataset.reopenRun) === runId)
+          ?? toolbar.querySelector<HTMLButtonElement>("[data-candidate-history]"))?.focus();
+      }
     },
   });
   // Keep initial/closed history truly empty until explicitly requested.
-  const clear = () => { history.reset(); host.replaceChildren(); };
+  const clear = () => { requested = false; history.reset(); host.replaceChildren(); };
   toolbar.addEventListener("click", event => {
     const button = (event.target as Element).closest<HTMLButtonElement>("button");
     if (!button || button.disabled || !options.visible()) return;
     if (button.hasAttribute("data-full-candidate")) options.full();
-    else if (button.hasAttribute("data-candidate-history")) void history.refresh();
+    else if (button.hasAttribute("data-candidate-history")) { requested = true; void history.refresh(); }
     else if (button.hasAttribute("data-cancel-candidate")) options.cancel();
-    else if (button.dataset.releaseRun) void history.release(button.dataset.releaseRun);
-    else if (button.dataset.reopenRun) options.reopen(button.dataset.reopenRun);
+    else if (button.dataset.releaseRun) { button.focus(); void history.release(button.dataset.releaseRun); }
+    else if (button.dataset.reopenRun) { button.focus(); options.reopen(button.dataset.reopenRun); }
   }, { signal: events.signal });
-  return { clear, dispose() { events.abort(); history.dispose(); toolbar.remove(); } };
+  return {
+    clear,
+    adopted(runId: string) {
+      history.markAdopted(runId);
+      if (requested) void history.refresh();
+    },
+    dispose() { events.abort(); history.dispose(); toolbar.remove(); } };
 }

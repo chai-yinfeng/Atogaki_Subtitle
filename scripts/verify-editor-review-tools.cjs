@@ -24,10 +24,28 @@ const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
   await open();assert.equal(await page.locator('[data-full-candidate]').count(),1);
   await page.locator('#preview-retranscription').click();await page.locator('#retranscription-dialog[open]').waitFor();await page.locator('#close-retranscription-preview').click();
   await page.locator('[data-candidate-history]').click();await page.locator('[data-release-run]').waitFor();
-  await page.locator('[data-release-run]').click();await page.locator('#confirmation-dialog[open]').waitFor();assert.equal(await page.locator('#confirmation-dialog').evaluate(d=>d.inert),false);
-  await page.locator('#cancel-confirmation').click();assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='release_asr_candidate').length),0);
-  await page.locator('[data-release-run]').click();await page.locator('#accept-confirmation').click();await page.waitForFunction(()=>document.querySelector('.candidate-history')?.textContent.includes('产物已清理'));
+  await page.locator('[data-release-run]').click();await page.locator('#candidate-cleanup-dialog[open]').waitFor();assert.equal(await page.locator('#candidate-cleanup-dialog').evaluate(d=>d.inert),false);
+  await page.locator('[data-cancel-cleanup]').click();assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='release_asr_candidate').length),0);
+  assert.equal(await page.locator('#candidate-cleanup-dialog').count(),0);
+  assert.ok(await page.evaluate(()=>document.activeElement.hasAttribute('data-release-run')));
+  assert.equal(await page.locator('#editor-repair-dialog').evaluate(d=>!!d.closest('[inert]')),false);
+  await page.locator('[data-release-run]').click();assert.equal(await page.locator('#candidate-cleanup-dialog').getAttribute('role'),'region');
+  assert.equal(await page.locator('#editor-repair-dialog').evaluate(d=>!!d.closest('[inert]')),true);
+  await page.locator('[data-cancel-cleanup]').focus();await page.keyboard.press('Shift+Tab');assert.equal(await page.evaluate(()=>document.activeElement.hasAttribute('data-accept-cleanup')),true);
+  await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.hasAttribute('data-cancel-cleanup')),true);
+  await page.keyboard.press('Escape');assert.equal(await page.locator('#candidate-cleanup-dialog').count(),0);
+  assert.equal(await page.evaluate(()=>document.querySelector('#confirmation-dialog').open),false);
+
+  await page.locator('[data-release-run]').click();await page.locator('[data-accept-cleanup]').click();await page.waitForFunction(()=>document.querySelector('.candidate-history')?.textContent.includes('产物已清理'));
   assert.equal(await page.locator('[data-release-run]').count(),0);assert.match(await page.locator('#retranscription-message').textContent(),/1 KiB/);
+  // Adoption refreshes an already-requested history and protects its row immediately.
+  await page.locator('#preview-retranscription').click();await page.locator('#retranscription-dialog[open]').waitFor();await page.locator('#close-retranscription-preview').click();
+  await page.locator('[data-candidate-history]').click();await page.locator('[data-release-run]').waitFor();
+  await page.locator('.candidate-history-row:has([data-release-run]) [data-reopen-run]').click();await page.locator('#retranscription-dialog[open]').waitFor();await page.locator('#confirm-retranscription').click();
+  await page.waitForFunction(()=>document.querySelector('.candidate-history').textContent.includes('已采用，保留来源'));
+  assert.equal(await page.locator('[data-release-run]').count(),0);assert.equal(await page.locator('#retranscription-dialog').count(),0);
+  assert.ok(await page.evaluate(()=>document.activeElement.hasAttribute('data-reopen-run')));
+
   // Out-of-order history reads must keep the latest list.
   await page.evaluate(()=>{window.__test.held.history=true;const r=Object.values(window.__test.previews)[0];window.__test.historyRows=[{id:'old',provider_name:'旧返回',model_identity:'test',scope_start_ms:0,scope_end_ms:2800,created_at_unix:1,status:'failed'}]});
   await page.locator('[data-candidate-history]').click();await page.waitForFunction(()=>window.__test.pending.filter(r=>r.kind==='history').length===1);
@@ -43,7 +61,7 @@ const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
   assert.equal(await page.locator('[data-full-candidate]').isDisabled(),false);assert.equal(await page.locator('#retranscription-dialog').count(),0);
   // A completed release belongs to the originating task even after navigation.
   await page.evaluate(()=>{window.__test.held.history=false;window.__test.held.release=true;window.__test.historyRows=[{id:'late',provider_name:'迟到清理',model_identity:'test',scope_start_ms:0,scope_end_ms:2800,created_at_unix:1,status:'succeeded',cleanable:true,reopenable:true}]});
-  await page.locator('[data-candidate-history]').click();await page.locator('[data-release-run="late"]').click();await page.locator('#accept-confirmation').click();await page.waitForFunction(()=>window.__test.pending.some(r=>r.kind==='release'));
+  await page.locator('[data-candidate-history]').click();await page.locator('[data-release-run="late"]').click();await page.locator('[data-accept-cleanup]').click();await page.waitForFunction(()=>window.__test.pending.some(r=>r.kind==='release'));
   assert.equal(await page.locator('[data-reopen-run="late"]').isDisabled(),true);await close();await page.locator('[data-editor-action="back"]').click();await page.locator('.job-open').nth(1).click();
   await page.waitForFunction(()=>document.querySelector('#karaoke-current-source').value.startsWith('任务 B 第'));const bText=await page.locator('#karaoke-current-source').inputValue();
   await page.evaluate(()=>window.__test.pending.find(r=>r.kind==='release').resolve());await page.waitForTimeout(50);assert.equal(await page.locator('#karaoke-current-source').inputValue(),bText);

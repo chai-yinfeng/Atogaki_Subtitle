@@ -132,3 +132,9 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 本轮修复还让重开候选读取错误在当前工具显示，避免仅写入未打开的预览；浏览器回归覆盖嵌套祖先 inert、内层关闭后外层仍阻止背景、内层 Tab 循环、采用中 Escape／关闭锁及错误重试。62 项前端测试、九组 WebKit、类型／构建、cargo fmt --check、git diff --check 通过。原生包构建验证了本次源码和 Tauri 嵌入，但未打四 sidecar 正式 release，也未覆盖 `/Applications/Atogaki.app`。
 
 截图、AX 与 JSON 摘要保存在忽略目录 `local-artifacts/editor-native-790957e/`（构建摘要、fixture 身份、拖动跟随、候选控件、采用与撤销前后摘要）。合成数据库留在 `/tmp`，未提交 Git；正式数据库未接入本次测试。QA 进程已正常退出。持续内存、滚动 P95、原生 pinch／捕获丢失、通用确认框的 AX 以及 Windows 仍分别保留待验收。
+
+## 处理清理确认与历史状态收口
+
+识别复核里的清理确认改用同一显式焦点边界，原生 AX 现在显示标题、取消与清理产物按钮，点击取消正常返回外层工具。采用后无需手动刷新历史即可看到“已采用，保留来源”，该行不再有清理入口；局部行重绘保留对照按钮焦点，原生确认 Escape 可返回编辑器。原生重复采用与撤销后，40 段 ID／时间／原译文／标记与隔离基线完全一致，integrity_check=ok。
+
+新增控制器测试覆盖采用立即失效旧历史读取、确认等待期间的采用阻止释放；浏览器验证取消／Escape／Tab、背景 inert 恢复、采用状态更新及焦点保留，合计 64 项前端和九组 WebKit 回归通过。类型／生产构建、格式检查通过，隔离包签名有效。截图、AX 与结果在忽略目录 `local-artifacts/editor-cleanup-native/`。原生未确认执行删除，合成 IPC 测试验证了确认后的释放参数与迟到返回；通用应用模态框没有全局替换。

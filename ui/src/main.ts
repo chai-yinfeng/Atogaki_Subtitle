@@ -1,3 +1,4 @@
+import { mountCandidateCleanupConfirmation } from "./candidate-cleanup-confirmation";
 import { mountReviewSignals } from "./editor-review-signals";
 import { mountCandidateHistory } from "./editor-candidate-history";
 import { createEditorProcessing } from "./editor-processing";
@@ -1363,7 +1364,8 @@ async function saveEditorCueTime(): Promise<void> {
   finally { setEditorMutationBusy(false); }
 }
 const taskTools = mountTaskTools(workspaceView, editorRoot, closeEditorTools);
-const repairTool = mountToolDialog(editorRepairDialog, () => { reviewSignals.clear(); candidateHistory.clear(); });
+const cleanupConfirmation = mountCandidateCleanupConfirmation(shell!);
+const repairTool = mountToolDialog(editorRepairDialog, () => { reviewSignals.clear(); candidateHistory.clear(); }, () => !cleanupConfirmation.open);
 const processingBackend = createProcessingBackend(invoke);
 const editorProcessing = createEditorProcessing({
   backend: processingBackend,
@@ -1383,6 +1385,7 @@ const editorProcessing = createEditorProcessing({
     rememberStructureEdit(before, after, `局部重新识别 ${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)}`, preview.job_id);
     applySubtitleStructure(after, preview.candidate_segments[0]?.id);
     candidateTool.close(); activeRepairSignalId = null;
+    candidateHistory.adopted(preview.preview_id);
     if (signalId) void saveAsrReviewDecision(signalId, "resolved");
     setSubtitleEditAction(`已替换所选范围为 ${preview.candidate_segments.length} 段新识别字幕；新段需要重新翻译，可用会话撤销恢复。`);
   },
@@ -1398,7 +1401,7 @@ const candidateHistory = mountCandidateHistory(editorRepairDialog.querySelector<
   visible: () => editorRepairDialog.open,
   list: processingBackend.runs,
   release: processingBackend.release,
-  confirmRelease: () => confirmAction({ title: "清理这个未采用候选？", message: "释放候选的音频缓存和识别产物，保留运行摘要。清理后无法再打开该候选；当前字幕不变。", confirmLabel: "清理产物", danger: true }),
+  confirmRelease: () => cleanupConfirmation.confirm(),
   released: (runId, bytes) => {
     if (editorProcessing.preview?.preview_id === runId) { editorProcessing.clearPreview(runId); candidateTool.close(); }
     setRetranscriptionMessage(`已清理候选产物，本次释放 ${formatBytes(bytes)}。`);
@@ -1481,6 +1484,7 @@ window.addEventListener("pagehide", () => {
   candidateHistory.dispose();
   editorProcessing.dispose();
   candidateTool.dispose();
+  cleanupConfirmation.dispose();
   repairTool.dispose();
 }, { once: true });
 
@@ -2793,6 +2797,7 @@ async function stopActivePlayback(): Promise<void> {
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
   candidateTool.close();
+  cleanupConfirmation.cancel();
   repairTool.close();
   editorProcessing.reset();
   if (workspaceView?.classList.contains("editor-task-tools")) closeEditorTools();

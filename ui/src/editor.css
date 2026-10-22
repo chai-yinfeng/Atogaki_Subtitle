@@ -126,3 +126,7 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; background: #eceff3; }
 
 /* Match the accessible processing region while isolating nested focus/background. */
 .editor-candidate-dialog[open] { position: fixed; inset: 10dvh 0 auto; z-index: 40; max-height: 80dvh; box-shadow: 0 0 0 100vmax #0008; }
+
+.editor-cleanup-dialog[open] { position: fixed; inset: 30dvh 0 auto; z-index: 50; width: min(520px,95vw); max-height: 65dvh; overflow: auto; padding: 18px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 0 0 100vmax #0008; font: 13px/1.5 system-ui, sans-serif; }
+.editor-cleanup-dialog h2 { font: 600 17px/1.4 system-ui, sans-serif; margin: 0 0 12px; }
+.editor-cleanup-dialog button { font: 13px system-ui, sans-serif; padding: 6px 10px; }

@@ -32,3 +32,10 @@ test('unlisted or protected runs never prompt; failed confirmation releases lock
 test('dispose invalidates pending reads and forbids new commands',async()=>{
  const h=harness(),read=h.history.refresh();h.history.dispose();h.calls[0].resolve([run('r')]);await read;await h.history.refresh();await h.history.release('r');assert.equal(h.calls.length,1);assert.deepEqual(h.events,[['rows',[]]]);
 });
+test('committed adoption invalidates old reads and immediately removes cleanup permission',async()=>{
+ const h=harness();await ready(h);const old=h.history.refresh();h.history.markAdopted('r');const adopted=h.events.at(-1)[1][0];assert.equal(adopted.adopted,true);assert.equal(adopted.cleanable,false);
+ h.calls[1].resolve([run('r')]);await old;assert.deepEqual(h.events.at(-1),['rows',[adopted]]);await h.history.release('r');assert.equal(h.calls.length,2);
+});
+test('adoption during a pending cleanup confirmation prevents release',async()=>{
+ const h=harness();await ready(h);const cleanup=h.history.release('r');h.history.markAdopted('r');h.calls[1].resolve(true);await cleanup;assert.equal(h.calls.some(c=>c.kind==='release'),false);
+});
