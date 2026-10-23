@@ -1,3 +1,5 @@
+import { createSubtitleTranslation, needsTranslation } from "./subtitle-translation";
+import { createTranslationBackend } from "./subtitle-translation-backend";
 import { createSubtitleExport } from "./subtitle-export";
 import { createSubtitleExportBackend } from "./subtitle-export-backend";
 import { mountSubtitleExportDialogs } from "./subtitle-export-view";
@@ -137,14 +139,6 @@ type GlossaryApplyResult = {
 };
 
 
-
-type BatchTranslationResult = {
-  segments: SubtitleSegment[];
-  requested_count: number;
-  translated_count: number;
-  empty_segment_ids: string[];
-  resumed: boolean;
-};
 
 type SubtitleUndoEntry = {
   before: SubtitleSegment;
@@ -1136,9 +1130,6 @@ let activeLearningItemId: string | null = null;
 let activeLearningProviderId = "summary";
 let learningActionBusy = false;
 let learningLookupBusy = false;
-type TaskTranslationActivity = { message: string; startedAt: number };
-const taskTranslationActivities = new Map<string, TaskTranslationActivity>();
-let taskTranslationElapsedTimer: number | null = null;
 let playbackPositionSaveTimer: number | null = null;
 let lastPlaybackPositionSavedAt = 0;
 let karaokeFollowPlayhead = true;
@@ -1160,6 +1151,36 @@ let translationStatus: TranslationStatus = {
 };
 
 const editorSession = new EditorSession();
+const subtitleTranslation = createSubtitleTranslation<JobDetail>({
+  context: () => activeDetail && (currentArea === "karaoke" || currentArea === "workspace") ? {
+    jobId: activeDetail.job.job_id, navigation: navigationRequestId, segments: activeDetail.segments,
+    contextStaleIds: activeDetail.translation_context_stale_ids, provider: translationStatus.provider,
+    configured: translationStatus.configured, sourceLabel: languageLabel(activeSourceLanguage()), targetLabel: languageLabel(activeTargetLanguage()),
+  } : null,
+  available: () => !workspaceActionBusy, dirty: hasUnsavedSubtitleEdits,
+  flush: cue => subtitleDrafts.flush(cueKey(cue)), confirm: confirmAction,
+  backend: createTranslationBackend<JobDetail>(invoke),
+  acceptSegment: cue => {
+    replaceActiveSegment(cue);
+    if (activeDetail) renderSubtitleListPreservingView(activeDetail.segments, cue.id);
+    updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+  },
+  acceptSegments: cues => {
+    if (!activeDetail) return;
+    activeDetail.segments = cues; renderSubtitleListPreservingView(cues);
+    updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+  },
+  acceptDetail: detail => {
+    if (!activeDetail) return;
+    activeDetail.job = detail.job; activeDetail.segments = detail.segments;
+    activeDetail.translation_runs = detail.translation_runs;
+    activeDetail.translation_context_stale_ids = detail.translation_context_stale_ids;
+    renderSubtitleListPreservingView(activeDetail.segments); updateTranslationControls();
+    updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+  },
+  status: setWorkspaceAction, changed: updateTranslationControls, time: formatTime, elapsed: formatElapsed,
+  clock: { now: Date.now, repeat: tick => { const timer = window.setInterval(tick, 1_000); return () => window.clearInterval(timer); } },
+});
 const subtitleExportView = mountSubtitleExportDialogs(shell ?? document.body);
 const subtitleExport = createSubtitleExport({
   context: () => activeDetail && (currentArea === "karaoke" || currentArea === "workspace") ? {
@@ -1443,12 +1464,13 @@ editorRoot.addEventListener("click", event => {
   else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id && selectEditorCue(id)) editorCueList.reveal(id); }
   else if (action === "reveal-playing") { editorSession.listAutoScroll = true; editorCueList.reveal(editorSession.playbackCueId); syncEditorFollow(); }
   else if (action === "follow") void resumeEditorFollow();
-  else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void translateSegment(cue, karaokeTimingMessage); }
+  else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void subtitleTranslation.single(cue); }
   else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
   else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
 });
 
 window.addEventListener("pagehide", () => {
+  subtitleTranslation.dispose();
   subtitleExport.dispose();
   subtitleExportView.dispose();
   editorLayout.dispose();
@@ -2325,7 +2347,7 @@ function renderGlossaryList(): void {
 function updateTranslationControls(): void {
   const hasSegments = (activeDetail?.segments.length ?? 0) > 0;
   const taskTranslationBusy = activeDetail
-    ? taskTranslationActivities.has(activeDetail.job.job_id)
+    ? subtitleTranslation.has(activeDetail.job.job_id)
     : false;
   const taskBusy = workspaceActionBusy || taskTranslationBusy;
   const singleTranslate = editorRoot.querySelector<HTMLButtonElement>('[data-editor-action="translate"]');
@@ -2399,34 +2421,6 @@ function setSubtitleEditAction(message: string, isError = false): void {
     return;
   }
   setWorkspaceAction(message, isError);
-}
-
-function renderActiveTaskTranslationActivity(): void {
-  const jobId = activeDetail?.job.job_id;
-  const activity = jobId ? taskTranslationActivities.get(jobId) : undefined;
-  if (!activity || currentArea !== "workspace") return;
-  setWorkspaceAction(
-    `${activity.message} · 已运行 ${formatElapsed((Date.now() - activity.startedAt) / 1_000)}`,
-  );
-}
-
-function startTaskTranslation(jobId: string, message: string): () => void {
-  const activity = { message, startedAt: Date.now() };
-  taskTranslationActivities.set(jobId, activity);
-  renderActiveTaskTranslationActivity();
-  updateTranslationControls();
-  if (taskTranslationElapsedTimer === null) {
-    taskTranslationElapsedTimer = window.setInterval(renderActiveTaskTranslationActivity, 1_000);
-  }
-  return () => {
-    if (taskTranslationActivities.get(jobId) !== activity) return;
-    taskTranslationActivities.delete(jobId);
-    if (taskTranslationActivities.size === 0 && taskTranslationElapsedTimer !== null) {
-      window.clearInterval(taskTranslationElapsedTimer);
-      taskTranslationElapsedTimer = null;
-    }
-    updateTranslationControls();
-  };
 }
 
 function setWorkspaceBusy(busy: boolean): void {
@@ -4028,7 +4022,7 @@ function renderWorkspace(detail: JobDetail): void {
   if (currentArea !== "karaoke") updateActiveSubtitle(0);
   renderSubtitleOverlayButton();
   updateTranslationControls();
-  renderActiveTaskTranslationActivity();
+  subtitleTranslation.renderActivity();
   void refreshVideoRenders();
 }
 
@@ -4275,60 +4269,6 @@ function replaceActiveSegment(updated: SubtitleSegment): void {
   activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
   subtitleDrafts.ensure(updated);
   if (currentArea === "karaoke") { currentCueEditor.sync(karaokeDraftSegment()); renderEditorList(); }
-}
-
-async function reloadTranslatedWorkspace(jobId: string): Promise<void> {
-  const detail = await invoke<JobDetail>("get_job_detail", { jobId });
-  if (!activeDetail || activeDetail.job.job_id !== jobId) return;
-  activeDetail.job = detail.job;
-  activeDetail.segments = detail.segments;
-  activeDetail.translation_runs = detail.translation_runs;
-  activeDetail.translation_context_stale_ids = detail.translation_context_stale_ids;
-  renderSubtitleListPreservingView(activeDetail.segments);
-  updateTranslationControls();
-  updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
-}
-
-async function translateSegment(
-  segment: SubtitleSegment,
-  state: HTMLElement,
-): Promise<void> {
-  if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
-  const jobId = activeDetail.job.job_id;
-  if (taskTranslationActivities.has(jobId)) return;
-  const stopElapsed = startTaskTranslation(jobId, `正在保存并发送本段到 ${translationStatus.provider}`);
-  state.textContent = `正在保存并发送本段到 ${translationStatus.provider}…`;
-  state.classList.remove("warning");
-  try {
-    await subtitleDrafts.flush(cueKey(segment));
-    const translated = await invoke<SubtitleSegment>("translate_subtitle", {
-      jobId,
-      segmentId: segment.id,
-    });
-    if (activeDetail?.job.job_id === jobId) {
-      replaceActiveSegment(translated);
-      renderSubtitleListPreservingView(activeDetail.segments, segment.id);
-      updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
-    }
-    try {
-      await reloadTranslatedWorkspace(jobId);
-      if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`本段${languageLabel(activeTargetLanguage())}译文已由 ${translationStatus.provider} 更新并刷新。`);
-      }
-    } catch (reloadError) {
-      if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`翻译已经写入本地，但重新读取失败：${String(reloadError)}`, true);
-      }
-    }
-  } catch (error) {
-    if (activeDetail?.job.job_id === jobId) {
-      state.textContent = `翻译失败：${String(error)}`;
-      state.classList.add("warning");
-      setWorkspaceAction(`翻译失败：${String(error)}`, true);
-    }
-  } finally {
-    stopElapsed();
-  }
 }
 
 function editFlags(segment: SubtitleSegment): string {
@@ -4621,81 +4561,7 @@ function highlightSegment(segmentId: string | null): void {
 }
 
 function segmentNeedsTranslation(segment: SubtitleSegment): boolean {
-  return segment.translation_stale || !segment.translated_text?.trim() ||
-    !!activeDetail?.translation_context_stale_ids.includes(segment.id);
-}
-
-async function translateAllSubtitles(onlyPending: boolean): Promise<void> {
-  if (!activeDetail || workspaceActionBusy || !translationStatus.configured) return;
-  const jobId = activeDetail.job.job_id;
-  if (taskTranslationActivities.has(jobId)) return;
-  if (hasUnsavedSubtitleEdits()) {
-    setWorkspaceAction("请先保存各段尚未保存的修改，再执行全部重译。", true);
-    return;
-  }
-  const pendingSegments = activeDetail.segments.filter(
-    (segment) => segmentNeedsTranslation(segment),
-  );
-  const isResume = onlyPending;
-  const requestCount = onlyPending ? pendingSegments.length : activeDetail.segments.length;
-  if (requestCount === 0) return;
-  const confirmed = await confirmAction({
-    title: isResume ? "继续翻译未完成字幕？" : "全部翻译／重译？",
-    message: isResume
-      ? `将只把 ${requestCount} 段缺失或过期原文发送到 ${translationStatus.provider}；已经成功的译文保持不变。`
-      : `将把 ${requestCount} 段${languageLabel(activeSourceLanguage())}原文发送到 ${translationStatus.provider}，并覆盖现有${languageLabel(activeTargetLanguage())}译文，包括人工修改。`,
-    confirmLabel: isResume ? "继续未完成批次" : "发送并覆盖",
-    danger: !isResume,
-  });
-  if (!confirmed) return;
-  if (activeDetail?.job.job_id !== jobId || taskTranslationActivities.has(jobId)) return;
-
-  const batchCount = Math.ceil(requestCount / 12);
-  const stopElapsed = startTaskTranslation(
-    jobId,
-    `正在通过 ${translationStatus.provider}${isResume ? "继续" : ""}翻译 ${requestCount} 段字幕（${batchCount} 批）；成功批次会立即保存`,
-  );
-  try {
-    const result = await invoke<BatchTranslationResult>("translate_all_subtitles", {
-      jobId,
-      onlyPending,
-    });
-    if (activeDetail?.job.job_id === jobId) {
-      activeDetail.segments = result.segments;
-      renderSubtitleListPreservingView(activeDetail.segments);
-      updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
-    }
-    try {
-      await reloadTranslatedWorkspace(jobId);
-      if (activeDetail?.job.job_id === jobId) {
-        if (result.empty_segment_ids.length > 0) {
-          const emptyIds = new Set(result.empty_segment_ids);
-          const emptyLabels = result.segments
-            .map((segment, index) => ({ segment, index }))
-            .filter(({ segment }) => emptyIds.has(segment.id))
-            .map(({ segment, index }) => `第 ${index + 1} 段（${formatTime(segment.start_ms)}）`);
-          setWorkspaceAction(`已保存 ${result.translated_count}/${result.requested_count} 段；${emptyLabels.join("、")}在单独重试后仍为空，已保留为待翻译。`, true);
-        } else {
-          setWorkspaceAction(`${result.resumed ? "续译" : "翻译"}完成：${result.translated_count} 段已按批次写入本地。`);
-        }
-      }
-    } catch (reloadError) {
-      if (activeDetail?.job.job_id === jobId) {
-        setWorkspaceAction(`翻译批次已经写入本地，但重新读取失败：${String(reloadError)}`, true);
-      }
-    }
-  } catch (error) {
-    if (activeDetail?.job.job_id === jobId) {
-      try {
-        await reloadTranslatedWorkspace(jobId);
-        setWorkspaceAction(`翻译在后续批次停止，之前成功的批次已经保留。${onlyPending ? "点击“补译缺失／过期段”可以继续。" : "未完成重译的段落保留原译文；补译只处理缺失／过期段，再次全体重译会重新处理所有段落。"}错误：${String(error)}`, true);
-      } catch (reloadError) {
-        setWorkspaceAction(`翻译停止：${String(error)}；已完成批次可能已保存，但重新读取失败：${String(reloadError)}`, true);
-      }
-    }
-  } finally {
-    stopElapsed();
-  }
+  return needsTranslation(segment, activeDetail?.translation_context_stale_ids ?? []);
 }
 
 function subtitleStyleEditor(track: "source" | "translation"): HTMLElement {
@@ -5853,8 +5719,8 @@ workspaceSectionTabs.forEach((tab) => {
     event.preventDefault();
   });
 });
-translatePendingButton?.addEventListener("click", () => void translateAllSubtitles(true));
-translateAllButton?.addEventListener("click", () => void translateAllSubtitles(false));
+translatePendingButton?.addEventListener("click", () => void subtitleTranslation.batch(true));
+translateAllButton?.addEventListener("click", () => void subtitleTranslation.batch(false));
 openSubtitleOverlayButton?.addEventListener("click", () => void openSubtitleOverlay());
 previousSubtitleButton?.addEventListener("click", () => seekAdjacentSubtitle(-1));
 rewindMediaButton?.addEventListener("click", () => seekRelative(-5));

@@ -31,3 +31,12 @@
 `subtitle-export-view.ts` 持有格式选择和导出专用覆盖确认各一份节点，关闭即移出文档，dispose 释放监听器和焦点边界。复用 mountToolDialog 的具名 region、背景 inert、Tab 循环、Escape 和关闭焦点恢复，不再借用通用 confirmation-dialog；文件名用 textContent 呈现。main.ts 仅注入当前任务、原草稿查询、全局 busy 和消息回调，不增加播放器或保存状态。
 
 原生 QA 验证格式控件 AX、勾选、系统目录取消、Escape 回到导出按钮与返回原编辑段；系统目录面板 Open 禁用，原生文件写入和覆盖确认尚未验收。WebKit mock 覆盖格式、覆盖确认／取消、焦点及重试；会话测试覆盖切任务与 dispose 后的迟到返回。这些证据不替代实际原生文件导出或 Windows 验证。
+
+
+## 2026-10-23：翻译会话与活动计时
+
+`subtitle-translation.ts` 持有单句／批量用例、每任务活动和唯一进度 timer；`subtitle-translation-backend.ts` 集中原 `translate_subtitle`、`translate_all_subtitles`、`get_job_detail` 三条 IPC，参数与后端实现不变。main 注入唯一 SubtitleDrafts 的 flush／dirty、现有确认视图和工作区结果回调。确认阶段也预留任务活动，避免重复提交；确认返回后再次检查草稿和任务可用状态。
+
+每次调用冻结任务 ID、navigation 与 provider 展示信息，每次 await 后核对。单句保存失败不发翻译，切页发生在 flush 期间也不追加请求；已发出的后台翻译仍可正常落库，离开后重进同任务不能让旧结果覆盖新视图。批量失败继续读取已经成功的批次，明确提示续译；错误恢复读取本身迟到时也不覆盖另一视图消息。不同任务的活动独立结束，dispose 停止 timer 并忽略所有迟到呈现，不声称取消后端工作。
+
+进度不再按固定 12 段估算批数。现有后端按语义分组与 provider 限制组织请求，界面显示段数和成功批次会立即保存，完成后报告服务实际返回的计数。后端 revision 校验、候选事务、翻译配置和通用确认的原生模态实现不在本次改动中。
