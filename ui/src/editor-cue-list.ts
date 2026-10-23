@@ -12,6 +12,7 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
   let cues: readonly T[] = [], positions = new Map<string, number>();
   let selected: string | null = null, playback: string | null = null;
   let frame: number | null = null;
+  let windowStart = -1, windowEnd = -1;
   host.tabIndex = 0;
 
   const patch = (row: HTMLElement, cue: T) => {
@@ -27,9 +28,13 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
     row.setAttribute("aria-rowindex", String((positions.get(cue.id) ?? 0) + 1));
     row.tabIndex = cue.id === selected ? 0 : -1;
   };
-  const draw = () => {
+  const draw = (refresh = false) => {
     if (frame !== null) { cancelAnimationFrame(frame); frame = null; }
     const { start, end } = cueWindow(cues.length, host.scrollTop, host.clientHeight);
+    // Pixel scrolling within a fixed-height row does not change its DOM window.
+    // Explicit render/update/mark paths still refresh changed data and state.
+    if (!refresh && start === windowStart && end === windowEnd) return;
+    windowStart = start; windowEnd = end;
     const wanted = new Set(cues.slice(start, end).map(cue => cue.id));
     for (const [id, row] of rows) if (!wanted.has(id)) {
       if (row.contains(document.activeElement)) host.focus({ preventScroll: true });
@@ -43,9 +48,13 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
         row.setAttribute("role", "row");
         row.innerHTML = '<span role="gridcell"></span><button type="button" class="secondary" data-cue-time role="gridcell"></button><span role="gridcell" class="cue-source"></span><span role="gridcell" class="cue-translation"></span><span role="gridcell" class="cue-status"></span>';
         rows.set(cue.id, row);
+        row.style.top = `${index * cueRowHeight}px`;
+        patch(row, cue);
+      } else if (refresh) {
+        // Filtering and structural changes can move an existing cue to a new row.
+        row.style.top = `${index * cueRowHeight}px`;
+        patch(row, cue);
       }
-      row.style.top = `${index * cueRowHeight}px`;
-      patch(row, cue);
     }
     if (!cues.length) {
       if (!content.querySelector(".empty-state")) {
@@ -65,7 +74,7 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
     }
     if (!content.isConnected) host.replaceChildren(content);
   };
-  const schedule = () => { if (frame === null) frame = requestAnimationFrame(draw); };
+  const schedule = () => { if (frame === null) frame = requestAnimationFrame(() => draw()); };
   const reveal = (id: string | null) => {
     const index = id ? positions.get(id) : undefined;
     if (index === undefined) return;
@@ -124,12 +133,13 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
         host.scrollTop = Math.min(host.scrollTop, Math.max(0, cues.length * cueRowHeight - host.clientHeight));
       }
       selected = nextSelected; playback = nextPlayback;
-      host.setAttribute("aria-rowcount", String(cues.length)); draw();
+      host.setAttribute("aria-rowcount", String(cues.length)); draw(true);
     },
     update(cue: T) { const row = rows.get(cue.id); if (row) patch(row, cue); },
     clear() {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null; cues = []; positions.clear(); rows.clear(); content.replaceChildren();
+      windowStart = -1; windowEnd = -1;
       content.style.height = "0px"; host.scrollTop = 0; host.setAttribute("aria-rowcount", "0");
     },
     mark, reveal,
