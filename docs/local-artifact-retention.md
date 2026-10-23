@@ -62,3 +62,5 @@ python3 scripts/inventory-local-artifacts.py \
 ```
 
 盘点脚本始终没有删除入口；根配置中的 retention 仅为记录。后续清理必须基于新清单的明确候选和现有授权，保留恢复点、人工评审、权威发行来源及已采用识别证据。编辑器性能、模块与 Windows 门禁继续见[路线图](roadmap.md)。
+
+2026-10-23 本机候选更新后，App 回退轮换为 `.Atogaki.previous.20261023-candidate`（86c46c8）与稳定版 `.Atogaki.previous-20261020T210406Z`（0.1.1）；在新包／数据验证后按完整摘要清除被取代的 `.Atogaki.previous.20261021-modules` 及本次暂存副本，约 193 MiB 逻辑内容。新增一份删除旧任务后的一致性 SQLite 快照，未复制模型／媒体。新清单与核验材料在 `local-artifacts/install-backups/20261023-candidate/`，详见[安装记录](local-editor-installation.md)；本页较早盘点中的 App 路径为历史状态，不能据此再次删除。

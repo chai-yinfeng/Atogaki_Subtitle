@@ -47,3 +47,17 @@
 新的一致性 SQLite 快照与上次 `20261021-compact/before-install.sqlite` 的 SHA-256 完全相同。保留旧文件并校验 integrity_check 后，新快照路径改为相对链接，恢复路径和字节内容不变，不再保留另一份 34,852,864 字节（约 33 MiB）的副本。其他独立数据恢复点、模型、主题、媒体与 ASR 来源均未清理；APFS 共享块使上述逻辑大小不能视为精确空闲增量。
 
 预检、安装、两次 20 表验证、签名文件清单、截图／AX、轮换清理与快照去重记录在忽略目录 `local-artifacts/install-backups/20261021-modules/`。本次为本机试装，没有生成或更新公开 Release。剩余 Rust／repository 与处理工具拆分、滚动 P95／长时内存、文档整理和 Windows 验收继续按路线图推进。
+
+## 2026-10-23：接缝修复与后续编辑模块候选（05b2e07）
+
+从干净提交 `05b2e07` 完整 release 构建，正式 identifier `com.chai-yinfeng.atogaki`、版本号 0.1.2 保持，包含 ffmpeg、ffprobe、whisper-cli、llama-server。前端 104 项测试、类型检查和生产构建通过；本提交共享库 157 passed／5 环境依赖 ignored、桌面 33 passed／4 ignored 的结果见[短片段基线](godfather-short-baseline.md)。这次本机更新不修改公开 v0.1.2 资产。
+
+为避免正式 WebView 存储混入测试，另构建同提交的完整 `editor-qa` identifier 包，复用原 QA App 位置和两任务／40 段合成数据库。两包四个 sidecar 摘要一致；原生检查播放行与编辑框同步跟随、单击锁定后继续播放、恢复跟随、视频折叠期间播放时钟持续推进、导出格式 Escape 返回焦点、真实 libass 样式预览及关闭后的焦点，以及返回编辑时仍处于原暂停时间／当前段。QA 正常退出后 20 张表摘要完全一致，integrity_check=ok。没有保存样式、修改字幕、触发 ASR 或调用云端 API。
+
+正式 App 在空闲任务列表正常退出，13 个任务均已完成。使用 SQLite backup API 新增一份 34,852,864 字节的一致性快照；此前用户授权删除旧《教父》任务，所以本次快照不是之前 14 任务快照的重复内容。没有复制模型、媒体或整个数据目录。
+
+暂存正式包核验后原子替换 `/Applications/Atogaki.app`。完整 27 文件摘要与候选包一致，主程序和四个 sidecar 均存在，深度签名通过。启动后及打开 Daily English Podcast（405 段）、定位第一句并短暂播放后，正式数据库 20 张表的逐表内容摘要均与安装前一致，13 个任务／6,887 段保留，integrity_check=ok。最后暂停于 00:00:09.788／第 1 段、开启跟随供用户试用；没有修改正式字幕或自动重建既有识别结果。接缝修复由[真实片段 CLI／原始证据重放](godfather-short-baseline.md)验证，本次原生检查不冒充又执行了一次识别。
+
+保留 `/Applications/.Atogaki.previous.20261023-candidate`（86c46c8）和 `/Applications/.Atogaki.previous-20261020T210406Z`（0.1.1）。新包与数据通过核验后，按旧清单完整摘要核对并删除被取代的 `.Atogaki.previous.20261021-modules`（8a85af0）和本次已安装的暂存包，共 202,448,538 字节、约 193 MiB 逻辑副本内容；APFS 共享块使它不等于精确空闲空间增量。仍只保留两份 App 回退，不逐步追加备份；其他独立数据库恢复点和 ASR 证据保留。
+
+本次候选／正式／QA 包摘要、20 表前后摘要、一致性快照、轮换清单，以及隔离／正式截图与 AX 在忽略目录 `local-artifacts/install-backups/20261023-candidate/`。剩余滚动 P95、稳定负载 RSS、偶发锁定、系统文件面板、Windows 和翻译质量／缓存观测门禁继续保留，不能把试装成功当作全部验收完成。
