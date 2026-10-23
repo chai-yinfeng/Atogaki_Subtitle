@@ -9,6 +9,16 @@ const { webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE || 'playwright'
     await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1430');
     await page.locator('.job-open').first().click();
     await page.locator('.editor-cue-row').first().waitFor();
+    await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio, #karaoke-media-host video')?.readyState>=1);
+    const clockChanges=await page.evaluate(async()=>{
+      const media=document.querySelector('#karaoke-media-host audio, #karaoke-media-host video');media.pause();
+      const settle=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));await settle();
+      let count=0;const observer=new MutationObserver(records=>count+=records.length);
+      observer.observe(document.querySelector('#editor-cue-list'),{subtree:true,attributes:true,childList:true,characterData:true});
+      observer.observe(document.querySelector('#karaoke-segment-time'),{subtree:true,childList:true,characterData:true});
+      for(let i=0;i<20;i++)media.dispatchEvent(new Event('timeupdate'));await settle();observer.disconnect();return count;
+    });
+    assert.equal(clockChanges,0,'unchanged clock ticks must not rebuild cue state or title');
     const mutations=await page.evaluate(async()=>{
       const host=document.querySelector('#editor-cue-list');
       const settle=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));

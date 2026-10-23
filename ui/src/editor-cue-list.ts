@@ -84,6 +84,9 @@ export function mountEditorCueList<T extends CueRow>(host: HTMLElement, callback
     draw();
   };
   const mark = (nextSelected: string | null, nextPlayback: string | null, follow = false) => {
+    // Clock ticks within one cue do not change row state. Data and draft
+    // changes use render/update; a new selection or playback cue still patches.
+    if (nextSelected === selected && nextPlayback === playback) return;
     const oldSelected = selected, oldPlayback = playback;
     selected = nextSelected; playback = nextPlayback;
     for (const id of new Set([oldSelected, oldPlayback, selected, playback])) {

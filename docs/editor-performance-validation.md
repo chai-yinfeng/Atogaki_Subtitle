@@ -100,3 +100,22 @@ ATOGAKI_EDITOR_ENGINE=webkit node scripts/verify-editor-ui.cjs
 采样后曾观察到编辑锁定 #1973、播放标记 #1978，本轮没有追溯到具体触发动作；显式恢复后，持续播放至 #1985 时编辑段、播放标记与黄色行一致。该观察保留待复查，不将已通过的浏览器跟随回归扩展成原生所有输入均已通过。
 
 SQLite integrity_check=ok、foreign_key_check 为空；隔离副本的 9,976 段（含目标 3,089 段）逐字段与恢复快照相同。构建／fixture 身份在 `/tmp/atogaki-modules-native-790957e/long-task-before.json`，RSS、AX、截图、八轮工具结果和数据核验在 `local-artifacts/editor-performance/2026-10-22/native-*`。这次补充真实数据与释放观察，持续内存、原生滚动 P95 和 Windows 仍不能勾为全部通过。
+
+
+## 2026-10-23：播放时钟中的重复行状态与标题更新
+
+滚动路径复查发现另一个确定的热路径：每次 updateKaraokePosition 都调用 mark，即使编辑段和播放段 ID 完全不变，也会对同一行写 4 个 ARIA／tabIndex 属性；未变化的段落时间标题同样每次用 textContent 重建。mark 现仅在两个 ID 有变化时补丁行；文字、草稿与结构仍走 render／update。当前时钟和段落标题只在值变化时写入，播放头绘制及时间窗逻辑不变。
+
+新增 `scripts/measure-editor-clock.cjs`，对 16ee370 未修改源码生产构建与本次构建依次测量，同机 WebKit 2336、1180×760、同一合成 IPC／静音媒体／三小时时间模型，分别 300／3,000／10,000 段。媒体暂停在固定时刻，每轮 120 个 RAF 间隔派发 timeupdate，三轮；MutationObserver 统计行和段落标题，performance.now 统计同步事件处理。没有运行解码播放、滚轮、原生 CPU profiler、JS heap 或 RSS。本机计时约 1 ms 精度，结果只适用于这一 UI 回调工作负载。
+
+| 段数 | 每轮重复行属性写入，前→后 | 每轮标题重建，前→后 | 同步回调累计耗时中位数，前→后（ms） | 单回调 P95，前→后（ms） |
+|---|---:|---:|---:|---:|
+| 300 | 480 → 0 | 120 → 0 | 155 → 41 | 2 → 1 |
+| 3,000 | 480 → 0 | 120 → 0 | 149 → 41 | 2 → 1 |
+| 10,000 | 480 → 0 | 120 → 0 | 159 → 43 | 2 → 1 |
+
+每轮均为 cue-0、14 个挂载行（列表头部单侧 overscan），没有行增删或页面错误，所有样本无 >50 ms 帧。该回调工作负载帧间隔 P95 的三轮中位数为 18→17 ms，后样本单轮 17–18 ms，不能据此将先前“大跨度滚动 P95”门禁改为通过。
+
+104 项前端测试、类型／生产构建、两套 Cargo fmt 和 diff 检查通过。列表专项新增固定时钟零行／标题变更，同时保留局部保存、筛选后索引、空结果、End、重入和焦点验证；跟随专项验证实际播放过段、手动锁定、空白、IME、失败保存、筛选与 Cut；编辑器布局／保存回归同步通过。Rust 源码未变，未重跑 Rust 测试；本轮未更新原生 QA 或正式 App。
+
+原始前后 JSON 和源码／夹具身份在忽略目录 `local-artifacts/editor-performance/2026-10-23-clock/`，脚本拒绝覆盖同名结果。复现沿用前述环境变量，将 ATOGAKI_MEASUREMENT_LABEL 分别设为唯一标签运行 `node scripts/measure-editor-clock.cjs`。这里关闭的是重复 UI 写入，不将结果外推为真实滚动、播放解码或稳态内存通过；上述原生门禁继续保留。

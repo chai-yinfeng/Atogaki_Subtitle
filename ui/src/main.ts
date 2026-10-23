@@ -3550,7 +3550,10 @@ async function undoKaraokeTextSave(): Promise<void> {
 
 function updateKaraokePosition(milliseconds: number): void {
   if (currentArea !== "karaoke") return;
-  if (karaokeCurrentTime) karaokeCurrentTime.textContent = formatPreciseTime(milliseconds);
+  if (karaokeCurrentTime) {
+    const value = formatPreciseTime(milliseconds);
+    if (karaokeCurrentTime.textContent !== value) karaokeCurrentTime.textContent = value;
+  }
   const playbackSegment = subtitleAt(milliseconds);
   const previousId = editorSession.selectedCueId, previousPlayback = editorSession.playbackCueId;
   // A recovered/failed draft must never be displaced by a clock update.
@@ -3560,9 +3563,10 @@ function updateKaraokePosition(milliseconds: number): void {
   editorCueList.mark(editorSession.selectedCueId, editorSession.playbackCueId, editorSession.listAutoScroll);
   if (previousId !== editorSession.selectedCueId || previousPlayback !== editorSession.playbackCueId) syncEditorSelectionMessage();
   if (karaokeSegmentTime) {
-    karaokeSegmentTime.textContent = segment
+    const value = segment
       ? `${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)} · #${segment.segment_index + 1}`
       : "当前没有字幕";
+    if (karaokeSegmentTime.textContent !== value) karaokeSegmentTime.textContent = value;
   }
   if (!currentCueEditor.dirty && !currentCueEditor.matches(segment)) currentCueEditor.sync(segment);
   const timeFingerprint = `${segment?.id}:${segment?.start_ms}:${segment?.end_ms}`;
