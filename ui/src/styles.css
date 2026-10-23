@@ -431,7 +431,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .confirmation-message { white-space: pre-wrap; line-height: 1.6; }
 .confirmation-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .video-render-dialog { width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 40px); border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: var(--ink); background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
-.subtitle-style-dialog { box-sizing: border-box; width: min(1240px, calc(100vw - 40px)); height: min(800px, calc(100vh - 40px)); overflow: hidden; border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: var(--ink); background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
+.subtitle-style-dialog { position: fixed; inset: 20px; z-index: 60; margin: auto; box-sizing: border-box; width: min(1240px, calc(100vw - 40px)); height: min(800px, calc(100vh - 40px)); overflow: hidden; border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: var(--ink); background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
 .subtitle-style-workspace { min-height: 0; height: calc(100% - 108px); display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(360px, .9fr); gap: 18px; margin-top: 16px; }
 .subtitle-style-controls { min-height: 0; overflow-y: auto; padding-right: 5px; scrollbar-gutter: stable; }
 .subtitle-style-grid { display: grid; gap: 14px; }

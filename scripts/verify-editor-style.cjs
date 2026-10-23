@@ -18,9 +18,17 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright');cons
    return structuredClone(preview);
   };
  });
- await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();await page.locator('[data-editor-action="export"]').click();await page.locator('#edit-subtitle-styles').click();
+ await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();await page.locator('[data-editor-action="export"]').click();assert.equal(await page.locator('#subtitle-style-dialog').count(),0);await page.locator('#edit-subtitle-styles').click();
  const dialog=page.locator('#subtitle-style-dialog'),size=dialog.locator('[data-style-editor="source"] [data-style-field="font_size"]');
  await page.waitForFunction(()=>document.querySelector('#subtitle-style-message').textContent.includes('当前样式已保存'));assert.equal(await size.inputValue(),'30');
+ assert.equal(await dialog.getAttribute('role'),'region');assert.equal(await page.locator('#workspace-view').evaluate(e=>e.inert),true);
+ const family=dialog.locator('[data-style-editor="source"] [data-style-field="font_family"]');
+ await family.fill('');await page.waitForFunction(()=>document.querySelectorAll('.subtitle-font-option').length===2);assert.equal(await page.locator('#subtitle-font-picker unsafe').count(),0);
+ await family.press('ArrowDown');assert.equal(await page.locator('.subtitle-font-option').first().evaluate(e=>e===document.activeElement),true);
+ await page.keyboard.press('Escape');assert.equal(await dialog.evaluate(e=>e.open),true);assert.equal(await family.evaluate(e=>e===document.activeElement),true);assert.equal(await page.locator('.subtitle-font-option').count(),0);
+ await family.fill('Fixture Sans');await page.locator('.subtitle-font-option').first().click();assert.equal(await family.inputValue(),'Fixture Sans');assert.equal(await page.locator('.subtitle-font-option').count(),0);
+ await page.locator('#close-subtitle-style').focus();await page.keyboard.press('Shift+Tab');assert.equal(await page.evaluate(()=>document.activeElement.dataset.styleField),'background_color_alpha');await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),'close-subtitle-style');
+
  await page.evaluate(()=>new MutationObserver(()=>window.__style.applied.push(document.querySelector('#subtitle-font-events pre').textContent)).observe(document.querySelector('#subtitle-font-events pre'),{childList:true,subtree:true,characterData:true}));
  await size.fill('42');await page.waitForFunction(()=>document.querySelector('#subtitle-font-events pre').textContent==='size=42');assert.match(await page.locator('#subtitle-style-message').innerText(),/尚未保存/);
  await page.locator('#save-subtitle-style').click();await page.waitForFunction(()=>document.querySelector('#subtitle-style-message').textContent.includes('当前样式已保存'));assert.equal(await page.evaluate(()=>window.__style.state.styles.source.font_size),42);
@@ -30,6 +38,6 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright');cons
  await page.evaluate(()=>window.__style.hold=true);await page.locator('#preview-subtitle-style').click();await page.waitForFunction(()=>window.__style.pending.length===1);await page.locator('#close-subtitle-style').click();await page.evaluate(()=>window.__style.hold=false);await page.locator('#edit-subtitle-styles').click();await page.waitForFunction(()=>document.querySelector('#subtitle-font-events pre').textContent==='size=42');await page.evaluate(()=>window.__style.pending.shift()());
  await page.waitForFunction(()=>!document.querySelector('#preview-subtitle-style').disabled);assert.equal(await page.locator('#subtitle-font-events pre').textContent(),'size=42');
  assert.equal(await page.evaluate(()=>window.__test.calls.filter(r=>r.cmd==='list_subtitle_fonts').length),1);
- await page.keyboard.press('Escape');assert.equal(await dialog.evaluate(e=>e.open),false);await page.locator('#back-to-jobs').click();assert.equal(await page.locator('#karaoke-current-source').isVisible(),true);assert.deepEqual(errors,[]);
+ await page.keyboard.press('Escape');assert.equal(await dialog.count(),0);assert.equal(await page.evaluate(()=>document.activeElement.id),'edit-subtitle-styles');assert.equal(await page.locator('#workspace-view').evaluate(e=>e.inert),false);await page.locator('#back-to-jobs').click();assert.equal(await page.locator('#karaoke-current-source').isVisible(),true);assert.deepEqual(errors,[]);
  console.log('PASS: initial load, debounce, save, saved status, superseded render suppression, close/reopen isolation, font cache and return');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
