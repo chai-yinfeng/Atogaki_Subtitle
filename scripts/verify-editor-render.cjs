@@ -1,0 +1,30 @@
+const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright');const assert=require('node:assert/strict');
+(async()=>{const browser=await webkit.launch({headless:true});try{
+ const page=await browser.newPage({viewport:{width:1180,height:760}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));await require('./editor-ui-fixture.cjs').installEditorFixture(page,30);
+ await page.addInitScript(()=>{
+  const invoke=window.__TAURI_INTERNALS__.invoke;window.__render={history:[],fail:false};window.__test.job.input_path='/qa/input.mp4';for(const c of window.__test.cues)c.translation_stale=false;
+  window.__TAURI_INTERNALS__.invoke=async(cmd,args={})=>{
+   if(!['media_capabilities','video_render_estimates','list_video_renders','pick_video_output_file','submit_video_render','cancel_video_render','reveal_rendered_video'].includes(cmd))return structuredClone(await invoke(cmd,args));
+   window.__test.calls.push({cmd,args});
+   if(cmd==='media_capabilities')return {binary_path:'/qa/ffmpeg',version:'fixture ffmpeg',ass_filter:true,videotoolbox_encoder:false,mpeg4_encoder:true,ready_for_hard_subtitles:true};
+   if(cmd==='video_render_estimates')return ['compact','balanced','high'].map((quality,i)=>({quality,width:1280,height:720,duration_ms:90000,target_video_bitrate_bps:(i+1)*1000000,estimated_audio_bitrate_bps:128000,estimated_size_bytes:20000000*(i+1),bitrate_source:'source_bitrate'}));
+   if(cmd==='list_video_renders')return structuredClone(window.__render.history);
+   if(cmd==='pick_video_output_file')return {path:'/qa/output.mp4',alreadyExists:true};
+   if(cmd==='submit_video_render'){
+    if(window.__render.fail)throw Error('fixture revision conflict');
+    const r={id:'render-one',source_job_id:args.request.sourceJobId,input_path:'/qa/input.mp4',subtitle_path:'/qa/frozen.ass',output_path:args.request.outputPath,subtitle_track:args.request.subtitleTrack,status:'queued',progress:0,encoder:null,audio_encoder:null,fallback_reason:null,error_message:null,created_at_unix:1,updated_at_unix:1};window.__render.history=[r];return structuredClone(r);
+   }
+   if(cmd==='cancel_video_render'){window.__render.history[0].status='cancelled';return structuredClone(window.__render.history[0]);}
+  };
+ });
+ await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();await page.locator('[data-editor-action="export"]').click();assert.equal(await page.evaluate(()=>window.__test.calls.filter(r=>r.cmd==='list_video_renders').length),0);
+ await page.locator('#render-video').click();const dialog=page.locator('#video-render-dialog');await page.waitForFunction(()=>!document.querySelector('#submit-video-render').disabled);assert.match(await page.locator('#media-capabilities').innerText(),/烧录环境就绪/);await page.locator('#video-render-quality').selectOption('high');assert.match(await page.locator('#video-render-estimate').innerText(),/3.00 Mbps/);
+ await page.locator('#choose-video-output').click();await page.waitForFunction(()=>document.querySelector('#video-output-path').value==='/qa/output.mp4');await page.locator('#submit-video-render').click();await page.locator('#cancel-confirmation').click();assert.equal(await page.evaluate(()=>window.__test.calls.filter(r=>r.cmd==='submit_video_render').length),0);
+ await page.evaluate(()=>window.__render.fail=true);await page.locator('#submit-video-render').click();await page.locator('#accept-confirmation').click();await page.waitForFunction(()=>document.querySelector('#video-render-message').textContent.includes('fixture revision conflict'));assert.equal(await page.locator('#submit-video-render').isEnabled(),true);
+ await page.evaluate(()=>window.__render.fail=false);await page.locator('#submit-video-render').click();await page.locator('#accept-confirmation').click();await page.locator('[data-cancel-render="render-one"]').waitFor();assert.deepEqual(await page.evaluate(()=>window.__test.calls.filter(r=>r.cmd==='submit_video_render').at(-1).args.request),{sourceJobId:'editor-test',outputPath:'/qa/output.mp4',subtitleTrack:'bilingual',quality:'high',overwriteExisting:true});
+ await page.evaluate(()=>{window.__render.history[0].status='running';window.__render.history[0].progress=.4;});await page.waitForFunction(()=>document.querySelector('#video-render-list progress')?.value===.4);
+ await page.locator('[data-cancel-render="render-one"]').click();await page.locator('#accept-confirmation').click();await page.waitForFunction(()=>document.querySelector('#video-render-list').textContent.includes('已取消'));assert.equal(await page.locator('[data-cancel-render]').count(),0);
+ await page.locator('#close-video-render').click();assert.equal(await dialog.evaluate(e=>e.open),false);const count=await page.evaluate(()=>window.__test.calls.filter(r=>r.cmd==='list_video_renders').length);await page.waitForTimeout(1200);assert.equal(await page.evaluate(()=>window.__test.calls.filter(r=>r.cmd==='list_video_renders').length),count);
+ await page.locator('#render-video').click();await page.waitForFunction(()=>!document.querySelector('#submit-video-render').disabled);assert.equal(await page.locator('#video-output-path').inputValue(),'');await page.keyboard.press('Escape');await page.locator('#back-to-jobs').click();assert.equal(await page.locator('#karaoke-current-source').isVisible(),true);assert.deepEqual(errors,[]);
+ console.log('PASS: lazy history, quality estimate, picker, overwrite cancel, failure retry, frozen submit, progress/cancel, closed polling and clean reopen');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

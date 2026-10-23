@@ -69,6 +69,8 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 任务样式的异步读取、保存与预览通过 `subtitle-style-session.ts` 协调，四条调用集中到 `subtitle-style-backend.ts`。每次打开绑定任务／导航代次，修改递增草稿版本，串行渲染只接受最新版本；关闭释放 debounce 和迟到呈现。字体、颜色与预览视图由 `subtitle-style-view.ts` 持有，模板独立；关闭即卸载节点，dispose 释放全局监听器，字体候选关闭即释放选项。具名 region 与显式焦点边界替代样式 showModal，FFmpeg/libass 与实际样式服务保持原实现。
 
+烧录工具通过 `video-render-session.ts` 管理访问状态和历史轮询，`video-render-backend.ts` 适配原七条 IPC。请求绑定任务与导航代次，覆盖确认冻结提交参数；关闭停止前端轮询，后端 worker 与冻结快照继续运行。规格、能力和历史结果不跨工具访问复用，烧录视图仍待从 main 渐进抽取。
+
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。

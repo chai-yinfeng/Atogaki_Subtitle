@@ -1,3 +1,6 @@
+import { createVideoRenderSession } from "./video-render-session";
+import { createVideoRenderBackend } from "./video-render-backend";
+import type { VideoRender, VideoRenderQuality } from "./video-render-types";
 import { mountSubtitleStyleView } from "./subtitle-style-view";
 import { createSubtitleStyleSession } from "./subtitle-style-session";
 import { createSubtitleStyleBackend } from "./subtitle-style-backend";
@@ -352,49 +355,6 @@ type NetworkSourceCheck = {
   status: number | null;
   ok: boolean;
   error: string | null;
-};
-
-type MediaCapabilities = {
-  binary_path: string;
-  version: string;
-  ass_filter: boolean;
-  videotoolbox_encoder: boolean;
-  mpeg4_encoder: boolean;
-  ready_for_hard_subtitles: boolean;
-};
-
-type VideoRenderQuality = "compact" | "balanced" | "high";
-type VideoRenderEstimate = {
-  quality: VideoRenderQuality;
-  width: number | null;
-  height: number | null;
-  duration_ms: number;
-  target_video_bitrate_bps: number;
-  estimated_audio_bitrate_bps: number;
-  estimated_size_bytes: number;
-  bitrate_source: "source_bitrate" | "resolution_fallback";
-};
-
-type VideoRender = {
-  id: string;
-  source_job_id: string;
-  input_path: string;
-  subtitle_path: string;
-  output_path: string;
-  subtitle_track: "source" | "translation" | "bilingual";
-  status: "queued" | "running" | "done" | "failed" | "cancelled";
-  progress: number;
-  encoder: string | null;
-  audio_encoder: string | null;
-  fallback_reason: string | null;
-  error_message: string | null;
-  created_at_unix: number;
-  updated_at_unix: number;
-};
-
-type VideoOutputSelection = {
-  path: string;
-  alreadyExists: boolean;
 };
 
 type SubtitleOverlayPayload = {
@@ -995,11 +955,6 @@ let pendingGlossaryCorrection: {
 } | null = null;
 let taskGlossaryConfigurationId: string | null = null;
 let selectedTaskContentGroups = new Set<string>();
-let mediaCapabilities: MediaCapabilities | null = null;
-let videoRenderEstimates: VideoRenderEstimate[] = [];
-let videoRenders: VideoRender[] = [];
-let selectedVideoOutputAlreadyExists = false;
-let videoRenderSubmitting = false;
 let desktopSettings: DesktopSettings | null = null;
 let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
@@ -1037,6 +992,26 @@ let translationStatus: TranslationStatus = {
 };
 
 const editorSession = new EditorSession();
+const videoRenderSession = createVideoRenderSession({
+  context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId,
+    inputPath: activeDetail.job.input_path, videoAvailable: !!activeDetail.job.input_path && !!activeDetail.playback_path && !isAudioPath(activeDetail.job.input_path) } : null,
+  staleCount: () => activeDetail?.segments.filter(cue => cue.translation_stale).length ?? 0,
+  available: () => !workspaceActionBusy, dirty: hasUnsavedSubtitleEdits, suggestedName: suggestedVideoName,
+  backend: createVideoRenderBackend(invoke), confirm: confirmAction, status: setWorkspaceAction, fileManager: fileManagerLabel,
+  repeat: tick => { const timer = window.setInterval(tick, 1000); return () => window.clearInterval(timer); },
+  view: {
+    open: () => { if (videoOutputPath) videoOutputPath.placeholder = suggestedVideoName(); videoRenderDialog?.showModal(); },
+    close: () => videoRenderDialog?.close(),
+    read: () => ({ outputPath: videoOutputPath?.value ?? "", track: (videoSubtitleTrack?.value ?? "bilingual") as VideoRender["subtitle_track"], quality: (videoRenderQuality?.value ?? "balanced") as VideoRenderQuality }),
+    output: path => { if (videoOutputPath) videoOutputPath.value = path; },
+    message: text => { if (videoRenderMessage) videoRenderMessage.textContent = text; },
+    capabilities: error => { if (error && mediaCapabilitiesHost) { mediaCapabilitiesHost.textContent = error; mediaCapabilitiesHost.classList.add("warning"); } else renderMediaCapabilities(); },
+    estimates: error => { if (error && videoRenderEstimate) { videoRenderEstimate.textContent = error; videoRenderEstimate.classList.add("warning"); } else renderVideoEstimate(); },
+    history: renderVideoRenderHistory,
+    busy: (busy, canSubmit) => { if (submitVideoRenderButton) submitVideoRenderButton.disabled = !canSubmit; const choose = videoRenderDialog?.querySelector<HTMLButtonElement>("#choose-video-output"); if (choose) choose.disabled = busy; },
+  },
+});
+videoRenderDialog?.addEventListener("close", () => { if (!videoRenderDialog.open) videoRenderSession.close(); });
 const subtitleStyleView = mountSubtitleStyleView(shell ?? document.body, {
   context: () => activeDetail ? { segments: activeDetail.segments, sourceLanguage: activeDetail.job.source_language } : null,
   fileUrl: convertFileSrc, time: formatTime,
@@ -1368,6 +1343,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  videoRenderSession.dispose();
   subtitleStyles.dispose();
   subtitleStyleView.dispose();
   subtitleTranslation.dispose();
@@ -2671,6 +2647,7 @@ async function stopActivePlayback(): Promise<void> {
   if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
+  videoRenderSession.close();
   subtitleStyles.close();
   subtitleExport.reset();
   candidateTool.close();
@@ -3924,7 +3901,7 @@ function renderWorkspace(detail: JobDetail): void {
   renderSubtitleOverlayButton();
   updateTranslationControls();
   subtitleTranslation.renderActivity();
-  void refreshVideoRenders();
+
 }
 
 async function relinkActiveJobMedia(): Promise<void> {
@@ -4491,12 +4468,12 @@ function suggestedVideoName(): string {
 
 function renderVideoRenderHistory(): void {
   if (!videoRenderList || !videoRenderCount) return;
-  videoRenderCount.textContent = `${videoRenders.length} 条`;
-  if (videoRenders.length === 0) {
+  videoRenderCount.textContent = `${videoRenderSession.renders.length} 条`;
+  if (videoRenderSession.renders.length === 0) {
     videoRenderList.innerHTML = `<div class="empty-state">还没有烧录记录。</div>`;
     return;
   }
-  videoRenderList.innerHTML = videoRenders
+  videoRenderList.innerHTML = videoRenderSession.renders
     .map((render) => {
       const details = render.status === "done"
         ? `${render.encoder === "videotoolbox" ? "VideoToolbox" : render.encoder === "mpeg4" ? "MPEG-4 软件编码" : render.encoder ?? "未知编码器"} · 音频 ${render.audio_encoder ?? "未知"}${render.fallback_reason ? ` · ${render.fallback_reason}` : ""}`
@@ -4518,26 +4495,11 @@ function renderVideoRenderHistory(): void {
     })
     .join("");
   videoRenderList.querySelectorAll<HTMLButtonElement>("[data-cancel-render]").forEach((button) => {
-    button.addEventListener("click", () => void cancelVideoRender(button.dataset.cancelRender ?? ""));
+    button.addEventListener("click", () => void videoRenderSession.cancel(button.dataset.cancelRender ?? ""));
   });
   videoRenderList.querySelectorAll<HTMLButtonElement>("[data-reveal-render]").forEach((button) => {
-    button.addEventListener("click", () => void revealRenderedVideo(button.dataset.revealRender ?? ""));
+    button.addEventListener("click", () => void videoRenderSession.reveal(button.dataset.revealRender ?? ""));
   });
-}
-
-async function refreshVideoRenders(): Promise<void> {
-  const jobId = activeDetail?.job.job_id;
-  if (!jobId) return;
-  try {
-    const renders = await invoke<VideoRender[]>("list_video_renders", { sourceJobId: jobId });
-    if (activeDetail?.job.job_id !== jobId) return;
-    videoRenders = renders;
-    renderVideoRenderHistory();
-  } catch (error) {
-    if (videoRenderDialog?.open && videoRenderMessage) {
-      videoRenderMessage.textContent = `无法读取烧录记录：${String(error)}`;
-    }
-  }
 }
 
 function formatFileSize(bytes: number): string {
@@ -4548,7 +4510,7 @@ function formatFileSize(bytes: number): string {
 function renderVideoEstimate(): void {
   if (!videoRenderEstimate || !videoRenderQuality) return;
   const quality = videoRenderQuality.value as VideoRenderQuality;
-  const estimate = videoRenderEstimates.find((candidate) => candidate.quality === quality);
+  const estimate = videoRenderSession.estimates.find((candidate) => candidate.quality === quality);
   if (!estimate) {
     videoRenderEstimate.textContent = "正在读取源视频规格…";
     return;
@@ -4564,187 +4526,26 @@ function renderVideoEstimate(): void {
   videoRenderEstimate.innerHTML = `<strong>${escapeHtml(resolution)} · 目标视频码率 ${escapeHtml(bitrate)}</strong><span>预计成品约 ${escapeHtml(formatFileSize(estimate.estimated_size_bytes))} · ${escapeHtml(basis)}</span>`;
 }
 
-async function refreshVideoRenderEstimates(jobId: string): Promise<void> {
-  if (videoRenderEstimate) {
-    videoRenderEstimate.textContent = "正在读取源视频规格…";
-    videoRenderEstimate.classList.remove("warning");
-  }
-  try {
-    const estimates = await invoke<VideoRenderEstimate[]>("video_render_estimates", { sourceJobId: jobId });
-    if (activeDetail?.job.job_id !== jobId) return;
-    videoRenderEstimates = estimates;
-    renderVideoEstimate();
-  } catch (error) {
-    videoRenderEstimates = [];
-    if (videoRenderEstimate) {
-      videoRenderEstimate.textContent = `无法读取视频规格：${String(error)}`;
-      videoRenderEstimate.classList.add("warning");
-    }
-  }
-}
-
 function renderMediaCapabilities(): void {
   if (!mediaCapabilitiesHost) return;
-  if (!mediaCapabilities) {
+  if (!videoRenderSession.capabilities) {
     mediaCapabilitiesHost.textContent = "正在检查内置 FFmpeg sidecar…";
     mediaCapabilitiesHost.classList.remove("warning");
     return;
   }
   if (submitVideoRenderButton) {
-    submitVideoRenderButton.disabled = videoRenderSubmitting || !mediaCapabilities.ready_for_hard_subtitles;
+    submitVideoRenderButton.disabled = !videoRenderSession.canSubmit;
   }
   const encoder = [
     ...(desktopPlatform === "macos"
-      ? [mediaCapabilities.videotoolbox_encoder ? "VideoToolbox 可用" : "VideoToolbox 不可用"]
+      ? [videoRenderSession.capabilities.videotoolbox_encoder ? "VideoToolbox 可用" : "VideoToolbox 不可用"]
       : []),
-    mediaCapabilities.mpeg4_encoder
+    videoRenderSession.capabilities.mpeg4_encoder
       ? desktopPlatform === "macos" ? "MPEG-4 回退可用" : "MPEG-4 软件编码可用"
       : desktopPlatform === "macos" ? "MPEG-4 回退缺失" : "MPEG-4 软件编码缺失",
   ].join(" · ");
-  mediaCapabilitiesHost.innerHTML = `<strong>${mediaCapabilities.ready_for_hard_subtitles ? "烧录环境就绪" : "烧录环境不可用"}</strong><span>${escapeHtml(encoder)} · libass ${mediaCapabilities.ass_filter ? "可用" : "缺失"}</span><code>${escapeHtml(mediaCapabilities.binary_path)}</code><small>${escapeHtml(mediaCapabilities.version)}</small>`;
-  mediaCapabilitiesHost.classList.toggle("warning", !mediaCapabilities.ready_for_hard_subtitles);
-}
-
-async function openVideoRenderDialog(): Promise<void> {
-  if (!activeDetail || workspaceActionBusy) return;
-  if (hasUnsavedSubtitleEdits()) {
-    setWorkspaceAction("请先保存各段尚未保存的修改，再烧录视频。", true);
-    return;
-  }
-  const staleCount = activeDetail.segments.filter((segment) => segment.translation_stale).length;
-  if (staleCount > 0) {
-    setWorkspaceAction(`有 ${staleCount} 段译文已过期，请重译或修正后再烧录。`, true);
-    return;
-  }
-  if (!activeDetail.job.input_path || !activeDetail.playback_path || isAudioPath(activeDetail.job.input_path)) {
-    setWorkspaceAction("当前任务没有可烧录的视频源；如果原文件已移动，请先在字幕编辑中重新定位。", true);
-    return;
-  }
-  if (videoRenderMessage) videoRenderMessage.textContent = "";
-  if (videoOutputPath && !videoOutputPath.value) videoOutputPath.placeholder = suggestedVideoName();
-  selectedVideoOutputAlreadyExists = false;
-  videoRenderEstimates = [];
-  if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
-  videoRenderDialog?.showModal();
-  renderMediaCapabilities();
-  await Promise.all([
-    invoke<MediaCapabilities>("media_capabilities")
-      .then((capabilities) => {
-        mediaCapabilities = capabilities;
-        renderMediaCapabilities();
-      })
-      .catch((error) => {
-        mediaCapabilities = null;
-        if (mediaCapabilitiesHost) {
-          mediaCapabilitiesHost.textContent = `ffmpeg 检查失败：${String(error)}`;
-          mediaCapabilitiesHost.classList.add("warning");
-        }
-        if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
-      }),
-    refreshVideoRenders(),
-    refreshVideoRenderEstimates(activeDetail.job.job_id),
-  ]);
-}
-
-async function chooseVideoOutput(): Promise<void> {
-  if (!activeDetail || videoRenderSubmitting) return;
-  const inputPath = activeDetail.job.input_path;
-  const separator = inputPath ? Math.max(inputPath.lastIndexOf("/"), inputPath.lastIndexOf("\\")) : -1;
-  const initialDirectory = inputPath && separator > 0 ? inputPath.slice(0, separator) : null;
-  if (videoRenderMessage) videoRenderMessage.textContent = "正在打开视频保存面板…";
-  try {
-    const selection = await invoke<VideoOutputSelection | null>("pick_video_output_file", {
-      initialDirectory,
-      suggestedName: suggestedVideoName(),
-    });
-    if (!selection) {
-      if (videoRenderMessage) videoRenderMessage.textContent = "已取消选择。";
-      return;
-    }
-    if (videoOutputPath) videoOutputPath.value = selection.path;
-    selectedVideoOutputAlreadyExists = selection.alreadyExists;
-    if (videoRenderMessage) {
-      videoRenderMessage.textContent = selection.alreadyExists
-        ? "目标文件已经存在，开始前会再次确认覆盖。"
-        : "已选择输出位置。";
-    }
-  } catch (error) {
-    if (videoRenderMessage) videoRenderMessage.textContent = `无法选择输出位置：${String(error)}`;
-  }
-}
-
-async function submitVideoRender(): Promise<void> {
-  if (!activeDetail || !videoOutputPath || !videoSubtitleTrack || !videoRenderQuality || videoRenderSubmitting) return;
-  const outputPath = videoOutputPath.value.trim();
-  if (!outputPath.toLowerCase().endsWith(".mp4")) {
-    if (videoRenderMessage) videoRenderMessage.textContent = "输出路径必须以 .mp4 结尾。";
-    return;
-  }
-  let overwriteExisting = false;
-  if (selectedVideoOutputAlreadyExists) {
-    overwriteExisting = await confirmAction({
-      title: "覆盖已有视频？",
-      message: "目标视频已经存在。只有新视频烧录成功后，Atogaki 才会安全替换它。",
-      confirmLabel: "烧录并替换",
-      danger: true,
-    });
-    if (!overwriteExisting) {
-      if (videoRenderMessage) videoRenderMessage.textContent = "已取消，现有视频不会被修改。";
-      return;
-    }
-  }
-  videoRenderSubmitting = true;
-  if (submitVideoRenderButton) submitVideoRenderButton.disabled = true;
-  if (videoRenderMessage) videoRenderMessage.textContent = "正在准备字幕并创建烧录任务…";
-  try {
-    const render = await invoke<VideoRender>("submit_video_render", {
-      request: {
-        sourceJobId: activeDetail.job.job_id,
-        outputPath,
-        subtitleTrack: videoSubtitleTrack.value,
-        quality: videoRenderQuality.value,
-        overwriteExisting,
-      },
-    });
-    selectedVideoOutputAlreadyExists = false;
-    if (videoRenderMessage) {
-      videoRenderMessage.textContent = `已提交：${videoTrackLabel(render.subtitle_track)}，可关闭窗口继续校对。`;
-    }
-    await refreshVideoRenders();
-  } catch (error) {
-    if (videoRenderMessage) videoRenderMessage.textContent = `提交失败：${String(error)}`;
-  } finally {
-    videoRenderSubmitting = false;
-    if (submitVideoRenderButton) {
-      submitVideoRenderButton.disabled = mediaCapabilities?.ready_for_hard_subtitles === false;
-    }
-  }
-}
-
-async function cancelVideoRender(renderId: string): Promise<void> {
-  if (!renderId) return;
-  const confirmed = await confirmAction({
-    title: "取消视频烧录？",
-    message: "FFmpeg 会停止，临时输出会被清理；已完成的源任务和字幕不会改变。",
-    confirmLabel: "取消烧录",
-    danger: true,
-  });
-  if (!confirmed) return;
-  try {
-    await invoke<VideoRender>("cancel_video_render", { renderId });
-    if (videoRenderMessage) videoRenderMessage.textContent = "已请求取消，正在停止 FFmpeg 并清理临时文件。";
-    await refreshVideoRenders();
-  } catch (error) {
-    if (videoRenderMessage) videoRenderMessage.textContent = `取消失败：${String(error)}`;
-  }
-}
-
-async function revealRenderedVideo(path: string): Promise<void> {
-  try {
-    await invoke("reveal_rendered_video", { path });
-  } catch (error) {
-    if (videoRenderMessage) videoRenderMessage.textContent = `${fileManagerLabel} 定位失败：${String(error)}`;
-  }
+  mediaCapabilitiesHost.innerHTML = `<strong>${videoRenderSession.capabilities.ready_for_hard_subtitles ? "烧录环境就绪" : "烧录环境不可用"}</strong><span>${escapeHtml(encoder)} · libass ${videoRenderSession.capabilities.ass_filter ? "可用" : "缺失"}</span><code>${escapeHtml(videoRenderSession.capabilities.binary_path)}</code><small>${escapeHtml(videoRenderSession.capabilities.version)}</small>`;
+  mediaCapabilitiesHost.classList.toggle("warning", !videoRenderSession.capabilities.ready_for_hard_subtitles);
 }
 
 function addGlossaryTermRow(
@@ -5308,12 +5109,12 @@ saveGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredentia
 clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(true));
 checkGeminiApiKeyButton?.addEventListener("click", () => void checkGeminiCredential());
 karaokeOpenWorkspaceButton?.addEventListener("click", () => void showEditorTools("translation"));
-renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
-document.querySelector<HTMLButtonElement>("#close-video-render")?.addEventListener("click", () => videoRenderDialog?.close());
-document.querySelector<HTMLButtonElement>("#choose-video-output")?.addEventListener("click", () => void chooseVideoOutput());
-submitVideoRenderButton?.addEventListener("click", () => void submitVideoRender());
+renderVideoButton?.addEventListener("click", () => void videoRenderSession.open());
+document.querySelector<HTMLButtonElement>("#close-video-render")?.addEventListener("click", () => videoRenderSession.close());
+document.querySelector<HTMLButtonElement>("#choose-video-output")?.addEventListener("click", () => void videoRenderSession.chooseOutput());
+submitVideoRenderButton?.addEventListener("click", () => void videoRenderSession.submit());
 videoOutputPath?.addEventListener("input", () => {
-  selectedVideoOutputAlreadyExists = false;
+  videoRenderSession.outputChanged();
 });
 videoSubtitleTrack?.addEventListener("change", () => {
   if (videoOutputPath && !videoOutputPath.value) videoOutputPath.placeholder = suggestedVideoName();
@@ -5506,11 +5307,7 @@ void listen<{ action: PlaybackAction }>("subtitle-overlay-playback-action", (eve
 window.setInterval(() => void refresh(), 2_000);
 window.setInterval(() => void refreshActiveJob(), 2_000);
 window.setInterval(updateVisibleJobTimings, 1_000);
-window.setInterval(() => {
-  if (activeDetail && videoRenders.some((render) => render.status === "queued" || render.status === "running")) {
-    void refreshVideoRenders();
-  }
-}, 1_000);
+
 
 async function showPartialTranscript(jobId: string): Promise<void> {
   const dialog = document.createElement("dialog");
