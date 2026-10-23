@@ -430,7 +430,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .rename-job-footer span { color: #a54632; font-size: 12px; }
 .confirmation-message { white-space: pre-wrap; line-height: 1.6; }
 .confirmation-actions { display: flex; justify-content: flex-end; gap: 10px; }
-.video-render-dialog { width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 40px); border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: var(--ink); background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
+.video-render-dialog { position: fixed; inset: 20px; z-index: 60; margin: auto; overflow: auto; width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 40px); border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: var(--ink); background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
 .subtitle-style-dialog { position: fixed; inset: 20px; z-index: 60; margin: auto; box-sizing: border-box; width: min(1240px, calc(100vw - 40px)); height: min(800px, calc(100vh - 40px)); overflow: hidden; border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: var(--ink); background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
 .subtitle-style-workspace { min-height: 0; height: calc(100% - 108px); display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(360px, .9fr); gap: 18px; margin-top: 16px; }
 .subtitle-style-controls { min-height: 0; overflow-y: auto; padding-right: 5px; scrollbar-gutter: stable; }
@@ -813,3 +813,5 @@ dialog, .settings-dialog, .glossary-dialog, .learning-dictionary-dialog,
 #settings-form > .settings-tabs { position:static; flex-shrink:0; margin:0; padding:12px 24px; }
 #settings-form > .settings-content { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:18px 24px; scroll-padding-block:18px; }
 #settings-form > .settings-footer { position:static; flex-shrink:0; margin:0; padding:14px 24px; }
+
+.video-render-confirmation { position: fixed; inset: 16dvh auto auto; z-index: 70; max-height: 80dvh; overflow: auto; box-shadow: 0 16px 80px #0006; }
