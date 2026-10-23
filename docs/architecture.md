@@ -63,6 +63,8 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 任务显示名称只保存在 SQLite，不改变 UUID 任务目录和原媒体。任务删除仅允许 `done` 或 `failed` 状态：`LocalTaskService` 会校验目标确实是应用 `jobs` 根目录下与任务 ID 同名的目录，先将其原子移动为待删除目录，再删除 SQLite 记录和派生文件；数据库删除失败时恢复目录。任务记录中的原媒体路径永远不参与删除。
 
+字幕文件导出由 `subtitle-export.ts` 协调单次会话，`subtitle-export-view.ts` 管理按需连接的格式与覆盖确认节点，`subtitle-export-backend.ts` 适配原四条 Tauri IPC。请求绑定任务身份与 navigation，每次异步返回核对代次；离页释放等待和 busy，不把迟到的导出路径展示给另一任务。唯一草稿、播放器及后端导出服务保持原边界。
+
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。

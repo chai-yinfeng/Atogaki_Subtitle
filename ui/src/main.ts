@@ -1,3 +1,6 @@
+import { createSubtitleExport } from "./subtitle-export";
+import { createSubtitleExportBackend } from "./subtitle-export-backend";
+import { mountSubtitleExportDialogs } from "./subtitle-export-view";
 import { mountCandidateCleanupConfirmation } from "./candidate-cleanup-confirmation";
 import { mountReviewSignals } from "./editor-review-signals";
 import { mountCandidateHistory } from "./editor-candidate-history";
@@ -354,26 +357,6 @@ type NetworkSourceCheck = {
   error: string | null;
 };
 
-type SubtitleExport = {
-  source_srt: string;
-  translated_srt: string;
-  bilingual_srt: string;
-  bilingual_ass: string;
-  missing_translation_count: number;
-};
-
-type SubtitleExportPlan = {
-  output_directory: string;
-  base_name: string;
-  source_srt: string;
-  translated_srt: string;
-  bilingual_srt: string;
-  bilingual_ass: string;
-  existing_files: string[];
-};
-
-type SubtitleExportArtifact = "source_srt" | "translated_srt" | "bilingual_srt" | "bilingual_ass";
-
 type MediaCapabilities = {
   binary_path: string;
   version: string;
@@ -678,22 +661,6 @@ ${taskToolsTemplate(fileManagerLabel)}
         <label>任务名称<input id="rename-job-input" maxlength="100" autocomplete="off" /></label>
         <p>名称只用于列表显示；留空会恢复为媒体文件名。</p>
         <div class="rename-job-footer"><span id="rename-job-message" role="status"></span><button type="submit">保存名称</button></div>
-      </form>
-    </dialog>
-    <dialog id="subtitle-export-dialog" class="rename-job-dialog subtitle-export-dialog">
-      <form id="subtitle-export-form">
-        <div class="dialog-heading">
-          <div><p class="eyebrow">SUBTITLE FILES</p><h2>选择字幕文件</h2></div>
-          <button id="cancel-subtitle-export" type="button" class="secondary">取消</button>
-        </div>
-        <p>原文 SRT 可以独立导出；含译文的文件要求全部译文已完成且没有过期。</p>
-        <div class="subtitle-export-options">
-          <label><input type="checkbox" name="subtitle-artifact" value="source_srt" checked />原文 SRT</label>
-          <label><input type="checkbox" name="subtitle-artifact" value="translated_srt" checked />译文 SRT</label>
-          <label><input type="checkbox" name="subtitle-artifact" value="bilingual_srt" checked />双语 SRT</label>
-          <label><input type="checkbox" name="subtitle-artifact" value="bilingual_ass" checked />双语 ASS</label>
-        </div>
-        <div class="rename-job-footer"><span id="subtitle-export-message" role="status"></span><button type="submit">选择目录</button></div>
       </form>
     </dialog>
     <dialog id="confirmation-dialog" class="rename-job-dialog confirmation-dialog">
@@ -1018,9 +985,6 @@ const exportButton = workspaceView.querySelector<HTMLButtonElement>("#export-sub
 const renderVideoButton = workspaceView.querySelector<HTMLButtonElement>("#render-video");
 const editSubtitleStylesButton = workspaceView.querySelector<HTMLButtonElement>("#edit-subtitle-styles");
 const revealExportButton = workspaceView.querySelector<HTMLButtonElement>("#reveal-export");
-const subtitleExportDialog = document.querySelector<HTMLDialogElement>("#subtitle-export-dialog");
-const subtitleExportForm = document.querySelector<HTMLFormElement>("#subtitle-export-form");
-const subtitleExportMessage = document.querySelector<HTMLSpanElement>("#subtitle-export-message");
 const workspaceActionMessage = workspaceView.querySelector<HTMLParagraphElement>("#workspace-action-message");
 const workspaceGlossary = workspaceView.querySelector<HTMLSelectElement>("#workspace-glossary");
 const jobGlossaryStatus = workspaceView.querySelector<HTMLSpanElement>("#job-glossary-status");
@@ -1135,13 +1099,11 @@ const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(editorBackend.updateT
 
 const subtitleStructureUndoHistory = new Map<string, SubtitleStructureUndoEntry[]>();
 let workspaceActionBusy = false;
-let lastExportedSubtitlePath: string | null = null;
 let glossaries: Glossary[] = [];
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
 let renamingJob: LocalJob | null = null;
 let confirmationResolver: ((confirmed: boolean) => void) | null = null;
-let subtitleExportResolver: ((artifacts: SubtitleExportArtifact[] | null) => void) | null = null;
 let pendingGlossaryCorrection: {
   glossaryId: string;
   state: HTMLElement;
@@ -1198,6 +1160,23 @@ let translationStatus: TranslationStatus = {
 };
 
 const editorSession = new EditorSession();
+const subtitleExportView = mountSubtitleExportDialogs(shell ?? document.body);
+const subtitleExport = createSubtitleExport({
+  context: () => activeDetail && (currentArea === "karaoke" || currentArea === "workspace") ? {
+    jobId: activeDetail.job.job_id, navigation: navigationRequestId,
+    inputPath: activeDetail.job.input_path, segments: activeDetail.segments,
+  } : null,
+  available: () => !workspaceActionBusy,
+  dirty: hasUnsavedSubtitleEdits,
+  backend: createSubtitleExportBackend(invoke), view: subtitleExportView,
+  busyChanged: setWorkspaceBusy, status: setWorkspaceAction, fileManager: fileManagerLabel,
+  resultChanged: path => {
+    revealExportButton?.classList.toggle("hidden", !path);
+    updateTranslationControls();
+  },
+});
+subtitleExportView.bindActions(exportButton, revealExportButton, () => void subtitleExport.export(), () => void subtitleExport.reveal());
+
 const editorRoot = document.querySelector<HTMLElement>("#karaoke-view")!;
 const editorSearch = document.querySelector<HTMLInputElement>("#editor-search")!;
 const editorFilter = document.querySelector<HTMLSelectElement>("#editor-filter")!;
@@ -1470,6 +1449,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  subtitleExport.dispose();
+  subtitleExportView.dispose();
   editorLayout.dispose();
   editorMenus.dispose();
   editorFollow.dispose();
@@ -2389,7 +2370,7 @@ function updateTranslationControls(): void {
         : "";
   }
   if (revealExportButton) {
-    revealExportButton.disabled = taskBusy || !lastExportedSubtitlePath;
+    revealExportButton.disabled = taskBusy || !subtitleExport.lastPath;
   }
   const previewButton = workspaceView.querySelector<HTMLButtonElement>("#preview-glossary");
   if (previewButton) {
@@ -2796,6 +2777,7 @@ async function stopActivePlayback(): Promise<void> {
   if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
+  subtitleExport.reset();
   candidateTool.close();
   cleanupConfirmation.cancel();
   repairTool.close();
@@ -4004,8 +3986,7 @@ async function enterSubtitleEditor(jobId: string, detail?: JobDetail): Promise<v
 }
 
 function renderWorkspace(detail: JobDetail): void {
-  lastExportedSubtitlePath = null;
-  revealExportButton?.classList.add("hidden");
+  subtitleExport.clearResult();
   if (workspaceTitle) workspaceTitle.textContent = `${displayName(detail.job)} · ${currentArea === "karaoke" ? "任务工具" : "任务进度"}`;
   if (workspaceMessage) {
     workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message} · ${jobTimingLabel(detail.job)}`;
@@ -5081,106 +5062,6 @@ async function previewSubtitleStyleDraft(automatic = false): Promise<void> {
   }
 }
 
-async function exportSubtitles(): Promise<void> {
-  if (!activeDetail || workspaceActionBusy) return;
-  if (hasUnsavedSubtitleEdits()) {
-    setWorkspaceAction("请先保存各段尚未保存的修改，再导出字幕。", true);
-    return;
-  }
-  const artifacts = await chooseSubtitleExportArtifacts();
-  if (!artifacts) return;
-  const needsTranslation = artifacts.some((artifact) => artifact !== "source_srt");
-  const staleCount = activeDetail.segments.filter((segment) => segment.translation_stale).length;
-  const missingCount = activeDetail.segments.filter((segment) => !segment.translated_text?.trim()).length;
-  if (needsTranslation && (staleCount > 0 || missingCount > 0)) {
-    setWorkspaceAction(`含译文的导出需要完整且最新的译文；当前缺失 ${missingCount} 段、待重译 ${staleCount} 段。也可以只导出原文 SRT。`, true);
-    return;
-  }
-
-  setWorkspaceBusy(true);
-  setWorkspaceAction("正在选择字幕导出目录…");
-  try {
-    const inputPath = activeDetail.job.input_path;
-    const separator = inputPath ? Math.max(inputPath.lastIndexOf("/"), inputPath.lastIndexOf("\\")) : -1;
-    const initialDirectory = inputPath && separator > 0 ? inputPath.slice(0, separator) : null;
-    const outputDirectory = await invoke<string | null>("pick_subtitle_export_directory", {
-      initialDirectory,
-    });
-    if (!outputDirectory) {
-      setWorkspaceAction("已取消字幕导出。");
-      return;
-    }
-
-    const plan = await invoke<SubtitleExportPlan>("preview_workspace_subtitle_export", {
-      request: {
-        jobId: activeDetail.job.job_id,
-        outputDirectory,
-        artifacts,
-      },
-    });
-    let overwriteExisting = false;
-    if (plan.existing_files.length > 0) {
-      const names = plan.existing_files
-        .map((path) => path.split(/[\\/]/).pop() ?? path)
-        .join("\n");
-      overwriteExisting = await confirmAction({
-        title: "覆盖已有字幕？",
-        message: `以下 ${plan.existing_files.length} 个字幕文件已存在：\n\n${names}`,
-        confirmLabel: "覆盖字幕",
-        danger: true,
-      });
-      if (!overwriteExisting) {
-        setWorkspaceAction("已取消导出，现有字幕文件没有被修改。");
-        return;
-      }
-    }
-
-    setWorkspaceAction("正在从 当前字幕内容生成原文、译文和双语字幕…");
-    const exported = await invoke<SubtitleExport>("export_workspace_subtitles", {
-      request: {
-        jobId: activeDetail.job.job_id,
-        outputDirectory,
-        overwriteExisting,
-        artifacts,
-      },
-    });
-    const exportedPaths: Record<SubtitleExportArtifact, string> = {
-      source_srt: exported.source_srt,
-      translated_srt: exported.translated_srt,
-      bilingual_srt: exported.bilingual_srt,
-      bilingual_ass: exported.bilingual_ass,
-    };
-    lastExportedSubtitlePath = exportedPaths[artifacts[0]];
-    revealExportButton?.classList.remove("hidden");
-    setWorkspaceAction(`已导出 ${artifacts.length} 个字幕文件到：${outputDirectory}`);
-  } catch (error) {
-    setWorkspaceAction(`导出失败：${String(error)}`, true);
-  } finally {
-    setWorkspaceBusy(false);
-  }
-}
-
-function chooseSubtitleExportArtifacts(): Promise<SubtitleExportArtifact[] | null> {
-  if (!subtitleExportDialog || !subtitleExportMessage) return Promise.resolve(null);
-  subtitleExportMessage.textContent = "";
-  subtitleExportDialog.showModal();
-  return new Promise((resolve) => {
-    subtitleExportResolver = resolve;
-  });
-}
-
-async function revealExportedSubtitle(): Promise<void> {
-  if (!lastExportedSubtitlePath || workspaceActionBusy) return;
-  setWorkspaceBusy(true);
-  try {
-    await invoke("reveal_exported_subtitle", { path: lastExportedSubtitlePath });
-  } catch (error) {
-    setWorkspaceAction(`${fileManagerLabel} 定位失败：${String(error)}`, true);
-  } finally {
-    setWorkspaceBusy(false);
-  }
-}
-
 function videoTrackLabel(track: VideoRender["subtitle_track"]): string {
   if (track === "source") return `仅${languageLabel(activeSourceLanguage())}原文`;
   if (track === "translation") return `仅${languageLabel(activeTargetLanguage())}译文`;
@@ -6024,7 +5905,6 @@ saveGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredentia
 clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(true));
 checkGeminiApiKeyButton?.addEventListener("click", () => void checkGeminiCredential());
 karaokeOpenWorkspaceButton?.addEventListener("click", () => void showEditorTools("translation"));
-exportButton?.addEventListener("click", () => void exportSubtitles());
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
 editSubtitleStylesButton?.addEventListener("click", () => void openSubtitleStyleDialog());
 previewSubtitleStyleButton?.addEventListener("click", () => {
@@ -6032,7 +5912,6 @@ previewSubtitleStyleButton?.addEventListener("click", () => {
   void previewSubtitleStyleDraft();
 });
 saveSubtitleStyleButton?.addEventListener("click", () => void saveSubtitleStyleDraft());
-revealExportButton?.addEventListener("click", () => void revealExportedSubtitle());
 document.querySelector<HTMLButtonElement>("#close-subtitle-style")?.addEventListener("click", closeSubtitleStyleDialog);
 subtitleStyleDialog?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-style-field]").forEach((field) => {
   field.addEventListener("input", () => scheduleSubtitleStylePreview());
@@ -6086,29 +5965,6 @@ videoSubtitleTrack?.addEventListener("change", () => {
   if (videoOutputPath && !videoOutputPath.value) videoOutputPath.placeholder = suggestedVideoName();
 });
 videoRenderQuality?.addEventListener("change", renderVideoEstimate);
-subtitleExportForm?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const artifacts = Array.from(subtitleExportForm.querySelectorAll<HTMLInputElement>('input[name="subtitle-artifact"]:checked'))
-    .map((input) => input.value as SubtitleExportArtifact);
-  if (artifacts.length === 0) {
-    if (subtitleExportMessage) subtitleExportMessage.textContent = "请至少选择一种字幕文件。";
-    return;
-  }
-  subtitleExportDialog?.close();
-  subtitleExportResolver?.(artifacts);
-  subtitleExportResolver = null;
-});
-document.querySelector<HTMLButtonElement>("#cancel-subtitle-export")?.addEventListener("click", () => {
-  subtitleExportDialog?.close();
-  subtitleExportResolver?.(null);
-  subtitleExportResolver = null;
-});
-subtitleExportDialog?.addEventListener("cancel", (event) => {
-  event.preventDefault();
-  subtitleExportDialog.close();
-  subtitleExportResolver?.(null);
-  subtitleExportResolver = null;
-});
 document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());
 workspaceView.querySelector<HTMLButtonElement>("#manage-workspace-glossary")?.addEventListener("click", () => void openGlossaryManager(workspaceGlossary?.value));
 document.querySelector<HTMLButtonElement>("#close-glossaries")?.addEventListener("click", () => glossaryDialog?.close());

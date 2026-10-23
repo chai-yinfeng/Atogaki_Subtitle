@@ -146,3 +146,14 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 新的独立 identifier QA 包复用原有两份 20 段合成任务，签名检查通过。真实前端使用原 IPC 名称打开详情、保存第三段文字，读取 SQLite 确认只有一段变化，其他 39 段不变；从界面撤回文字，再将起点 6.000→6.100 秒保存，核对正文恢复且邻段不动，然后撤销时间。定位暂停到 6.500 秒，Cut 得到 A 21＋B 20 段，Join 回 A 20 段；依次撤销 Join 和 Cut 后，40 段逐字段与基线相同，integrity_check=ok、foreign_key_check 为空。不是只用 mock IPC 验证宏路径。
 
 构建身份、文字／时间落库快照、Cut 快照、撤销后 AX／截图和最终核验在忽略目录 `local-artifacts/editor-rust-commands/`。QA 已正常退出，未重装正式 App，未调用真实 ASR／翻译。本次原生专项覆盖上述编辑调用，未逐项重测所有插入／删除／播放位置路径；既有函数体与服务测试继续作为机械搬移回归证据。repository 尚未拆分，Windows、原生滚动与持续内存等门禁没有因此变为通过。
+
+
+## 2026-10-23：字幕文件导出边界
+
+从 main.ts 抽出导出会话、视图、DTO 与四条 IPC 适配，保留格式、命令参数、SQLite 和文件写入服务。会话冻结任务与导航身份，每个异步阶段核对，reset／dispose 后旧请求不能进入下一阶段、显示结果或释放新会话的 busy。格式选择与覆盖确认按需连接单份控件，复用显式背景 inert、Tab 循环、Escape 与关闭焦点恢复；修复 Safari 鼠标点击未聚焦按钮时取消后焦点落空。
+
+71 项前端测试和类型／生产构建通过；导出 WebKit 专项覆盖空选择、缺译／过期阻止、仅原文请求、文件名转义、覆盖取消无写入、确认参数、失败重试、重复开关和返回编辑。新增会话测试覆盖 dirty 二次核对、快速换任务、旧目录返回、新锁保护及 dispose 后迟到成功／失败。编辑器、跟随与候选处理三组 WebKit 同步回归；两套 Cargo fmt 与 diff 检查通过。Rust 源码未变，本轮未重跑全部 Rust 测试。
+
+独立 identifier 的 debug QA 包复用两份 20 段合成任务，签名验证通过。原生 AX 可访问格式标题、四个勾选框、取消和选择目录；仅选原文后打开系统目录面板，定位临时输出目录，但 Open 持续禁用，未提交写文件。取消后按钮可再次操作，重开格式保留选择，Escape 焦点回到导出按钮，返回编辑仍为第一段。原生实际 SRT、覆盖确认及 Finder 定位继续待验收，不从 mock 回归推导通过。系统目录选择 Rust 实现本轮未修改，原因仍待调查。
+
+QA 正常退出后，40 段全部字段与开始快照一致，integrity_check=ok、foreign_key_check 为空，临时输出目录没有文件。构建 SHA、AX／截图及核验位于忽略目录 `local-artifacts/editor-export-native/`。本轮没有接入正式数据库、调用模型或替换正式 App；长时内存、滚动 P95、锁定触发和 Windows 门禁仍保留。

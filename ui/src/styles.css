@@ -347,6 +347,8 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .export-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .export-card-actions button { align-self: auto; }
 .subtitle-export-dialog { width: min(560px, calc(100vw - 32px)); }
+.subtitle-export-dialog[open], .subtitle-export-overwrite-dialog[open] { position: fixed; inset: 16dvh 0 auto; z-index: 50; max-height: 80dvh; overflow: auto; box-shadow: 0 0 0 100vmax #0008; }
+.subtitle-export-overwrite-dialog [data-overwrite-files] { max-height: 30dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .subtitle-export-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
 .subtitle-export-options label { display: flex; gap: 9px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .subtitle-export-options input { width: auto; }
