@@ -67,6 +67,8 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
 
+任务样式的异步读取、保存与预览通过 `subtitle-style-session.ts` 协调，四条调用集中到 `subtitle-style-backend.ts`。每次打开绑定任务／导航代次，修改递增草稿版本，串行渲染只接受最新版本；关闭释放 debounce 和迟到呈现。字体与颜色视图暂留 main，FFmpeg/libass 与实际样式服务保持原实现。
+
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。

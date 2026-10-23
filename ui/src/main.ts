@@ -1,3 +1,6 @@
+import { createSubtitleStyleSession } from "./subtitle-style-session";
+import { createSubtitleStyleBackend } from "./subtitle-style-backend";
+import type { SubtitleStyle, SubtitleStyleSet, SubtitleFontFamily, SubtitleFontCoverage, SubtitleFontReport } from "./subtitle-style-types";
 import { createSubtitleTranslation, needsTranslation } from "./subtitle-translation";
 import { createTranslationBackend } from "./subtitle-translation-backend";
 import { createSubtitleExport } from "./subtitle-export";
@@ -392,42 +395,6 @@ type VideoRender = {
 type VideoOutputSelection = {
   path: string;
   alreadyExists: boolean;
-};
-
-type SubtitleStyle = {
-  font_family: string;
-  font_size: number;
-  primary_color: string;
-  outline_color: string;
-  outline_width: number;
-  shadow: number;
-  background_color: string | null;
-  bold: boolean;
-  italic: boolean;
-  alignment: number;
-  margin_left: number;
-  margin_right: number;
-  margin_vertical: number;
-  letter_spacing: number;
-};
-
-type SubtitleStyleSet = { schema_version?: number; source: SubtitleStyle; translation: SubtitleStyle };
-type SubtitleFontFamily = { family: string; aliases: string[]; face_count: number; monospaced: boolean };
-type SubtitleFontCoverage = {
-  requested_family: string;
-  installed: boolean;
-  matched_family: string | null;
-  post_script_name: string | null;
-  missing_characters: string[];
-  needs_fallback: boolean;
-};
-type SubtitleFontReport = { source: SubtitleFontCoverage; translation: SubtitleFontCoverage };
-type SubtitleStyleState = { styles: SubtitleStyleSet; font_report: SubtitleFontReport };
-type SubtitleStylePreview = {
-  output_path: string;
-  timestamp_ms: number;
-  font_report: SubtitleFontReport;
-  font_events: string[];
 };
 
 type SubtitleOverlayPayload = {
@@ -1108,9 +1075,6 @@ let mediaCapabilities: MediaCapabilities | null = null;
 let videoRenderEstimates: VideoRenderEstimate[] = [];
 let videoRenders: VideoRender[] = [];
 let subtitleFonts: SubtitleFontFamily[] | null = null;
-let subtitleStyleBusy = false;
-let subtitleStylePreviewTimer: number | null = null;
-let subtitleStylePreviewQueued = false;
 let activeSubtitleFontTrack: "source" | "translation" | null = null;
 let selectedVideoOutputAlreadyExists = false;
 let videoRenderSubmitting = false;
@@ -1151,6 +1115,42 @@ let translationStatus: TranslationStatus = {
 };
 
 const editorSession = new EditorSession();
+const subtitleStyles = createSubtitleStyleSession({
+  context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId, timestampMs: (mediaPlayer.media?.currentTime ?? 0) * 1000 } : null,
+  available: () => !workspaceActionBusy,
+  backend: createSubtitleStyleBackend(invoke),
+  later: (callback, delay) => { const timer = window.setTimeout(callback, delay); return () => window.clearTimeout(timer); },
+  view: {
+    open: () => { subtitleStylePreviewHost?.replaceChildren(); subtitleFontEvents?.classList.add("hidden"); subtitleStyleDialog?.showModal(); },
+    close: () => { subtitleStyleDialog?.close(); closeSubtitleFontPicker(); },
+    valid: subtitleStyleDraftIsValid,
+    read: () => ({ styles: currentSubtitleStyles(), track: subtitleStylePreviewTrack?.value ?? "bilingual" }),
+    loaded: (state, fonts) => {
+      subtitleFonts = fonts; populateSubtitleStyleEditor("source", state.styles.source);
+      populateSubtitleStyleEditor("translation", state.styles.translation); renderSubtitleFontReport(state.font_report);
+    },
+    saved: state => renderSubtitleFontReport(state.font_report),
+    previewed: (preview, automatic, saved) => {
+      renderSubtitleFontReport(preview.font_report);
+      if (subtitleStylePreviewHost) {
+        const image = document.createElement("img"); image.alt = `libass 字幕预览，时间 ${formatTime(preview.timestamp_ms)}`;
+        image.src = convertFileSrc(preview.output_path); subtitleStylePreviewHost.replaceChildren(image);
+      }
+      if (subtitleFontEvents) {
+        const pre = subtitleFontEvents.querySelector("pre");
+        if (pre) pre.textContent = preview.font_events.length ? preview.font_events.join("\n") : "本次 FFmpeg 日志没有报告字体替换事件。";
+        subtitleFontEvents.classList.remove("hidden");
+      }
+      if (subtitleStyleMessage) subtitleStyleMessage.textContent = `${automatic ? "已自动刷新" : "已刷新"} ${formatTime(preview.timestamp_ms)} 的真实渲染帧；${saved ? "当前样式已保存。" : "预览草稿尚未保存。"}`;
+    },
+    busy: (value, ready) => {
+      if (previewSubtitleStyleButton) previewSubtitleStyleButton.disabled = value || !ready;
+      if (saveSubtitleStyleButton) saveSubtitleStyleButton.disabled = value || !ready;
+      subtitleStyleDialog?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("[data-style-field], [data-font-picker-toggle], #subtitle-style-preview-track").forEach(field => { field.disabled = !ready; });
+    },
+    message: text => { if (subtitleStyleMessage) subtitleStyleMessage.textContent = text; },
+  },
+});
 const subtitleTranslation = createSubtitleTranslation<JobDetail>({
   context: () => activeDetail && (currentArea === "karaoke" || currentArea === "workspace") ? {
     jobId: activeDetail.job.job_id, navigation: navigationRequestId, segments: activeDetail.segments,
@@ -1470,6 +1470,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  subtitleStyles.dispose();
   subtitleTranslation.dispose();
   subtitleExport.dispose();
   subtitleExportView.dispose();
@@ -2771,6 +2772,7 @@ async function stopActivePlayback(): Promise<void> {
   if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
+  subtitleStyles.close();
   subtitleExport.reset();
   candidateTool.close();
   cleanupConfirmation.cancel();
@@ -4783,149 +4785,11 @@ function renderSubtitleFontReport(report: SubtitleFontReport): void {
   renderSubtitleFontCoverage("translation", report.translation);
 }
 
-function setSubtitleStyleBusy(busy: boolean): void {
-  subtitleStyleBusy = busy;
-  if (previewSubtitleStyleButton) previewSubtitleStyleButton.disabled = busy;
-  if (saveSubtitleStyleButton) saveSubtitleStyleButton.disabled = busy;
-}
-
-function cancelScheduledSubtitleStylePreview(): void {
-  if (subtitleStylePreviewTimer !== null) {
-    window.clearTimeout(subtitleStylePreviewTimer);
-    subtitleStylePreviewTimer = null;
-  }
-}
-
 function subtitleStyleDraftIsValid(): boolean {
   if (!subtitleStyleDialog) return false;
   return Array.from(
     subtitleStyleDialog.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-style-field]"),
   ).every((field) => field.checkValidity() && (field instanceof HTMLSelectElement || field.type === "checkbox" || field.value.trim() !== ""));
-}
-
-function scheduleSubtitleStylePreview(delay = 700): void {
-  if (!subtitleStyleDialog?.open) return;
-  cancelScheduledSubtitleStylePreview();
-  if (subtitleStyleMessage && delay > 0) {
-    subtitleStyleMessage.textContent = "样式已修改；停止操作后将自动刷新真实预览…";
-  }
-  subtitleStylePreviewTimer = window.setTimeout(() => {
-    subtitleStylePreviewTimer = null;
-    if (!subtitleStyleDraftIsValid()) {
-      if (subtitleStyleMessage) subtitleStyleMessage.textContent = "请先补全或修正标红的样式参数；预览暂未刷新。";
-      return;
-    }
-    void previewSubtitleStyleDraft(true);
-  }, delay);
-}
-
-function closeSubtitleStyleDialog(): void {
-  cancelScheduledSubtitleStylePreview();
-  subtitleStylePreviewQueued = false;
-  subtitleStyleDialog?.close();
-}
-
-async function openSubtitleStyleDialog(): Promise<void> {
-  if (!activeDetail || workspaceActionBusy || subtitleStyleBusy) return;
-  const jobId = activeDetail.job.job_id;
-  subtitleStyleDialog?.showModal();
-  if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在读取任务样式和本机字体…";
-  setSubtitleStyleBusy(true);
-  let readyForPreview = false;
-  try {
-    const [state, fonts] = await Promise.all([
-      invoke<SubtitleStyleState>("get_subtitle_style_state", { jobId }),
-      subtitleFonts ? Promise.resolve(subtitleFonts) : invoke<SubtitleFontFamily[]>("list_subtitle_fonts"),
-    ]);
-    if (activeDetail?.job.job_id !== jobId) return;
-    subtitleFonts = fonts;
-    populateSubtitleStyleEditor("source", state.styles.source);
-    populateSubtitleStyleEditor("translation", state.styles.translation);
-    renderSubtitleFontReport(state.font_report);
-    readyForPreview = true;
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `已读取 ${fonts.length} 个字体族，正在生成初始真实预览…`;
-  } catch (error) {
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `无法读取字幕样式：${String(error)}`;
-  } finally {
-    setSubtitleStyleBusy(false);
-    if (readyForPreview) scheduleSubtitleStylePreview(0);
-  }
-}
-
-async function saveSubtitleStyleDraft(): Promise<void> {
-  if (!activeDetail || subtitleStyleBusy) return;
-  if (!subtitleStyleDraftIsValid()) {
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = "请先补全或修正标红的样式参数，再保存任务样式。";
-    return;
-  }
-  const jobId = activeDetail.job.job_id;
-  setSubtitleStyleBusy(true);
-  if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在校验并保存任务样式…";
-  try {
-    const state = await invoke<SubtitleStyleState>("save_subtitle_styles", {
-      request: { jobId, styles: currentSubtitleStyles() },
-    });
-    renderSubtitleFontReport(state.font_report);
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = "任务样式已保存；之后的 ASS 导出和视频烧录都会使用它。";
-  } catch (error) {
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `保存失败：${String(error)}`;
-  } finally {
-    setSubtitleStyleBusy(false);
-    if (subtitleStylePreviewQueued && subtitleStyleDialog?.open) {
-      subtitleStylePreviewQueued = false;
-      scheduleSubtitleStylePreview(150);
-    }
-  }
-}
-
-async function previewSubtitleStyleDraft(automatic = false): Promise<void> {
-  if (!activeDetail || !subtitleStylePreviewTrack || !subtitleStyleDialog?.open) return;
-  if (subtitleStyleBusy) {
-    subtitleStylePreviewQueued = true;
-    return;
-  }
-  if (!subtitleStyleDraftIsValid()) {
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = "请先补全或修正标红的样式参数；预览暂未刷新。";
-    return;
-  }
-  const jobId = activeDetail.job.job_id;
-  const timestampMs = Math.max(0, Math.round((mediaPlayer.media?.currentTime ?? 0) * 1_000));
-  setSubtitleStyleBusy(true);
-  if (subtitleStyleMessage) subtitleStyleMessage.textContent = "正在通过 FFmpeg/libass 生成预览帧…";
-  try {
-    const preview = await invoke<SubtitleStylePreview>("preview_subtitle_styles", {
-      request: {
-        jobId,
-        styles: currentSubtitleStyles(),
-        subtitleTrack: subtitleStylePreviewTrack.value,
-        timestampMs,
-      },
-    });
-    if (activeDetail?.job.job_id !== jobId || !subtitleStyleDialog.open) return;
-    renderSubtitleFontReport(preview.font_report);
-    if (subtitleStylePreviewHost) {
-      const image = document.createElement("img");
-      image.alt = `libass 字幕预览，时间 ${formatTime(preview.timestamp_ms)}`;
-      image.src = convertFileSrc(preview.output_path);
-      subtitleStylePreviewHost.replaceChildren(image);
-    }
-    if (subtitleFontEvents) {
-      const pre = subtitleFontEvents.querySelector("pre");
-      if (pre) pre.textContent = preview.font_events.length > 0
-        ? preview.font_events.join("\n")
-        : "本次 FFmpeg 日志没有报告字体替换事件。";
-      subtitleFontEvents.classList.remove("hidden");
-    }
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `${automatic ? "已自动刷新" : "已刷新"} ${formatTime(preview.timestamp_ms)} 的真实渲染帧；预览草稿尚未保存。`;
-  } catch (error) {
-    if (subtitleStyleMessage) subtitleStyleMessage.textContent = `预览失败：${String(error)}`;
-  } finally {
-    setSubtitleStyleBusy(false);
-    if (subtitleStylePreviewQueued && subtitleStyleDialog?.open) {
-      subtitleStylePreviewQueued = false;
-      scheduleSubtitleStylePreview(150);
-    }
-  }
 }
 
 function videoTrackLabel(track: VideoRender["subtitle_track"]): string {
@@ -5772,15 +5636,14 @@ clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredenti
 checkGeminiApiKeyButton?.addEventListener("click", () => void checkGeminiCredential());
 karaokeOpenWorkspaceButton?.addEventListener("click", () => void showEditorTools("translation"));
 renderVideoButton?.addEventListener("click", () => void openVideoRenderDialog());
-editSubtitleStylesButton?.addEventListener("click", () => void openSubtitleStyleDialog());
+editSubtitleStylesButton?.addEventListener("click", () => void subtitleStyles.open());
 previewSubtitleStyleButton?.addEventListener("click", () => {
-  cancelScheduledSubtitleStylePreview();
-  void previewSubtitleStyleDraft();
+  void subtitleStyles.preview();
 });
-saveSubtitleStyleButton?.addEventListener("click", () => void saveSubtitleStyleDraft());
-document.querySelector<HTMLButtonElement>("#close-subtitle-style")?.addEventListener("click", closeSubtitleStyleDialog);
+saveSubtitleStyleButton?.addEventListener("click", () => void subtitleStyles.save());
+document.querySelector<HTMLButtonElement>("#close-subtitle-style")?.addEventListener("click", () => subtitleStyles.close());
 subtitleStyleDialog?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-style-field]").forEach((field) => {
-  field.addEventListener("input", () => scheduleSubtitleStylePreview());
+  field.addEventListener("input", () => subtitleStyles.changed());
 });
 for (const track of ["source", "translation"] as const) {
   const input = subtitleStyleField<HTMLInputElement>(track, "font_family");
@@ -5815,11 +5678,9 @@ document.addEventListener("pointerdown", (event) => {
 });
 subtitleStyleDialog?.querySelector<HTMLElement>(".subtitle-style-controls")?.addEventListener("scroll", closeSubtitleFontPicker);
 window.addEventListener("resize", closeSubtitleFontPicker);
-subtitleStylePreviewTrack?.addEventListener("change", () => scheduleSubtitleStylePreview(0));
+subtitleStylePreviewTrack?.addEventListener("change", () => subtitleStyles.changed(0));
 subtitleStyleDialog?.addEventListener("close", () => {
-  cancelScheduledSubtitleStylePreview();
-  subtitleStylePreviewQueued = false;
-  closeSubtitleFontPicker();
+  if (!subtitleStyleDialog.open) subtitleStyles.close();
 });
 document.querySelector<HTMLButtonElement>("#close-video-render")?.addEventListener("click", () => videoRenderDialog?.close());
 document.querySelector<HTMLButtonElement>("#choose-video-output")?.addEventListener("click", () => void chooseVideoOutput());
