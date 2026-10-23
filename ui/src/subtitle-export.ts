@@ -1,8 +1,9 @@
+import { staleTranslationCount } from "./subtitle-translation-state.ts";
 import type { SubtitleSegment } from "./editor-types";
 import type { SubtitleExportArtifact } from "./subtitle-export-types";
 import type { createSubtitleExportBackend } from "./subtitle-export-backend";
 
-type Context = { jobId: string; navigation: number; inputPath: string | null; segments: readonly SubtitleSegment[] };
+type Context = { jobId: string; navigation: number; inputPath: string | null; segments: readonly SubtitleSegment[]; contextStaleIds: readonly string[] };
 type Options = {
   context(): Context | null;
   available(): boolean;
@@ -53,8 +54,8 @@ export function createSubtitleExport(options: Options) {
         if (!current(ticket) || !selected?.length) return;
         const artifacts = [...selected];
         if (options.dirty()) { options.status("请先保存各段尚未保存的修改，再导出字幕。", true); return; }
-        const segments = options.context()!.segments;
-        const stale = segments.filter(cue => cue.translation_stale).length;
+        const latest = options.context()!, segments = latest.segments;
+        const stale = staleTranslationCount(segments, latest.contextStaleIds);
         const missing = segments.filter(cue => !cue.translated_text?.trim()).length;
         if (artifacts.some(artifact => artifact !== "source_srt") && (stale || missing)) {
           options.status(`含译文的导出需要完整且最新的译文；当前缺失 ${missing} 段、待重译 ${stale} 段。也可以只导出原文 SRT。`, true);

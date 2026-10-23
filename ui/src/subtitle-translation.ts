@@ -1,3 +1,4 @@
+import { needsTranslation } from "./subtitle-translation-state.ts";
 import type { SubtitleSegment } from "./editor-types";
 
 export type BatchTranslationResult = {
@@ -9,9 +10,6 @@ export type TranslationContext = {
   contextStaleIds: readonly string[]; provider: string; configured: boolean;
   sourceLabel: string; targetLabel: string;
 };
-export function needsTranslation(cue: SubtitleSegment, contextStaleIds: readonly string[]) {
-  return cue.translation_stale || !cue.translated_text?.trim() || contextStaleIds.includes(cue.id);
-}
 type Confirmation = { title: string; message: string; confirmLabel: string; danger: boolean };
 type Options<Detail> = {
   context(): TranslationContext | null;

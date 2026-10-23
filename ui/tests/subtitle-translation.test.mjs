@@ -1,6 +1,7 @@
+import { needsTranslation, staleTranslationCount } from "../src/subtitle-translation-state.ts";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSubtitleTranslation, needsTranslation } from '../src/subtitle-translation.ts';
+import { createSubtitleTranslation } from '../src/subtitle-translation.ts';
 import { createTranslationBackend } from '../src/subtitle-translation-backend.ts';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function harness(){
@@ -71,4 +72,8 @@ test('different tasks can finish independently without clearing another task act
  const other={...h.cue,id:'d',job_id:'b'};h.setContext({...h.context,jobId:'b',navigation:2,segments:[other]});const second=h.tool.single(other);h.pending[2].resolve();await flush();
  h.pending[1].reject(Error('old task'));await first;assert(h.tool.has('b'));assert(h.timer);assert.equal(h.events.filter(e=>e[0]==='timer-start').length,1);
  h.pending[3].resolve(other);await flush();h.pending[4].resolve({job:'b'});await second;assert.equal(h.timer,null);assert(!h.events.some(e=>e[0]==='status'&&e[1].includes('old task')));
+});
+
+test('stale count unions actual cue IDs without double-counting or counting absent IDs',()=>{
+ const cues=[{id:'a',translation_stale:true},{id:'b',translation_stale:false},{id:'c',translation_stale:false}];assert.equal(staleTranslationCount(cues,['a','b','b','missing']),2);assert.equal(staleTranslationCount([],['missing']),0);
 });

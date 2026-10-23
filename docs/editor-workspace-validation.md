@@ -242,3 +242,16 @@ Tauri cargo check 通过，共享库 149 项通过／5 项环境依赖忽略，�
 QA 正常退出，临时清除的 A 过期标记已恢复，40 段全部字段与基线相同，全部样式记录不变，integrity_check=ok、foreign_key_check 为空；仅增加一条真实完成烧录记录、派生视频与导出文件。证据在忽略目录 `local-artifacts/editor-output-commands/`：移动清单／等价核验、构建 SHA、原生 AX、ffprobe 与恢复核验。没有复制数据库、增加 App 副本或替换正式 App；使用本机 FFmpeg／ffprobe 的 QA 覆盖，不是完整发行 sidecar 验收。
 
 本次局部原生操作不代表移入的所有保存／取消／视频输出／定位命令逐项实测。窗口验收仍保留覆盖确认、运行中取消、目录面板、原生选值复核和 Windows，性能门禁不变。
+
+
+## 2026-10-23：上下文过期预检修复与长任务实际取消
+
+复用既有 long-task-data 隔离副本和 QA App，不创建数据库／媒体副本。最初只临时清除目标的 1 段文字过期后，后端仍以 45 段上下文过期拒绝提交，揭示前端预检遗漏了 translation_context_stale_ids。修复把过期统计提到纯 helper：实际 cue 的文字 flag 和上下文 ID 取并集，重复／不存在的 ID 不增加计数；字幕导出与烧录共用，source SRT 仍可独立导出，后端校验完全保留。
+
+104 项前端测试、类型／生产构建通过，新增测试覆盖上下文独立过期、重叠／重复／不存在 ID，以及译文导出拒绝而原文目录仍可打开。纯 helper 被 Node strip-types 测试直接导入，使用显式 .ts 并在 noEmit 配置允许该扩展名，由 Vite 正常打包，没有新增运行时加载器。WebKit 烧录专项新增上下文独立过期在打开工具和 media_capabilities 请求前阻止；编辑布局、跟随、字幕导出与翻译四组同步通过，两套 Cargo fmt 与 diff 检查通过。Rust 源码未变，未重跑 Rust 全量测试。
+
+修复后的原生包在保持原标记时，烧录入口立即提示 46 段（1 段文字＋45 段上下文），未打开烧录面板。为只验证取消用例，退出 QA 后记录全 provenance／依赖边，临时清除隔离目标两类标记；没有把它们视为真实质量通过。3,089 段、1920×1080 长素材实际提交后进入 running，原生确认标题、取消和“取消烧录”均可访问。点击确认后，在约 1.0245% 进度进入 cancelled，原生历史与 SQLite 一致；最终 cancel-test.mp4 不存在，同目录没有 partial，匹配本次输出的 FFmpeg PID 为空。
+
+QA 正常退出后恢复临时标记：9,976 段字幕逐字段一致，9,976 条 provenance 和 80,821 条依赖边完全一致，全部样式及原有 11 条烧录记录不变，仅新增一条 cancelled 记录和派生 ASS。integrity_check=ok、foreign_key_check 为空。原媒体大小、mtime_ns、inode 未变；未对约 9.9 GB 文件做完整内容哈希，不把元数据核验说成逐字节校验。没有替换正式 App、写入正式数据库、复制原媒体或留下测试 MP4。
+
+构建 SHA、修复前后入口 AX、running／确认／cancelled AX、记录、进程及恢复核验在忽略目录 `local-artifacts/editor-render-cancel-native/`。本节关闭原生运行中取消与取消确认可访问性的待验收项；覆盖确认、系统目录／保存面板、其他通用确认、原生选值复核、Windows，以及滚动 P95／稳定内存／锁定触发仍保留。

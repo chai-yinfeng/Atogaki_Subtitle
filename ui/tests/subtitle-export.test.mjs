@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createSubtitleExport } from '../src/subtitle-export.ts';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function harness(){
- let context={jobId:'a',navigation:1,inputPath:'C:\\media\\a.mp4',segments:[{translation_stale:false,translated_text:'translation'}]},dirty=false,available=true;
+ let context={jobId:'a',navigation:1,contextStaleIds:[],inputPath:'C:\\media\\a.mp4',segments:[{translation_stale:false,translated_text:'translation'}]},dirty=false,available=true;
  const pending=[],events=[];
  const request=(kind,args)=>new Promise((resolve,reject)=>pending.push({kind,args,resolve,reject}));
  const tool=createSubtitleExport({context:()=>context,available:()=>available,dirty:()=>dirty,fileManager:'Finder',
@@ -58,4 +58,9 @@ test('duplicate starts are suppressed; backend failure unlocks and allows retry'
  assert.match(h.events.find(e=>e[0]==='status'&&e[1].includes('失败'))[1],/picker failed/);assert.deepEqual(h.events.at(-1),['busy',false]);
  h.setAvailable(false);await h.tool.export();assert.equal(h.pending.length,2);
  h.setAvailable(true);const next=h.tool.export();h.pending[2].resolve(null);await next;
+});
+
+test('context-only stale translation blocks translated export but allows source-only',async()=>{
+ const h=harness();h.context.segments[0].id='c';h.context.contextStaleIds=['c'];const translated=h.tool.export();h.pending[0].resolve(['bilingual_srt']);await translated;assert.equal(h.pending.length,1);assert.match(h.events.at(-1)[1],/待重译 1/);
+ const source=h.tool.export();h.pending[1].resolve(['source_srt']);await flush();assert.equal(h.pending[2].kind,'pickDirectory');h.pending[2].resolve(null);await source;
 });

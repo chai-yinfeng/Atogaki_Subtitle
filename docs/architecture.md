@@ -71,6 +71,8 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 烧录工具通过 `video-render-session.ts` 管理访问状态和历史轮询，`video-render-backend.ts` 适配原七条 IPC。请求绑定任务与导航代次，覆盖确认冻结提交参数；关闭停止前端轮询，后端 worker 与冻结快照继续运行。规格、能力和历史结果不跨工具访问复用，烧录视图由 `video-render-view.ts` 持有，模板独立，关闭卸载控件，专用确认采用嵌套显式焦点边界；历史按 ID 保留节点，dispose 释放事件与引用。
 
+导出与烧录入口通过 `subtitle-translation-state.ts` 统计当前 cue 的文字过期与上下文依赖过期并去重，避免只看文字 flag 后才收到后端拒绝。仅原文 SRT 保持独立；预检不替代服务层 revision／过期校验，也不引入额外全任务轮询。
+
 ## 数据边界
 
 - 媒体、模型、任务产物：默认本地文件系统。

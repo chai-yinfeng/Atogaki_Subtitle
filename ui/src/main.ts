@@ -4,7 +4,8 @@ import { createVideoRenderBackend } from "./video-render-backend";
 import { mountSubtitleStyleView } from "./subtitle-style-view";
 import { createSubtitleStyleSession } from "./subtitle-style-session";
 import { createSubtitleStyleBackend } from "./subtitle-style-backend";
-import { createSubtitleTranslation, needsTranslation } from "./subtitle-translation";
+import { createSubtitleTranslation } from "./subtitle-translation";
+import { needsTranslation, staleTranslationCount } from "./subtitle-translation-state";
 import { createTranslationBackend } from "./subtitle-translation-backend";
 import { createSubtitleExport } from "./subtitle-export";
 import { createSubtitleExportBackend } from "./subtitle-export-backend";
@@ -952,7 +953,7 @@ const videoRenderView = mountVideoRenderView(shell ?? document.body, {
 const videoRenderSession = createVideoRenderSession({
   context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId,
     inputPath: activeDetail.job.input_path, videoAvailable: !!activeDetail.job.input_path && !!activeDetail.playback_path && !isAudioPath(activeDetail.job.input_path) } : null,
-  staleCount: () => activeDetail?.segments.filter(cue => cue.translation_stale).length ?? 0,
+  staleCount: () => activeDetail ? staleTranslationCount(activeDetail.segments, activeDetail.translation_context_stale_ids) : 0,
   available: () => !workspaceActionBusy, dirty: hasUnsavedSubtitleEdits, suggestedName: videoRenderView.suggestedName,
   backend: createVideoRenderBackend(invoke), confirm: videoRenderView.confirm, status: setWorkspaceAction, fileManager: fileManagerLabel,
   repeat: tick => { const timer = window.setInterval(tick, 1000); return () => window.clearInterval(timer); },
@@ -1005,7 +1006,7 @@ const subtitleExportView = mountSubtitleExportDialogs(shell ?? document.body);
 const subtitleExport = createSubtitleExport({
   context: () => activeDetail && (currentArea === "karaoke" || currentArea === "workspace") ? {
     jobId: activeDetail.job.job_id, navigation: navigationRequestId,
-    inputPath: activeDetail.job.input_path, segments: activeDetail.segments,
+    inputPath: activeDetail.job.input_path, segments: activeDetail.segments, contextStaleIds: activeDetail.translation_context_stale_ids,
   } : null,
   available: () => !workspaceActionBusy,
   dirty: hasUnsavedSubtitleEdits,
