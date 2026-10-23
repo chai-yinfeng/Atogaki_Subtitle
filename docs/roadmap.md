@@ -23,7 +23,7 @@ _最后更新：2026-10-23_
 
 ## 下一步与验收门禁
 
-1. 字幕文件导出已拆为会话／视图／IPC；格式选择、取消及焦点恢复通过原生 QA，系统目录面板 Open 禁用使真实写文件与原生覆盖确认仍待验收。浏览器覆盖确认／取消、旧返回和失败回归通过，详见[窗口验收](editor-workspace-validation.md#2026-10-23字幕文件导出边界)。继续按用例收敛 main.ts 与 Rust 边界，一条边界一个提交；保留唯一播放器、SubtitleDrafts、LocalDatabase 和现有 revision／候选事务。停止追加式初始化，明确 mount／dispose。
+1. 字幕文件导出已拆为会话／视图／IPC；格式选择、取消、焦点恢复与 20 段原文 SRT 实际写入通过原生 QA，完整文字／时间逐段匹配 SQLite；系统目录面板 Open 间歇禁用，第二次同路径不能提交，原生覆盖确认及 Finder 定位仍待验收。浏览器覆盖确认／取消、旧返回和失败回归通过，详见[窗口验收](editor-workspace-validation.md#2026-10-23字幕文件导出边界)。继续按用例收敛 main.ts 与 Rust 边界，一条边界一个提交；保留唯一播放器、SubtitleDrafts、LocalDatabase 和现有 revision／候选事务。停止追加式初始化，明确 mount／dispose。
 2. 用可控的同负载原生操作复查滚动、稳定内存、锁定触发和工具卸载；保留原始 trace／RSS／数据核验，不把 DOM 减少或离页回收单独当作无泄漏结论。
 3. 按[本机保留清单](local-artifact-retention.md)继续维护材料；本轮已将 v0.1.1／v0.1.2 的重复下载改为可追溯链接，并单独清理当前树 incremental 缓存，约 830 MiB 逻辑内容。未分类数据、工作数据库、模型、来源证据与共享缓存保留。Web／Postgres 只交付[影响报告](legacy-web-retirement-impact.md)，实施选择另行讨论。
 4. 达到下一个可试用里程碑后完成隔离数据的签名包回归，再按已有授权更新本机 App。Windows 在选定候选独立实机验收，macOS 结果不外推。

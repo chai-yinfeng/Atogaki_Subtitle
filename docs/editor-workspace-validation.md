@@ -157,3 +157,12 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 独立 identifier 的 debug QA 包复用两份 20 段合成任务，签名验证通过。原生 AX 可访问格式标题、四个勾选框、取消和选择目录；仅选原文后打开系统目录面板，定位临时输出目录，但 Open 持续禁用，未提交写文件。取消后按钮可再次操作，重开格式保留选择，Escape 焦点回到导出按钮，返回编辑仍为第一段。原生实际 SRT、覆盖确认及 Finder 定位继续待验收，不从 mock 回归推导通过。系统目录选择 Rust 实现本轮未修改，原因仍待调查。
 
 QA 正常退出后，40 段全部字段与开始快照一致，integrity_check=ok、foreign_key_check 为空，临时输出目录没有文件。构建 SHA、AX／截图及核验位于忽略目录 `local-artifacts/editor-export-native/`。本轮没有接入正式数据库、调用模型或替换正式 App；长时内存、滚动 P95、锁定触发和 Windows 门禁仍保留。
+
+
+### 原生导出复查：实际 SRT 与目录面板的间歇状态
+
+继续使用相同 6cf07c6 源码的隔离包与两份合成任务，无应用代码变更。将系统目录面板定位到工作区忽略目录 `local-artifacts/editor-export-native/` 后，Open／New Folder 可用，点击 Open 实际生成 `原生验收 A · 字幕编辑.ja.srt`。逐段对照只读 SQLite 快照：20 段编号、起止时间和完整原文全部一致，SHA-256 为 `407ae265323402d25080241b7288baa7a69a6d0ca63c2ad8a7b0d1eaa0571f2a`；不是仅检查文件存在或成功消息。
+
+再次导出、重选同一目录时 Open 又被禁用，未到达覆盖确认；激活窗口／面板、重新输入路径、粘贴、切换列表视图及从父目录显式选择均未恢复。首次 `/tmp` 失败与这次相同工作区路径重试失败说明，不能归因于只有 `/tmp` 不可写。现有命令与锁定依赖源码均选择目录模式，rfd 默认允许建目录，bundle identifier 一致且签名有效；这些只排除明显配置差异，未证明根因。没有依据猜测去改 IPC、换目录选择器或放宽权限。
+
+取消后工具控件恢复，QA 正常退出。全部 40 段仍逐字段等于原快照，integrity_check=ok、foreign_key_check 为空。`verification-20261023.json` 保存新核验，前一轮未导出记录保留；目录取消 AX 与实际 SRT 留在同一忽略目录。原生 source SRT 实际写入已验证，覆盖确认／取消及 Finder 定位仍待验证，系统面板间歇禁用另保留调查；Windows 和性能门禁不变。本轮没有新增数据库备份或 App 副本，也未替换正式 App。
