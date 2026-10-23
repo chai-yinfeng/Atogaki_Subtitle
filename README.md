@@ -183,7 +183,7 @@ Atogaki_Sub/
 - macOS Apple Silicon 是当前主要质量基线；Windows 11 x86_64 已通过独立许可证审计、安装门禁和选定候选实机回归发布 `alpha.10`，后续仍按稳定候选集中更新。Windows 悬浮字幕不稳定且不建议使用；x86_64 macOS 尚未列入当前主线。
 - 当前没有账号、云端文件托管、跨设备同步或自动媒体下载。
 
-项目方向见 [`docs/product-direction.md`](docs/product-direction.md)，完成度和技术债见 [`docs/roadmap.md`](docs/roadmap.md)。适合后续补充的公开材料包括 App 截图/短演示、已知问题、测试设备矩阵、贡献指南和稳定 Release 下载入口；这些应在首轮功能回归与外部测试反馈稳定后加入。
+文档入口见[文档索引](docs/README.md)，项目方向见 [`docs/product-direction.md`](docs/product-direction.md)，当前进度和待验收项见 [`docs/roadmap.md`](docs/roadmap.md)。逐次提交与历史技术债保留在路线图历史快照，研究提案和验收证据分别索引。
 
 ## 许可证
 

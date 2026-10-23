@@ -1,0 +1,54 @@
+# 文档索引
+
+_更新：2026-10-22_
+
+当前产品行为先看产品方向、能力矩阵与最新有效 ADR；完成度看路线图，验证范围看对应记录。研究提案不表示功能已实现，单次窗口截图或测试计数也不表示全平台门禁已通过。
+
+## 当前规范与开发入口
+
+- [产品方向](product-direction.md)：用户、场景、平台和数据边界。
+- [当前路线图](roadmap.md)：本次编辑器改造状态、下一步与未完成门禁。
+- [稳定能力矩阵](app-capability-matrix.md)：桌面范围和 CLI／研究路线的晋升边界。
+- [架构与目录约定](architecture.md)：应用层、SQLite、媒体、IPC 和前端生命周期。
+- [开发协作与回归约定](development-workflow.md)、[桌面测试](desktop-testing.md)：开发与隔离数据工作方式。
+- [发布流程](releasing.md)、[第三方许可证审计](third-party-license-audit.md)：版本化构建、材料与目标平台边界。
+- [Windows 兼容计划](windows-porting.md)、[Windows 实机清单](windows-testing.md)：平台专属结果与待验收项，不能用 macOS 结果替代。
+- [主题材质清单](theme-material-assets.md)：资产用途、来源与保留信息。
+
+## 编辑器的有效决策
+
+完整目录见[架构决策](decisions/)。ADR 保留原历史，不把被取代的交互重新当作默认行为。
+
+| 决策 | 当前适用范围 |
+|---|---|
+| [0055 统一编辑器](decisions/0055-unified-subtitle-editor.md) | 任务入口、唯一草稿与四区工作面；其中旧布局和播放不切换编辑对象已被 0058 取代 |
+| [0056 虚拟列表与摘要](decisions/0056-editor-virtual-list-and-task-summary.md) | 视口 DOM、局部更新与轻量任务摘要；原 42 px 行高后来由 0058 紧凑布局改成 28 px |
+| [0057 视图生命周期](decisions/0057-editor-view-lifecycles.md) | 当前段输入和按需工具 mount／dispose，后继原生焦点修正见 0058 |
+| [0058 紧凑布局与跟随](decisions/0058-compact-editor-and-playback-follow.md) | 左视频、右波形与上下双语编辑、底部列表；默认跟随、手动锁定、输入保护与工具焦点 |
+| [0059 Rust 模块边界](decisions/0059-desktop-command-and-repository-modules.md) | IPC 与 repository 渐进拆分，保留方法、SQL、revision 与事务合同 |
+
+## 验收证据与运行记录
+
+这些文件按提交和测试环境描述观察结果；阅读时同时看限制和待验证项。
+
+- [编辑窗口与交互](editor-workspace-validation.md)、[性能与接口](editor-performance-validation.md)、[本机安装与备份轮换](local-editor-installation.md)。
+- [离线工作流验证](offline-workflow-validation.md)、[阶段队列与提前翻译验证](staged-pipeline-validation.md)。
+- [识别／翻译质量基线](evaluation.md)、[Hy-MT2 验证](hy-mt2-validation.md)、[Gemini 接入与验证](gemini-transcribe.md)。工程合同与人工质量结论分开。
+
+截图、trace、模型输出、媒体与数据库通常位于被忽略的 local-artifacts 或隔离临时目录；文档给出定位与用途，不把它们都当成发行资产或可删除缓存。
+
+## 研究、能力对照与待讨论方案
+
+- [字幕工作面调研](editor-workspace-review.md)：改造前的审计与布局备选，已采纳部分由 0055–0059 和当前路线图承接。
+- [Aegisub 能力映射](aegisub-capability-map.md)：当前独立实现的能力与后续候选，不是完整复刻或扩大制作软件范围的承诺。
+- [管线演进计划](pipeline-evolution.md)：保留研究阶段的接口与质量门禁；已落地部分应对照后继 ADR 和验收记录，不按原审阅基线推断当前实现。
+- [Web Serve／Postgres 退役影响](legacy-web-retirement-impact.md)：调用、兼容与依赖审计已完成；隔离 feature 或删除尚待讨论，本轮未退役。
+- [Muse 流式 ASR 研究](muse-voice-transcribe-research.md)、[翻译 Provider 候选](translation-provider-options.md)、[视觉参考讨论](visual-reference-notes.md)：研究时点的材料，不等同当前产品默认项。
+
+## 历史记录
+
+- [2026-10-22 路线图完整快照](roadmap-history-2026-10-22.md)：保留逐次交付、旧复选框、技术债与当时测试计数；过期未完成项不自动进入当前计划。
+- [发行记录](release-notes/)：各版本已发布的范围；本机试装不等于新的公开发行。
+- [历次 ADR](decisions/)：原决策及后继取代关系，旧记录继续可追溯。
+
+更新当前规范时同步检查路线图和有关能力映射；新增研究应标清提案状态，新增验收应记录提交、环境、证据、失败与局限。历史材料的更正通过后继记录说明，保留原始结果的来源。

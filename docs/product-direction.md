@@ -1,6 +1,8 @@
 # 产品方向：多语言音视频理解工作台
 
-_最后更新：2026-10-21_
+_最后更新：2026-10-22_
+
+本文定义当前产品边界，交付进度与未完成门禁见[路线图](roadmap.md)；研究、验收与历史材料分别列于[文档索引](README.md)。
 
 ## 项目起点与泛化方向
 
@@ -64,13 +66,17 @@ Windows 基础发行通过实机闭环后，日常核心开发与交互质量继
 
 字幕精修先完善人工时间轴、播放定位和基础结构编辑，再扩展生词／句子收藏等学习模块。学习数据与用于识别纠错的词表保持独立，但必须能从收藏项回到原任务、字幕段和播放时间。
 
-## 识别与翻译质量演进（已确定方向，待实现）
+<a id="识别与翻译质量演进已确定方向待实现"></a>
+
+## 识别与翻译质量演进：既有边界与后续验证
+
+数据分层、run／artifact、provenance／revision、语义组与上下文依赖、审查信号和受管本地翻译已分批实现；它们的工程合同与真实模型质量分别验收。本节保留演进方向，不能把每条研究路线视为已进入桌面，也不再将所有数据边界统称为尚未实现。
 
 处理数据统一区分 acoustic chunks、word/token timeline、subtitle cues 与 translation groups，保存来源和必要的版本关系。保持 ASR → 可编辑原文 → translation 两段式主路线；第一阶段源／译 cue 一一对应，翻译模型读取跨 cue 的完整分组上下文。一个任务可有多个完整或局部 ASR run，候选结果经比较和冲突校验后采用，不自动覆盖当前人工工作区。
 
 ASR 可疑信号、人工／自动审查和修复尝试进入正式数据模型。词级时间只保存实际可得精度，不能用插值或旧字幕反推值冒充精确时间。先用现有原视频及少量人工复核参考建立基线，不以大量完整标准字幕作为启动条件。
 
-本地／云端 ASR 与本地／云端翻译独立组合：Whisper 保留本地识别基线，Hy-MT2 已接入本地翻译（日常推荐 1.8B，7B 供资源更充足的设备选择），Gemini 支持需要确切范围授权的局部识别及独立的文本翻译。本地模型的下载和 runtime 生命周期最终由应用管理，普通用户不需要手动编译或维护 llama.cpp。Muse Voice Transcribe、SeamlessStreaming 和 SimulStreaming 作为分别研究的线索；Gemini Live Translate 仅设 E2E experimental 路线，不改变正式资料的两段式结构。
+本地／云端 ASR 与本地／云端翻译独立组合：Whisper 保留本地识别基线，Hy-MT2 已接入本地翻译（日常推荐 1.8B，7B 供资源更充足的设备选择），Gemini 支持需要确切范围授权的局部识别及独立的文本翻译。macOS 已由应用管理本地模型下载和 runtime 生命周期，普通用户不需要手动编译或维护 llama.cpp；Windows runtime 与真实体验仍单独验收。Muse Voice Transcribe、SeamlessStreaming 和 SimulStreaming 作为分别研究的线索；Gemini Live Translate 仅设 E2E experimental 路线，不改变正式资料的两段式结构。
 
 实时 candidate、stable、committed 与离线精修结果分开。模型、算法、部署细节和质量结论按阶段验证，不因记录方向而视为已经实现。详见 [管线演进计划](pipeline-evolution.md) 与 [决策 0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
 
