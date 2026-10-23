@@ -406,6 +406,31 @@ impl JobRunner {
                 self.asr_provider.status().id.as_str(),
                 "whisper.cpp" | "mlx-whisper"
             ) {
+                let fresh = || -> Result<crate::application::CandidateCueSet> {
+                    if self.asr_provider.status().id == "mlx-whisper" {
+                        let mut cues =
+                            segment_timed_units(&response.timed_units, options.source_language)?;
+                        cues.segmentation_policy = format!(
+                            "{}+{}",
+                            cues.segmentation_policy,
+                            crate::application::acoustic_stitch::STITCHING_STRATEGY
+                        );
+                        Ok(cues)
+                    } else {
+                        Ok(crate::application::acoustic_plan::candidate_cues(
+                            &response.timed_units,
+                        ))
+                    }
+                };
+                let expected_policy = if self.asr_provider.status().id == "mlx-whisper" {
+                    format!(
+                        "{}+{}",
+                        crate::application::subtitle_segmentation::LEGACY_SEGMENTATION_POLICY,
+                        crate::application::acoustic_stitch::STITCHING_STRATEGY
+                    )
+                } else {
+                    crate::application::acoustic_stitch::STITCHING_STRATEGY.into()
+                };
                 if cache.is_file()
                     && std::fs::read_to_string(cache.with_extension("sha256"))
                         .ok()
@@ -414,11 +439,15 @@ impl JobRunner {
                             .ok()
                             .as_deref()
                 {
-                    serde_json::from_slice(&std::fs::read(&cache)?)?
-                } else if self.asr_provider.status().id == "mlx-whisper" {
-                    segment_timed_units(&response.timed_units, options.source_language)?
+                    let cached: crate::application::CandidateCueSet =
+                        serde_json::from_slice(&std::fs::read(&cache)?)?;
+                    if cached.segmentation_policy != expected_policy {
+                        fresh()?
+                    } else {
+                        cached
+                    }
                 } else {
-                    crate::application::acoustic_plan::candidate_cues(&response.timed_units)
+                    fresh()?
                 }
             } else {
                 segment_timed_units(&response.timed_units, options.source_language)?
@@ -445,6 +474,31 @@ impl JobRunner {
                 &response.timed_units,
                 run.created_at_unix,
             ));
+            if matches!(
+                self.asr_provider.status().id.as_str(),
+                "whisper.cpp" | "mlx-whisper"
+            ) {
+                let mut seam_signals = crate::application::acoustic_plan::stitching_signals(
+                    job,
+                    &job.id(),
+                    &run.id,
+                    run.created_at_unix,
+                    0,
+                )?;
+                for signal in &mut seam_signals {
+                    signal.cue_ids = cue_set
+                        .cues
+                        .iter()
+                        .filter(|cue| {
+                            cue.timed_unit_ids
+                                .iter()
+                                .any(|id| signal.cue_ids.contains(id))
+                        })
+                        .map(|cue| cue.cue.id.clone())
+                        .collect();
+                }
+                signals.extend(seam_signals);
+            }
             artifacts.write_quality_signals(&signals)?;
             if let Some(database) = &self.database {
                 database

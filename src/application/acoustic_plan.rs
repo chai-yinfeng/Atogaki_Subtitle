@@ -338,19 +338,24 @@ pub fn recovery_summary(job: &Job) -> Result<TaskRecoverySummary> {
     })
 }
 pub fn partial_units(job: &Job) -> Result<Vec<TimedUnit>> {
+    Ok(stitched_units(job, false)?.0)
+}
+
+fn stitched_units(
+    job: &Job,
+    contiguous_only: bool,
+) -> Result<(Vec<TimedUnit>, super::acoustic_stitch::StitchReport)> {
     let root = job.dir.join("asr-checkpoint");
     let plan: AcousticPlan = serde_json::from_slice(&fs::read(root.join("plan.json"))?)?;
-    let mut units = vec![];
+    let mut chunks = vec![];
     for chunk in &plan.chunks {
-        if let Ok(e) = read_evidence(&root, chunk) {
-            units.extend(
-                owned_units(chunk, e.units)
-                    .into_iter()
-                    .map(|unit| (chunk.index, unit)),
-            );
+        match read_evidence(&root, chunk) {
+            Ok(e) => chunks.push((chunk.clone(), e.units)),
+            Err(_) if contiguous_only => break,
+            Err(_) => {}
         }
     }
-    Ok(stitch_units(units))
+    Ok(super::acoustic_stitch::stitch(&chunks))
 }
 
 /// A conservative prefix: contiguous, checked chunks only, with one whole
@@ -359,17 +364,11 @@ pub fn partial_units(job: &Job) -> Result<Vec<TimedUnit>> {
 pub fn stable_prefix(job: &Job) -> Result<Option<(Vec<TimedUnit>, u64)>> {
     let root = job.dir.join("asr-checkpoint");
     let plan: AcousticPlan = serde_json::from_slice(&fs::read(root.join("plan.json"))?)?;
-    let mut units = vec![];
     let mut contiguous = 0;
     for chunk in &plan.chunks {
-        let Ok(evidence) = read_evidence(&root, chunk) else {
+        let Ok(_) = read_evidence(&root, chunk) else {
             break;
         };
-        units.extend(
-            owned_units(chunk, evidence.units)
-                .into_iter()
-                .map(|u| (chunk.index, u)),
-        );
         contiguous += 1;
     }
     if contiguous < 2 {
@@ -377,41 +376,13 @@ pub fn stable_prefix(job: &Job) -> Result<Option<(Vec<TimedUnit>, u64)>> {
     }
     let frontier = plan.chunks[contiguous - 1].read_start_ms;
     Ok(Some((
-        stitch_units(units)
+        stitched_units(job, true)?
+            .0
             .into_iter()
             .filter(|u| u.end_ms.is_some_and(|e| e <= frontier))
             .collect(),
         frontier,
     )))
-}
-fn owned_units(chunk: &AcousticChunk, units: Vec<TimedUnit>) -> Vec<TimedUnit> {
-    units
-        .into_iter()
-        .filter(|u| {
-            u.start_ms.zip(u.end_ms).is_some_and(|(s, e)| {
-                let midpoint = s + (e - s) / 2;
-                midpoint >= chunk.start_ms && midpoint < chunk.end_ms
-            })
-        })
-        .collect()
-}
-fn stitch_units(mut units: Vec<(usize, TimedUnit)>) -> Vec<TimedUnit> {
-    units.sort_by_key(|(_, unit)| unit.start_ms);
-    let mut output: Vec<(usize, TimedUnit)> = vec![];
-    for (chunk, unit) in units {
-        if let Some((previous_chunk, previous)) = output.last() {
-            // Only cross-chunk observations of the same overlapping span are
-            // duplicates. Repetition inside one decoder output is review evidence.
-            if *previous_chunk != chunk
-                && previous.end_ms > unit.start_ms
-                && previous.text.trim() == unit.text.trim()
-            {
-                continue;
-            }
-        }
-        output.push((chunk, unit));
-    }
-    output.into_iter().map(|(_, unit)| unit).collect()
 }
 
 pub async fn configuration_digest(
@@ -605,7 +576,8 @@ pub async fn execute_chunks_with_progress(
             .await?;
         }
     }
-    let timed_units = partial_units(job)?;
+    let (timed_units, report) = stitched_units(job, false)?;
+    write_json(&root.join("stitching-v2.json"), &report)?;
     let raw = root.join("merged-units.json");
     write_json(&raw, &timed_units)?;
     Ok(AsrResponse {
@@ -622,7 +594,7 @@ pub fn candidate_cues(units: &[TimedUnit]) -> crate::application::CandidateCueSe
     // inventing word boundaries by proportional character splitting.
     crate::application::CandidateCueSet {
         schema_version: 1,
-        segmentation_policy: ACOUSTIC_STRATEGY.into(),
+        segmentation_policy: super::acoustic_stitch::STITCHING_STRATEGY.into(),
         cues: units
             .iter()
             .map(|u| crate::application::CandidateCue {
@@ -655,6 +627,43 @@ pub fn boundary_signals(
         }
     }
     signals
+}
+
+/// Attach unresolved seam decisions to the existing ASR review flow. Offset is
+/// used by selected-range runs whose checkpoints have range-local timestamps.
+pub fn stitching_signals(
+    job: &Job,
+    job_id: &str,
+    run_id: &str,
+    created_at_unix: u64,
+    offset_ms: u64,
+) -> Result<Vec<crate::application::QualitySignal>> {
+    let path = job.dir.join("asr-checkpoint/stitching-v2.json");
+    if !path.is_file() {
+        return Ok(vec![]);
+    }
+    let report: super::acoustic_stitch::StitchReport = serde_json::from_slice(&fs::read(path)?)?;
+    Ok(report
+        .seams
+        .into_iter()
+        .filter(|seam| seam.mode == "unresolved_preserved")
+        .map(|seam| crate::application::QualitySignal {
+            schema_version: 1,
+            id: uuid::Uuid::new_v4().to_string(),
+            job_id: job_id.into(),
+            run_id: run_id.into(),
+            kind: crate::application::QualitySignalKind::ManualConcern,
+            severity: crate::application::QualitySignalSeverity::Warning,
+            start_ms: Some(seam.review_start_ms.saturating_add(offset_ms)),
+            end_ms: Some(seam.review_end_ms.saturating_add(offset_ms)),
+            cue_ids: seam.preserved_unit_ids.clone(),
+            detector_version: super::acoustic_stitch::STITCHING_STRATEGY.into(),
+            message: "音频块重叠区无法可靠对齐，已保留两侧识别内容；请复核重复、缺句与时间边界"
+                .into(),
+            evidence: serde_json::to_value(&seam).expect("serializable seam decision"),
+            created_at_unix,
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -696,15 +705,14 @@ mod tests {
             mapped[1].timing_source,
             crate::application::TimingSource::Unknown
         );
-        // Both remaining observations lie in right context too; the next chunk
-        // supplies owned output rather than these being published twice.
-        assert!(owned_units(chunk, mapped).is_empty());
+        // Valid context observations remain available to the seam reconciler;
+        // timestamp mapping must not discard them by their midpoint.
+        assert_eq!(mapped.len(), 2);
         let next = &plan.chunks[72];
         let (mapped, _) =
             map_chunk_timestamps(next, vec![timed_unit(Some(10_020), Some(10_120))]).unwrap();
-        let owned = owned_units(next, mapped);
-        assert_eq!(owned.len(), 1);
-        assert_eq!(owned[0].start_ms, Some(chunk.read_end_ms + 20));
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].start_ms, Some(chunk.read_end_ms + 20));
     }
 
     #[test]
@@ -749,6 +757,30 @@ mod tests {
         sync_output_file(&path).unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"complete decoder output");
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn unresolved_seam_review_keeps_unit_ids_and_selected_range_offset() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-seam-review-{}", uuid::Uuid::new_v4()));
+        let job = Job::create_in(&root).unwrap();
+        let plan = AcousticPlan::new(240000, "audio".into(), "config".into());
+        let mut left = timed_unit(Some(119600), Some(120600));
+        left.text = "left observation".into();
+        let mut right = timed_unit(Some(119500), Some(120800));
+        right.text = "different right observation".into();
+        let (_, report) = super::super::acoustic_stitch::stitch(&[
+            (plan.chunks[0].clone(), vec![left.clone()]),
+            (plan.chunks[1].clone(), vec![right.clone()]),
+        ]);
+        write_json(&job.dir.join("asr-checkpoint/stitching-v2.json"), &report).unwrap();
+        let signals = stitching_signals(&job, "parent-job", "candidate-run", 123, 60000).unwrap();
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].start_ms, Some(175000));
+        assert_eq!(signals[0].end_ms, Some(185000));
+        assert_eq!(signals[0].cue_ids, vec![left.id, right.id]);
+        assert_eq!(signals[0].run_id, "candidate-run");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -976,30 +1008,5 @@ mod tests {
         );
         assert_eq!(fake.calls.load(Ordering::SeqCst), 32);
         fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn overlapping_repetition_inside_one_chunk_is_not_silently_deleted() {
-        let unit = |id: &str, start, end| TimedUnit {
-            id: id.into(),
-            text: "はい".into(),
-            kind: crate::application::TimedUnitKind::ProviderSegment,
-            start_ms: Some(start),
-            end_ms: Some(end),
-            timing_source: crate::application::TimingSource::Model,
-            provider_confidence: None,
-            speaker: None,
-        };
-        assert_eq!(
-            stitch_units(vec![(0, unit("a", 0, 1000)), (0, unit("b", 500, 1500))]).len(),
-            2
-        );
-        assert_eq!(
-            stitch_units(vec![
-                (0, unit("a", 119000, 120500)),
-                (1, unit("b", 119500, 121000))
-            ])
-            .len(),
-            1
-        );
     }
 }

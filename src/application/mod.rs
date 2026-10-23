@@ -1,4 +1,5 @@
 pub mod acoustic_plan;
+pub mod acoustic_stitch;
 pub mod asr_provider;
 pub mod asr_quality;
 pub mod asr_run;

@@ -27,6 +27,7 @@ _更新：2026-10-22_
 | [0057 视图生命周期](decisions/0057-editor-view-lifecycles.md) | 当前段输入和按需工具 mount／dispose，后继原生焦点修正见 0058 |
 | [0058 紧凑布局与跟随](decisions/0058-compact-editor-and-playback-follow.md) | 左视频、右波形与上下双语编辑、底部列表；默认跟随、手动锁定、输入保护与工具焦点 |
 | [0059 Rust 模块边界](decisions/0059-desktop-command-and-repository-modules.md) | IPC 与 repository 渐进拆分，保留方法、SQL、revision 与事务合同 |
+| [0060 音频块接缝](decisions/0060-overlap-alignment-before-acoustic-selection.md) | 重叠区先对齐后选择，无法可靠匹配时保留两侧观测并进入复核 |
 
 ## 验收证据与运行记录
 

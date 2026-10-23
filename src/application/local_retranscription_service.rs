@@ -357,6 +357,17 @@ impl LocalRetranscriptionService {
                 &timed_units,
                 run.created_at_unix,
             ));
+            if metadata.0 == "whisper.cpp" {
+                let root: PathBuf =
+                    serde_json::from_slice(&fs::read(artifacts.dir.join("checkpoint-root.json"))?)?;
+                signals.extend(crate::application::acoustic_plan::stitching_signals(
+                    &Job::open(root)?,
+                    job_id,
+                    &run.id,
+                    run.created_at_unix,
+                    start_ms as u64,
+                )?);
+            }
             artifacts.write_quality_signals(&signals)?;
             self.database
                 .replace_asr_quality_signals(&run.id, &signals)
