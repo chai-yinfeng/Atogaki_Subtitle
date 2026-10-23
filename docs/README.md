@@ -14,6 +14,7 @@ _更新：2026-10-22_
 - [发布流程](releasing.md)、[第三方许可证审计](third-party-license-audit.md)：版本化构建、材料与目标平台边界。
 - [Windows 兼容计划](windows-porting.md)、[Windows 实机清单](windows-testing.md)：平台专属结果与待验收项，不能用 macOS 结果替代。
 - [主题材质清单](theme-material-assets.md)：资产用途、来源与保留信息。
+- [本机产物保留清单](local-artifact-retention.md)：路径、用途、版本与 checksum 等级；明确重复下载和构建缓存的清理边界。
 
 ## 编辑器的有效决策
 
