@@ -138,3 +138,11 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright node scripts
 识别复核里的清理确认改用同一显式焦点边界，原生 AX 现在显示标题、取消与清理产物按钮，点击取消正常返回外层工具。采用后无需手动刷新历史即可看到“已采用，保留来源”，该行不再有清理入口；局部行重绘保留对照按钮焦点，原生确认 Escape 可返回编辑器。原生重复采用与撤销后，40 段 ID／时间／原译文／标记与隔离基线完全一致，integrity_check=ok。
 
 新增控制器测试覆盖采用立即失效旧历史读取、确认等待期间的采用阻止释放；浏览器验证取消／Escape／Tab、背景 inert 恢复、采用状态更新及焦点保留，合计 64 项前端和九组 WebKit 回归通过。类型／生产构建、格式检查通过，隔离包签名有效。截图、AX 与结果在忽略目录 `local-artifacts/editor-cleanup-native/`。原生未确认执行删除，合成 IPC 测试验证了确认后的释放参数与迟到返回；通用应用模态框没有全局替换。
+
+## 2026-10-22：Rust 字幕工作区命令边界
+
+按 [0059](decisions/0059-desktop-command-and-repository-modules.md) 将 11 条命令及 9 个 DTO 从 main 移到 `commands/editor.rs`，main 减少约 300 行，generate_handler 显式使用模块路径。逐条比较搬移前后函数体完全一致；serde 命名与字段不变，没有修改 SQL、连接池、revision 或应用服务。Tauri cargo check、33 项桌面测试（另 4 项需外部环境而忽略）、14 项 LocalWorkspaceService 测试、两套 Cargo fmt 和 diff 检查通过；QA 构建同时完成前端类型／生产构建，没有前端源码变化。
+
+新的独立 identifier QA 包复用原有两份 20 段合成任务，签名检查通过。真实前端使用原 IPC 名称打开详情、保存第三段文字，读取 SQLite 确认只有一段变化，其他 39 段不变；从界面撤回文字，再将起点 6.000→6.100 秒保存，核对正文恢复且邻段不动，然后撤销时间。定位暂停到 6.500 秒，Cut 得到 A 21＋B 20 段，Join 回 A 20 段；依次撤销 Join 和 Cut 后，40 段逐字段与基线相同，integrity_check=ok、foreign_key_check 为空。不是只用 mock IPC 验证宏路径。
+
+构建身份、文字／时间落库快照、Cut 快照、撤销后 AX／截图和最终核验在忽略目录 `local-artifacts/editor-rust-commands/`。QA 已正常退出，未重装正式 App，未调用真实 ASR／翻译。本次原生专项覆盖上述编辑调用，未逐项重测所有插入／删除／播放位置路径；既有函数体与服务测试继续作为机械搬移回归证据。repository 尚未拆分，Windows、原生滚动与持续内存等门禁没有因此变为通过。

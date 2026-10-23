@@ -1,6 +1,6 @@
 # 架构与目录约定
 
-_最后更新：2026-10-21_
+_最后更新：2026-10-22_
 
 ## 仓库组织
 
@@ -19,6 +19,7 @@ Atogaki_Sub/
 ├── migrations/                # 现有 Postgres 实验性迁移；不作为桌面 MVP 依赖
 ├── migrations/sqlite/         # 桌面本地 SQLite 迁移
 ├── src-tauri/                 # Tauri 桌面壳；依赖根 Rust library
+│   ├── src/commands/          # 按用例组织的 IPC 命令与 wire DTO；渐进抽取
 │   ├── binaries/              # 构建时生成、按 target triple 命名的 sidecar
 │   └── third-party/           # sidecar 版本、构建清单与许可证
 ├── scripts/                   # 固定版本 sidecar 构建与分发校验
@@ -39,6 +40,8 @@ Atogaki_Sub/
 ```
 
 UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `application` 中的用例并订阅任务状态。当前 CLI 同样是该应用层的一个适配器。
+
+Tauri 工作区命令已进入 `src-tauri/src/commands/editor.rs`，main 保留应用构造、共享状态与显式注册；命令只借用原服务，不持有另一份工作区或事务。其余命令与 SQLite repository 继续按 [0059](decisions/0059-desktop-command-and-repository-modules.md) 逐条抽取，不能把第一条边界视为整个 Rust 模块拆分已完成。
 
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 

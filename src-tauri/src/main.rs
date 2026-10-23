@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod commands;
 mod credential_store;
 mod desktop_settings;
 mod dictionary_download;
@@ -37,11 +38,9 @@ use atogaki_subtitle::{
         local_db::{
             LocalAsrQualitySignalRecord, LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord,
             LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail,
-            LocalRenderJobRecord, LocalSubtitleSegmentRecord, LocalTranslationRunRecord,
-            NewLocalLearningSelection,
+            LocalRenderJobRecord, LocalSubtitleSegmentRecord, NewLocalLearningSelection,
         },
         media::MediaCapabilities,
-        waveform::WaveformWindow,
     },
 };
 use media_server::PlaybackMediaRegistry;
@@ -420,73 +419,6 @@ struct SaveGlossaryRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UpdateSubtitleRequest {
-    job_id: String,
-    segment_id: String,
-    source_text: String,
-    translated_text: Option<String>,
-    start_ms: i64,
-    end_ms: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EditSubtitleBlockRequest {
-    job_id: String,
-    before_segments: Vec<LocalSubtitleSegmentRecord>,
-    remove_id: Option<String>,
-    insertion: Option<LocalSubtitleSegmentRecord>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SplitSubtitleRequest {
-    job_id: String,
-    segment_id: String,
-    boundary_ms: i64,
-    left_source_text: String,
-    right_source_text: String,
-    left_translated_text: Option<String>,
-    right_translated_text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MergeSubtitlesRequest {
-    job_id: String,
-    left_segment_id: String,
-    right_segment_id: String,
-    source_text: String,
-    translated_text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RestoreSubtitleStructureRequest {
-    job_id: String,
-    before_segments: Vec<LocalSubtitleSegmentRecord>,
-    after_segments: Vec<LocalSubtitleSegmentRecord>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SaveSubtitleTimingRequest {
-    job_id: String,
-    before_segments: Vec<LocalSubtitleSegmentRecord>,
-    after_segments: Vec<LocalSubtitleSegmentRecord>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WaveformWindowRequest {
-    job_id: String,
-    start_ms: i64,
-    end_ms: i64,
-    point_count: usize,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct PreviewRetranscriptionRequest {
     job_id: String,
     start_ms: i64,
@@ -563,13 +495,6 @@ struct PreviewSubtitleStylesRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SavePlaybackPositionRequest {
-    job_id: String,
-    position_ms: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct SaveLearningSelectionRequest {
     job_id: String,
     segment_id: String,
@@ -598,16 +523,6 @@ struct UseLearningDefinitionRequest {
 struct VideoOutputSelection {
     path: String,
     already_exists: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct DesktopJobDetail {
-    translation_context_stale_ids: Vec<String>,
-    job: DesktopTimedJob,
-    segments: Vec<LocalSubtitleSegmentRecord>,
-    translation_runs: Vec<LocalTranslationRunRecord>,
-    playback_path: Option<String>,
-    audio_fallback_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1300,160 +1215,6 @@ async fn apply_glossary_to_workspace(
 }
 
 #[tauri::command]
-async fn get_job_detail(
-    state: State<'_, DesktopState>,
-    media_registry: State<'_, PlaybackMediaRegistry>,
-    job_id: String,
-) -> Result<DesktopJobDetail, String> {
-    // Reconcile only newer output for the task being opened.
-    state
-        .task_service
-        .refresh_persisted_job(&job_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    let detail = state
-        .workspace_service
-        .get_job(&job_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    let playback_path = register_playback_file(&media_registry, detail.job.input_path.as_deref())?;
-    let fallback = PathBuf::from(&detail.job.storage_dir).join("audio.wav");
-    let audio_fallback_path = register_playback_file(&media_registry, fallback.to_str())?;
-
-    Ok(DesktopJobDetail {
-        translation_context_stale_ids: detail
-            .cue_provenance
-            .iter()
-            .filter(|cue| cue.translation_dependency_stale)
-            .map(|cue| cue.segment_id.clone())
-            .collect(),
-        job: DesktopTimedJob::new(detail.job),
-        segments: detail.segments,
-        translation_runs: detail.translation_runs,
-        playback_path,
-        audio_fallback_path,
-    })
-}
-
-#[tauri::command]
-async fn update_subtitle(
-    state: State<'_, DesktopState>,
-    request: UpdateSubtitleRequest,
-) -> Result<LocalSubtitleSegmentRecord, String> {
-    state
-        .workspace_service
-        .update_subtitle(
-            &request.job_id,
-            &request.segment_id,
-            request.source_text,
-            request.translated_text,
-            request.start_ms,
-            request.end_ms,
-        )
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn restore_subtitle(
-    state: State<'_, DesktopState>,
-    snapshot: LocalSubtitleSegmentRecord,
-) -> Result<LocalSubtitleSegmentRecord, String> {
-    state
-        .workspace_service
-        .restore_subtitle(&snapshot)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn edit_subtitle_block(
-    state: State<'_, DesktopState>,
-    request: EditSubtitleBlockRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
-    state
-        .workspace_service
-        .edit_subtitle_block(
-            &request.job_id,
-            &request.before_segments,
-            request.remove_id.as_deref(),
-            request.insertion,
-        )
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn split_subtitle(
-    state: State<'_, DesktopState>,
-    request: SplitSubtitleRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
-    state
-        .workspace_service
-        .split_subtitle(
-            &request.job_id,
-            &request.segment_id,
-            request.boundary_ms,
-            request.left_source_text,
-            request.right_source_text,
-            request.left_translated_text,
-            request.right_translated_text,
-        )
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn merge_subtitles(
-    state: State<'_, DesktopState>,
-    request: MergeSubtitlesRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
-    state
-        .workspace_service
-        .merge_subtitles(
-            &request.job_id,
-            &request.left_segment_id,
-            &request.right_segment_id,
-            request.source_text,
-            request.translated_text,
-        )
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn restore_subtitle_structure(
-    state: State<'_, DesktopState>,
-    request: RestoreSubtitleStructureRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
-    state
-        .workspace_service
-        .restore_subtitle_structure(
-            &request.job_id,
-            &request.before_segments,
-            &request.after_segments,
-        )
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn save_subtitle_timing(
-    state: State<'_, DesktopState>,
-    request: SaveSubtitleTimingRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
-    state
-        .workspace_service
-        .save_subtitle_timing(
-            &request.job_id,
-            &request.before_segments,
-            &request.after_segments,
-        )
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn translation_status(
     state: State<'_, DesktopState>,
     job_id: Option<String>,
@@ -1524,47 +1285,6 @@ async fn preview_workspace_subtitle_export(
         )
         .await
         .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn get_playback_position(
-    state: State<'_, DesktopState>,
-    job_id: String,
-) -> Result<i64, String> {
-    state
-        .workspace_service
-        .playback_position(&job_id)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn save_playback_position(
-    state: State<'_, DesktopState>,
-    request: SavePlaybackPositionRequest,
-) -> Result<(), String> {
-    state
-        .workspace_service
-        .save_playback_position(&request.job_id, request.position_ms)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn get_waveform_window(
-    state: State<'_, DesktopState>,
-    request: WaveformWindowRequest,
-) -> Result<WaveformWindow, String> {
-    state
-        .workspace_service
-        .waveform_window(
-            &request.job_id,
-            request.start_ms,
-            request.end_ms,
-            request.point_count,
-        )
-        .await
-        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -2487,16 +2207,6 @@ async fn open_external_url(url: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-fn register_playback_file(
-    registry: &PlaybackMediaRegistry,
-    path: Option<&str>,
-) -> Result<Option<String>, String> {
-    let Some(path) = path.map(PathBuf::from).filter(|path| path.is_file()) else {
-        return Ok(None);
-    };
-    registry.register(&path).map(Some)
-}
-
 fn allow_asset_file(app: &AppHandle, path: Option<&str>) -> Result<Option<String>, String> {
     let Some(path) = path.map(PathBuf::from).filter(|path| path.is_file()) else {
         return Ok(None);
@@ -2757,10 +2467,10 @@ fn main() {
             export_workspace_subtitles,
             get_glossary,
             get_job_glossary_snapshot,
-            get_job_detail,
-            get_playback_position,
+            commands::editor::get_job_detail,
+            commands::editor::get_playback_position,
             get_subtitle_style_state,
-            get_waveform_window,
+            commands::editor::get_waveform_window,
             preview_retranscription,
             reopen_asr_candidate,
             release_asr_candidate,
@@ -2818,7 +2528,7 @@ fn main() {
             save_glossary,
             save_learning_selection,
             save_asr_review_decision,
-            save_playback_position,
+            commands::editor::save_playback_position,
             save_subtitle_styles,
             select_model,
             submit_transcription,
@@ -2838,13 +2548,13 @@ fn main() {
             update_subtitle_overlay,
             update_learning_item_meaning,
             use_learning_dictionary_definition,
-            update_subtitle,
-            restore_subtitle,
-            split_subtitle,
-            edit_subtitle_block,
-            merge_subtitles,
-            restore_subtitle_structure,
-            save_subtitle_timing
+            commands::editor::update_subtitle,
+            commands::editor::restore_subtitle,
+            commands::editor::split_subtitle,
+            commands::editor::edit_subtitle_block,
+            commands::editor::merge_subtitles,
+            commands::editor::restore_subtitle_structure,
+            commands::editor::save_subtitle_timing
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Atogaki desktop application");
