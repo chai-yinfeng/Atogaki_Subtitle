@@ -20,27 +20,20 @@ use atogaki_subtitle::{
     application::{
         LocalBatchTranslationResult, LocalGlossaryApplyResult, LocalGlossaryPreview,
         LocalGlossaryPromptPreview, LocalGlossaryService, LocalGlossaryTermDraft,
-        LocalLearningService, LocalRenderEstimate, LocalRenderQuality, LocalRenderRequest,
-        LocalRenderService, LocalRetranscriptionPreview, LocalRetranscriptionService,
-        LocalSubtitleExport, LocalSubtitleExportArtifact, LocalSubtitleExportPlan,
-        LocalTaskService, LocalTranslationStatus, LocalWorkspaceService,
-        MutableTranslationProvider, RepairAttempt, RepairAttemptStatus, ReviewDecision,
-        ReviewDecisionKind, SubtitleFontFamily, SubtitleFontService, SubtitleStylePreview,
-        SubtitleStyleService, SubtitleStyleState, TranscriptionOptions,
-        UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
+        LocalLearningService, LocalRenderService, LocalRetranscriptionPreview,
+        LocalRetranscriptionService, LocalTaskService, LocalTranslationStatus,
+        LocalWorkspaceService, MutableTranslationProvider, RepairAttempt, RepairAttemptStatus,
+        ReviewDecision, ReviewDecisionKind, SubtitleFontService, SubtitleStyleService,
+        TranscriptionOptions, UnconfiguredTranslationProvider, job_spec::TranscribeSpec,
     },
-    domain::{
-        LanguageCode,
-        subtitle::{SubtitleStyleSet, SubtitleTrack},
-    },
+    domain::LanguageCode,
     infrastructure::{
         config::{AppConfig, desktop_ffmpeg_path, desktop_whisper_cli_path},
         local_db::{
             LocalAsrQualitySignalRecord, LocalDatabase, LocalGlossaryDetail, LocalGlossaryRecord,
             LocalJobRecord, LocalJobTranslationStats, LocalLearningItemDetail,
-            LocalRenderJobRecord, LocalSubtitleSegmentRecord, NewLocalLearningSelection,
+            LocalSubtitleSegmentRecord, NewLocalLearningSelection,
         },
-        media::MediaCapabilities,
     },
 };
 use media_server::PlaybackMediaRegistry;
@@ -337,32 +330,6 @@ fn set_subtitle_overlay_payload(
     Ok(())
 }
 
-#[tauri::command]
-async fn media_capabilities(state: State<'_, DesktopState>) -> Result<MediaCapabilities, String> {
-    state
-        .render_service
-        .capabilities()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_subtitle_fonts(state: State<'_, DesktopState>) -> Vec<SubtitleFontFamily> {
-    state.subtitle_style_service.fonts().to_vec()
-}
-
-#[tauri::command]
-async fn get_subtitle_style_state(
-    state: State<'_, DesktopState>,
-    job_id: String,
-) -> Result<SubtitleStyleState, String> {
-    state
-        .subtitle_style_service
-        .get(&job_id)
-        .await
-        .map_err(|error| error.to_string())
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubmitTranscriptionRequest {
@@ -452,49 +419,6 @@ struct SaveAsrReviewDecisionRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SubtitleExportRequest {
-    job_id: String,
-    output_directory: String,
-    overwrite_existing: bool,
-    artifacts: Vec<LocalSubtitleExportArtifact>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SubtitleExportPlanRequest {
-    job_id: String,
-    output_directory: String,
-    artifacts: Vec<LocalSubtitleExportArtifact>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct VideoRenderRequest {
-    source_job_id: String,
-    output_path: String,
-    subtitle_track: SubtitleTrack,
-    quality: LocalRenderQuality,
-    overwrite_existing: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SaveSubtitleStylesRequest {
-    job_id: String,
-    styles: SubtitleStyleSet,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PreviewSubtitleStylesRequest {
-    job_id: String,
-    styles: SubtitleStyleSet,
-    subtitle_track: SubtitleTrack,
-    timestamp_ms: u64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct SaveLearningSelectionRequest {
     job_id: String,
     segment_id: String,
@@ -516,13 +440,6 @@ struct UseLearningDefinitionRequest {
     item_id: String,
     provider_id: String,
     definition: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct VideoOutputSelection {
-    path: String,
-    already_exists: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1255,39 +1172,6 @@ async fn translate_all_subtitles(
 }
 
 #[tauri::command]
-async fn export_workspace_subtitles(
-    state: State<'_, DesktopState>,
-    request: SubtitleExportRequest,
-) -> Result<LocalSubtitleExport, String> {
-    state
-        .workspace_service
-        .export_subtitles_to(
-            &request.job_id,
-            &PathBuf::from(request.output_directory),
-            request.overwrite_existing,
-            &request.artifacts,
-        )
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn preview_workspace_subtitle_export(
-    state: State<'_, DesktopState>,
-    request: SubtitleExportPlanRequest,
-) -> Result<LocalSubtitleExportPlan, String> {
-    state
-        .workspace_service
-        .subtitle_export_plan(
-            &request.job_id,
-            &PathBuf::from(request.output_directory),
-            &request.artifacts,
-        )
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn asr_candidate_progress(
     state: State<'_, DesktopState>,
     job_id: String,
@@ -1543,92 +1427,6 @@ async fn confirm_retranscription(
 }
 
 #[tauri::command]
-async fn save_subtitle_styles(
-    state: State<'_, DesktopState>,
-    request: SaveSubtitleStylesRequest,
-) -> Result<SubtitleStyleState, String> {
-    state
-        .subtitle_style_service
-        .save(&request.job_id, &request.styles)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn preview_subtitle_styles(
-    app: AppHandle,
-    state: State<'_, DesktopState>,
-    request: PreviewSubtitleStylesRequest,
-) -> Result<SubtitleStylePreview, String> {
-    let preview = state
-        .subtitle_style_service
-        .preview(
-            &request.job_id,
-            &request.styles,
-            request.subtitle_track,
-            request.timestamp_ms,
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    allow_asset_file(&app, Some(&preview.output_path))?;
-    Ok(preview)
-}
-
-#[tauri::command]
-async fn submit_video_render(
-    state: State<'_, DesktopState>,
-    request: VideoRenderRequest,
-) -> Result<LocalRenderJobRecord, String> {
-    state
-        .render_service
-        .submit(LocalRenderRequest {
-            source_job_id: request.source_job_id,
-            output_path: PathBuf::from(request.output_path),
-            subtitle_track: request.subtitle_track,
-            quality: request.quality,
-            overwrite_existing: request.overwrite_existing,
-        })
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn video_render_estimates(
-    state: State<'_, DesktopState>,
-    source_job_id: String,
-) -> Result<Vec<LocalRenderEstimate>, String> {
-    state
-        .render_service
-        .estimates(&source_job_id)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn list_video_renders(
-    state: State<'_, DesktopState>,
-    source_job_id: String,
-) -> Result<Vec<LocalRenderJobRecord>, String> {
-    state
-        .render_service
-        .list(&source_job_id)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn cancel_video_render(
-    state: State<'_, DesktopState>,
-    render_id: String,
-) -> Result<LocalRenderJobRecord, String> {
-    state
-        .render_service
-        .cancel(&render_id)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn pick_media_files(app: AppHandle) -> Result<Vec<String>, String> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     app.dialog()
@@ -1749,85 +1547,6 @@ async fn pick_hy_mt2_model_file(app: AppHandle) -> Result<Option<String>, String
         model_picker_directory(&app),
     )
     .await
-}
-
-#[tauri::command]
-async fn pick_subtitle_export_directory(
-    app: AppHandle,
-    initial_directory: Option<String>,
-) -> Result<Option<String>, String> {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    let mut picker = app.dialog().file().set_title("选择字幕导出目录");
-    let initial_directory = initial_directory
-        .map(PathBuf::from)
-        .filter(|path| path.is_dir())
-        .or_else(|| app.path().download_dir().ok().filter(|path| path.is_dir()));
-    if let Some(directory) = initial_directory {
-        picker = picker.set_directory(directory);
-    }
-    picker.pick_folder(move |selection| {
-        let _ = sender.send(selection);
-    });
-
-    receiver
-        .await
-        .map_err(|_| "目录选择器意外关闭，请重试。".to_owned())?
-        .map(|selection| {
-            selection
-                .into_path()
-                .map(|path| path.display().to_string())
-                .map_err(|error| format!("无法读取所选目录：{error}"))
-        })
-        .transpose()
-}
-
-#[tauri::command]
-async fn pick_video_output_file(
-    app: AppHandle,
-    initial_directory: Option<String>,
-    suggested_name: String,
-) -> Result<Option<VideoOutputSelection>, String> {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    let mut picker = app
-        .dialog()
-        .file()
-        .set_title("导出带字幕视频")
-        .add_filter("MP4 视频", &["mp4"])
-        .set_file_name(suggested_name);
-    let initial_directory = initial_directory
-        .map(PathBuf::from)
-        .filter(|path| path.is_dir())
-        .or_else(|| app.path().download_dir().ok().filter(|path| path.is_dir()));
-    if let Some(directory) = initial_directory {
-        picker = picker.set_directory(directory);
-    }
-    picker.save_file(move |selection| {
-        let _ = sender.send(selection);
-    });
-
-    receiver
-        .await
-        .map_err(|_| "视频保存面板意外关闭，请重试。".to_owned())?
-        .map(|selection| {
-            selection
-                .into_path()
-                .map(|path| VideoOutputSelection {
-                    already_exists: path.exists(),
-                    path: path.display().to_string(),
-                })
-                .map_err(|error| format!("无法读取视频输出路径：{error}"))
-        })
-        .transpose()
-}
-
-#[tauri::command]
-fn reveal_exported_subtitle(path: String) -> Result<(), String> {
-    reveal_in_file_manager(path, "导出文件")
-}
-
-#[tauri::command]
-fn reveal_rendered_video(path: String) -> Result<(), String> {
-    reveal_in_file_manager(path, "烧录视频")
 }
 
 fn reveal_in_file_manager(path: String, label: &str) -> Result<(), String> {
@@ -2464,12 +2183,12 @@ fn main() {
             delete_job,
             delete_learning_item,
             delete_glossary,
-            export_workspace_subtitles,
+            commands::subtitle_export::export_workspace_subtitles,
             get_glossary,
             get_job_glossary_snapshot,
             commands::editor::get_job_detail,
             commands::editor::get_playback_position,
-            get_subtitle_style_state,
+            commands::subtitle_style::get_subtitle_style_state,
             commands::editor::get_waveform_window,
             preview_retranscription,
             reopen_asr_candidate,
@@ -2487,12 +2206,12 @@ fn main() {
             list_jobs,
             list_job_summaries,
             list_learning_items,
-            list_subtitle_fonts,
+            commands::subtitle_style::list_subtitle_fonts,
             lookup_learning_dictionary,
-            list_video_renders,
+            commands::video_render::list_video_renders,
             model_catalog,
             model_download_states,
-            media_capabilities,
+            commands::video_render::media_capabilities,
             pick_media_file,
             pick_media_files,
             export_learning_anki,
@@ -2500,19 +2219,19 @@ fn main() {
             save_task_preset,
             pick_model_file,
             pick_hy_mt2_model_file,
-            pick_subtitle_export_directory,
-            pick_video_output_file,
+            commands::subtitle_export::pick_subtitle_export_directory,
+            commands::video_render::pick_video_output_file,
             pick_vad_model_file,
             apply_glossary_to_workspace,
             current_subtitle_overlay,
             hide_subtitle_overlay,
             preview_glossary_application,
             preview_glossary_prompt,
-            preview_subtitle_styles,
-            preview_workspace_subtitle_export,
+            commands::subtitle_style::preview_subtitle_styles,
+            commands::subtitle_export::preview_workspace_subtitle_export,
             recognition_defaults,
-            reveal_exported_subtitle,
-            reveal_rendered_video,
+            commands::subtitle_export::reveal_exported_subtitle,
+            commands::video_render::reveal_rendered_video,
             relink_job_media,
             rename_job,
             reorder_jobs,
@@ -2529,7 +2248,7 @@ fn main() {
             save_learning_selection,
             save_asr_review_decision,
             commands::editor::save_playback_position,
-            save_subtitle_styles,
+            commands::subtitle_style::save_subtitle_styles,
             select_model,
             submit_transcription,
             translation_profiles,
@@ -2537,10 +2256,10 @@ fn main() {
             start_model_download,
             start_dictionary_download,
             test_network_connection,
-            submit_video_render,
-            video_render_estimates,
+            commands::video_render::submit_video_render,
+            commands::video_render::video_render_estimates,
             open_subtitle_overlay,
-            cancel_video_render,
+            commands::video_render::cancel_video_render,
             translate_all_subtitles,
             uninstall_model,
             translate_subtitle,

@@ -227,3 +227,18 @@ WebKit 烧录专项从按钮验证：工具打开前不读历史，质量切换�
 退出后全部 40 段逐字段与测试前一致，全部样式记录不变，临时过期标记已恢复，integrity_check=ok、foreign_key_check 为空。仅新增一条真实 done 烧录记录与其派生成品；保存面板取消前后成品 SHA-256 相同。构建 SHA、完成 AX／截图、冻结记录、ffprobe、抽帧与恢复核验在忽略目录 `local-artifacts/editor-render-view-native/`。使用显式本机 FFmpeg／ffprobe 覆盖 QA 的 sidecar 配置，本轮不是完整发行包 sidecar 验收，未替换正式 App。
 
 本节取代前一节烧录视图／模态尚未迁移项，保留真实取消、覆盖、系统面板、通用确认、Windows 与既有滚动 P95／稳定内存／锁定触发门禁。Rust 服务代码未变，本轮未重跑 Rust 全量测试。
+
+
+## 2026-10-23：Rust 产物命令边界
+
+按 [0059](decisions/0059-desktop-command-and-repository-modules.md) 将 15 条命令及 6 个 DTO 移到 subtitle_export／subtitle_style／video_render 三个 commands 模块，main 减少约 280 行，注册表使用显式模块路径。逐项核对函数体相同、DTO 字段／serde 声明相同、注册各一条；共享 DesktopState 和平台 helper，没有复制服务、修改 Rust 业务函数或数据库事务。
+
+Tauri cargo check 通过，共享库 149 项通过／5 项环境依赖忽略，桌面 33 项通过／4 项环境依赖忽略，两套 fmt 与 diff 检查通过。QA 打包执行前端类型／生产构建；前端源码未变，本轮未重跑 WebKit 或 npm test，上一前端基线仍为 102 项测试，不把不同范围的验证合并成新全平台结论。
+
+新独立 identifier 包复用原 QA 目录和 40 段合成资料，签名检查通过。原生调用新模块成功读取字体／样式并生成真实 libass 预览；烧录能力、640×360 规格及历史正常，提交后 VideoToolbox／音频 copy 完成。实际记录与 AX 均为 bilingual，20 段原文＋13 段已有译文对应冻结 ASS 33 条；菜单点击未改变选值，不能将这次操作计为 source 切轨通过。输出 ffprobe 为 60 秒、640×360、H.264＋AAC。
+
+原文 SRT 通过新目录、计划与导出命令实际写出，20 段编号、时间和完整原文逐段匹配 SQLite。调用新字幕定位命令后，Finder 的 editor-output-commands 窗口确实选中该 SRT，随后只关闭这个 QA 窗口。Finder AX 观察调用本身耗时约 260 秒，本轮未测量应用定位耗时。第二次打开同一目录 Open 再次禁用，取消后 SRT 哈希未变；原生覆盖仍未到达。
+
+QA 正常退出，临时清除的 A 过期标记已恢复，40 段全部字段与基线相同，全部样式记录不变，integrity_check=ok、foreign_key_check 为空；仅增加一条真实完成烧录记录、派生视频与导出文件。证据在忽略目录 `local-artifacts/editor-output-commands/`：移动清单／等价核验、构建 SHA、原生 AX、ffprobe 与恢复核验。没有复制数据库、增加 App 副本或替换正式 App；使用本机 FFmpeg／ffprobe 的 QA 覆盖，不是完整发行 sidecar 验收。
+
+本次局部原生操作不代表移入的所有保存／取消／视频输出／定位命令逐项实测。窗口验收仍保留覆盖确认、运行中取消、目录面板、原生选值复核和 Windows，性能门禁不变。

@@ -41,7 +41,7 @@ Atogaki_Sub/
 
 UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `application` 中的用例并订阅任务状态。当前 CLI 同样是该应用层的一个适配器。
 
-Tauri 工作区命令已进入 `src-tauri/src/commands/editor.rs`，main 保留应用构造、共享状态与显式注册；命令只借用原服务，不持有另一份工作区或事务。其余命令与 SQLite repository 继续按 [0059](decisions/0059-desktop-command-and-repository-modules.md) 逐条抽取，不能把第一条边界视为整个 Rust 模块拆分已完成。
+Tauri 工作区命令已进入 `src-tauri/src/commands/editor.rs`，字幕文件、样式／字体和视频烧录分别进入同目录的 `subtitle_export.rs`、`subtitle_style.rs`、`video_render.rs`，合计 26 条；main 保留应用构造、共享状态与显式注册；命令只借用原服务，不持有另一份工作区或事务。其余命令与 SQLite repository 继续按 [0059](decisions/0059-desktop-command-and-repository-modules.md) 逐条抽取，不能把第一条边界视为整个 Rust 模块拆分已完成。
 
 `LocalDatabase` 的文字、时间与结构编辑进入 `infrastructure/local_db/subtitle_edits.rs`；父模块和该子模块仍使用同一连接池，候选采用继续复用同一结构事务辅助函数。数据记录、迁移与公开方法路径不变，辅助函数只在 repository 内可见；模块边界不能切开现有原子提交。
 
