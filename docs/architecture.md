@@ -45,6 +45,8 @@ Tauri 工作区命令已进入 `src-tauri/src/commands/editor.rs`，main 保留�
 
 `LocalDatabase` 的文字、时间与结构编辑进入 `infrastructure/local_db/subtitle_edits.rs`；父模块和该子模块仍使用同一连接池，候选采用继续复用同一结构事务辅助函数。数据记录、迁移与公开方法路径不变，辅助函数只在 repository 内可见；模块边界不能切开现有原子提交。
 
+`subtitle_publication.rs` 负责 ASR 来源恢复、快照发布和候选范围采用；`subtitle_queries.rs` 负责字幕只读查询与事务一致的 revision／字幕快照。任务元数据同步将原事务借给发布模块，候选采用也继续共用编辑模块的结构持久化函数，没有独立提交或复制证据保留逻辑。
+
 `LocalTaskService` 是桌面端长任务的第一层服务：提交时立即创建带 `queued` 状态的 UUID 任务目录，后台 worker 再调用 `JobRunner`。UI 通过 `JobSnapshot` 轮询持久化状态。默认仅启动一个 worker，避免本地 ASR 模型争抢 CPU、内存或 GPU；多 worker 只能由显式配置启用。
 
 当前 Tauri 壳共享一个 `LocalDatabase` 实例，并注册 `LocalTaskService`、`LocalWorkspaceService`、`LocalLearningService`、`SubtitleStyleService` 与 `LocalRenderService`：任务服务负责创建、排队、同步识别任务和持久化工作台顺序；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；学习服务负责收藏字幕选区、管理来源例句、简明译义与多 provider 结果；字幕样式服务通过 `SubtitleFontService` 枚举系统字体、检查任务文字覆盖，并调用与正式输出相同的 FFmpeg/libass 路径生成预览；烧录服务负责冻结 SQLite 字幕与样式快照、持久化输出任务、进度与取消。识别和烧录各使用一个本地 worker，状态互不污染。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，原媒体和任务音频只以进程内不透明令牌登记到 `atogaki-media` 协议；协议正确响应单段／多段 HTTP Range，避免长视频通过通用 asset protocol 时出现画面可播但音轨未继续取流的问题，前端仍不能任意读取文件系统。

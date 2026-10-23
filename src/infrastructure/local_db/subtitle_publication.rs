@@ -108,6 +108,9 @@ impl LocalDatabase {
         Ok(())
     }
 
+    /// Replaces exactly the subtitle blocks fully contained in a user-selected
+    /// range. The expected snapshot makes preview confirmation fail safely if
+    /// another edit happened while the preview was open.
     pub async fn replace_segment_range(
         &self,
         job_id: &str,

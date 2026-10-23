@@ -70,6 +70,7 @@ _最后更新：2026-10-22_
 - [x] Rust 命令第一条边界：11 条工作区命令和 9 个 wire DTO 移到 `commands/editor.rs`，main 显式注册模块路径；函数体、IPC 名称与请求字段保持一致。33 项 Tauri、14 项共享工作区测试与编译／格式检查通过；隔离原生文字保存／撤回、时间保存／撤销、Cut／Join／双撤销实际落库并恢复 40 段完整快照，见 [0059](decisions/0059-desktop-command-and-repository-modules.md) 与窗口验收。repository 留待独立提交，正式 App 未覆盖。
 - [x] Repository 第一条边界：7 个人工字幕编辑方法与 5 个结构事务辅助函数抽到 `local_db/subtitle_edits.rs`，候选仍复用同一事务内实现，函数体及 SQL 不变。新增部分写入后故障回归，确认 Cut 与候选范围替换完整回滚字幕、revision、来源、依赖和学习引用；共享库 149 通过／5 忽略、Tauri 33 通过／4 忽略。其余查询／来源／任务等边界继续分批处理，未重装 App，见 0059。
 - [x] Repository 快照／采用边界：6 个方法及 2 个辅助函数进入 `subtitle_publication.rs`，任务同步借用原事务，候选替换和采用证据仍原子提交。函数体与公开方法合同不变；完整共享库 149 通过／5 忽略、桌面 33 通过／4 忽略，覆盖 revision 冲突、来源保护、历史重叠与写入失败回滚，见 0059。未重装 App。
+- [x] Repository 只读边界：5 个字幕查询方法进入 `subtitle_queries.rs`，revision 与字幕仍在同一事务读取，排序／错误／方法体不变。完整共享库 149 通过／5 忽略及 Tauri 编译检查通过；未新增缓存或数据库连接，见 0059。
 - [x] 用户授权的旧安装备份清理：记录版本、路径与校验和后移除 21 份旧 App，合并 3 份完全相同的 SQLite 副本为可追溯链接，减少约 1.93 GiB 副本内容；保留安装前 App、0.1.1 稳定回退与全部独立恢复点，见 [本机安装记录](local-editor-installation.md)。
 - [x] [Web Serve／Postgres 退役影响报告](legacy-web-retirement-impact.md)：核对 CLI／HTTP／公开 library／迁移兼容面和实际桌面依赖树；保留 SQLite、loopback 媒体服务与所有迁移。非默认 feature 或移除方案留待讨论，本轮没有退役代码或数据库。
 - [ ] 文档索引与历史归档及其余产物保留清单。未采用候选、正式数据库与来源证据不因 UI 整理而删除。
