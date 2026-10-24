@@ -1,3 +1,6 @@
+import type { DesktopSettings, TranslationProfileSummary } from "./desktop-settings-types";
+import { createDesktopSettingsSave, createVersionedDirtyFields } from "./desktop-settings-save";
+import { createDesktopSettingsBackend } from "./desktop-settings-backend";
 import { mountVideoRenderView } from "./video-render-view";
 import { createVideoRenderSession } from "./video-render-session";
 import { createVideoRenderBackend } from "./video-render-backend";
@@ -253,30 +256,6 @@ type TranslationRun = {
   output_tokens: number | null;
   plan_json?: string | null;
   completed_at_unix: number;
-};
-
-type DesktopSettings = {
-  onboardingCompleted: boolean;
-  needsOnboarding: boolean;
-  whisperModelPath: string | null;
-  whisperModelReady: boolean;
-  vadModelPath: string | null;
-  vadModelReady: boolean;
-  hyMt2ModelPath: string | null;
-  hyMt2ModelReady: boolean;
-  localTranslationRuntimeReady: boolean;
-  translationProviderId: "none" | "deepl" | "deepseek" | "openai-compatible" | "hy-mt2-local";
-  translationModel: string | null;
-  translationBaseUrl: string | null;
-  translationStyleInstruction: string;
-  translationApiKeyConfigured: boolean;
-  translationApiKeySource: "system" | "environment" | "saved" | "deferred" | "local" | null;
-  credentialStore: string;
-  credentialError: string | null;
-  modelsDirectory: string;
-  networkProxyMode: "environment" | "direct" | "custom";
-  networkProxyUrl: string | null;
-  modelMirrorUrl: string | null;
 };
 
 type TranslationCredentialCheck = {
@@ -913,7 +892,8 @@ let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
 let dictionaryDownloadPoll: number | null = null;
-const settingsDirtyFields = new Set<string>();
+const settingsDirtyFields = createVersionedDirtyFields();
+let settingsVisit = 0, settingsLoadGeneration = 0;
 let learningItems: LearningItemDetail[] = [];
 let activeLearningLanguage: LearningLanguage = readLearningLanguagePreference();
 let pendingLearningSelection: PendingLearningSelection | null = null;
@@ -1304,6 +1284,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  settingsSave.dispose();
   taskProvider.dispose();
   taskProviderView?.dispose();
   videoRenderSession.dispose();
@@ -1822,6 +1803,7 @@ async function checkDictionaryCredential(providerId: string): Promise<void> {
 }
 
 async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
+  const request = ++settingsLoadGeneration, visit = settingsVisit;
   try {
     const [settings, catalog, downloads, profiles] = await Promise.all([
       invoke<DesktopSettings>("desktop_settings"),
@@ -1829,14 +1811,16 @@ async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
       invoke<ModelDownloadState[]>("model_download_states"),
       invoke<TranslationProfileSummary[]>("translation_profiles"),
     ]);
+    if (request !== settingsLoadGeneration || visit !== settingsVisit) return;
     updateProviderProfiles(profiles);
     availableModels = catalog;
     modelDownloads = downloads;
     renderDesktopSettings(settings);
     await loadDictionarySettings();
+    if (request !== settingsLoadGeneration || visit !== settingsVisit) return;
     if (openWhenNeeded && settings.needsOnboarding && !settingsDialog?.open) settingsDialog?.showModal();
   } catch (error) {
-    if (settingsMessage) settingsMessage.textContent = `无法读取启动配置：${String(error)}`;
+    if (request === settingsLoadGeneration && visit === settingsVisit && settingsMessage) settingsMessage.textContent = `无法读取启动配置：${String(error)}`;
   }
 }
 
@@ -1844,16 +1828,21 @@ async function refreshTranslationStatus(): Promise<void> {
   await taskProvider.refresh();
 }
 
-async function saveSettings(finishOnboarding: boolean): Promise<void> {
-  if (!settingsWhisperModel || !settingsVadModel || !settingsHyMt2Model || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !settingsProviderModel || !settingsProviderBaseUrl || !settingsTranslationStyle) return;
-  if (finishOnboarding && !settingsWhisperModel.value.trim()) {
-    if (settingsMessage) settingsMessage.textContent = "请先选择或下载一个 Whisper 模型。";
-    settingsWhisperModel.focus();
-    return;
-  }
-  if (settingsMessage) settingsMessage.textContent = "正在保存配置…";
-  try {
-    const settings = await invoke<DesktopSettings>("save_desktop_settings", {
+let settingsSaveFocus: { button: HTMLButtonElement; visit: number } | null = null;
+const settingsSave = createDesktopSettingsSave({
+  backend: createDesktopSettingsBackend(invoke),
+  visit: () => settingsVisit,
+  capture: finishOnboarding => {
+    if (!settingsWhisperModel || !settingsVadModel || !settingsHyMt2Model || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !settingsProviderModel || !settingsProviderBaseUrl || !settingsTranslationStyle) return null;
+    if (finishOnboarding && !settingsWhisperModel.value.trim()) {
+      if (settingsMessage) settingsMessage.textContent = "请先选择或下载一个 Whisper 模型。";
+      settingsWhisperModel.focus();
+      return null;
+    }
+    const fields = settingsDirtyFields.snapshot(), provider = settingsProvider.value;
+    const revision = settingsDirtyFields.revision, profileRevision = providerDirtyDrafts.revision;
+    const profile = providerDirtyDrafts.snapshot();
+    return {
       request: {
         whisperModelPath: settingsWhisperModel.value.trim() || null,
         vadModelPath: settingsVadModel.value.trim() || null,
@@ -1869,18 +1858,34 @@ async function saveSettings(finishOnboarding: boolean): Promise<void> {
         modelMirrorUrl: settingsModelMirror.value.trim() || null,
         onboardingCompleted: finishOnboarding || desktopSettings?.onboardingCompleted || false,
       },
-    });
-    settingsDirtyFields.clear();
-    providerDirtyDrafts.delete(settingsProvider.value);
-    updateProviderProfiles(await invoke<TranslationProfileSummary[]>("translation_profiles"));
-    renderDesktopSettings(settings);
-    await refreshTranslationStatus();
-    if (settingsMessage) settingsMessage.textContent = "配置已保存；如提供密钥，只会写入系统凭据库。";
-    if (finishOnboarding && !settings.needsOnboarding) settingsDialog?.close();
-  } catch (error) {
-    if (settingsMessage) settingsMessage.textContent = `保存失败：${String(error)}`;
-  }
-}
+      acknowledge: () => {
+        settingsDirtyFields.acknowledge(fields);
+        providerDirtyDrafts.acknowledge(profile, provider);
+      },
+      hasNewInput: () => settingsDirtyFields.revision !== revision || providerDirtyDrafts.revision !== profileRevision,
+    };
+  },
+  invalidateLoads: () => { ++settingsLoadGeneration; },
+  accepted: (settings, profiles) => { if (profiles) updateProviderProfiles(profiles); renderDesktopSettings(settings); },
+  refreshTranslation: () => taskProvider.refresh(),
+  reload: () => loadDesktopSettings(false),
+  isOpen: () => settingsDialog?.open ?? false,
+  close: () => settingsDialog?.close(),
+  changed: busy => {
+    const buttons = settingsForm?.querySelectorAll<HTMLButtonElement>('button[type="submit"], #finish-settings') ?? [];
+    if (busy) {
+      const button = Array.from(buttons).find(item => item === document.activeElement);
+      settingsSaveFocus = button ? { button, visit: settingsVisit } : null;
+    }
+    for (const button of buttons) button.disabled = busy;
+    if (!busy) {
+      const focus = settingsSaveFocus; settingsSaveFocus = null;
+      if (focus && focus.visit === settingsVisit && settingsDialog?.open && focus.button.getClientRects().length && !focus.button.closest("[inert]") && document.activeElement === document.body) focus.button.focus();
+    }
+  },
+  message: text => { if (settingsMessage) settingsMessage.textContent = text; },
+});
+async function saveSettings(finishOnboarding: boolean): Promise<void> { await settingsSave.save(finishOnboarding); }
 
 async function testNetworkConnection(): Promise<void> {
   if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !testNetworkButton || !networkTestResults) return;
@@ -4777,12 +4782,13 @@ saveLearningSentenceButton?.addEventListener("click", () => {
 });
 document.querySelector<HTMLButtonElement>("#close-learning-selection")?.addEventListener("click", () => closeLearningSelection());
 document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
+  ++settingsVisit;
   settingsDirtyFields.clear();
   if (!settingsDialog?.open) settingsDialog?.showModal();
   void loadDesktopSettings(false);
 });
 document.querySelector<HTMLButtonElement>("#close-settings")?.addEventListener("click", () => settingsDialog?.close());
-settingsDialog?.addEventListener("close", () => settingsDirtyFields.clear());
+settingsDialog?.addEventListener("close", () => { ++settingsVisit; ++settingsLoadGeneration; settingsDirtyFields.clear(); });
 settingsForm?.addEventListener("input", (event) => {
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
@@ -4799,9 +4805,8 @@ document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventL
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
 document.querySelector<HTMLButtonElement>("#settings-choose-hy-mt2")?.addEventListener("click", () => void chooseSettingsModel("hy-mt2"));
 const providerDrafts = new Map<string, { model: string; endpoint: string; style: string }>();
-const providerDirtyDrafts = new Set<string>();
+const providerDirtyDrafts = createVersionedDirtyFields();
 const providerReadiness = new Map<string, string>();
-type TranslationProfileSummary = { provider_id: string; model: string | null; base_url: string | null; style: string; readiness: string };
 function updateProviderProfiles(profiles: TranslationProfileSummary[]): void {
   for (const profile of profiles) {
     providerReadiness.set(profile.provider_id, profile.readiness);
