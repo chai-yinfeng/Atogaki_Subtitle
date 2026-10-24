@@ -8,7 +8,7 @@ export type DesktopSettings = {
   hyMt2ModelPath: string | null;
   hyMt2ModelReady: boolean;
   localTranslationRuntimeReady: boolean;
-  translationProviderId: "none" | "deepl" | "deepseek" | "openai-compatible" | "hy-mt2-local";
+  translationProviderId: "none" | "deepl" | "deepseek" | "gemini" | "openai-compatible" | "hy-mt2-local";
   translationModel: string | null;
   translationBaseUrl: string | null;
   translationStyleInstruction: string;

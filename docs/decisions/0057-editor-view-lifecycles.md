@@ -139,3 +139,12 @@ Escape 在字体候选打开时先收起候选并回到字体输入，下一次 
 `desktop-settings-view.ts` 持有导航、开关、公共 input／change／submit、首次配置标题与类名、保存按钮禁用／焦点恢复和内置主题状态。按选中分区显示页面并重置内部滚动，按钮公开 aria-pressed；初始转录页有明确选中状态。用户重开沿用既有访问和读取流程，首次配置打开复用已加载结果，不再重复读取。关闭仍通知协调器失效请求并清理原 dirty 状态，未更改持久化语义。
 
 公共监听器由 AbortController 管理，包含外部开启按钮、表单、dialog close 与 window theme 事件；dispose 先解除事件再关闭窗口，停止回调并释放焦点引用。实际字段呈现、选择文件、模型操作和 provider 草稿仍按原服务工作，没有新增配置保存逻辑。图片主题模块继续复用原外观容器，其自身监听器生命周期仍是独立后续项，本次不将它计为已清理。
+
+
+## 2026-10-24：provider 草稿与字段归属
+
+`translation-provider-drafts.ts` 取代主文件的 providerDrafts、providerDirtyDrafts、readiness 与 lastSettingsProvider：每个后端只持有 model／endpoint／style 和 dirty 版本；snapshot 只确认提交后端的同一版本，返回值复制且忽略额外字段。不存在第二份保存服务或 Key 缓存。profile 更新保留已编辑后端，同时允许当前干净后端接受迟到的已保存参数；不再借用其他后端留下的共享字段 dirty 标记决定显示。
+
+`translation-provider-fields.ts` 负责唯一共享字段、provider 选择、输入事件与 AbortController。字段值未变化时不重新赋值；显式切换清空密码意图，每个后端从自身 profile 或自身默认值初始化端点／模型，不继承另一后端的隐藏字段。默认模型与服务地址沿用原选择逻辑，Gemini 缺失 base_url 时使用其自身默认值。默认配置读取不能改绑未保存参数或非空 Key；查看非默认后端时使用中性凭据提示，不把默认后端的凭据状态套用过去。
+
+原公共字段 dirty registry 继续保护保存期间的新输入；provider 字段展示与非秘密草稿归本模块。关闭重开继续保留原有内存草稿，dispose 解除字段事件，Key 始终只在当前 DOM 与原单次请求中。其余设置字段、独立凭据、模型操作和图片主题仍按后续边界处理。

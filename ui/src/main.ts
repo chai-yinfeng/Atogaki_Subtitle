@@ -1,3 +1,5 @@
+import { createTranslationProviderDrafts } from "./translation-provider-drafts";
+import { mountTranslationProviderFields } from "./translation-provider-fields";
 import { createTranslationProviderActions } from "./translation-provider-actions";
 import { createTranslationProviderBackend } from "./translation-provider-backend";
 import type { AsrCredentialStatus } from "./translation-provider-types";
@@ -725,6 +727,8 @@ let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
 let dictionaryDownloadPoll: number | null = null;
 let settingsView: ReturnType<typeof mountDesktopSettingsView> | null = null;
+const providerDrafts = createTranslationProviderDrafts();
+let providerFields: ReturnType<typeof mountTranslationProviderFields> | null = null;
 let providerActions: ReturnType<typeof createTranslationProviderActions> | null = null;
 let providerCardsView: ReturnType<typeof mountTranslationProviderView> | null = null;
 const settingsDirtyFields = createVersionedDirtyFields();
@@ -1119,6 +1123,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  providerFields?.dispose();
   settingsView?.dispose();
   providerActions?.dispose();
   providerCardsView?.dispose();
@@ -1306,18 +1311,13 @@ function overwriteSettingsField<T extends HTMLInputElement | HTMLSelectElement>(
 function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
   settingsView?.onboarding(settings.needsOnboarding);
-  if (!settingsDirtyFields.has("settings-provider")) lastSettingsProvider = settings.translationProviderId;
   overwriteSettingsField(settingsWhisperModel, settings.whisperModelPath ?? "");
   overwriteSettingsField(settingsVadModel, settings.vadModelPath ?? "");
   overwriteSettingsField(settingsHyMt2Model, settings.hyMt2ModelPath ?? "");
   overwriteSettingsField(settingsProxyMode, settings.networkProxyMode);
   overwriteSettingsField(settingsProxyUrl, settings.networkProxyUrl ?? "");
   overwriteSettingsField(settingsModelMirror, settings.modelMirrorUrl ?? "");
-  overwriteSettingsField(settingsProvider, settings.translationProviderId);
-  const profile = providerDrafts.get(settingsProvider?.value ?? settings.translationProviderId);
-  overwriteSettingsField(settingsProviderModel, profile?.model ?? settings.translationModel ?? "");
-  overwriteSettingsField(settingsProviderBaseUrl, profile?.endpoint ?? settings.translationBaseUrl ?? "");
-  overwriteSettingsField(settingsTranslationStyle, profile?.style ?? settings.translationStyleInstruction);
+  providerFields?.load(settings);
   overwriteSettingsField(settingsApiKey, "");
   if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
   if (modelReadiness) {
@@ -1349,6 +1349,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
       ? `${source}。系统凭据库提示：${settings.credentialError}`
       : source;
     apiKeyStatus.classList.toggle("warning", Boolean(settings.credentialError));
+    if (settingsProvider?.value !== settings.translationProviderId) providerFields?.unchecked();
   }
   const taskProvider = document.querySelector<HTMLSelectElement>("#task-translation-provider");
   if (taskProvider && !taskProvider.value && settings.translationProviderId !== "none") taskProvider.value = settings.translationProviderId;
@@ -1618,8 +1619,8 @@ const settingsSave = createDesktopSettingsSave({
       return null;
     }
     const fields = settingsDirtyFields.snapshot(), provider = settingsProvider.value;
-    const revision = settingsDirtyFields.revision, profileRevision = providerDirtyDrafts.revision;
-    const profile = providerDirtyDrafts.snapshot();
+    const revision = settingsDirtyFields.revision, profileRevision = providerDrafts.revision;
+    const profile = providerDrafts.snapshot();
     return {
       request: {
         whisperModelPath: settingsWhisperModel.value.trim() || null,
@@ -1638,9 +1639,9 @@ const settingsSave = createDesktopSettingsSave({
       },
       acknowledge: () => {
         settingsDirtyFields.acknowledge(fields);
-        providerDirtyDrafts.acknowledge(profile, provider);
+        providerDrafts.acknowledge(profile, provider);
       },
-      hasNewInput: () => settingsDirtyFields.revision !== revision || providerDirtyDrafts.revision !== profileRevision,
+      hasNewInput: () => settingsDirtyFields.revision !== revision || providerDrafts.revision !== profileRevision,
     };
   },
   invalidateLoads: () => { settingsLoad.invalidate(); providerActions?.invalidateProfiles(); },
@@ -4561,58 +4562,13 @@ settingsView = mountDesktopSettingsView(settingsDialog!, {
 document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
 document.querySelector<HTMLButtonElement>("#settings-choose-hy-mt2")?.addEventListener("click", () => void chooseSettingsModel("hy-mt2"));
-const providerDrafts = new Map<string, { model: string; endpoint: string; style: string }>();
-const providerDirtyDrafts = createVersionedDirtyFields();
-const providerReadiness = new Map<string, string>();
 function updateProviderProfiles(profiles: TranslationProfileSummary[]): void {
-  providerActions?.invalidateProfiles();
-  for (const profile of profiles) {
-    providerReadiness.set(profile.provider_id, profile.readiness);
-    if (!providerDirtyDrafts.has(profile.provider_id)) providerDrafts.set(profile.provider_id, {
-      model: profile.model ?? "", endpoint: profile.base_url ?? (profile.provider_id === "openai-compatible" ? "https://api.openai.com/v1" : "https://api.deepseek.com"), style: profile.style,
-    });
-  }
+  providerActions?.invalidateProfiles(); providerDrafts.acceptProfiles(profiles); providerFields?.render();
 }
-for (const input of [settingsProviderModel, settingsProviderBaseUrl, settingsTranslationStyle]) input?.addEventListener("input", () => {
-  if (settingsProvider) {
-    providerDirtyDrafts.add(settingsProvider.value);
-    providerDrafts.set(settingsProvider.value, { model: settingsProviderModel?.value ?? "", endpoint: settingsProviderBaseUrl?.value ?? "", style: settingsTranslationStyle?.value ?? "" });
-  }
-  renderProviderCards();
-});
-let lastSettingsProvider = "none";
-settingsProvider?.addEventListener("change", () => {
-  // Never carry a secret or delete intent into another provider.
-  if (settingsApiKey) settingsApiKey.value = "";
-  providerDrafts.set(lastSettingsProvider, { model: settingsProviderModel?.value ?? "", endpoint: settingsProviderBaseUrl?.value ?? "", style: settingsTranslationStyle?.value ?? "" });
-  lastSettingsProvider = settingsProvider.value;
-  if (settingsProvider.value === "deepseek") {
-    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.deepseek.com";
-    if (settingsProviderModel) settingsProviderModel.value = "deepseek-v4-flash";
-  } else if (settingsProvider.value === "gemini") {
-    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://generativelanguage.googleapis.com/v1beta/openai";
-    if (settingsProviderModel) settingsProviderModel.value = "gemini-3.8-flash";
-  } else if (settingsProvider.value === "openai-compatible") {
-    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = "https://api.openai.com/v1";
-    if (settingsProviderModel) settingsProviderModel.value = "";
-  } else if (settingsProviderModel) {
-    settingsProviderModel.value = "";
-  }
-  if ((settingsProvider.value === "gemini" || settingsProvider.value === "deepseek" || settingsProvider.value === "openai-compatible") && settingsTranslationStyle && !settingsTranslationStyle.value.trim()) {
-    settingsTranslationStyle.value = "准确、自然的简体中文口语字幕；保留说话语气，不补充原文没有的信息。";
-  }
-  const draft = providerDrafts.get(settingsProvider.value);
-  if (draft) {
-    if (settingsProviderModel) settingsProviderModel.value = draft.model;
-    if (settingsProviderBaseUrl) settingsProviderBaseUrl.value = draft.endpoint;
-    if (settingsTranslationStyle) settingsTranslationStyle.value = draft.style;
-  }
-  syncProviderSettings();
-  if (apiKeyStatus && settingsProvider.value !== "none") {
-    apiKeyStatus.textContent = "尚未检查当前 provider；可点击“检查所选 Key”确认系统凭据是否存在。";
-    apiKeyStatus.classList.remove("warning");
-  }
-  renderProviderCards();
+providerFields = mountTranslationProviderFields(document.querySelector<HTMLElement>("[data-translation-settings]")!, providerDrafts, {
+  dirty: id => settingsDirtyFields.has(id),
+  clearSecretDirty: id => settingsDirtyFields.delete(id),
+  changed: () => renderProviderCards(),
 });
 providerActions = createTranslationProviderActions({
   backend: createTranslationProviderBackend(invoke),
@@ -4638,7 +4594,7 @@ providerActions = createTranslationProviderActions({
 });
 providerCardsView = mountTranslationProviderView(document.querySelector<HTMLElement>("[data-translation-settings]")!, {
   visit: () => settingsVisit,
-  state: () => ({ readiness: providerReadiness, dirty: providerDirtyDrafts, catalog: availableModels, downloads: modelDownloads }),
+  state: () => ({ readiness: providerDrafts.readiness, dirty: providerDrafts.dirty, catalog: availableModels, downloads: modelDownloads }),
   localModel: () => settingsHyMt2Model?.value ?? "",
   chooseLocalModel: path => { if (settingsHyMt2Model) { settingsHyMt2Model.value = path; settingsHyMt2Model.dispatchEvent(new Event("input", { bubbles: true })); } },
   action: (action, id, current) => providerActions!.run(action, id, current),
