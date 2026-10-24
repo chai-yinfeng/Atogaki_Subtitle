@@ -1,7 +1,8 @@
 import { createTranslationProviderActions } from "./translation-provider-actions";
 import { createTranslationProviderBackend } from "./translation-provider-backend";
 import type { AsrCredentialStatus } from "./translation-provider-types";
-import { translationProviderTemplate } from "./translation-provider-template";
+import { desktopSettingsTemplate } from "./desktop-settings-template";
+import { mountDesktopSettingsView } from "./desktop-settings-view";
 import { mountTranslationProviderView } from "./translation-provider-view";
 import type { DesktopSettings, TranslationProfileSummary, ModelCatalogItem, ModelDownloadState, DictionaryCatalogItem, DictionaryDownloadState, DictionaryCredentialStatus } from "./desktop-settings-types";
 import { createDesktopSettingsLoad } from "./desktop-settings-load";
@@ -335,14 +336,10 @@ app.innerHTML = `
           <label>翻译目标<select id="target-language" disabled><option value="zh-Hans">简体中文</option></select></label>
           <label>媒体文件<input id="media-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
-          <label>Whisper 模型<input id="model-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
-          <button id="choose-model" type="button" class="secondary">选择模型</button>
           <div class="vad-setting">
             <label><input id="vad-enabled" type="checkbox" checked />启用语音活动检测（推荐）</label>
             <span>先过滤静音、音乐和环境声，再交给 Whisper；使用 Silero VAD 默认参数。</span>
           </div>
-          <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
-          <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
           <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>云端随稳定原文提前翻译，本地在完整转录后翻译；云端只发送字幕文本和上下文。</span></label>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
@@ -351,6 +348,12 @@ app.innerHTML = `
             <div id="task-content-packs" class="task-content-packs"></div>
             <details open><summary>最终 Whisper prompt</summary><pre id="task-prompt-preview">正在生成预览…</pre></details>
           </div>
+          <details><summary>高级：模型路径与 VAD 参数</summary>
+          <label>Whisper 模型<input id="model-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
+          <button id="choose-model" type="button" class="secondary">选择模型</button>
+          <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
+          <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
+          </details>
           <div class="form-footer"><span id="task-message" role="status"></span><button id="submit-task" type="submit">开始转写</button></div>
         </form>
       </section>
@@ -504,87 +507,7 @@ ${taskToolsTemplate(fileManagerLabel)}
         <div class="rename-job-footer"><span id="glossary-correction-message" role="status"></span><button type="submit">加入词表</button></div>
       </form>
     </dialog>
-    <dialog id="settings-dialog" class="settings-dialog">
-      <form id="settings-form">
-        <div class="dialog-heading">
-          <div><p class="eyebrow">SETTINGS</p><h2>启动配置</h2></div>
-          <button id="close-settings" type="button" class="secondary">稍后再说</button>
-        </div>
-        <p class="dialog-help">媒体和模型默认保留在本机；选择云端翻译 provider 时，只有原文字幕和上下文会发送到对应服务。</p>
-        <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>1. 本地模型</strong><span id="models-directory"></span></div><span id="model-readiness"></span></div>
-          <div class="settings-path-row">
-            <label>Whisper 模型<input id="settings-whisper-model" placeholder="选择已有 ggml-*.bin，或从下方下载" /></label>
-            <button id="settings-choose-whisper" type="button" class="secondary">选择文件</button>
-          </div>
-          <div class="settings-path-row">
-            <label>Silero VAD 模型（推荐）<input id="settings-vad-model" placeholder="选择已有 ggml-silero-*.bin，或从下方下载" /></label>
-            <button id="settings-choose-vad" type="button" class="secondary">选择文件</button>
-          </div>
-          <div class="settings-path-row">
-            <label>Hy-MT2 模型<input id="settings-hy-mt2-model" placeholder="选择已有 Hy-MT2 *.gguf，或从下方下载" /></label>
-            <button id="settings-choose-hy-mt2" type="button" class="secondary">选择文件</button>
-          </div>
-        </section>
-        <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>2. 网络与模型下载</strong><span>代理同时用于模型下载与所选云端翻译；镜像只用于模型下载，失败会回退官方源。</span></div><span>每个模型都会校验 SHA-256</span></div>
-          <div class="network-settings-grid">
-            <label>代理模式
-              <select id="settings-proxy-mode">
-                <option value="environment">跟随启动环境</option>
-                <option value="direct">直连（忽略系统与环境代理）</option>
-                <option value="custom">自定义 HTTP 代理</option>
-              </select>
-            </label>
-            <label id="proxy-url-field">HTTP 代理地址
-              <input id="settings-proxy-url" inputmode="url" placeholder="http://127.0.0.1:7897" />
-            </label>
-            <label>Hugging Face 镜像根地址（可选）
-              <input id="settings-model-mirror" inputmode="url" placeholder="https://hf-mirror.com" />
-            </label>
-          </div>
-          <div class="network-test-row"><button id="test-network" type="button" class="secondary">测试当前网络配置</button><span>测试只检查当前输入，不会切换或保存模式；修改后请点击“保存配置”。该代理也用于云端翻译。</span></div>
-          <div id="network-test-results" class="network-test-results" role="status"></div>
-          <div id="model-catalog" class="model-catalog"></div>
-          <p id="model-download-message" class="settings-message" role="status"></p>
-        </section>
-        <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>3. 云端 ASR（可选）</strong><span>Gemini Key 只存入系统凭据库。配置 Key 不会授权上传；每次运行仍需单独确认音频范围。</span></div><span id="asr-credential-store-label"></span></div>
-          <p>与翻译区 Gemini 共用同一把 Key；保存或删除会同时影响两项功能。音频上传仍需逐次授权。</p><label>Gemini API Key<input id="settings-gemini-api-key" type="password" autocomplete="off" placeholder="从 Google AI Studio 创建；保存后立即清空" /></label>
-          <div class="credential-check-row"><button id="save-gemini-api-key" type="button">保存 Key</button><button id="check-gemini-api-key" type="button" class="secondary">检查</button><button id="clear-gemini-api-key" type="button" class="secondary">删除</button></div>
-          <p id="gemini-api-key-status" class="settings-message">尚未读取配置。</p>
-          <p class="settings-message">Atogaki 上传提取后的 WAV，并在转录请求完成后调用 Files API 删除上传文件。免费层价格为 $0，但存在项目级 rate limits，且免费层数据会用于改进 Google 产品。</p>
-        </section>
-        ${translationProviderTemplate()}
-        <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>5. 学习词典</strong><span>离线包由你明确点击后下载到正式应用数据目录；商业词典的 Key 分来源保存。</span></div><span id="dictionary-directory"></span></div>
-          <div>
-            <strong class="settings-subheading">离线词典包</strong>
-            <p class="settings-message">JMdict 与 Tomoshi 用于日语；ECDICT 基础数据用于英语。ECDICT 属于社区汇总数据，下载会复用上方代理设置并校验固定版本摘要。</p>
-          </div>
-          <div id="dictionary-catalog" class="model-catalog"></div>
-          <p id="dictionary-download-message" class="settings-message" role="status"></p>
-          <div>
-            <strong class="settings-subheading">在线词典 API</strong>
-            <p class="settings-message">每个来源独立配置；Key 仅保存在系统凭据库，不写入日志或任务目录。检查只验证凭据是否存在，不调用词典 API。</p>
-          </div>
-          <div id="dictionary-credentials" class="dictionary-credentials">
-            ${[
-              ["merriam-webster", "Merriam-Webster", "保留英英来源标签页；正式展示需满足 Logo 与署名要求。"],
-            ].map(([id, name, hint]) => `<article class="dictionary-credential-card" data-dictionary-provider="${id}">
-              <div><strong>${name}</strong><span>${hint}</span></div>
-              <input type="password" autocomplete="off" data-dictionary-key="${id}" aria-label="${name} API Key" placeholder="粘贴 API Key；保存后立即清空" />
-              <div class="model-card-action"><span data-dictionary-status="${id}">尚未读取配置</span><div><button type="button" class="secondary" data-check-dictionary-key="${id}">检查</button><button type="button" data-save-dictionary-key="${id}">保存</button><button type="button" class="secondary" data-clear-dictionary-key="${id}">删除</button></div></div>
-            </article>`).join("")}
-          </div>
-          <p id="dictionary-credential-message" class="settings-message" role="status"></p>
-        </section>
-        <div class="settings-footer">
-          <span id="settings-message" role="status"></span>
-          <div><button id="save-settings" type="submit" class="secondary">保存</button><button id="finish-settings" type="button">保存并开始使用</button></div>
-        </div>
-      </form>
-    </dialog>
+    ${desktopSettingsTemplate()}
   </main>
 `;
 
@@ -728,7 +651,6 @@ const glossaryCorrectionSource = document.querySelector<HTMLInputElement>("#glos
 const glossaryCorrectionTarget = document.querySelector<HTMLInputElement>("#glossary-correction-target");
 const glossaryCorrectionMessage = document.querySelector<HTMLSpanElement>("#glossary-correction-message");
 const settingsDialog = document.querySelector<HTMLDialogElement>("#settings-dialog");
-const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
 const settingsWhisperModel = document.querySelector<HTMLInputElement>("#settings-whisper-model");
 const settingsVadModel = document.querySelector<HTMLInputElement>("#settings-vad-model");
 const settingsHyMt2Model = document.querySelector<HTMLInputElement>("#settings-hy-mt2-model");
@@ -802,6 +724,7 @@ let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
 let dictionaryDownloadPoll: number | null = null;
+let settingsView: ReturnType<typeof mountDesktopSettingsView> | null = null;
 let providerActions: ReturnType<typeof createTranslationProviderActions> | null = null;
 let providerCardsView: ReturnType<typeof mountTranslationProviderView> | null = null;
 const settingsDirtyFields = createVersionedDirtyFields();
@@ -1196,6 +1119,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  settingsView?.dispose();
   providerActions?.dispose();
   providerCardsView?.dispose();
   settingsLoad.dispose();
@@ -1381,8 +1305,7 @@ function overwriteSettingsField<T extends HTMLInputElement | HTMLSelectElement>(
 
 function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
-  settingsDialog?.classList.toggle("onboarding",settings.needsOnboarding);
-  const title=settingsDialog?.querySelector("h2");if(title)title.textContent=settings.needsOnboarding ? "首次配置" : "设置";
+  settingsView?.onboarding(settings.needsOnboarding);
   if (!settingsDirtyFields.has("settings-provider")) lastSettingsProvider = settings.translationProviderId;
   overwriteSettingsField(settingsWhisperModel, settings.whisperModelPath ?? "");
   overwriteSettingsField(settingsVadModel, settings.vadModelPath ?? "");
@@ -1680,11 +1603,10 @@ const settingsLoad = createDesktopSettingsLoad({
     if (dictionaryDirectoryLabel) dictionaryDirectoryLabel.textContent = `目录：${directory}`;
     renderDictionaryCatalog(); renderDictionaryCredentials();
   },
-  onboard: () => { if (!settingsDialog?.open) settingsDialog?.showModal(); },
+  onboard: () => settingsView?.open(false),
   message: text => { if (settingsMessage) settingsMessage.textContent = text; },
   dictionaryMessage: text => { if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = text; },
 });
-let settingsSaveFocus: { button: HTMLButtonElement; visit: number } | null = null;
 const settingsSave = createDesktopSettingsSave({
   backend: settingsBackend,
   visit: () => settingsVisit,
@@ -1727,18 +1649,7 @@ const settingsSave = createDesktopSettingsSave({
   reload: () => loadDesktopSettings(false),
   isOpen: () => settingsDialog?.open ?? false,
   close: () => settingsDialog?.close(),
-  changed: busy => {
-    const buttons = settingsForm?.querySelectorAll<HTMLButtonElement>('button[type="submit"], #finish-settings') ?? [];
-    if (busy) {
-      const button = Array.from(buttons).find(item => item === document.activeElement);
-      settingsSaveFocus = button ? { button, visit: settingsVisit } : null;
-    }
-    for (const button of buttons) button.disabled = busy;
-    if (!busy) {
-      const focus = settingsSaveFocus; settingsSaveFocus = null;
-      if (focus && focus.visit === settingsVisit && settingsDialog?.open && focus.button.getClientRects().length && !focus.button.closest("[inert]") && document.activeElement === document.body) focus.button.focus();
-    }
-  },
+  changed: busy => settingsView?.saving(busy),
   message: text => { if (settingsMessage) settingsMessage.textContent = text; },
 });
 async function saveSettings(finishOnboarding: boolean): Promise<void> { await settingsSave.save(finishOnboarding); }
@@ -4637,25 +4548,15 @@ saveLearningSentenceButton?.addEventListener("click", () => {
   if (pendingLearningSelection) void saveLearningSentence(pendingLearningSelection.segmentId);
 });
 document.querySelector<HTMLButtonElement>("#close-learning-selection")?.addEventListener("click", () => closeLearningSelection());
-document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("click", () => {
-  ++settingsVisit;
-  settingsDirtyFields.clear();
-  if (!settingsDialog?.open) settingsDialog?.showModal();
-  void loadDesktopSettings(false);
-});
-document.querySelector<HTMLButtonElement>("#close-settings")?.addEventListener("click", () => settingsDialog?.close());
-settingsDialog?.addEventListener("close", () => { ++settingsVisit; settingsLoad.invalidate(); settingsDirtyFields.clear(); });
-settingsForm?.addEventListener("input", (event) => {
-  const target = event.target;
-  if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
-    settingsDirtyFields.add(target.id);
-  }
-});
-settingsForm?.addEventListener("change", (event) => {
-  const target = event.target;
-  if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
-    settingsDirtyFields.add(target.id);
-  }
+settingsView = mountDesktopSettingsView(settingsDialog!, {
+  openButton: document.querySelector<HTMLButtonElement>("#open-settings"),
+  visit: () => settingsVisit,
+  opening: () => { ++settingsVisit; settingsDirtyFields.clear(); },
+  opened: () => { void loadDesktopSettings(false); },
+  closed: () => { ++settingsVisit; settingsLoad.invalidate(); settingsDirtyFields.clear(); },
+  dirty: id => settingsDirtyFields.add(id),
+  save: finish => { void saveSettings(finish); },
+  applyTheme,
 });
 document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
 document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
@@ -4755,11 +4656,6 @@ document.querySelector("#dictionary-credentials")?.addEventListener("click", (ev
 });
 settingsProxyMode?.addEventListener("change", syncNetworkSettings);
 testNetworkButton?.addEventListener("click", () => void testNetworkConnection());
-settingsForm?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void saveSettings(false);
-});
-document.querySelector<HTMLButtonElement>("#finish-settings")?.addEventListener("click", () => void saveSettings(true));
 workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
   if (currentArea === "karaoke") { closeEditorTools(); return; }
   void showTopLevelArea("workbench").then(() => refresh());
@@ -5082,82 +4978,6 @@ function renderProviderCards(): void { providerCardsView?.render(); }
 
 async function refreshProviderReadiness(): Promise<void> { await providerActions?.refreshProfiles(); }
 
-function organizeSettings(): void {
-  const form = document.querySelector<HTMLFormElement>("#settings-form");
-  if (!form) return;
-  const sections = Array.from(form.querySelectorAll<HTMLElement>(":scope > .settings-section"));
-  const models = sections[0],
-    network = sections[1],
-    asr = sections[2],
-    translation = sections[3],
-    dictionaries = sections[4];
-  if (!models || !network || !asr || !translation || !dictionaries) return;
-  const downloads = document.createElement("section");
-  downloads.className = "settings-section";
-  downloads.innerHTML = "<h3>模型与存储</h3><p>统一下载、校验与卸载。模型按需安装。</p>";
-  for (const selector of ["#models-directory", "#model-catalog", "#model-download-message"]) {
-    const item = form.querySelector(selector);
-    if (item) downloads.append(item);
-  }
-  const localModel = document.querySelector("#settings-hy-mt2-model")?.closest(".settings-path-row");
-  if (localModel) downloads.append(localModel);
-  const appearance = document.createElement("section"); appearance.className = "settings-section appearance-settings";
-  appearance.innerHTML = '<h3>外观</h3><p>选择页面主题，即时生效并自动保存。字幕导出样式保持独立。</p><div class="theme-options"><button type="button" data-app-theme="moonlight"><span class="theme-swatch moonlight-swatch"></span><strong>月夜</strong><span>颜料笔触、月光与青灰纸面</span></button><button type="button" data-app-theme="letter"><span class="theme-swatch letter-swatch"></span><strong>来信</strong><span>纸纤维、折痕与信笺层次</span></button></div>';
-  const syncTheme = () => appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.appTheme === document.documentElement.dataset.theme)));
-  appearance.querySelectorAll<HTMLButtonElement>("[data-app-theme]").forEach(button => button.onclick = () => { applyTheme(button.dataset.appTheme as "moonlight"|"letter"); syncTheme(); });
-  syncTheme();
-  window.addEventListener("atogaki-theme-change",syncTheme);
-  models.querySelector("strong")!.textContent = "本地转录";
-  const optionalAsr = document.createElement("details"); optionalAsr.className="onboarding-optional";
-  optionalAsr.innerHTML='<summary>可选：Gemini 局部修复</summary>';
-  optionalAsr.append(asr); models.append(optionalAsr);
-  translation.querySelector("strong")!.textContent = "翻译";
-  network.querySelector("strong")!.textContent = "网络与高级";
-  dictionaries.querySelector("strong")!.textContent = "词典";
-  const nav = document.createElement("nav");
-  nav.className = "settings-tabs";
-  nav.setAttribute("aria-label", "设置分区");
-  const pages = [
-    ["appearance", "外观", appearance],
-    ["transcription", "转录", models],
-    ["translation", "翻译", translation],
-    ["models", "模型与存储", downloads],
-    ["dictionary", "词典", dictionaries],
-    ["network", "网络与高级", network],
-  ] as const;
-  const footer = form.querySelector(".settings-footer");
-  const content = document.createElement("div");
-  content.className = "settings-content";
-  form.insertBefore(content, footer);
-  pages.forEach(([key, label, page]) => {
-    page.dataset.settingsPage = key;
-    content.append(page);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary";
-    button.textContent = label;
-    button.dataset.settingsTab = key;
-    button.onclick = () => {
-      pages.forEach(([candidate, , section]) => section.classList.toggle("hidden", candidate !== key));
-      nav.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
-      content.scrollTop = 0;
-    };
-    nav.append(button);
-    page.classList.toggle("hidden", key !== "transcription");
-  });
-  form.querySelector(".dialog-help")?.after(nav);
-  const heading = form.querySelector("h2");
-  if (heading) heading.textContent = "设置";
-  const advanced = document.createElement("details");
-  advanced.innerHTML = "<summary>高级：模型路径与 VAD 参数</summary>";
-  const taskForm = document.querySelector("#task-form");
-  for (const selector of ["#model-path", "#choose-model", "#vad-model-path", "#choose-vad-model"]) {
-    const control = document.querySelector(selector);
-    if (control) advanced.append(control.tagName === "INPUT" ? control.closest("label")! : control);
-  }
-  taskForm?.querySelector(".form-footer")?.before(advanced);
-}
-organizeSettings();
 
 function addOfflineTools(): void {
   const jobsSearch = document.createElement("input");

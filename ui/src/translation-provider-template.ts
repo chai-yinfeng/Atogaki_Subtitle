@@ -11,7 +11,7 @@ export function translationProviderTemplate(): string {
     const card = `<article class="provider-card" data-provider-card="${id}"><h4>${title}</h4><p>${description}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary ${id === "hy-mt2-local" ? "hidden" : ""}" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<label class="local-model-choice">翻译模型<select id="local-translation-model-choice"></select></label><p>模型详情与下载位于“模型与存储”。</p>' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div></article>`;
     return id === "openai-compatible" ? `<details><summary>高级：自定义兼容服务</summary>${card}</details>` : card;
   }).join("");
-  return `<section class="settings-section" data-translation-settings>
+  return `<section class="settings-section hidden" data-settings-page="translation" data-translation-settings>
     <div class="settings-section-heading"><div><strong>翻译</strong><span>Hy-MT2 完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
           <label>下次新任务的默认翻译方式（保存后生效）
             <select id="settings-provider">
