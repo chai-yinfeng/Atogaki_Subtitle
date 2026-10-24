@@ -1,3 +1,6 @@
+import { createModelPickerBackend } from "./model-picker-backend";
+import { createModelPickerSession } from "./model-picker-session";
+import { mountModelPickerView } from "./model-picker-view";
 import { mountModelManagementView } from "./model-management-view";
 import { createModelManagementSession } from "./model-management-session";
 import { createModelManagementBackend } from "./model-management-backend";
@@ -726,6 +729,7 @@ let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelManagement: ReturnType<typeof createModelManagementSession> | null = null;
 let modelCatalogView: ReturnType<typeof mountModelManagementView> | null = null;
+let modelPickerView: ReturnType<typeof mountModelPickerView> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
@@ -1127,6 +1131,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  modelPicker.dispose();
+  modelPickerView?.dispose();
   modelManagement?.dispose();
   modelCatalogView?.dispose();
   providerFields?.dispose();
@@ -1636,23 +1642,23 @@ async function testNetworkConnection(): Promise<void> {
   }
 }
 
-async function chooseSettingsModel(kind: "whisper" | "vad" | "hy-mt2"): Promise<void> {
-  const command = kind === "whisper"
-    ? "pick_model_file"
-    : kind === "vad" ? "pick_vad_model_file" : "pick_hy_mt2_model_file";
-  try {
-    const path = await invoke<string | null>(command);
-    const input = kind === "whisper"
-      ? settingsWhisperModel
-      : kind === "vad" ? settingsVadModel : settingsHyMt2Model;
-    if (path && input) {
-      input.value = path;
-      settingsDirtyFields.add(input.id);
-    }
-  } catch (error) {
-    if (settingsMessage) settingsMessage.textContent = `无法打开模型选择器：${String(error)}`;
-  }
-}
+const modelPicker = createModelPickerSession({
+  backend: createModelPickerBackend(invoke),
+  visit: () => settingsVisit,
+  isOpen: () => settingsDialog?.open ?? false,
+  capture: kind => {
+    const input = kind === "whisper" ? settingsWhisperModel : kind === "vad" ? settingsVadModel : settingsHyMt2Model;
+    if (!input) return null;
+    const value = input.value, version = settingsDirtyFields.snapshot().get(input.id);
+    return { apply: path => {
+      if (input.value !== value || settingsDirtyFields.snapshot().get(input.id) !== version) return false;
+      input.value = path; settingsDirtyFields.add(input.id); renderProviderCards(); return true;
+    } };
+  },
+  changed: () => modelPickerView?.render(),
+  message: text => { if (settingsMessage) settingsMessage.textContent = text; },
+  clearMessage: text => { if (settingsMessage?.textContent === text) settingsMessage.textContent = ""; },
+});
 
 modelManagement = createModelManagementSession({
   backend: createModelManagementBackend(invoke),
@@ -4447,14 +4453,12 @@ settingsView = mountDesktopSettingsView(settingsDialog!, {
   visit: () => settingsVisit,
   opening: () => { ++settingsVisit; settingsDirtyFields.clear(); },
   opened: () => { modelManagement?.observe(); void loadDesktopSettings(false); },
-  closed: () => { ++settingsVisit; modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
+  closed: () => { ++settingsVisit; modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
   dirty: id => settingsDirtyFields.add(id),
   save: finish => { void saveSettings(finish); },
   applyTheme,
 });
-document.querySelector<HTMLButtonElement>("#settings-choose-whisper")?.addEventListener("click", () => void chooseSettingsModel("whisper"));
-document.querySelector<HTMLButtonElement>("#settings-choose-vad")?.addEventListener("click", () => void chooseSettingsModel("vad"));
-document.querySelector<HTMLButtonElement>("#settings-choose-hy-mt2")?.addEventListener("click", () => void chooseSettingsModel("hy-mt2"));
+modelPickerView = mountModelPickerView(settingsDialog!, modelPicker, () => settingsVisit);
 function updateProviderProfiles(profiles: TranslationProfileSummary[]): void {
   providerActions?.invalidateProfiles(); providerDrafts.acceptProfiles(profiles); providerFields?.render();
 }

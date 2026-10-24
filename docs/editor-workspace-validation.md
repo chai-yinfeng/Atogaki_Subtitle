@@ -348,3 +348,14 @@ QA 正常退出后恢复临时标记：9,976 段字幕逐字段一致，9,976 �
 完整四 sidecar 独立 identifier debug QA 包编译和签名验证通过，复用原临时 App／合成数据。原生展示八张可下载模型卡片，名称、说明、未下载状态和按钮均可访问；Tab 从导航到达首个下载按钮，有可见焦点环，未按 Enter 或激活任何模型操作。截图确认两列卡片、按钮与页脚无异常。QA 正常退出后 20 表行数和排序内容 SHA-256 全部一致，integrity_check=ok、foreign_key_check 为空；未保存配置／Key、下载或卸载真实模型、替换正式 App 或新增备份。证据在忽略目录 `local-artifacts/model-view-native/`，含包／源码 SHA、AX／截图及核验结果。
 
 原生本次只验证静态卡片与 Tab；真实下载期间的焦点、取消／完成／文件系统和 Windows 不由 WebKit 或静态窗口结果外推。Rust 源码／事务未变，本轮未重跑 Rust 全量测试；路径选择器及其他设置边界、编辑滚动 P95／长期内存等门禁继续保留。
+
+
+## 2026-10-24：模型文件选择与旧回执保护
+
+设置中的 Whisper／VAD／Hy-MT2 文件选择移入独立 session、IPC adapter 和可释放视图。179 项前端测试通过，新增八项覆盖原三命令、防重复／跨种类互斥、成功未保存提示、取消／失败重试、新输入保护、关闭重开旧成功／失败、非法入口及 dispose 后不读取已释放上下文。类型／生产构建、根目录与 Tauri Cargo fmt、diff 检查通过；Rust 源码未变，未重复运行 Rust 全量测试。
+
+新增 `scripts/verify-model-picker.cjs` 在 WebKit 生产构建真实表单验证：三个按钮互斥、新值与同值 input 事件阻止旧路径、取消焦点返回、失败重试、日文／尖括号路径按文本呈现、切页仍只回填原字段、关闭重开抑制旧结果与旧消息。模型卡片／模型会话、provider 字段／卡片、设置公共视图／保存／读取和编辑器跟随八组同步通过，共九组。所有模型与配置操作均为 fixture，无真实网络或凭据写入；picker 视图 dispose 的 AbortController 由实现检查，本次未单列其原生卸载测试。
+
+完整四 sidecar、独立 QA identifier 的 debug App 编译／签名验证通过，复用既有临时 App 和合成数据。原生键盘打开 Whisper 面板后取消，原路径仍空、通知准确且焦点返回原按钮；再次打开，通过前往目录、选择自建 42 字节 bin 文件与启用的 Open 返回，Whisper 字段显示实际 `/private/tmp/atogaki-model-picker-fixture/whisper-qa.bin`，VAD 不变，提示尚未保存且焦点返回。未按保存、不运行该测试文件、不下载模型；正常退出后 20 表内容摘要全部一致，integrity_check=ok、foreign_key_check 为空。证据在忽略目录 `local-artifacts/model-picker-native/`，含包摘要、AX、截图和数据核验。
+
+前往目录第一次 paste 未改变原路径，第二次显式聚焦并输入后成功；不把本次启用 Open 推广为既有文件面板间歇问题已解决。VAD／Hy-MT2 原生选择、真实模型校验、其他导出面板、Windows、编辑滚动 P95 与长期内存门禁继续保留。未替换正式 App 或新增 App／数据库恢复备份。

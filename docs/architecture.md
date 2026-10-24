@@ -69,9 +69,9 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 provider 卡片静态结构进入 `translation-provider-template.ts`，单个共享编辑框、模型选项和委托事件进入 `translation-provider-view.ts`，dispose 释放监听器并失效迟到动作；`translation-provider-actions.ts` 协调卡片操作，IPC 经独立 backend 接入；会话按访问、通知与 profile 代次校验返回，凭据写入与配置保存使相关旧读取失效。
 
-`desktop-settings-template.ts` 直接生成六分区最终结构，`desktop-settings-view.ts` 管理公共导航、开关、主题、表单事件与保存按钮焦点；dispose 释放监听器。`translation-provider-drafts.ts` 持有唯一非秘密草稿及每 provider 版本，`translation-provider-fields.ts` 负责共享字段和监听器；迟到默认读取不改绑未保存参数或 Key。`model-management-session.ts` 接管下载／取消／选择／卸载和可见设置下的串行观察，原六条 IPC 经独立 adapter 接入，复用既有 catalog／download 状态。关闭停止前端 timer，后台下载意图保留；`model-management-view.ts` 按 model ID 保留卡片／按钮／进度节点并差量呈现，委托事件调用原会话，焦点随同一模型状态保留且不抢占新输入。其余设置字段、独立 ASR／词典凭据和路径选择器仍待抽取。
+`desktop-settings-template.ts` 直接生成六分区最终结构，`desktop-settings-view.ts` 管理公共导航、开关、主题、表单事件与保存按钮焦点；dispose 释放监听器。`translation-provider-drafts.ts` 持有唯一非秘密草稿及每 provider 版本，`translation-provider-fields.ts` 负责共享字段和监听器；迟到默认读取不改绑未保存参数或 Key。`model-management-session.ts` 接管下载／取消／选择／卸载和可见设置下的串行观察，原六条 IPC 经独立 adapter 接入，复用既有 catalog／download 状态。关闭停止前端 timer，后台下载意图保留；`model-management-view.ts` 按 model ID 保留卡片／按钮／进度节点并差量呈现，委托事件调用原会话，焦点随同一模型状态保留且不抢占新输入。`model-picker-session.ts` 串行协调三个设置模型选择器，`model-picker-backend.ts` 复用原三条 IPC，`model-picker-view.ts` 管理委托监听器与焦点；回填核对设置访问、字段值及 dirty 版本，选择不直接保存配置。其余设置字段、独立 ASR／词典凭据和任务媒体选择器仍待抽取。
 
-任务后续翻译 provider 由 `task-translation-provider.ts` 管理任务／navigation 绑定的读取、在途保存与选择草稿，视图和原两条 IPC 适配独立；静态控件复用任务工具模板。旧访问返回不能更新当前状态，保存中新输入按版本保留；不增加凭据存储，也不自动翻译。模型卡片视图、路径选择器和独立凭据用例仍待抽取。
+任务后续翻译 provider 由 `task-translation-provider.ts` 管理任务／navigation 绑定的读取、在途保存与选择草稿，视图和原两条 IPC 适配独立；静态控件复用任务工具模板。旧访问返回不能更新当前状态，保存中新输入按版本保留；不增加凭据存储，也不自动翻译。模型卡片及设置模型路径选择器已分离；任务媒体选择器和独立凭据用例仍待抽取。
 
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
 
