@@ -1,3 +1,5 @@
+import { createModelManagementSession } from "./model-management-session";
+import { createModelManagementBackend } from "./model-management-backend";
 import { createTranslationProviderDrafts } from "./translation-provider-drafts";
 import { mountTranslationProviderFields } from "./translation-provider-fields";
 import { createTranslationProviderActions } from "./translation-provider-actions";
@@ -721,7 +723,7 @@ let selectedTaskContentGroups = new Set<string>();
 let desktopSettings: DesktopSettings | null = null;
 let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
-let modelDownloadPoll: number | null = null;
+let modelManagement: ReturnType<typeof createModelManagementSession> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
@@ -1123,6 +1125,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  modelManagement?.dispose();
   providerFields?.dispose();
   settingsView?.dispose();
   providerActions?.dispose();
@@ -1386,11 +1389,11 @@ function renderModelCatalog(): void {
     const action = download && ["queued", "downloading", "cancelling"].includes(download.status) ? "cancel" : "download";
     const buttonLabel = action === "cancel" ? download?.status === "cancelling" ? "正在取消" : "取消"
       : download?.status === "failed" || download?.status === "cancelled" ? "继续下载" : "下载";
-    const disabled = action === "cancel"
+    const disabled = modelManagement?.busy || (action === "cancel"
       ? download?.status === "cancelling"
-      : Boolean(activeDownload);
+      : Boolean(activeDownload));
     const actions = download?.status === "done"
-      ? `<div>${download.active ? "" : `<button type="button" data-model-action="select" data-model-id="${escapeHtml(model.id)}">设为当前</button>`}<button type="button" class="secondary" data-model-action="uninstall" data-model-id="${escapeHtml(model.id)}">卸载</button></div>`
+      ? `<div>${download.active ? "" : `<button type="button" data-model-action="select" data-model-id="${escapeHtml(model.id)}" ${modelManagement?.busy ? "disabled" : ""}>设为当前</button>`}<button type="button" class="secondary" data-model-action="uninstall" data-model-id="${escapeHtml(model.id)}" ${modelManagement?.busy ? "disabled" : ""}>卸载</button></div>`
       : `<button type="button" class="secondary" data-model-action="${action}" data-model-id="${escapeHtml(model.id)}" ${disabled ? "disabled" : ""}>${buttonLabel}</button>`;
     return `<article class="model-card">
       <div><strong>${escapeHtml(model.name)}</strong><span>${escapeHtml(model.sizeLabel)} · ${escapeHtml(model.recommendedFor)}</span></div>
@@ -1596,7 +1599,7 @@ const settingsLoad = createDesktopSettingsLoad({
   accepted: ({ settings, catalog, downloads, profiles }) => {
     if (settingsMessage?.textContent?.startsWith("无法读取启动配置：")) settingsMessage.textContent = "";
     updateProviderProfiles(profiles); availableModels = catalog; modelDownloads = downloads;
-    renderDesktopSettings(settings);
+    renderDesktopSettings(settings); modelManagement?.observe();
   },
   dictionariesAccepted: ({ catalog, downloads, credentials, directory }) => {
     if (dictionaryDownloadMessage?.textContent?.startsWith("无法读取词典配置：")) dictionaryDownloadMessage.textContent = "";
@@ -1604,7 +1607,7 @@ const settingsLoad = createDesktopSettingsLoad({
     if (dictionaryDirectoryLabel) dictionaryDirectoryLabel.textContent = `目录：${directory}`;
     renderDictionaryCatalog(); renderDictionaryCredentials();
   },
-  onboard: () => settingsView?.open(false),
+  onboard: () => { settingsView?.open(false); modelManagement?.observe(); },
   message: text => { if (settingsMessage) settingsMessage.textContent = text; },
   dictionaryMessage: text => { if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = text; },
 });
@@ -1698,101 +1701,35 @@ async function chooseSettingsModel(kind: "whisper" | "vad" | "hy-mt2"): Promise<
   }
 }
 
-async function startModelDownload(modelId: string): Promise<void> {
-  if (!modelId) return;
-  if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return;
-  if (modelDownloadMessage) modelDownloadMessage.textContent = "正在保存当前网络配置并连接模型来源…";
-  try {
-    await invoke<void>("save_download_network_settings", {
-      request: {
-        proxyMode: settingsProxyMode.value,
-        proxyUrl: settingsProxyUrl.value.trim() || null,
-        modelMirrorUrl: settingsModelMirror.value.trim() || null,
-      },
-    });
-    settingsDirtyFields.delete(settingsProxyMode.id);
-    settingsDirtyFields.delete(settingsProxyUrl.id);
-    settingsDirtyFields.delete(settingsModelMirror.id);
-    const state = await invoke<ModelDownloadState>("start_model_download", { modelId });
-    modelDownloads = modelDownloads.filter((download) => download.modelId !== modelId);
-    modelDownloads.push(state);
-    renderModelCatalog();
-    if (modelDownloadPoll === null) {
-      modelDownloadPoll = window.setInterval(() => void refreshModelDownloads(), 500);
-    }
-  } catch (error) {
-    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法开始下载：${String(error)}`;
-  }
-}
-
-async function refreshModelDownloads(): Promise<void> {
-  try {
-    modelDownloads = await invoke<ModelDownloadState[]>("model_download_states");
-    renderModelCatalog();
-    const active = modelDownloads.some((download) =>
-      download.status === "queued" || download.status === "downloading" || download.status === "cancelling"
-    );
-    if (!active) {
-      if (modelDownloadPoll !== null) window.clearInterval(modelDownloadPoll);
-      modelDownloadPoll = null;
-      await loadDesktopSettings(false);
-      const completed = modelDownloads.find((download) => download.status === "done");
-      const failed = modelDownloads.find((download) => download.status === "failed");
-      if (modelDownloadMessage) {
-        modelDownloadMessage.textContent = completed
-          ? "模型已校验并安装，路径已自动填入。"
-          : failed ? `下载失败：${failed.error ?? "未知错误"}` : "";
-      }
-    }
-  } catch (error) {
-    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法读取下载状态：${String(error)}`;
-  }
-}
-
-async function cancelModelDownload(modelId: string): Promise<void> {
-  if (!modelId) return;
-  try {
-    const state = await invoke<ModelDownloadState>("cancel_model_download", { modelId });
-    modelDownloads = modelDownloads.filter((download) => download.modelId !== modelId);
-    modelDownloads.push(state);
-    renderModelCatalog();
-  } catch (error) {
-    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法取消下载：${String(error)}`;
-  }
-}
-
-async function uninstallModel(modelId: string): Promise<void> {
-  if (!modelId) return;
-  try {
-    await invoke<void>("uninstall_model", { modelId });
-    modelDownloads = modelDownloads.filter((download) => download.modelId !== modelId);
-    await loadDesktopSettings(false);
-    if (modelDownloadMessage) modelDownloadMessage.textContent = "模型及其未完成下载已删除。";
-  } catch (error) {
-    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法卸载模型：${String(error)}`;
-  }
-}
-
-async function selectModel(modelId: string): Promise<void> {
-  if (!modelId) return;
-  const model = availableModels.find((candidate) => candidate.id === modelId);
-  if (modelDownloadMessage) modelDownloadMessage.textContent = "正在校验并切换模型…";
-  try {
-    await invoke<ModelDownloadState>("select_model", { modelId });
-    if (model?.kind === "whisper" && settingsWhisperModel) {
-      settingsDirtyFields.delete(settingsWhisperModel.id);
-    } else if (model?.kind === "vad" && settingsVadModel) {
-      settingsDirtyFields.delete(settingsVadModel.id);
-    } else if (model?.kind === "hy-mt2" && settingsHyMt2Model) {
-      settingsDirtyFields.delete(settingsHyMt2Model.id);
-    }
-    modelDownloads = await invoke<ModelDownloadState[]>("model_download_states");
-    await loadDesktopSettings(false);
-    if (modelDownloadMessage) modelDownloadMessage.textContent = "模型已校验并设为当前使用。";
-  } catch (error) {
-    if (modelDownloadMessage) modelDownloadMessage.textContent = `无法选择模型：${String(error)}`;
-  }
-}
+modelManagement = createModelManagementSession({
+  backend: createModelManagementBackend(invoke),
+  visit: () => settingsVisit,
+  isOpen: () => settingsDialog?.open ?? false,
+  catalog: () => availableModels,
+  downloads: () => modelDownloads,
+  accepted: states => { modelDownloads = states; renderModelCatalog(); renderProviderCards(); },
+  changed: () => renderModelCatalog(),
+  captureNetwork: () => {
+    if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return null;
+    const snapshot = settingsDirtyFields.snapshot(), ids = [settingsProxyMode.id, settingsProxyUrl.id, settingsModelMirror.id];
+    return {
+      request: { proxyMode: settingsProxyMode.value, proxyUrl: settingsProxyUrl.value.trim() || null, modelMirrorUrl: settingsModelMirror.value.trim() || null },
+      acknowledge: () => { for (const id of ids) settingsDirtyFields.acknowledge(snapshot, id); return ids.some(id => settingsDirtyFields.has(id)); },
+    };
+  },
+  captureSelection: kind => {
+    const input = kind === "whisper" ? settingsWhisperModel : kind === "vad" ? settingsVadModel : settingsHyMt2Model;
+    const snapshot = settingsDirtyFields.snapshot();
+    return { acknowledge: () => { if (!input) return false; settingsDirtyFields.acknowledge(snapshot, input.id); return settingsDirtyFields.has(input.id); } };
+  },
+  invalidateLoads: () => settingsLoad.invalidate(),
+  reload: () => settingsLoad.load(false),
+  message: text => { if (modelDownloadMessage) modelDownloadMessage.textContent = text; },
+});
+async function startModelDownload(modelId: string): Promise<void> { await modelManagement?.run("start", modelId); }
+async function cancelModelDownload(modelId: string): Promise<void> { await modelManagement?.run("cancel", modelId); }
+async function uninstallModel(modelId: string): Promise<void> { await modelManagement?.run("uninstall", modelId); }
+async function selectModel(modelId: string): Promise<void> { await modelManagement?.run("select", modelId); }
 
 function renderGlossaryOptions(): void {
   const taskSelection = taskGlossary?.value ?? "";
@@ -4553,8 +4490,8 @@ settingsView = mountDesktopSettingsView(settingsDialog!, {
   openButton: document.querySelector<HTMLButtonElement>("#open-settings"),
   visit: () => settingsVisit,
   opening: () => { ++settingsVisit; settingsDirtyFields.clear(); },
-  opened: () => { void loadDesktopSettings(false); },
-  closed: () => { ++settingsVisit; settingsLoad.invalidate(); settingsDirtyFields.clear(); },
+  opened: () => { modelManagement?.observe(); void loadDesktopSettings(false); },
+  closed: () => { ++settingsVisit; modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
   dirty: id => settingsDirtyFields.add(id),
   save: finish => { void saveSettings(finish); },
   applyTheme,
