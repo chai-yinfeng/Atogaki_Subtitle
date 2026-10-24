@@ -1,3 +1,6 @@
+import { createTranslationProviderActions } from "./translation-provider-actions";
+import { createTranslationProviderBackend } from "./translation-provider-backend";
+import type { AsrCredentialStatus } from "./translation-provider-types";
 import { translationProviderTemplate } from "./translation-provider-template";
 import { mountTranslationProviderView } from "./translation-provider-view";
 import type { DesktopSettings, TranslationProfileSummary, ModelCatalogItem, ModelDownloadState, DictionaryCatalogItem, DictionaryDownloadState, DictionaryCredentialStatus } from "./desktop-settings-types";
@@ -259,21 +262,6 @@ type TranslationRun = {
   output_tokens: number | null;
   plan_json?: string | null;
   completed_at_unix: number;
-};
-
-type TranslationCredentialCheck = {
-  providerId: string;
-  providerName: string;
-  storedInSystem: boolean;
-  availableFromEnvironment: boolean;
-  credentialStore: string;
-};
-
-type AsrCredentialStatus = {
-  providerId: "gemini-transcribe";
-  providerName: string;
-  configured: boolean;
-  credentialStore: string;
 };
 
 type NetworkSourceCheck = {
@@ -814,6 +802,7 @@ let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
 let dictionaryDownloadPoll: number | null = null;
+let providerActions: ReturnType<typeof createTranslationProviderActions> | null = null;
 let providerCardsView: ReturnType<typeof mountTranslationProviderView> | null = null;
 const settingsDirtyFields = createVersionedDirtyFields();
 let settingsVisit = 0;
@@ -1207,6 +1196,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  providerActions?.dispose();
   providerCardsView?.dispose();
   settingsLoad.dispose();
   settingsSave.dispose();
@@ -1731,7 +1721,7 @@ const settingsSave = createDesktopSettingsSave({
       hasNewInput: () => settingsDirtyFields.revision !== revision || providerDirtyDrafts.revision !== profileRevision,
     };
   },
-  invalidateLoads: () => settingsLoad.invalidate(),
+  invalidateLoads: () => { settingsLoad.invalidate(); providerActions?.invalidateProfiles(); },
   accepted: (settings, profiles) => { if (profiles) updateProviderProfiles(profiles); renderDesktopSettings(settings); },
   refreshTranslation: () => taskProvider.refresh(),
   reload: () => loadDesktopSettings(false),
@@ -4674,6 +4664,7 @@ const providerDrafts = new Map<string, { model: string; endpoint: string; style:
 const providerDirtyDrafts = createVersionedDirtyFields();
 const providerReadiness = new Map<string, string>();
 function updateProviderProfiles(profiles: TranslationProfileSummary[]): void {
+  providerActions?.invalidateProfiles();
   for (const profile of profiles) {
     providerReadiness.set(profile.provider_id, profile.readiness);
     if (!providerDirtyDrafts.has(profile.provider_id)) providerDrafts.set(profile.provider_id, {
@@ -4722,12 +4713,34 @@ settingsProvider?.addEventListener("change", () => {
   }
   renderProviderCards();
 });
+providerActions = createTranslationProviderActions({
+  backend: createTranslationProviderBackend(invoke),
+  visit: () => settingsVisit,
+  isOpen: () => settingsDialog?.open ?? false,
+  invalidateSettingsLoads: () => settingsLoad.invalidate(),
+  profilesAccepted: profiles => { updateProviderProfiles(profiles); renderProviderCards(); },
+  captureCredential: (id, clear) => {
+    const secret = settingsApiKey?.value ?? "", asrSecret = settingsGeminiApiKey?.value ?? "";
+    const fields = settingsDirtyFields.snapshot();
+    return {
+      apiKey: clear ? null : secret,
+      applied: () => {
+        if (settingsProvider?.value === id && settingsApiKey?.value === secret && settingsDirtyFields.snapshot().get(settingsApiKey.id) === fields.get(settingsApiKey.id)) {
+          settingsApiKey.value = ""; settingsDirtyFields.acknowledge(fields, settingsApiKey.id);
+        }
+      },
+      asrStatus: status => renderAsrCredentialStatus(status, settingsGeminiApiKey?.value === asrSecret && settingsDirtyFields.snapshot().get(settingsGeminiApiKey?.id ?? "") === fields.get(settingsGeminiApiKey?.id ?? "")),
+    };
+  },
+  credentialMessage: (id, text) => { if (settingsProvider?.value === id && apiKeyStatus) apiKeyStatus.textContent = text; },
+  message: text => { if (settingsMessage) settingsMessage.textContent = text; },
+});
 providerCardsView = mountTranslationProviderView(document.querySelector<HTMLElement>("[data-translation-settings]")!, {
   visit: () => settingsVisit,
   state: () => ({ readiness: providerReadiness, dirty: providerDirtyDrafts, catalog: availableModels, downloads: modelDownloads }),
   localModel: () => settingsHyMt2Model?.value ?? "",
   chooseLocalModel: path => { if (settingsHyMt2Model) { settingsHyMt2Model.value = path; settingsHyMt2Model.dispatchEvent(new Event("input", { bubbles: true })); } },
-  action: providerCardAction,
+  action: (action, id, current) => providerActions!.run(action, id, current),
   error: text => { if (settingsMessage) settingsMessage.textContent = text; },
 });
 document.querySelector("#dictionary-credentials")?.addEventListener("click", (event) => {
@@ -5067,45 +5080,7 @@ async function showPartialTranscript(jobId: string): Promise<void> {
 window.addEventListener("atogaki-theme-change", () => renderKaraokeTimeline());
 function renderProviderCards(): void { providerCardsView?.render(); }
 
-async function refreshProviderReadiness(current: () => boolean = () => true): Promise<void> {
-  const profiles = await settingsBackend.profiles();
-  if (!current()) return;
-  updateProviderProfiles(profiles); renderProviderCards();
-}
-
-async function providerCardAction(action: "test" | "check" | "save" | "delete", id: string, current: () => boolean): Promise<void> {
-  let committed = false;
-  const secret = settingsApiKey?.value ?? "", asrSecret = settingsGeminiApiKey?.value ?? "";
-  try {
-    if (action === "test") {
-      await invoke<string>("test_translation_connection", { providerId: id });
-    } else if (action === "check") {
-      const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", { providerId: id });
-      if (current() && settingsMessage) settingsMessage.textContent = `${result.providerName}：${result.storedInSystem || result.availableFromEnvironment ? "凭据存在，尚不代表连接已通过" : "未找到凭据"}；本次未调用翻译 API。`;
-    } else {
-      await invoke("save_translation_credential", { providerId: id, apiKey: action === "save" ? secret : null, clear: action === "delete" });
-      committed = true;
-      if (!current()) return;
-      if (settingsProvider?.value === id && settingsApiKey?.value === secret) settingsApiKey.value = "";
-    }
-    if (!current()) return;
-    await refreshProviderReadiness(current);
-    if (!current()) return;
-    if (committed) {
-      if (id === "gemini") {
-        const status = await invoke<AsrCredentialStatus>("asr_credential_status");
-        if (!current()) return;
-        renderAsrCredentialStatus(status, settingsGeminiApiKey?.value === asrSecret);
-      }
-      const verb = action === "delete" ? "删除" : "保存";
-      if (settingsProvider?.value === id && apiKeyStatus) apiKeyStatus.textContent = `${id} 凭据已${verb}；连接状态请查看卡片。`;
-      if (settingsMessage) settingsMessage.textContent = `${id} 凭据已${verb}；${id === "gemini" ? "语音识别与翻译共用此 Key，音频上传仍需单独授权。" : "其他后端配置未改变。"}`;
-    }
-  } catch (error) {
-    if (current() && settingsMessage) settingsMessage.textContent = committed ? `凭据已${action === "delete" ? "删除" : "保存"}，但状态刷新失败：${String(error)}` : `${action === "test" ? "连接测试失败：" : ""}${String(error)}`;
-    if (action === "test" && current()) await refreshProviderReadiness(current).catch(() => {});
-  }
-}
+async function refreshProviderReadiness(): Promise<void> { await providerActions?.refreshProfiles(); }
 
 function organizeSettings(): void {
   const form = document.querySelector<HTMLFormElement>("#settings-form");
