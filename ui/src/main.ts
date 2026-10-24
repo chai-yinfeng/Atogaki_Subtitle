@@ -1,3 +1,5 @@
+import { createDictionaryDownloadBackend } from "./dictionary-download-backend";
+import { createDictionaryDownloadSession } from "./dictionary-download-session";
 import { createDictionaryCredentialBackend } from "./dictionary-credential-backend";
 import { createDictionaryCredentialSession } from "./dictionary-credential-session";
 import { mountDictionaryCredentialView } from "./dictionary-credential-view";
@@ -732,7 +734,7 @@ let modelPickerView: ReturnType<typeof mountModelPickerView> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
-let dictionaryDownloadPoll: number | null = null;
+let dictionaryDownloadSession: ReturnType<typeof createDictionaryDownloadSession> | null = null;
 let settingsView: ReturnType<typeof mountDesktopSettingsView> | null = null;
 const providerDrafts = createTranslationProviderDrafts();
 let providerFields: ReturnType<typeof mountTranslationProviderFields> | null = null;
@@ -1131,6 +1133,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  dictionaryDownloadSession?.dispose();
   dictionaryCredentialSession.dispose();
   dictionaryCredentialView?.dispose();
   asrCredentials.dispose();
@@ -1402,11 +1405,11 @@ function renderDictionaryCatalog(): void {
       <span>${escapeHtml(item.license)} · 署名：${escapeHtml(item.attribution)}</span>
       <span>来源：${escapeHtml(item.sourceUrl)}</span>
       ${progress === null ? "" : `<progress max="1" value="${progress}"></progress>`}
-      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span><button type="button" class="secondary" data-download-dictionary="${escapeHtml(item.id)}" ${activeDownload ? "disabled" : ""}>${download?.status === "done" ? "检查更新" : download?.status === "failed" ? "重试" : "下载"}</button></div>
+      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span><button type="button" class="secondary" data-download-dictionary="${escapeHtml(item.id)}" ${activeDownload || dictionaryDownloadSession?.busy ? "disabled" : ""}>${download?.status === "done" ? "检查更新" : download?.status === "failed" ? "重试" : "下载"}</button></div>
     </article>`;
   }).join("");
   dictionaryCatalogHost.querySelectorAll<HTMLButtonElement>("[data-download-dictionary]").forEach((button) => {
-    button.addEventListener("click", () => void startDictionaryDownload(button.dataset.downloadDictionary ?? ""));
+    button.addEventListener("click", () => void dictionaryDownloadSession?.start(button.dataset.downloadDictionary ?? ""));
   });
 }
 
@@ -1423,51 +1426,6 @@ function renderAsrCredentialStatus(status: AsrCredentialStatus, clearInput = fal
     geminiApiKeyStatus.classList.toggle("warning", !status.configured);
   }
   if (clearInput && settingsGeminiApiKey) settingsGeminiApiKey.value = "";
-}
-
-async function startDictionaryDownload(dictionaryId: string): Promise<void> {
-  if (!dictionaryId || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return;
-  if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = "正在保存当前网络配置并获取词典发布信息…";
-  try {
-    await invoke<void>("save_download_network_settings", {
-      request: {
-        proxyMode: settingsProxyMode.value,
-        proxyUrl: settingsProxyUrl.value.trim() || null,
-        modelMirrorUrl: settingsModelMirror.value.trim() || null,
-      },
-    });
-    const state = await invoke<DictionaryDownloadState>("start_dictionary_download", { dictionaryId });
-    dictionaryDownloads = dictionaryDownloads.filter((download) => download.dictionaryId !== dictionaryId);
-    dictionaryDownloads.push(state);
-    renderDictionaryCatalog();
-    if (dictionaryDownloadPoll === null) {
-      dictionaryDownloadPoll = window.setInterval(() => void refreshDictionaryDownloads(), 500);
-    }
-  } catch (error) {
-    if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = `无法开始词典下载：${String(error)}`;
-  }
-}
-
-async function refreshDictionaryDownloads(): Promise<void> {
-  try {
-    dictionaryDownloads = await invoke<DictionaryDownloadState[]>("dictionary_download_states");
-    renderDictionaryCatalog();
-    const active = dictionaryDownloads.some((download) =>
-      download.status === "queued" || download.status === "resolving" || download.status === "downloading"
-    );
-    if (!active) {
-      if (dictionaryDownloadPoll !== null) window.clearInterval(dictionaryDownloadPoll);
-      dictionaryDownloadPoll = null;
-      const failed = dictionaryDownloads.find((download) => download.status === "failed");
-      if (dictionaryDownloadMessage) {
-        dictionaryDownloadMessage.textContent = failed
-          ? `下载失败：${failed.error ?? "未知错误"}`
-          : "词典包已校验并安装到正式应用数据目录。";
-      }
-    }
-  } catch (error) {
-    if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = `无法读取词典下载状态：${String(error)}`;
-  }
 }
 
 async function loadDesktopSettings(openWhenNeeded = false): Promise<void> { await settingsLoad.load(openWhenNeeded); }
@@ -1490,9 +1448,9 @@ const settingsLoad = createDesktopSettingsLoad({
     if (dictionaryDownloadMessage?.textContent?.startsWith("无法读取词典配置：")) dictionaryDownloadMessage.textContent = "";
     availableDictionaries = catalog; dictionaryDownloads = downloads; dictionaryCredentials = credentials;
     if (dictionaryDirectoryLabel) dictionaryDirectoryLabel.textContent = `目录：${directory}`;
-    renderDictionaryCatalog(); renderDictionaryCredentials();
+    renderDictionaryCatalog(); renderDictionaryCredentials(); dictionaryDownloadSession?.observe();
   },
-  onboard: () => { settingsView?.open(false); modelManagement?.observe(); },
+  onboard: () => { settingsView?.open(false); modelManagement?.observe(); dictionaryDownloadSession?.observe(); },
   message: text => { if (settingsMessage) settingsMessage.textContent = text; },
   dictionaryMessage: text => { if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = text; },
 });
@@ -1543,6 +1501,26 @@ const settingsSave = createDesktopSettingsSave({
   message: text => { if (settingsMessage) settingsMessage.textContent = text; },
 });
 async function saveSettings(finishOnboarding: boolean): Promise<void> { await settingsSave.save(finishOnboarding); }
+
+dictionaryDownloadSession = createDictionaryDownloadSession({
+  backend: createDictionaryDownloadBackend(invoke),
+  visit: () => settingsVisit, isOpen: () => settingsDialog?.open ?? false,
+  catalog: () => availableDictionaries, downloads: () => dictionaryDownloads,
+  accepted: states => { dictionaryDownloads = states; renderDictionaryCatalog(); },
+  changed: () => renderDictionaryCatalog(),
+  captureNetwork: () => {
+    if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return null;
+    const ids = [settingsProxyMode.id, settingsProxyUrl.id, settingsModelMirror.id], fields = settingsDirtyFields.snapshot();
+    return {
+      request: { proxyMode: settingsProxyMode.value, proxyUrl: settingsProxyUrl.value.trim() || null, modelMirrorUrl: settingsModelMirror.value.trim() || null },
+      acknowledge: () => { for (const id of ids) settingsDirtyFields.acknowledge(fields, id); return ids.some(id => settingsDirtyFields.has(id)); },
+    };
+  },
+  invalidateLoads: () => { settingsLoad.invalidate(); settingsLoad.invalidateDictionaries(); },
+  reload: () => settingsLoad.loadDictionaries(),
+  message: text => { if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = text; },
+  clearMessage: text => { if (dictionaryDownloadMessage?.textContent === text) dictionaryDownloadMessage.textContent = ""; },
+});
 
 const dictionaryCredentialSession = createDictionaryCredentialSession({
   backend: createDictionaryCredentialBackend(invoke),
@@ -4425,8 +4403,8 @@ settingsView = mountDesktopSettingsView(settingsDialog!, {
   openButton: document.querySelector<HTMLButtonElement>("#open-settings"),
   visit: () => settingsVisit,
   opening: () => { ++settingsVisit; settingsDirtyFields.clear(); },
-  opened: () => { modelManagement?.observe(); void loadDesktopSettings(false); },
-  closed: () => { ++settingsVisit; dictionaryCredentialSession.hidden(); settingsLoad.invalidateDictionaries(); asrCredentials.hidden(); networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
+  opened: () => { modelManagement?.observe(); dictionaryDownloadSession?.observe(); void loadDesktopSettings(false); },
+  closed: () => { ++settingsVisit; dictionaryDownloadSession?.hidden(); dictionaryCredentialSession.hidden(); settingsLoad.invalidateDictionaries(); asrCredentials.hidden(); networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
   dirty: id => settingsDirtyFields.add(id),
   save: finish => { void saveSettings(finish); },
   applyTheme,
