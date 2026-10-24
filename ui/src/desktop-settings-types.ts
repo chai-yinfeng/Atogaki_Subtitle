@@ -30,3 +30,61 @@ export type SaveDesktopSettingsRequest = {
   networkProxyMode: string; networkProxyUrl: string | null; modelMirrorUrl: string | null;
   onboardingCompleted: boolean;
 };
+
+export type ModelCatalogItem = {
+  id: string;
+  kind: "whisper" | "vad" | "hy-mt2";
+  name: string;
+  fileName: string;
+  sizeLabel: string;
+  recommendedFor: string;
+  sourceUrl: string;
+};
+
+export type ModelDownloadState = {
+  modelId: string;
+  status: "queued" | "downloading" | "cancelling" | "cancelled" | "done" | "failed";
+  downloadedBytes: number;
+  totalBytes: number | null;
+  path: string | null;
+  error: string | null;
+  source: string | null;
+  active: boolean;
+};
+
+export type DictionaryCatalogItem = {
+  id: string;
+  name: string;
+  languagePair: string;
+  versionLabel: string;
+  sizeLabel: string;
+  description: string;
+  license: string;
+  attribution: string;
+  sourceUrl: string;
+};
+
+export type DictionaryDownloadState = {
+  dictionaryId: string;
+  status: "queued" | "resolving" | "downloading" | "done" | "failed";
+  downloadedBytes: number;
+  totalBytes: number | null;
+  path: string | null;
+  version: string | null;
+  error: string | null;
+  source: string | null;
+};
+
+export type DictionaryCredentialStatus = {
+  providerId: "merriam-webster";
+  providerName: string;
+  configured: boolean;
+  credentialStore: string;
+};
+
+export type DesktopSettingsSnapshot = {
+  settings: DesktopSettings; catalog: ModelCatalogItem[]; downloads: ModelDownloadState[]; profiles: TranslationProfileSummary[];
+};
+export type DictionarySettingsSnapshot = {
+  catalog: DictionaryCatalogItem[]; downloads: DictionaryDownloadState[]; credentials: DictionaryCredentialStatus[]; directory: string;
+};

@@ -1,4 +1,5 @@
-import type { DesktopSettings, TranslationProfileSummary } from "./desktop-settings-types";
+import type { DesktopSettings, TranslationProfileSummary, ModelCatalogItem, ModelDownloadState, DictionaryCatalogItem, DictionaryDownloadState, DictionaryCredentialStatus } from "./desktop-settings-types";
+import { createDesktopSettingsLoad } from "./desktop-settings-load";
 import { createDesktopSettingsSave, createVersionedDirtyFields } from "./desktop-settings-save";
 import { createDesktopSettingsBackend } from "./desktop-settings-backend";
 import { mountVideoRenderView } from "./video-render-view";
@@ -268,57 +269,6 @@ type TranslationCredentialCheck = {
 
 type AsrCredentialStatus = {
   providerId: "gemini-transcribe";
-  providerName: string;
-  configured: boolean;
-  credentialStore: string;
-};
-
-type ModelCatalogItem = {
-  id: string;
-  kind: "whisper" | "vad" | "hy-mt2";
-  name: string;
-  fileName: string;
-  sizeLabel: string;
-  recommendedFor: string;
-  sourceUrl: string;
-};
-
-type ModelDownloadState = {
-  modelId: string;
-  status: "queued" | "downloading" | "cancelling" | "cancelled" | "done" | "failed";
-  downloadedBytes: number;
-  totalBytes: number | null;
-  path: string | null;
-  error: string | null;
-  source: string | null;
-  active: boolean;
-};
-
-type DictionaryCatalogItem = {
-  id: string;
-  name: string;
-  languagePair: string;
-  versionLabel: string;
-  sizeLabel: string;
-  description: string;
-  license: string;
-  attribution: string;
-  sourceUrl: string;
-};
-
-type DictionaryDownloadState = {
-  dictionaryId: string;
-  status: "queued" | "resolving" | "downloading" | "done" | "failed";
-  downloadedBytes: number;
-  totalBytes: number | null;
-  path: string | null;
-  version: string | null;
-  error: string | null;
-  source: string | null;
-};
-
-type DictionaryCredentialStatus = {
-  providerId: "merriam-webster";
   providerName: string;
   configured: boolean;
   credentialStore: string;
@@ -893,7 +843,7 @@ let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
 let dictionaryDownloadPoll: number | null = null;
 const settingsDirtyFields = createVersionedDirtyFields();
-let settingsVisit = 0, settingsLoadGeneration = 0;
+let settingsVisit = 0;
 let learningItems: LearningItemDetail[] = [];
 let activeLearningLanguage: LearningLanguage = readLearningLanguagePreference();
 let pendingLearningSelection: PendingLearningSelection | null = null;
@@ -1284,6 +1234,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  settingsLoad.dispose();
   settingsSave.dispose();
   taskProvider.dispose();
   taskProviderView?.dispose();
@@ -1656,24 +1607,7 @@ function renderDictionaryCredentials(): void {
   });
 }
 
-async function loadDictionarySettings(): Promise<void> {
-  try {
-    const [catalog, downloads, credentials, directory] = await Promise.all([
-      invoke<DictionaryCatalogItem[]>("dictionary_catalog"),
-      invoke<DictionaryDownloadState[]>("dictionary_download_states"),
-      invoke<DictionaryCredentialStatus[]>("dictionary_credential_statuses"),
-      invoke<string>("dictionary_directory"),
-    ]);
-    availableDictionaries = catalog;
-    dictionaryDownloads = downloads;
-    dictionaryCredentials = credentials;
-    if (dictionaryDirectoryLabel) dictionaryDirectoryLabel.textContent = `目录：${directory}`;
-    renderDictionaryCatalog();
-    renderDictionaryCredentials();
-  } catch (error) {
-    if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = `无法读取词典配置：${String(error)}`;
-  }
-}
+async function loadDictionarySettings(): Promise<void> { await settingsLoad.loadDictionaries(); }
 
 function renderAsrCredentialStatus(status: AsrCredentialStatus): void {
   if (asrCredentialStoreLabel) asrCredentialStoreLabel.textContent = status.credentialStore;
@@ -1802,35 +1736,35 @@ async function checkDictionaryCredential(providerId: string): Promise<void> {
   }
 }
 
-async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
-  const request = ++settingsLoadGeneration, visit = settingsVisit;
-  try {
-    const [settings, catalog, downloads, profiles] = await Promise.all([
-      invoke<DesktopSettings>("desktop_settings"),
-      availableModels.length ? Promise.resolve(availableModels) : invoke<ModelCatalogItem[]>("model_catalog"),
-      invoke<ModelDownloadState[]>("model_download_states"),
-      invoke<TranslationProfileSummary[]>("translation_profiles"),
-    ]);
-    if (request !== settingsLoadGeneration || visit !== settingsVisit) return;
-    updateProviderProfiles(profiles);
-    availableModels = catalog;
-    modelDownloads = downloads;
-    renderDesktopSettings(settings);
-    await loadDictionarySettings();
-    if (request !== settingsLoadGeneration || visit !== settingsVisit) return;
-    if (openWhenNeeded && settings.needsOnboarding && !settingsDialog?.open) settingsDialog?.showModal();
-  } catch (error) {
-    if (request === settingsLoadGeneration && visit === settingsVisit && settingsMessage) settingsMessage.textContent = `无法读取启动配置：${String(error)}`;
-  }
-}
+async function loadDesktopSettings(openWhenNeeded = false): Promise<void> { await settingsLoad.load(openWhenNeeded); }
 
 async function refreshTranslationStatus(): Promise<void> {
   await taskProvider.refresh();
 }
 
+const settingsBackend = createDesktopSettingsBackend(invoke);
+const settingsLoad = createDesktopSettingsLoad({
+  backend: settingsBackend,
+  visit: () => settingsVisit,
+  catalog: () => availableModels,
+  accepted: ({ settings, catalog, downloads, profiles }) => {
+    if (settingsMessage?.textContent?.startsWith("无法读取启动配置：")) settingsMessage.textContent = "";
+    updateProviderProfiles(profiles); availableModels = catalog; modelDownloads = downloads;
+    renderDesktopSettings(settings);
+  },
+  dictionariesAccepted: ({ catalog, downloads, credentials, directory }) => {
+    if (dictionaryDownloadMessage?.textContent?.startsWith("无法读取词典配置：")) dictionaryDownloadMessage.textContent = "";
+    availableDictionaries = catalog; dictionaryDownloads = downloads; dictionaryCredentials = credentials;
+    if (dictionaryDirectoryLabel) dictionaryDirectoryLabel.textContent = `目录：${directory}`;
+    renderDictionaryCatalog(); renderDictionaryCredentials();
+  },
+  onboard: () => { if (!settingsDialog?.open) settingsDialog?.showModal(); },
+  message: text => { if (settingsMessage) settingsMessage.textContent = text; },
+  dictionaryMessage: text => { if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = text; },
+});
 let settingsSaveFocus: { button: HTMLButtonElement; visit: number } | null = null;
 const settingsSave = createDesktopSettingsSave({
-  backend: createDesktopSettingsBackend(invoke),
+  backend: settingsBackend,
   visit: () => settingsVisit,
   capture: finishOnboarding => {
     if (!settingsWhisperModel || !settingsVadModel || !settingsHyMt2Model || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !settingsProviderModel || !settingsProviderBaseUrl || !settingsTranslationStyle) return null;
@@ -1865,7 +1799,7 @@ const settingsSave = createDesktopSettingsSave({
       hasNewInput: () => settingsDirtyFields.revision !== revision || providerDirtyDrafts.revision !== profileRevision,
     };
   },
-  invalidateLoads: () => { ++settingsLoadGeneration; },
+  invalidateLoads: () => settingsLoad.invalidate(),
   accepted: (settings, profiles) => { if (profiles) updateProviderProfiles(profiles); renderDesktopSettings(settings); },
   refreshTranslation: () => taskProvider.refresh(),
   reload: () => loadDesktopSettings(false),
@@ -4788,7 +4722,7 @@ document.querySelector<HTMLButtonElement>("#open-settings")?.addEventListener("c
   void loadDesktopSettings(false);
 });
 document.querySelector<HTMLButtonElement>("#close-settings")?.addEventListener("click", () => settingsDialog?.close());
-settingsDialog?.addEventListener("close", () => { ++settingsVisit; ++settingsLoadGeneration; settingsDirtyFields.clear(); });
+settingsDialog?.addEventListener("close", () => { ++settingsVisit; settingsLoad.invalidate(); settingsDirtyFields.clear(); });
 settingsForm?.addEventListener("input", (event) => {
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
