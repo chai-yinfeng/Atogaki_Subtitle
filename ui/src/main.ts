@@ -1,3 +1,4 @@
+import { mountDictionaryDownloadView } from "./dictionary-download-view";
 import { createDictionaryDownloadBackend } from "./dictionary-download-backend";
 import { createDictionaryDownloadSession } from "./dictionary-download-session";
 import { createDictionaryCredentialBackend } from "./dictionary-credential-backend";
@@ -734,6 +735,7 @@ let modelPickerView: ReturnType<typeof mountModelPickerView> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
+let dictionaryDownloadView: ReturnType<typeof mountDictionaryDownloadView> | null = null;
 let dictionaryDownloadSession: ReturnType<typeof createDictionaryDownloadSession> | null = null;
 let settingsView: ReturnType<typeof mountDesktopSettingsView> | null = null;
 const providerDrafts = createTranslationProviderDrafts();
@@ -1134,6 +1136,7 @@ editorRoot.addEventListener("click", event => {
 
 window.addEventListener("pagehide", () => {
   dictionaryDownloadSession?.dispose();
+  dictionaryDownloadView?.dispose();
   dictionaryCredentialSession.dispose();
   dictionaryCredentialView?.dispose();
   asrCredentials.dispose();
@@ -1381,37 +1384,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
 
 function renderModelCatalog(): void { modelCatalogView?.render(); renderProviderCards(); }
 
-function renderDictionaryCatalog(): void {
-  if (!dictionaryCatalogHost) return;
-  const activeDownload = dictionaryDownloads.find((download) =>
-    download.status === "queued" || download.status === "resolving" || download.status === "downloading"
-  );
-  dictionaryCatalogHost.innerHTML = availableDictionaries.map((item) => {
-    const download = dictionaryDownloads.find((value) => value.dictionaryId === item.id);
-    const progress = download?.totalBytes
-      ? Math.min(1, download.downloadedBytes / download.totalBytes)
-      : null;
-    const state = download?.status === "done"
-      ? `已安装${download.version ? ` · ${download.version}` : ""}`
-      : download?.status === "failed"
-        ? `失败：${download.error ?? "未知错误"}`
-        : download?.status === "downloading"
-          ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}${download.source ? ` · ${download.source}` : ""}`
-          : download?.status === "resolving" ? "正在获取最新版与校验信息…"
-            : download?.status === "queued" ? "等待下载" : "尚未安装";
-    return `<article class="model-card">
-      <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.languagePair)} · ${escapeHtml(item.sizeLabel)} · ${escapeHtml(item.versionLabel)}</span></div>
-      <span>${escapeHtml(item.description)}</span>
-      <span>${escapeHtml(item.license)} · 署名：${escapeHtml(item.attribution)}</span>
-      <span>来源：${escapeHtml(item.sourceUrl)}</span>
-      ${progress === null ? "" : `<progress max="1" value="${progress}"></progress>`}
-      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span><button type="button" class="secondary" data-download-dictionary="${escapeHtml(item.id)}" ${activeDownload || dictionaryDownloadSession?.busy ? "disabled" : ""}>${download?.status === "done" ? "检查更新" : download?.status === "failed" ? "重试" : "下载"}</button></div>
-    </article>`;
-  }).join("");
-  dictionaryCatalogHost.querySelectorAll<HTMLButtonElement>("[data-download-dictionary]").forEach((button) => {
-    button.addEventListener("click", () => void dictionaryDownloadSession?.start(button.dataset.downloadDictionary ?? ""));
-  });
-}
+function renderDictionaryCatalog(): void { dictionaryDownloadView?.render(); }
 
 function renderDictionaryCredentials(): void { dictionaryCredentialView?.render(); }
 
@@ -1520,6 +1493,14 @@ dictionaryDownloadSession = createDictionaryDownloadSession({
   reload: () => settingsLoad.loadDictionaries(),
   message: text => { if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = text; },
   clearMessage: text => { if (dictionaryDownloadMessage?.textContent === text) dictionaryDownloadMessage.textContent = ""; },
+});
+
+dictionaryDownloadView = mountDictionaryDownloadView(dictionaryCatalogHost!, {
+  visit: () => settingsVisit,
+  state: () => ({ catalog: availableDictionaries, downloads: dictionaryDownloads, busy: dictionaryDownloadSession?.busy ?? false }),
+  start: id => dictionaryDownloadSession!.start(id),
+  formatBytes,
+  error: text => { if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = text; },
 });
 
 const dictionaryCredentialSession = createDictionaryCredentialSession({

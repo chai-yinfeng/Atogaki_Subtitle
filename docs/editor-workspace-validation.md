@@ -403,3 +403,14 @@ QA 正常退出后恢复临时标记：9,976 段字幕逐字段一致，9,976 �
 新增 `scripts/verify-dictionary-download.cjs` 在 WebKit 生产构建实际操作：网络预检挂起时修改镜像，返回后仍保留新值与未保存提示；重复按钮不补发请求。活动观察后关闭设置等待 1.1 秒，dictionary_download_states 次数不增长；重开读取真实 fixture 后台状态并在完成后显示检查更新。缓存立即 done 重新读取一次后再等 1.1 秒，无残留轮询；关闭挂起预检后释放，后端 start 意图仍只发一次且无隐藏读。挂起旧访问状态读取，重开接受 done 后释放旧 queued，卡片仍保持新终态。词典凭据、ASR、网络、模型选择器／会话／卡片、provider 字段／卡片、设置读取／保存／视图与编辑跟随十二组同步通过，共十三组。
 
 所有网络保存／词典开始和状态读取均为 fixture，没有真实下载、词典安装、系统配置或正式数据修改；本轮未重新打包、覆盖正式 App 或增加备份。正式 App 仍为 05b2e07，原生网络／文件系统／下载完成和 Windows 未由 mock 推导通过。卡片仍整块重建，焦点与 view 生命周期待下一边界；长期内存、滚动 P95 及其他原生门禁保持。
+
+
+## 2026-10-24：词典卡片稳定节点与原生 Tab
+
+catalog 从 main 的 innerHTML 整块重建迁到 dictionary-download-view，按 ID 更新 metadata、状态／进度及原下载按钮。保留许可、署名与来源；无动态 HTML 插值。忙时按钮禁用，焦点保留在同一词典状态；完成、失败重试及状态刷新不抢占用户已转入的输入。
+
+229 项前端测试、类型／生产构建、根目录与 Tauri cargo fmt --check、git diff --check 通过。新增 `scripts/verify-dictionary-view.cjs` WebKit 专项直接加载实际视图，验证 metadata／错误纯文本、状态与进度名称、相同 render 的 MutationObserver 记录为零、按钮／进度／卡片身份、忙时状态焦点、进度更新保留焦点、新输入不被抢焦点、完成／重试标签与失败焦点恢复、重排／去重／移除，以及 dispose 后迟到失败不触及已释放上下文。下载会话专项补查实际周期状态读取后仍为同一按钮／进度节点；词典凭据、ASR、网络、模型选择器／会话／卡片、provider 字段／卡片、设置读取／保存／视图与编辑跟随十二组同步通过，共十四组。
+
+完整四 sidecar、独立 identifier 的 debug QA App 编译／签名验证通过，复用原临时 App／合成数据，无新增数据库或恢复备份。原生显示 JMdict、Tomoshi 与 ECDICT 三张卡片，名称、说明、许可／署名、来源和未安装状态完整可访问；Tab 从导航依次到达三个下载按钮，下方按钮被滚入内部视口，截图有可见焦点环，未按 Enter 或激活下载、凭据或保存。QA 正常退出后 20 表行数和排序内容 SHA-256 一致，integrity_check=ok、foreign_key_check 为空。证据在忽略目录 `local-artifacts/dictionary-view-native/`，含包与源码摘要、AX／截图及核验结果。
+
+本次原生只验证静态呈现／键盘导航；动态下载进度、失败重试与焦点保护为 WebKit fixture 结果，不能外推真实网络／文件系统或 Windows。Rust 源码与事务未改，未重跑全量 Rust 测试；未覆盖正式 App，仍为 05b2e07。滚动 P95、长期内存及其他原生门禁继续保留。
