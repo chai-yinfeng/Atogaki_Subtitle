@@ -4,8 +4,8 @@ use crate::{
     application::{
         TranscriptionOptions, TranslationFuture, TranslationGroup, TranslationOptions,
         TranslationPlanner, TranslationPlannerCue, TranslationProvider, TranslationProviderStatus,
-        TranslationRequest, TranslationResponse, acoustic_plan, execute_translation_group,
-        translation_planner::TRANSLATION_AFTER_CONTEXT_MS,
+        TranslationRequest, TranslationResponse, TranslationUsage, acoustic_plan,
+        execute_translation_group, translation_planner::TRANSLATION_AFTER_CONTEXT_MS,
         translation_use_case::validate_translation_results,
     },
     domain::glossary,
@@ -113,7 +113,7 @@ impl TranslationProvider for CachedProvider {
                 .map(|t| t.segment_id.clone())
                 .collect::<Vec<_>>();
             if self.revisions_match(&request).await? {
-                if let Ok(response) = self.read(&key) {
+                if let Ok(mut response) = self.read(&key) {
                     if validate_translation_results(
                         &self.status().name,
                         &ids,
@@ -125,6 +125,29 @@ impl TranslationProvider for CachedProvider {
                             .iter()
                             .all(|t| !t.translated_text.trim().is_empty())
                     {
+                        // Preserve original billed usage in the immutable cache,
+                        // but never charge it again when reusing this response.
+                        response.usage = TranslationUsage {
+                            input_tokens: Some(0),
+                            output_tokens: Some(0),
+                            cached_input_tokens: Some(0),
+                            uncached_input_tokens: Some(0),
+                            local_cache_hit: Some(true),
+                        };
+                        acoustic_plan::write_json(
+                            &self
+                                .directory
+                                .parent()
+                                .expect("cache directory has parent")
+                                .join("cache-hits")
+                                .join(format!("{}.json", uuid::Uuid::new_v4())),
+                            &serde_json::json!({
+                                "schema_version": 1, "event_scope": "local_result_cache_hit",
+                                "input_sha256": key, "profile_sha256": self.profile_sha256,
+                                "observed_at_unix_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
+                                "usage": response.usage,
+                            }),
+                        )?;
                         return Ok(response);
                     }
                 }
@@ -469,6 +492,88 @@ mod tests {
     struct Provider {
         requests: Mutex<Vec<TranslationRequest>>,
         fail: AtomicBool,
+    }
+
+    #[tokio::test]
+    async fn legacy_cache_hit_preserves_checksum_and_does_not_rebill_tokens() {
+        #[derive(Serialize)]
+        struct LegacyUsage {
+            input_tokens: Option<i64>,
+            output_tokens: Option<i64>,
+        }
+        #[derive(Serialize)]
+        struct LegacyResponse {
+            translations: Vec<crate::application::TranslationResult>,
+            model: Option<String>,
+            usage: LegacyUsage,
+        }
+        let root =
+            std::env::temp_dir().join(format!("atogaki-cache-usage-{}", uuid::Uuid::new_v4()));
+        let provider = Arc::new(Provider::default());
+        let cache = CachedProvider {
+            provider: provider.clone(),
+            directory: root.join("groups"),
+            profile_sha256: "profile".into(),
+            profile_snapshot: serde_json::Value::Null,
+            guard: None,
+        };
+        let request = TranslationRequest {
+            semantic_groups: vec![],
+            options: TranslationOptions::default(),
+            before_context: vec![],
+            after_context: vec![],
+            style_instruction: None,
+            targets: vec![crate::application::TranslationTargetSegment {
+                segment_id: "cue-1".into(),
+                source_text: "A saved source line.".into(),
+            }],
+        };
+        let key = cache.key(&request).unwrap();
+        let response = LegacyResponse {
+            translations: vec![crate::application::TranslationResult {
+                segment_id: "cue-1".into(),
+                translated_text: "缓存译文".into(),
+            }],
+            model: Some("fixture-v1".into()),
+            usage: LegacyUsage {
+                input_tokens: Some(100),
+                output_tokens: Some(20),
+            },
+        };
+        let file = cache.directory.join(format!("{key}.json"));
+        acoustic_plan::write_json(
+            &file,
+            &serde_json::json!({
+                "schema_version": 2, "input_sha256": key,
+                "sha256": digest(&(&key, &response)).unwrap(),
+                "request": request, "response": response,
+            }),
+        )
+        .unwrap();
+        let original = fs::read(&file).unwrap();
+        let reused = cache.translate(request).await.unwrap();
+        assert_eq!(reused.translations[0].translated_text, "缓存译文");
+        assert_eq!(reused.usage.input_tokens, Some(0));
+        assert_eq!(reused.usage.output_tokens, Some(0));
+        assert_eq!(reused.usage.cached_input_tokens, Some(0));
+        assert_eq!(reused.usage.local_cache_hit, Some(true));
+        assert!(provider.requests.lock().unwrap().is_empty());
+        assert_eq!(fs::read(&file).unwrap(), original);
+        assert_eq!(cache.read(&key).unwrap().usage.input_tokens, Some(100));
+        let hits = fs::read_dir(root.join("cache-hits"))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        let event: serde_json::Value =
+            serde_json::from_slice(&fs::read(hits[0].path()).unwrap()).unwrap();
+        assert_eq!(event["event_scope"], "local_result_cache_hit");
+        assert_eq!(event["usage"]["input_tokens"], 0);
+        assert!(
+            !event.as_object().unwrap().contains_key("request"),
+            "hit events need not duplicate subtitle text"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
     impl TranslationProvider for Provider {
         fn status(&self) -> TranslationProviderStatus {

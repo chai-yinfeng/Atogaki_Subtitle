@@ -64,6 +64,14 @@ pub struct TranslationResult {
 pub struct TranslationUsage {
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    /// Provider-reported prompt-cache tokens, not the local result cache.
+    /// Omit absent fields to preserve checksums of existing cached responses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncached_input_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_cache_hit: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

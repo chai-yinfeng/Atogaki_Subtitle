@@ -16,6 +16,8 @@
 
 不采用增大语义组跨度来减少请求，因为会改变原组的上下文与失败边界。模拟吞吐结果不等于真实 DeepSeek 延迟改善，更不证明译文质量提高；真实云端与人工审查仍后补。
 
+2026-10-23 追加：usage 保留可选的 provider prompt-cache hit/miss token，并由现有单接收组规则分配；本地结果复用返回本次零新增、独立记录命中事件，原缓存与原调用 journal 的历史消耗保持。旧缓存 checksum 兼容，新工作区计划保存 `execution_usage`，无 SQLite schema 迁移；定义和覆盖限制见[翻译消耗观测](../translation-usage-observation.md)。实际 HTTP／重试逐次计数及真实命中率仍未验收。
+
 ## 媒体
 
 移除返回 `Vec<u8>` 的自定义媒体协议，改为应用生命周期内的只读 HTTP 服务。只绑定 `127.0.0.1:0`，系统分配端口；只访问后端登记并 canonicalize 的文件，URL 使用会话随机 UUID token，不接受路径参数。没有目录列表、上传或 LAN 监听。检查 Host 与提供的 Origin；原生 AVFoundation 请求可以没有 Origin，CORS 只回显允许的 Tauri origin，不使用 `*`。URL 不写入任务持久配置，重启后重新生成。

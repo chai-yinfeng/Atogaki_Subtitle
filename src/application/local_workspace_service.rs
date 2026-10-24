@@ -1026,6 +1026,15 @@ impl LocalWorkspaceService {
         options_json: Option<String>,
         plan_json: Option<String>,
     ) -> Result<()> {
+        let plan_json = plan_json
+            .map(|snapshot| -> Result<String> {
+                let mut plan: serde_json::Value = serde_json::from_str(&snapshot)?;
+                plan.as_object_mut()
+                    .ok_or_else(|| anyhow!("translation plan must be an object"))?
+                    .insert("execution_usage".into(), serde_json::to_value(&usage)?);
+                Ok(serde_json::to_string(&plan)?)
+            })
+            .transpose()?;
         self.database
             .record_translation_run(&NewLocalTranslationRun {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -1470,6 +1479,9 @@ mod tests {
                     usage: TranslationUsage {
                         input_tokens: Some(42),
                         output_tokens: Some(12),
+                        cached_input_tokens: Some(30),
+                        uncached_input_tokens: Some(12),
+                        ..TranslationUsage::default()
                     },
                 })
             })
@@ -1721,6 +1733,13 @@ mod tests {
         assert_eq!(runs[0].segment_count, 2);
         assert_eq!(runs[0].input_tokens, Some(42));
         assert_eq!(runs[0].output_tokens, Some(12));
+        let recorded_plan: serde_json::Value =
+            serde_json::from_str(runs[0].plan_json.as_deref().unwrap()).unwrap();
+        assert_eq!(recorded_plan["execution_usage"]["cached_input_tokens"], 30);
+        assert_eq!(
+            recorded_plan["execution_usage"]["uncached_input_tokens"],
+            12
+        );
         assert_eq!(
             runs[0].grouping_strategy.as_deref(),
             Some(TRANSLATION_GROUPING_STRATEGY)

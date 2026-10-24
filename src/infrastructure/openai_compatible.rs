@@ -285,6 +285,17 @@ impl OpenAiCompatibleTranslationProvider {
                     .usage
                     .as_ref()
                     .and_then(|usage| usage.completion_tokens),
+                cached_input_tokens: response
+                    .usage
+                    .as_ref()
+                    .and_then(|usage| usage.prompt_cache_hit_tokens)
+                    .filter(|count| *count >= 0),
+                uncached_input_tokens: response
+                    .usage
+                    .as_ref()
+                    .and_then(|usage| usage.prompt_cache_miss_tokens)
+                    .filter(|count| *count >= 0),
+                ..TranslationUsage::default()
             },
         })
     }
@@ -414,6 +425,8 @@ struct ChatMessage {
 struct ChatUsage {
     prompt_tokens: Option<i64>,
     completion_tokens: Option<i64>,
+    prompt_cache_hit_tokens: Option<i64>,
+    prompt_cache_miss_tokens: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -689,7 +702,8 @@ mod tests {
                             "content": "{\"translations\":[{\"segment_id\":\"s1\",\"translated_text\":\"[[ATOGAKI_TERM_0]]的新作品\"}]}"
                         }
                     }],
-                    "usage": {"prompt_tokens": 120, "completion_tokens": 18}
+                    "usage": {"prompt_tokens": 120, "completion_tokens": 18,
+                              "prompt_cache_hit_tokens": 96, "prompt_cache_miss_tokens": 24}
                 })
                 .to_string(),
                 &prepared_by_id,
@@ -700,6 +714,9 @@ mod tests {
         assert_eq!(response.model.as_deref(), Some("deepseek-v4-flash-202608"));
         assert_eq!(response.usage.input_tokens, Some(120));
         assert_eq!(response.usage.output_tokens, Some(18));
+        assert_eq!(response.usage.cached_input_tokens, Some(96));
+        assert_eq!(response.usage.uncached_input_tokens, Some(24));
+        assert_eq!(response.usage.local_cache_hit, None);
 
         let empty = provider
             .decode_response(
@@ -716,6 +733,8 @@ mod tests {
             .unwrap();
         assert_eq!(empty.translations[0].segment_id, "s1");
         assert!(empty.translations[0].translated_text.trim().is_empty());
+        assert_eq!(empty.usage.cached_input_tokens, None);
+        assert_eq!(empty.usage.uncached_input_tokens, None);
 
         let error = provider
             .decode_response(

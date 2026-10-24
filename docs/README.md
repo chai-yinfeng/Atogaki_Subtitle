@@ -37,6 +37,7 @@ _更新：2026-10-22_
 - [离线工作流验证](offline-workflow-validation.md)、[阶段队列与提前翻译验证](staged-pipeline-validation.md)。
 - [识别／翻译质量基线](evaluation.md)、[Hy-MT2 验证](hy-mt2-validation.md)、[Gemini 接入与验证](gemini-transcribe.md)。工程合同与人工质量结论分开。
 - [《教父》短片段质量基线](godfather-short-baseline.md)：旧任务删除、独立五分钟片段和识别／分段／翻译逐层排查计划。
+- [翻译消耗与缓存观测](translation-usage-observation.md)：云端前缀缓存、本地结果复用及 token 记录范围，不能用语义组数代替 HTTP 次数。
 
 截图、trace、模型输出、媒体与数据库通常位于被忽略的 local-artifacts 或隔离临时目录；文档给出定位与用途，不把它们都当成发行资产或可删除缓存。
 

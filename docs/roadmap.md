@@ -17,7 +17,7 @@ _最后更新：2026-10-23_
 | 模块边界 | 当前段、列表、跟随、播放器、时间轴绘制／手势／波形请求、候选处理／历史／复核、字幕文件导出、单句／批量翻译、样式会话／字体视图、烧录会话／视图与工具生命周期；26 条 Rust 工作区／产物命令；SQLite 编辑、发布／采用、只读查询模块 | 前端剩余处理／翻译配置、Rust 其余命令与 repository 渐进抽取；不改变事务或 schema |
 | 文档与产物 | 文档索引与历史快照；Web Serve／Postgres 影响报告；32 个本机目录的保留清单，重复下载及当前树缓存分批清理；旧 App 与完全重复恢复副本已有轮换记录 | 未分类临时数据与共享缓存继续保留；Web 退役方案仍待讨论，本轮不移除 |
 
-最新工程基线：前端 104 项测试与相关 WebKit 专项、共享库 157 项测试／5 项环境依赖忽略、桌面 33 项／4 项环境依赖忽略。测试范围分别见[窗口验收](editor-workspace-validation.md)、[性能验证](editor-performance-validation.md)、[短片段质量基线](godfather-short-baseline.md)与 [0059](decisions/0059-desktop-command-and-repository-modules.md)，不同提交的结果不能合并成未执行的全平台验收。
+最新工程基线：前端 106 项测试与相关 WebKit 专项、共享库 158 项测试／5 项环境依赖忽略、桌面 33 项／4 项环境依赖忽略。测试范围分别见[窗口验收](editor-workspace-validation.md)、[性能验证](editor-performance-validation.md)、[短片段质量基线](godfather-short-baseline.md)、[翻译消耗观测](translation-usage-observation.md)与 [0059](decisions/0059-desktop-command-and-repository-modules.md)，不同提交的结果不能合并成未执行的全平台验收。
 
 正式 identifier 的本机 App 已更新到 `05b2e07`，包含后续滚动、模块与接缝修复；完整四 sidecar 包经隔离原生检查后覆盖，正式 13 个任务／6,887 段和 20 表内容摘要保持一致，停在英语任务第一句供用户验收。本机 App、恢复点与轮换清理凭据见[安装记录](local-editor-installation.md)，公开发行仍为 macOS v0.1.2。正式数据库、人工评审、采用过的 ASR 证据、模型和来源不明文件不进入自动清理。
 
@@ -26,6 +26,8 @@ _最后更新：2026-10-23_
 用户于 2026-10-23 确认把《教父》短片段识别／分段／翻译排查并入本目标，不新增自动事后纠错功能。正式旧任务已通过 App 删除，保留原视频与隔离对照证据；五分钟片段和后续排查顺序见[短片段质量基线](godfather-short-baseline.md)。这条质量线与编辑器验收并行，分段／翻译策略修改另以实际样本讨论，不用重构测试代替质量结论。
 
 同片段 max_len=32／0 已复现中点归属导致的接缝双重排除，用户确认后按 [0060](decisions/0060-overlap-alignment-before-acoustic-selection.md) 修复。真实检查点重放恢复对白，新默认 58→59 段；两组忽略空白、标点和大小写后的拼接文字一致，未重新解码。修复已进入本机候选 App，人工听辨与翻译／缓存观测仍未完成。
+
+后续代码已补[翻译消耗观测](translation-usage-observation.md)：可选云端 prompt-cache token、实际本地复用事件与本次零新增、计划 metadata 和工具提示，保留旧缓存 checksum；106／158 项测试及两组 WebKit 通过。实际 wire／重试次数、旧任务命中率和真实云端质量仍未知；没有调整翻译组／上下文或宣称费用改善，正式 App 仍为用户验收的 05b2e07。
 
 1. 继续按用例收敛 main.ts 与 Rust 边界，一条边界一个提交；下一步为翻译配置与剩余处理用例；烧录视图及专用确认已迁移，原生实际完成路径已有证据。保留唯一播放器、SubtitleDrafts、LocalDatabase 和 revision／候选事务。最新烧录会话已隔离异步访问并停止隐藏历史轮询，104 项测试及五组 WebKit 通过，详见[窗口验收](editor-workspace-validation.md)。
 2. 原生保留字幕文件覆盖、批量确认与烧录覆盖确认验证；系统目录面板 Open 间歇禁用仍待调查。样式原生 AX 与真实 libass 初始预览、20 段原文 SRT 实际写入与 Finder 定位、60 秒合成视频实际烧录及成品规格、3,089 段隔离长任务运行中取消／临时文件清理已有证据。原生下拉的一次工具点击未改变选值，人工复现仍待确认。固定时刻 UI 时钟回调的重复行／标题写入已归零，不能替代原生指标。下一步用可控的同负载原生操作复查滚动、稳定内存、锁定触发和工具卸载；保留原始 trace／RSS／数据核验，不把 DOM 减少或离页回收单独当作无泄漏结论。

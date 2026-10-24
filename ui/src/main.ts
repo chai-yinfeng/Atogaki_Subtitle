@@ -5,6 +5,7 @@ import { mountSubtitleStyleView } from "./subtitle-style-view";
 import { createSubtitleStyleSession } from "./subtitle-style-session";
 import { createSubtitleStyleBackend } from "./subtitle-style-backend";
 import { createSubtitleTranslation } from "./subtitle-translation";
+import { translationUsageLabel } from "./subtitle-translation-usage";
 import { needsTranslation, staleTranslationCount } from "./subtitle-translation-state";
 import { createTranslationBackend } from "./subtitle-translation-backend";
 import { createSubtitleExport } from "./subtitle-export";
@@ -247,6 +248,7 @@ type TranslationRun = {
   segment_count: number;
   input_tokens: number | null;
   output_tokens: number | null;
+  plan_json?: string | null;
   completed_at_unix: number;
 };
 
@@ -2192,9 +2194,8 @@ function updateTranslationControls(): void {
       translationRunStatusText.textContent = "当前任务还没有机器翻译运行记录。";
     } else {
       const model = latest.model ? ` · ${latest.model}` : "";
-      const tokens = latest.input_tokens !== null || latest.output_tokens !== null
-        ? ` · Token ${latest.input_tokens ?? "?"} 入 / ${latest.output_tokens ?? "?"} 出`
-        : "";
+      const usageLabel = translationUsageLabel(latest);
+      const tokens = usageLabel ? ` · ${usageLabel}` : "";
       translationRunStatusText.textContent = `最近批次：${latest.provider_name}${model} · ${latest.segment_count} 段${tokens} · ${new Date(latest.completed_at_unix * 1_000).toLocaleString()}`;
     }
   }

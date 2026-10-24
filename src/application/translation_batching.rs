@@ -285,6 +285,9 @@ mod tests {
                     usage: TranslationUsage {
                         input_tokens: Some(10),
                         output_tokens: Some(20),
+                        cached_input_tokens: Some(8),
+                        uncached_input_tokens: Some(2),
+                        ..TranslationUsage::default()
                     },
                 })
             })
@@ -325,14 +328,25 @@ mod tests {
                 let r = provider.translate(request(i)).await.unwrap();
                 assert_eq!(r.translations.len(), 1);
                 assert_eq!(r.translations[0].segment_id, format!("s{i}"));
-                r.usage.input_tokens.unwrap_or_default()
+                (
+                    r.usage.input_tokens.unwrap_or_default(),
+                    r.usage.cached_input_tokens.unwrap_or_default(),
+                    r.usage.uncached_input_tokens.unwrap_or_default(),
+                )
             });
         }
         let mut tokens = 0;
+        let mut cached_tokens = 0;
+        let mut uncached_tokens = 0;
         while let Some(result) = tasks.join_next().await {
-            tokens += result.unwrap();
+            let (input, cached, uncached) = result.unwrap();
+            tokens += input;
+            cached_tokens += cached;
+            uncached_tokens += uncached;
         }
         assert_eq!(tokens, 40);
+        assert_eq!(cached_tokens, 32);
+        assert_eq!(uncached_tokens, 8);
         let calls = inner.calls.lock().unwrap();
         assert_eq!(calls.len(), 4);
         for call in calls.iter() {
