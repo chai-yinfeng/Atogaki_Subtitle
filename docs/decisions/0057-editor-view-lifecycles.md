@@ -173,3 +173,12 @@ Escape 在字体候选打开时先收起候选并回到字体输入，下一次 
 `model-picker-session.ts` 串行协调 Whisper、VAD 和 Hy-MT2 原生面板；`model-picker-backend.ts` 复用原三条无参数 IPC。选择前捕获设置访问与目标字段的值、dirty 版本，返回后仍属于原访问且输入未变化才回填。同值的新 input 事件也阻止旧回执覆盖。取消与失败不改字段，错误后可重试；关闭清除本模块仍拥有的通知，重开不呈现旧成功／失败，也不声称取消已打开的系统面板。
 
 `model-picker-view.ts` 委托原按钮事件，忙时禁用三个入口；dispose 通过 AbortController 释放监听器。仅原访问、原按钮仍可见且用户未转入其他输入时恢复键盘焦点。选择路径只标记原 dirty registry，提示尚未保存，不复制文件、下载模型、写配置或运行模型；任务媒体 chooseFile 继续留待独立边界。
+
+
+## 2026-10-24：只读网络诊断的输入归属
+
+`network-test-session.ts` 从 main 抽出原 `test_network_connection` 用例，`network-test-backend.ts` 集中原参数与返回 DTO，`network-test-view.ts` 处理结果呈现、事件和焦点。只复制本次三个网络参数与诊断结果，不创建网络配置存储或另一保存路径；测试不触发 save_download_network_settings，也不读取 Key。
+
+结果绑定设置访问、请求代次和字段值／dirty 版本。输入事件立即使已显示或在途结果失效；无事件的程序化字段更新在返回时再次核对。参数变更提示重新测试，保留用户输入；关闭清空诊断展示且忽略旧成功／失败。在途请求仍串行，关闭或修改参数不宣称取消已发出的后端网络请求，也不允许不断叠加请求。结束后恢复按钮，重试只通过用户显式操作。
+
+视图以 textContent 呈现外部诊断文字，相同结果不重复写 DOM。AbortController 释放 input／change／click 监听器；迟到焦点恢复在 dispose 后不访问会话，原访问仍可见且焦点未进入其他输入时才恢复按钮。其他网络配置字段呈现及独立凭据入口仍待各自迁移。

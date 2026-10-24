@@ -1,3 +1,6 @@
+import { createNetworkTestBackend } from "./network-test-backend";
+import { createNetworkTestSession } from "./network-test-session";
+import { mountNetworkTestView } from "./network-test-view";
 import { createModelPickerBackend } from "./model-picker-backend";
 import { createModelPickerSession } from "./model-picker-session";
 import { mountModelPickerView } from "./model-picker-view";
@@ -271,15 +274,6 @@ type TranslationRun = {
   output_tokens: number | null;
   plan_json?: string | null;
   completed_at_unix: number;
-};
-
-type NetworkSourceCheck = {
-  label: string;
-  requestedUrl: string;
-  resolvedHost: string | null;
-  status: number | null;
-  ok: boolean;
-  error: string | null;
 };
 
 type SubtitleOverlayPayload = {
@@ -665,8 +659,6 @@ const settingsHyMt2Model = document.querySelector<HTMLInputElement>("#settings-h
 const settingsProxyMode = document.querySelector<HTMLSelectElement>("#settings-proxy-mode");
 const settingsProxyUrl = document.querySelector<HTMLInputElement>("#settings-proxy-url");
 const settingsModelMirror = document.querySelector<HTMLInputElement>("#settings-model-mirror");
-const testNetworkButton = document.querySelector<HTMLButtonElement>("#test-network");
-const networkTestResults = document.querySelector<HTMLDivElement>("#network-test-results");
 const settingsProvider = document.querySelector<HTMLSelectElement>("#settings-provider");
 const settingsProviderBaseUrl = document.querySelector<HTMLInputElement>("#settings-provider-base-url");
 const settingsProviderModel = document.querySelector<HTMLInputElement>("#settings-provider-model");
@@ -729,6 +721,7 @@ let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelManagement: ReturnType<typeof createModelManagementSession> | null = null;
 let modelCatalogView: ReturnType<typeof mountModelManagementView> | null = null;
+let networkTestView: ReturnType<typeof mountNetworkTestView> | null = null;
 let modelPickerView: ReturnType<typeof mountModelPickerView> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
@@ -1131,6 +1124,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  networkTest.dispose();
+  networkTestView?.dispose();
   modelPicker.dispose();
   modelPickerView?.dispose();
   modelManagement?.dispose();
@@ -1617,30 +1612,21 @@ const settingsSave = createDesktopSettingsSave({
 });
 async function saveSettings(finishOnboarding: boolean): Promise<void> { await settingsSave.save(finishOnboarding); }
 
-async function testNetworkConnection(): Promise<void> {
-  if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !testNetworkButton || !networkTestResults) return;
-  testNetworkButton.disabled = true;
-  networkTestResults.innerHTML = "<span>正在测试模型来源…</span>";
-  try {
-    const checks = await invoke<NetworkSourceCheck[]>("test_network_connection", {
-      request: {
-        proxyMode: settingsProxyMode.value,
-        proxyUrl: settingsProxyUrl.value.trim() || null,
-        modelMirrorUrl: settingsModelMirror.value.trim() || null,
-      },
-    });
-    networkTestResults.innerHTML = checks.map((check) => {
-      const detail = check.ok
-        ? `${check.status ?? "已连接"}${check.resolvedHost ? ` · ${check.resolvedHost}` : ""}`
-        : check.error ?? "连接失败";
-      return `<div class="${check.ok ? "success" : "warning"}"><strong>${escapeHtml(check.label)}</strong><span>${escapeHtml(String(detail))}</span></div>`;
-    }).join("");
-  } catch (error) {
-    networkTestResults.innerHTML = `<div class="warning"><strong>配置无效</strong><span>${escapeHtml(String(error))}</span></div>`;
-  } finally {
-    testNetworkButton.disabled = false;
-  }
-}
+const networkTest = createNetworkTestSession({
+  backend: createNetworkTestBackend(invoke),
+  visit: () => settingsVisit,
+  isOpen: () => settingsDialog?.open ?? false,
+  capture: () => {
+    if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return null;
+    const inputs = [settingsProxyMode, settingsProxyUrl, settingsModelMirror];
+    const fields = settingsDirtyFields.snapshot(), values = inputs.map(input => input.value);
+    return {
+      request: { proxyMode: settingsProxyMode.value, proxyUrl: settingsProxyUrl.value.trim() || null, modelMirrorUrl: settingsModelMirror.value.trim() || null },
+      current: () => inputs.every((input, index) => input.value === values[index] && settingsDirtyFields.snapshot().get(input.id) === fields.get(input.id)),
+    };
+  },
+  changed: () => networkTestView?.render(),
+});
 
 const modelPicker = createModelPickerSession({
   backend: createModelPickerBackend(invoke),
@@ -4453,11 +4439,12 @@ settingsView = mountDesktopSettingsView(settingsDialog!, {
   visit: () => settingsVisit,
   opening: () => { ++settingsVisit; settingsDirtyFields.clear(); },
   opened: () => { modelManagement?.observe(); void loadDesktopSettings(false); },
-  closed: () => { ++settingsVisit; modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
+  closed: () => { ++settingsVisit; networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
   dirty: id => settingsDirtyFields.add(id),
   save: finish => { void saveSettings(finish); },
   applyTheme,
 });
+networkTestView = mountNetworkTestView(settingsDialog!, networkTest, () => settingsVisit);
 modelPickerView = mountModelPickerView(settingsDialog!, modelPicker, () => settingsVisit);
 function updateProviderProfiles(profiles: TranslationProfileSummary[]): void {
   providerActions?.invalidateProfiles(); providerDrafts.acceptProfiles(profiles); providerFields?.render();
@@ -4508,7 +4495,6 @@ document.querySelector("#dictionary-credentials")?.addEventListener("click", (ev
   else if (checkId) void checkDictionaryCredential(checkId);
 });
 settingsProxyMode?.addEventListener("change", syncNetworkSettings);
-testNetworkButton?.addEventListener("click", () => void testNetworkConnection());
 workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {
   if (currentArea === "karaoke") { closeEditorTools(); return; }
   void showTopLevelArea("workbench").then(() => refresh());
