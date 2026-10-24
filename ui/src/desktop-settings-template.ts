@@ -58,7 +58,7 @@ ${translationProviderTemplate()}
               ["merriam-webster", "Merriam-Webster", "保留英英来源标签页；正式展示需满足 Logo 与署名要求。"],
             ].map(([id, name, hint]) => `<article class="dictionary-credential-card" data-dictionary-provider="${id}">
               <div><strong>${name}</strong><span>${hint}</span></div>
-              <input type="password" autocomplete="off" data-dictionary-key="${id}" aria-label="${name} API Key" placeholder="粘贴 API Key；保存后立即清空" />
+              <input id="dictionary-key-${id}" type="password" autocomplete="off" data-dictionary-key="${id}" aria-label="${name} API Key" placeholder="粘贴 API Key；保存后立即清空" />
               <div class="model-card-action"><span data-dictionary-status="${id}">尚未读取配置</span><div><button type="button" class="secondary" data-check-dictionary-key="${id}">检查</button><button type="button" data-save-dictionary-key="${id}">保存</button><button type="button" class="secondary" data-clear-dictionary-key="${id}">删除</button></div></div>
             </article>`).join("")}
           </div>

@@ -1,3 +1,6 @@
+import { createDictionaryCredentialBackend } from "./dictionary-credential-backend";
+import { createDictionaryCredentialSession } from "./dictionary-credential-session";
+import { mountDictionaryCredentialView } from "./dictionary-credential-view";
 import { createSettingsMutationGate } from "./settings-mutation-gate";
 import { createAsrCredentialBackend } from "./asr-credential-backend";
 import { createAsrCredentialSession } from "./asr-credential-session";
@@ -722,6 +725,7 @@ let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelManagement: ReturnType<typeof createModelManagementSession> | null = null;
 let modelCatalogView: ReturnType<typeof mountModelManagementView> | null = null;
+let dictionaryCredentialView: ReturnType<typeof mountDictionaryCredentialView> | null = null;
 let asrCredentialView: ReturnType<typeof mountAsrCredentialView> | null = null;
 let networkTestView: ReturnType<typeof mountNetworkTestView> | null = null;
 let modelPickerView: ReturnType<typeof mountModelPickerView> | null = null;
@@ -1127,6 +1131,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  dictionaryCredentialSession.dispose();
+  dictionaryCredentialView?.dispose();
   asrCredentials.dispose();
   asrCredentialView?.dispose();
   networkTest.dispose();
@@ -1404,16 +1410,7 @@ function renderDictionaryCatalog(): void {
   });
 }
 
-function renderDictionaryCredentials(): void {
-  dictionaryCredentials.forEach((status) => {
-    const element = document.querySelector<HTMLElement>(`[data-dictionary-status="${status.providerId}"]`);
-    if (!element) return;
-    element.textContent = status.configured
-      ? `已保存至 ${status.credentialStore}；内容不会回显`
-      : `尚未在 ${status.credentialStore} 中配置`;
-    element.classList.toggle("warning", !status.configured);
-  });
-}
+function renderDictionaryCredentials(): void { dictionaryCredentialView?.render(); }
 
 async function loadDictionarySettings(): Promise<void> { await settingsLoad.loadDictionaries(); }
 
@@ -1470,44 +1467,6 @@ async function refreshDictionaryDownloads(): Promise<void> {
     }
   } catch (error) {
     if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = `无法读取词典下载状态：${String(error)}`;
-  }
-}
-
-async function saveDictionaryCredential(providerId: string, clear = false): Promise<void> {
-  const input = document.querySelector<HTMLInputElement>(`[data-dictionary-key="${providerId}"]`);
-  if (!input || (!clear && !input.value.trim())) {
-    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = "请先输入要保存的 API Key。";
-    return;
-  }
-  if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = clear ? "正在删除词典凭据…" : "正在保存词典凭据…";
-  try {
-    const status = await invoke<DictionaryCredentialStatus>("save_dictionary_credential", {
-      request: { providerId, apiKey: clear ? null : input.value.trim(), clear },
-    });
-    input.value = "";
-    dictionaryCredentials = dictionaryCredentials.filter((item) => item.providerId !== status.providerId);
-    dictionaryCredentials.push(status);
-    renderDictionaryCredentials();
-    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = clear
-      ? `${status.providerName} Key 已从 ${status.credentialStore} 删除。`
-      : `${status.providerName} Key 已保存至 ${status.credentialStore}。`;
-  } catch (error) {
-    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = `词典凭据操作失败：${String(error)}`;
-  }
-}
-
-async function checkDictionaryCredential(providerId: string): Promise<void> {
-  if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = `正在检查系统凭据；${credentialCheckHint}…`;
-  try {
-    const status = await invoke<DictionaryCredentialStatus>("check_dictionary_credential", { providerId });
-    dictionaryCredentials = dictionaryCredentials.filter((item) => item.providerId !== status.providerId);
-    dictionaryCredentials.push(status);
-    renderDictionaryCredentials();
-    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = status.configured
-      ? `${status.providerName} Key 存在于 ${status.credentialStore}；内容不会回显。`
-      : `${status.credentialStore} 中没有 ${status.providerName} Key。`;
-  } catch (error) {
-    if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = `检查失败：${String(error)}`;
   }
 }
 
@@ -1584,6 +1543,33 @@ const settingsSave = createDesktopSettingsSave({
   message: text => { if (settingsMessage) settingsMessage.textContent = text; },
 });
 async function saveSettings(finishOnboarding: boolean): Promise<void> { await settingsSave.save(finishOnboarding); }
+
+const dictionaryCredentialSession = createDictionaryCredentialSession({
+  backend: createDictionaryCredentialBackend(invoke),
+  mutations: settingsMutations,
+  visit: () => settingsVisit,
+  isOpen: () => settingsDialog?.open ?? false,
+  checkHint: credentialCheckHint,
+  capture: (provider, clear) => {
+    const input = settingsDialog?.querySelector<HTMLInputElement>(`[data-dictionary-key="${provider}"]`);
+    if (!input) return null;
+    const value = input.value, fields = settingsDirtyFields.snapshot();
+    return { apiKey: clear ? null : value, acknowledge: () => {
+      if (input.value === value && settingsDirtyFields.snapshot().get(input.id) === fields.get(input.id)) {
+        input.value = ""; settingsDirtyFields.acknowledge(fields, input.id);
+      }
+    } };
+  },
+  accepted: status => {
+    dictionaryCredentials = dictionaryCredentials.filter(item => item.providerId !== status.providerId);
+    dictionaryCredentials.push(status); renderDictionaryCredentials();
+  },
+  invalidate: () => settingsLoad.invalidateDictionaries(),
+  reload: () => loadDictionarySettings(),
+  changed: () => dictionaryCredentialView?.render(),
+  message: text => { if (dictionaryCredentialMessage) dictionaryCredentialMessage.textContent = text; },
+  clearMessage: text => { if (dictionaryCredentialMessage?.textContent === text) dictionaryCredentialMessage.textContent = ""; },
+});
 
 const asrCredentials = createAsrCredentialSession({
   backend: createAsrCredentialBackend(invoke),
@@ -4440,7 +4426,7 @@ settingsView = mountDesktopSettingsView(settingsDialog!, {
   visit: () => settingsVisit,
   opening: () => { ++settingsVisit; settingsDirtyFields.clear(); },
   opened: () => { modelManagement?.observe(); void loadDesktopSettings(false); },
-  closed: () => { ++settingsVisit; asrCredentials.hidden(); networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
+  closed: () => { ++settingsVisit; dictionaryCredentialSession.hidden(); settingsLoad.invalidateDictionaries(); asrCredentials.hidden(); networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
   dirty: id => settingsDirtyFields.add(id),
   save: finish => { void saveSettings(finish); },
   applyTheme,
@@ -4487,15 +4473,8 @@ providerCardsView = mountTranslationProviderView(document.querySelector<HTMLElem
   action: (action, id, current) => providerActions!.run(action, id, current),
   error: text => { if (settingsMessage) settingsMessage.textContent = text; },
 });
-document.querySelector("#dictionary-credentials")?.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) return;
-  const saveId = target.dataset.saveDictionaryKey;
-  const clearId = target.dataset.clearDictionaryKey;
-  const checkId = target.dataset.checkDictionaryKey;
-  if (saveId) void saveDictionaryCredential(saveId);
-  else if (clearId) void saveDictionaryCredential(clearId, true);
-  else if (checkId) void checkDictionaryCredential(checkId);
+dictionaryCredentialView = mountDictionaryCredentialView(document.querySelector<HTMLElement>("#dictionary-credentials")!, dictionaryCredentialSession, {
+  visit: () => settingsVisit, isOpen: () => settingsDialog?.open ?? false, statuses: () => dictionaryCredentials,
 });
 settingsProxyMode?.addEventListener("change", syncNetworkSettings);
 workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListener("click", () => {

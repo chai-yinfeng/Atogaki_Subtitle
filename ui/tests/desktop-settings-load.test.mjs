@@ -73,3 +73,10 @@ test('dispose ignores late results and future loads without accessing released c
   assert.equal(await h.loader.load(),false);assert.equal(await h.loader.loadDictionaries(),false);assert.equal(h.accepted.length,count);assert.equal(h.dictionaries.length,0);assert.deepEqual(h.messages,[]);assert.deepEqual(h.dictionaryMessages,[]);
  }
 });
+
+test('dictionary invalidation drops in-flight snapshots and errors without blocking a fresh read',async()=>{
+ for(const fail of [false,true]){const h=harness(),pending=deferred();h.dict(()=>pending.promise);const old=h.loader.loadDictionaries();h.loader.invalidateDictionaries();h.dict(async()=>dictionary('/fresh'));await h.loader.loadDictionaries();if(fail)pending.reject(Error('old credential snapshot'));else pending.resolve(dictionary('/old'));assert.equal(await old,false);assert.deepEqual(h.dictionaries,[dictionary('/fresh')]);assert.deepEqual(h.dictionaryMessages,[]);}
+});
+test('standalone dictionary snapshots are bound to the settings visit',async()=>{
+ const h=harness(),pending=deferred();h.dict(()=>pending.promise);const old=h.loader.loadDictionaries();h.visit(3);pending.resolve(dictionary('/old-visit'));assert.equal(await old,false);assert.deepEqual(h.dictionaries,[]);
+});

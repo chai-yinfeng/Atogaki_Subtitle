@@ -191,3 +191,12 @@ Escape 在字体候选打开时先收起候选并回到字体输入，下一次 
 Gemini ASR 与翻译共用同一凭据，全局保存也可写 Key。`settings-mutation-gate.ts` 只持有 busy／revision，在这三个现有会话之间共享写入所有权；获取失败时要求稍后重试，不排队缓存秘密。锁在读取输入前获取，覆盖写入与状态刷新，finally 释放；前端 dispose 不声称撤销已发出的后端写入。检查不持写锁，但结果须核对写入代次；写入期间新的 ASR／provider 检查不启动。未改变后端系统凭据接口、Key 的共享关系或音频上传授权。
 
 主文件保留唯一 dirty registry 与实际字段快照确认；视图通过 AbortController 释放事件，迟到焦点回调在 dispose 后不读上下文。该门闩只约束本桌面的三条入口，不宣称跨进程凭据事务或所有设置写入已统一；独立词典凭据和其旧读取／新输入风险仍待下一边界。
+
+
+## 2026-10-24：词典凭据与读取失效边界
+
+`dictionary-credential-session.ts` 管理当前支持的 Merriam-Webster 保存／删除／检查，原两条 IPC 经 adapter 接入；按钮、固定状态节点及委托事件移入独立 view。继续使用 main 的唯一 dictionaryCredentials 数组，不另建凭据或词典配置存储。词典写入接入现有 settings-mutation-gate，锁在捕获秘密前获取，忙时提示重试，不排队保留秘密。
+
+检查不读取或清空 Key，保存／删除成功只确认原访问、原输入值和 dirty 版本。现有词典输入增加稳定 id，使同值的新 input 事件也进入原 dirty registry。后端状态来源必须与请求一致，否则不回填、不确认输入；已完成写入而状态更新失败准确区分。关闭清除本模块仍拥有的消息，旧成功／错误不能影响新访问；旧写入成功只为已重开的设置重新读词典状态，dispose 后不补发读取并释放在途写入所有权。
+
+`desktop-settings-load.ts` 增加 invalidateDictionaries，单独失效词典读取；每次词典快照也捕获设置访问。操作开始和接受结果前失效较早快照，防止旧 configured 状态覆盖新凭据；旧访问的检查不得失效新访问读取。关闭同时失效独立词典读取。视图以 textContent 更新固定节点，AbortController 释放监听器，迟到焦点恢复不访问已释放上下文。词典包下载的观察和卡片仍按下一条边界处理，本次不宣称其隐藏轮询已停止。

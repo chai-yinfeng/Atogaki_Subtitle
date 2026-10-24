@@ -20,8 +20,8 @@ export function createDesktopSettingsLoad(options: Options) {
   let disposed = false, generation = 0, dictionaryGeneration = 0;
   const dictionaries = async (parentCurrent: () => boolean = () => true): Promise<boolean> => {
     if (disposed) return false;
-    const request = ++dictionaryGeneration;
-    const current = () => !disposed && request === dictionaryGeneration && parentCurrent();
+    const request = ++dictionaryGeneration, visit = options.visit();
+    const current = () => !disposed && request === dictionaryGeneration && visit === options.visit() && parentCurrent();
     try {
       const snapshot = await options.backend.dictionaries();
       if (!current()) return false;
@@ -56,6 +56,7 @@ export function createDesktopSettingsLoad(options: Options) {
     },
     loadDictionaries: () => dictionaries(),
     invalidate() { ++generation; },
+    invalidateDictionaries() { ++dictionaryGeneration; },
     dispose() { disposed = true; ++generation; ++dictionaryGeneration; },
   };
 }
