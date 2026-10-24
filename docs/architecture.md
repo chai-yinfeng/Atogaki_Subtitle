@@ -65,6 +65,8 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 字幕文件导出由 `subtitle-export.ts` 协调单次会话，`subtitle-export-view.ts` 管理按需连接的格式与覆盖确认节点，`subtitle-export-backend.ts` 适配原四条 Tauri IPC。请求绑定任务身份与 navigation，每次异步返回核对代次；离页释放等待和 busy，不把迟到的导出路径展示给另一任务。唯一草稿、播放器及后端导出服务保持原边界。
 
+任务后续翻译 provider 由 `task-translation-provider.ts` 管理任务／navigation 绑定的读取、在途保存与选择草稿，视图和原两条 IPC 适配独立；静态控件复用任务工具模板。旧访问返回不能更新当前状态，保存中新输入按版本保留；不增加凭据存储，也不自动翻译。全局配置、模型和凭据视图仍待独立抽取。
+
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
 
 任务样式的异步读取、保存与预览通过 `subtitle-style-session.ts` 协调，四条调用集中到 `subtitle-style-backend.ts`。每次打开绑定任务／导航代次，修改递增草稿版本，串行渲染只接受最新版本；关闭释放 debounce 和迟到呈现。字体、颜色与预览视图由 `subtitle-style-view.ts` 持有，模板独立；关闭即卸载节点，dispose 释放全局监听器，字体候选关闭即释放选项。具名 region 与显式焦点边界替代样式 showModal，FFmpeg/libass 与实际样式服务保持原实现。

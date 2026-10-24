@@ -64,6 +64,11 @@ export function taskToolsTemplate(fileManagerLabel: string): string {
         </div>
       </section>
       <section id="workspace-translation-panel" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-translation" data-workspace-panel="translation">
+        <div class="offline-tools" data-task-provider>
+          <label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="gemini">Gemini</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地翻译</option><option value="openai-compatible">高级兼容服务</option></select></label>
+          <button type="button" class="secondary" data-apply-task-provider>设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>
+          <span data-task-provider-message role="status"></span>
+        </div>
         <div class="module-heading">
           <div><p class="eyebrow">LANGUAGE WORKFLOW</p><h2>翻译与识别修正</h2><p>这里的操作会更新当前字幕工作区；原始识别快照保持不变。</p></div>
         </div>

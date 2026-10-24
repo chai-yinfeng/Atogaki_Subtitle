@@ -5,6 +5,9 @@ import { mountSubtitleStyleView } from "./subtitle-style-view";
 import { createSubtitleStyleSession } from "./subtitle-style-session";
 import { createSubtitleStyleBackend } from "./subtitle-style-backend";
 import { createSubtitleTranslation } from "./subtitle-translation";
+import { createTaskTranslationProvider, type TranslationStatus } from "./task-translation-provider";
+import { createTaskProviderBackend } from "./task-translation-provider-backend";
+import { mountTaskProviderView } from "./task-translation-provider-view";
 import { translationUsageLabel } from "./subtitle-translation-usage";
 import { needsTranslation, staleTranslationCount } from "./subtitle-translation-state";
 import { createTranslationBackend } from "./subtitle-translation-backend";
@@ -250,15 +253,6 @@ type TranslationRun = {
   output_tokens: number | null;
   plan_json?: string | null;
   completed_at_unix: number;
-};
-
-type TranslationStatus = {
-  provider_id: string;
-  provider: string;
-  configured: boolean;
-  model: string | null;
-  endpoint_kind: string;
-  configuration_hint: string | null;
 };
 
 type DesktopSettings = {
@@ -946,6 +940,22 @@ let translationStatus: TranslationStatus = {
   endpoint_kind: "none",
   configuration_hint: "请在设置中选择并配置翻译服务。",
 };
+let taskProviderView: ReturnType<typeof mountTaskProviderView> | null = null;
+const taskProvider = createTaskTranslationProvider({
+  context: () => ({ jobId: activeDetail?.job.job_id ?? null, navigation: navigationRequestId }),
+  backend: createTaskProviderBackend(invoke),
+  loading: () => {
+    translationStatus = { ...translationStatus, configured: false, configuration_hint: "正在读取翻译配置…" };
+    updateTranslationControls();
+  },
+  accepted: status => { translationStatus = status; updateTranslationControls(); },
+  changed: () => taskProviderView?.render(),
+  message: (text, error) => {
+    taskProviderView?.message(text, error);
+    if (currentArea === "karaoke" && workspaceView.classList.contains("hidden")) setSubtitleEditAction(text, error);
+  },
+});
+taskProviderView = mountTaskProviderView(workspaceView.querySelector<HTMLElement>("[data-task-provider]")!, taskProvider);
 
 const editorSession = new EditorSession();
 const videoRenderView = mountVideoRenderView(shell ?? document.body, {
@@ -1270,6 +1280,7 @@ async function showEditorTools(section: WorkspaceSection): Promise<void> {
   await refreshTranslationStatus();
 }
 function closeEditorTools(): void {
+  taskProvider.closed();
   taskTools.unmount();
   currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList();
 }
@@ -1293,6 +1304,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  taskProvider.dispose();
+  taskProviderView?.dispose();
   videoRenderSession.dispose();
   videoRenderView.dispose();
   subtitleStyles.dispose();
@@ -1828,17 +1841,7 @@ async function loadDesktopSettings(openWhenNeeded = false): Promise<void> {
 }
 
 async function refreshTranslationStatus(): Promise<void> {
-  try {
-    const jobId = activeDetail?.job.job_id ?? null;
-    const status = await invoke<TranslationStatus>("translation_status",{jobId});
-    if (jobId !== (activeDetail?.job.job_id ?? null)) return;
-    translationStatus = status;
-    const choice=document.querySelector<HTMLSelectElement>("#task-provider-choice");
-    if(choice)choice.value=status.provider_id;
-    updateTranslationControls();
-  } catch (error) {
-    setWorkspaceAction(`无法读取翻译配置：${String(error)}`, true);
-  }
+  await taskProvider.refresh();
 }
 
 async function saveSettings(finishOnboarding: boolean): Promise<void> {
@@ -3812,6 +3815,7 @@ async function enterSubtitleEditor(jobId: string, detail?: JobDetail): Promise<v
 }
 
 function renderWorkspace(detail: JobDetail): void {
+  taskProviderView?.render();
   subtitleExport.clearResult();
   if (workspaceTitle) workspaceTitle.textContent = `${displayName(detail.job)} · ${currentArea === "karaoke" ? "任务工具" : "任务进度"}`;
   if (workspaceMessage) {
@@ -5478,24 +5482,7 @@ function addOfflineTools(): void {
     input?.addEventListener("input", () => {
       if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
     });
-  const taskChoice = document.createElement("div");
-  taskChoice.className = "offline-tools";
-  taskChoice.innerHTML =
-    '<label>本任务后续翻译<select id="task-provider-choice"><option value="none">仅原文</option><option value="deepseek">DeepSeek</option><option value="gemini">Gemini</option><option value="deepl">DeepL</option><option value="hy-mt2-local">Hy-MT2 本地翻译</option><option value="openai-compatible">高级兼容服务</option></select></label><button type="button" class="secondary">设为本任务后端</button><span>更改只影响下一次翻译，不自动重译已有字幕。</span>';
-  workspaceView.querySelector("#workspace-translation-panel")?.prepend(taskChoice);
-  taskChoice.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
-    if (!activeDetail) return;
-    try {
-      await invoke("set_task_translation", {
-        jobId: activeDetail.job.job_id,
-        providerId: taskChoice.querySelector("select")!.value,
-      });
-      await refreshTranslationStatus();
-      setWorkspaceAction("本任务后端已更新；已有字幕未改变。");
-    } catch (e) {
-      setWorkspaceAction(String(e), true);
-    }
-  };
+
 }
 addOfflineTools();
 
