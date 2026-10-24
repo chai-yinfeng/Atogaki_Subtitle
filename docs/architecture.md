@@ -65,9 +65,9 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 字幕文件导出由 `subtitle-export.ts` 协调单次会话，`subtitle-export-view.ts` 管理按需连接的格式与覆盖确认节点，`subtitle-export-backend.ts` 适配原四条 Tauri IPC。请求绑定任务身份与 navigation，每次异步返回核对代次；离页释放等待和 busy，不把迟到的导出路径展示给另一任务。唯一草稿、播放器及后端导出服务保持原边界。
 
-全局配置保存由 `desktop-settings-save.ts` 协调冻结请求、访问代次与提交后刷新，原 IPC 经 `desktop-settings-backend.ts` 适配。字段和 provider 的单份 dirty registry 按版本确认，保留保存中新增输入；旧配置读取在保存开始和接受结果时失效。`desktop-settings-load.ts` 接管配置与词典只读请求：配置核对访问和代次，嵌套词典同时核对父请求，学习区词典刷新共享词典代次。模型 catalog 复用既有数据，不创建第二份配置存储或轮询；设置视图及模型／凭据卡片仍在 main，继续逐条抽取。
+全局配置保存由 `desktop-settings-save.ts` 协调冻结请求、访问代次与提交后刷新，原 IPC 经 `desktop-settings-backend.ts` 适配。字段和 provider 的单份 dirty registry 按版本确认，保留保存中新增输入；旧配置读取在保存开始和接受结果时失效。`desktop-settings-load.ts` 接管配置与词典只读请求：配置核对访问和代次，嵌套词典同时核对父请求，学习区词典刷新共享词典代次。模型 catalog 复用既有数据，不创建第二份配置存储或轮询；provider 卡片静态结构进入 `translation-provider-template.ts`，单个共享编辑框、模型选项和委托事件进入 `translation-provider-view.ts`，dispose 释放监听器并失效迟到动作；设置整体视图、卡片操作回调与模型／凭据用例仍待逐条抽取。
 
-任务后续翻译 provider 由 `task-translation-provider.ts` 管理任务／navigation 绑定的读取、在途保存与选择草稿，视图和原两条 IPC 适配独立；静态控件复用任务工具模板。旧访问返回不能更新当前状态，保存中新输入按版本保留；不增加凭据存储，也不自动翻译。全局配置、模型和凭据视图仍待独立抽取。
+任务后续翻译 provider 由 `task-translation-provider.ts` 管理任务／navigation 绑定的读取、在途保存与选择草稿，视图和原两条 IPC 适配独立；静态控件复用任务工具模板。旧访问返回不能更新当前状态，保存中新输入按版本保留；不增加凭据存储，也不自动翻译。设置整体视图、模型和凭据用例仍待独立抽取。
 
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
 

@@ -1,3 +1,5 @@
+import { translationProviderTemplate } from "./translation-provider-template";
+import { mountTranslationProviderView } from "./translation-provider-view";
 import type { DesktopSettings, TranslationProfileSummary, ModelCatalogItem, ModelDownloadState, DictionaryCatalogItem, DictionaryDownloadState, DictionaryCredentialStatus } from "./desktop-settings-types";
 import { createDesktopSettingsLoad } from "./desktop-settings-load";
 import { createDesktopSettingsSave, createVersionedDirtyFields } from "./desktop-settings-save";
@@ -565,35 +567,7 @@ ${taskToolsTemplate(fileManagerLabel)}
           <p id="gemini-api-key-status" class="settings-message">尚未读取配置。</p>
           <p class="settings-message">Atogaki 上传提取后的 WAV，并在转录请求完成后调用 Files API 删除上传文件。免费层价格为 $0，但存在项目级 rate limits，且免费层数据会用于改进 Google 产品。</p>
         </section>
-        <section class="settings-section">
-          <div class="settings-section-heading"><div><strong>4. 翻译 provider（可选）</strong><span>Hy-MT2 完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
-          <label>翻译 provider
-            <select id="settings-provider">
-              <option value="hy-mt2-local">Hy-MT2（本地翻译）</option>
-              <option value="deepl">DeepL（传统翻译 API）</option>
-              <option value="deepseek">DeepSeek（LLM API）</option><option value="gemini">Gemini（LLM API）</option>
-              <option value="openai-compatible">OpenAI-compatible（高级）</option>
-              <option value="none">不翻译／仅保留原文</option>
-            </select>
-          </label>
-          <div id="llm-provider-fields" class="settings-grid hidden">
-            <label id="provider-base-url-field">OpenAI-compatible Base URL
-              <input id="settings-provider-base-url" type="url" placeholder="https://api.openai.com/v1" />
-            </label>
-            <label id="provider-model-field">模型
-              <input id="settings-provider-model" type="text" placeholder="模型 ID" />
-            </label>
-            <label class="settings-span">翻译风格
-              <input id="settings-translation-style" type="text" placeholder="准确、自然的简体中文口语字幕" />
-            </label>
-          </div>
-          <label id="api-key-field"><span id="api-key-label">DeepL API Key</span>
-            <input id="settings-api-key" type="password" autocomplete="off" placeholder="留空则保持当前密钥" />
-          </label>
-          <label class="clear-secret"><input id="settings-clear-api-key" type="checkbox" /><span id="clear-api-key-label">删除系统凭据库中已保存的 DeepL Key</span></label>
-          <div class="credential-check-row"><button id="check-api-key" type="button" class="secondary">检查所选 Key</button><span>仅检查系统凭据条目，不会回显 Key 或调用翻译 API。</span></div>
-          <p id="api-key-status" class="settings-message"></p>
-        </section>
+        ${translationProviderTemplate()}
         <section class="settings-section">
           <div class="settings-section-heading"><div><strong>5. 学习词典</strong><span>离线包由你明确点击后下载到正式应用数据目录；商业词典的 Key 分来源保存。</span></div><span id="dictionary-directory"></span></div>
           <div>
@@ -780,8 +754,6 @@ const settingsProviderBaseUrl = document.querySelector<HTMLInputElement>("#setti
 const settingsProviderModel = document.querySelector<HTMLInputElement>("#settings-provider-model");
 const settingsTranslationStyle = document.querySelector<HTMLInputElement>("#settings-translation-style");
 const settingsApiKey = document.querySelector<HTMLInputElement>("#settings-api-key");
-const settingsClearApiKey = document.querySelector<HTMLInputElement>("#settings-clear-api-key");
-const checkApiKeyButton = document.querySelector<HTMLButtonElement>("#check-api-key");
 const settingsMessage = document.querySelector<HTMLSpanElement>("#settings-message");
 const apiKeyStatus = document.querySelector<HTMLParagraphElement>("#api-key-status");
 const credentialStoreLabel = document.querySelector<HTMLSpanElement>("#credential-store-label");
@@ -842,6 +814,7 @@ let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
 let dictionaryDownloadPoll: number | null = null;
+let providerCardsView: ReturnType<typeof mountTranslationProviderView> | null = null;
 const settingsDirtyFields = createVersionedDirtyFields();
 let settingsVisit = 0;
 let learningItems: LearningItemDetail[] = [];
@@ -1234,6 +1207,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  providerCardsView?.dispose();
   settingsLoad.dispose();
   settingsSave.dispose();
   taskProvider.dispose();
@@ -1400,48 +1374,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
 }
 
-function syncProviderSettings(): void {
-  const provider = settingsProvider?.value ?? "none";
-  const cloudEnabled = provider !== "none" && provider !== "hy-mt2-local";
-  const llmEnabled = provider === "gemini" || provider === "deepseek" || provider === "openai-compatible";
-  const customEndpoint = provider === "openai-compatible";
-  document.querySelector<HTMLElement>("#api-key-field")?.classList.toggle("hidden", !cloudEnabled);
-  settingsClearApiKey?.closest("label")?.classList.toggle("hidden", !cloudEnabled);
-  checkApiKeyButton?.closest("div")?.classList.toggle("hidden", !cloudEnabled);
-  document.querySelector<HTMLElement>("#llm-provider-fields")?.classList.toggle("hidden", !llmEnabled);
-  document.querySelector<HTMLElement>("#provider-base-url-field")?.classList.toggle("hidden", !customEndpoint);
-  document.querySelector<HTMLElement>("#provider-model-field")?.classList.toggle("hidden", provider === "hy-mt2-local");
-  if (settingsProviderModel) settingsProviderModel.disabled = provider === "hy-mt2-local";
-  const providerLabel = provider === "gemini" ? "Gemini（与语音识别共用）" : provider === "deepseek" ? "DeepSeek" : provider === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
-  const apiKeyLabel = document.querySelector<HTMLSpanElement>("#api-key-label");
-  const clearApiKeyLabel = document.querySelector<HTMLSpanElement>("#clear-api-key-label");
-  if (apiKeyLabel) apiKeyLabel.textContent = `${providerLabel} API Key`;
-  if (clearApiKeyLabel) clearApiKeyLabel.textContent = `删除系统凭据库中已保存的 ${providerLabel} Key`;
-  settingsHyMt2Model?.closest(".settings-path-row")?.classList.remove("hidden");
-  renderProviderCards();
-}
-
-async function checkSelectedApiKey(): Promise<void> {
-  if (!settingsProvider || !checkApiKeyButton || !apiKeyStatus || settingsProvider.value === "none" || settingsProvider.value === "hy-mt2-local") return;
-  checkApiKeyButton.disabled = true;
-  apiKeyStatus.textContent = `正在检查 ${settingsProvider.value} 的系统凭据；${credentialCheckHint}…`;
-  apiKeyStatus.classList.remove("warning");
-  try {
-    const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", {
-      providerId: settingsProvider.value,
-    });
-    const environment = result.availableFromEnvironment ? "；启动环境中也有兼容 Key" : "";
-    apiKeyStatus.textContent = result.storedInSystem
-      ? `${result.providerName} Key 存在于 ${result.credentialStore}${environment}；内容不会回显。`
-      : `${result.credentialStore} 中没有 ${result.providerName} Key${environment}。`;
-    apiKeyStatus.classList.toggle("warning", !result.storedInSystem && !result.availableFromEnvironment);
-  } catch (error) {
-    apiKeyStatus.textContent = `检查失败：${String(error)}`;
-    apiKeyStatus.classList.add("warning");
-  } finally {
-    checkApiKeyButton.disabled = false;
-  }
-}
+function syncProviderSettings(): void { renderProviderCards(); }
 
 function syncNetworkSettings(): void {
   const customProxy = settingsProxyMode?.value === "custom";
@@ -1473,7 +1406,6 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   overwriteSettingsField(settingsProviderBaseUrl, profile?.endpoint ?? settings.translationBaseUrl ?? "");
   overwriteSettingsField(settingsTranslationStyle, profile?.style ?? settings.translationStyleInstruction);
   overwriteSettingsField(settingsApiKey, "");
-  overwriteSettingsField(settingsClearApiKey, false);
   if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
   if (modelReadiness) {
     const recognition = settings.whisperModelReady
@@ -1609,7 +1541,7 @@ function renderDictionaryCredentials(): void {
 
 async function loadDictionarySettings(): Promise<void> { await settingsLoad.loadDictionaries(); }
 
-function renderAsrCredentialStatus(status: AsrCredentialStatus): void {
+function renderAsrCredentialStatus(status: AsrCredentialStatus, clearInput = true): void {
   if (asrCredentialStoreLabel) asrCredentialStoreLabel.textContent = status.credentialStore;
   if (geminiApiKeyStatus) {
     geminiApiKeyStatus.textContent = status.configured
@@ -1617,7 +1549,7 @@ function renderAsrCredentialStatus(status: AsrCredentialStatus): void {
       : `${status.credentialStore} 中尚未配置 Gemini Key。`;
     geminiApiKeyStatus.classList.toggle("warning", !status.configured);
   }
-  if (settingsGeminiApiKey) settingsGeminiApiKey.value = "";
+  if (clearInput && settingsGeminiApiKey) settingsGeminiApiKey.value = "";
 }
 
 async function saveGeminiCredential(clear: boolean): Promise<void> {
@@ -1786,7 +1718,7 @@ const settingsSave = createDesktopSettingsSave({
         translationBaseUrl: settingsProviderBaseUrl.value.trim() || null,
         translationStyleInstruction: settingsTranslationStyle.value.trim() || null,
         apiKey: settingsApiKey.value.trim() || null,
-        clearApiKey: settingsClearApiKey?.checked ?? false,
+        clearApiKey: false,
         networkProxyMode: settingsProxyMode.value,
         networkProxyUrl: settingsProxyUrl.value.trim() || null,
         modelMirrorUrl: settingsModelMirror.value.trim() || null,
@@ -4760,7 +4692,6 @@ let lastSettingsProvider = "none";
 settingsProvider?.addEventListener("change", () => {
   // Never carry a secret or delete intent into another provider.
   if (settingsApiKey) settingsApiKey.value = "";
-  if (settingsClearApiKey) settingsClearApiKey.checked = false;
   providerDrafts.set(lastSettingsProvider, { model: settingsProviderModel?.value ?? "", endpoint: settingsProviderBaseUrl?.value ?? "", style: settingsTranslationStyle?.value ?? "" });
   lastSettingsProvider = settingsProvider.value;
   if (settingsProvider.value === "deepseek") {
@@ -4791,7 +4722,14 @@ settingsProvider?.addEventListener("change", () => {
   }
   renderProviderCards();
 });
-checkApiKeyButton?.addEventListener("click", () => void checkSelectedApiKey());
+providerCardsView = mountTranslationProviderView(document.querySelector<HTMLElement>("[data-translation-settings]")!, {
+  visit: () => settingsVisit,
+  state: () => ({ readiness: providerReadiness, dirty: providerDirtyDrafts, catalog: availableModels, downloads: modelDownloads }),
+  localModel: () => settingsHyMt2Model?.value ?? "",
+  chooseLocalModel: path => { if (settingsHyMt2Model) { settingsHyMt2Model.value = path; settingsHyMt2Model.dispatchEvent(new Event("input", { bubbles: true })); } },
+  action: providerCardAction,
+  error: text => { if (settingsMessage) settingsMessage.textContent = text; },
+});
 document.querySelector("#dictionary-credentials")?.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLButtonElement)) return;
@@ -5127,119 +5065,46 @@ async function showPartialTranscript(jobId: string): Promise<void> {
 }
 
 window.addEventListener("atogaki-theme-change", () => renderKaraokeTimeline());
-let providerEditor: HTMLDivElement | null = null;
-function renderProviderCards(): void {
-  const selected = settingsProvider?.value ?? "none";
-  const labels: Record<string, string> = {
-    disabled: "仅转录", unconfigured: "未配置凭据", resources_missing: "本地资源缺失",
-    unverified: "凭据已配置，尚未验证连接", verified: "上次连接测试通过", validation_failed: "上次连接验证失败", configuration_missing: "配置不完整，请保存模型与端点",
-  };
-  for (const card of document.querySelectorAll<HTMLElement>("[data-provider-card]")) {
-    const id = card.dataset.providerCard!;
-    card.classList.toggle("active", selected === id);
-    const status = card.querySelector<HTMLElement>("[data-provider-readiness]");
-    if (status) status.textContent = id === "hy-mt2-local" && providerReadiness.get(id) === "unverified" ? "本地资源就绪，尚未验证" : labels[providerReadiness.get(id) ?? ""] ?? "正在读取配置状态…";
-    if (status && providerDirtyDrafts.has(id)) status.textContent += "（当前草稿未保存）";
-    const body = card.querySelector<HTMLElement>("[data-provider-editor]");
-    if (selected === id && body && providerEditor) {
-      if (providerEditor.parentElement !== body) body.append(providerEditor);
-      providerEditor.classList.remove("hidden");
-      const advanced = card.closest("details");
-      if (advanced) advanced.open = true;
-    }
-  }
-  if (selected === "none" || selected === "hy-mt2-local") providerEditor?.classList.add("hidden");
-  document.querySelector("[data-save-provider-key]")?.classList.toggle("hidden", selected === "none" || selected === "hy-mt2-local");
-  document.querySelector("[data-delete-provider-key]")?.classList.toggle("hidden", selected === "none" || selected === "hy-mt2-local");
-  const selector = document.querySelector<HTMLSelectElement>("#local-translation-model-choice");
-  if (selector) {
-    const installed = modelDownloads.filter(state => state.status === "done" && state.path && availableModels.some(m => m.id === state.modelId && m.kind === "hy-mt2"));
-    const current = settingsHyMt2Model?.value ?? "";
-    const entries = installed.map(state => ({path:state.path!, name:availableModels.find(m=>m.id===state.modelId)!.name}));
-    if (current && !entries.some(e=>e.path===current)) entries.unshift({path:current,name:current.split(/[\\/]/).pop() ?? "当前模型"});
-    selector.innerHTML = '<option value="">选择已安装模型</option>'+entries.map(e=>`<option value="${escapeHtml(e.path)}">${escapeHtml(e.name)}</option>`).join("");
-    selector.value = current;
-  }
+function renderProviderCards(): void { providerCardsView?.render(); }
+
+async function refreshProviderReadiness(current: () => boolean = () => true): Promise<void> {
+  const profiles = await settingsBackend.profiles();
+  if (!current()) return;
+  updateProviderProfiles(profiles); renderProviderCards();
 }
 
-async function refreshProviderReadiness(): Promise<void> {
-  updateProviderProfiles(await invoke<TranslationProfileSummary[]>("translation_profiles"));
-  renderProviderCards();
-}
-
-function organizeTranslationCards(section: HTMLElement): void {
-  const heading = section.querySelector(".settings-section-heading");
-  const selector = settingsProvider?.closest("label");
-  if (!selector) return;
-  // Card actions replace the older shared check/delete controls.
-  settingsClearApiKey?.closest("label")?.remove();
-  checkApiKeyButton?.closest("div")?.remove();
-  selector.firstChild!.textContent = "下次新任务的默认翻译方式（保存后生效）";
-  providerEditor = document.createElement("div");
-  providerEditor.className = "provider-editor hidden";
-  for (const child of Array.from(section.children)) if (child !== heading && child !== selector) providerEditor.append(child);
-  const cards = document.createElement("div"); cards.className = "provider-cards";
-  const entries = [
-    ["deepseek", "DeepSeek", "云端文本翻译；只发送字幕与上下文。"],
-    ["gemini", "Gemini", "只发送字幕文本和上下文；与 Gemini 语音识别共用 Key。保存或删除 Key 会同时影响两处，音频上传仍需单独授权。"],
-    ["deepl", "DeepL", "云端文本翻译；使用独立的 DeepL 凭据。"],
-    ["hy-mt2-local", "Hy-MT2 · 本地翻译", "离线翻译，无需上传字幕。1.8B 占用较少，7B 需要更多内存和处理时间。"],
-    ["openai-compatible", "OpenAI-compatible", "高级：自定义端点、模型与独立凭据。"],
-  ];
-  const advanced = document.createElement("details"); advanced.innerHTML = "<summary>高级：自定义兼容服务</summary>";
-  for (const [id, title, description] of entries) {
-    const card = document.createElement("article"); card.className = "provider-card"; card.dataset.providerCard = id;
-    card.innerHTML = `<h4>${escapeHtml(title)}</h4><p>${escapeHtml(description)}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<label class="local-model-choice">翻译模型<select id="local-translation-model-choice"></select></label><p>模型详情与下载位于“模型与存储”。</p>' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div>`;
-    if (id === "hy-mt2-local") card.querySelector("[data-test-provider]")?.classList.add("hidden");
-    card.querySelector<HTMLButtonElement>("[data-configure-provider]")!.onclick = () => {
-      if (!settingsProvider) return;
-      if (settingsProvider.value !== id) { settingsProvider.value = id; settingsProvider.dispatchEvent(new Event("change", { bubbles: true })); }
-      renderProviderCards();
-    };
-    card.querySelector<HTMLButtonElement>("[data-test-provider]")!.onclick = async (event) => {
-      const button = event.currentTarget as HTMLButtonElement; button.disabled = true;
-      try { await invoke<string>("test_translation_connection", { providerId: id }); }
-      catch (error) { if (settingsMessage) settingsMessage.textContent = `连接测试失败：${String(error)}`; }
-      finally { button.disabled = false; await refreshProviderReadiness().catch(() => {}); }
-    };
-    const check = card.querySelector<HTMLButtonElement>("[data-check-provider]");
-    if (check) check.onclick = async () => {
-      check.disabled = true;
-      try {
-        const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", { providerId: id });
-        if (settingsMessage) settingsMessage.textContent = `${result.providerName}：${result.storedInSystem || result.availableFromEnvironment ? "凭据存在，尚不代表连接已通过" : "未找到凭据"}；本次未调用翻译 API。`;
-        await refreshProviderReadiness();
-      } catch (error) { if (settingsMessage) settingsMessage.textContent = String(error); }
-      finally { check.disabled = false; }
-    };
-    if (id === "openai-compatible") advanced.append(card); else cards.append(card);
-  }
-  cards.append(advanced); section.append(cards);
-  document.querySelector<HTMLSelectElement>("#local-translation-model-choice")?.addEventListener("change", event => {
-    if (settingsHyMt2Model) { settingsHyMt2Model.value = (event.target as HTMLSelectElement).value; settingsHyMt2Model.dispatchEvent(new Event("input", {bubbles:true})); }
-  });
-  const actions = document.createElement("div"); actions.className = "offline-tools";
-  actions.innerHTML = '<button type="button" data-save-provider-key>保存此后端凭据</button><button type="button" class="secondary" data-delete-provider-key>删除此后端凭据</button>';
-  providerEditor.append(actions);
-  for (const button of actions.querySelectorAll<HTMLButtonElement>("button")) button.onclick = async () => {
-    const id = settingsProvider?.value, secret = settingsApiKey?.value ?? "";
-    if (!id) return;
-    button.disabled = true;
-    try {
-      await invoke("save_translation_credential", { providerId: id, apiKey: button.hasAttribute("data-save-provider-key") ? secret : null, clear: button.hasAttribute("data-delete-provider-key") });
+async function providerCardAction(action: "test" | "check" | "save" | "delete", id: string, current: () => boolean): Promise<void> {
+  let committed = false;
+  const secret = settingsApiKey?.value ?? "", asrSecret = settingsGeminiApiKey?.value ?? "";
+  try {
+    if (action === "test") {
+      await invoke<string>("test_translation_connection", { providerId: id });
+    } else if (action === "check") {
+      const result = await invoke<TranslationCredentialCheck>("check_translation_api_key", { providerId: id });
+      if (current() && settingsMessage) settingsMessage.textContent = `${result.providerName}：${result.storedInSystem || result.availableFromEnvironment ? "凭据存在，尚不代表连接已通过" : "未找到凭据"}；本次未调用翻译 API。`;
+    } else {
+      await invoke("save_translation_credential", { providerId: id, apiKey: action === "save" ? secret : null, clear: action === "delete" });
+      committed = true;
+      if (!current()) return;
       if (settingsProvider?.value === id && settingsApiKey?.value === secret) settingsApiKey.value = "";
-      if (settingsClearApiKey) settingsClearApiKey.checked = false;
-      await refreshProviderReadiness();
+    }
+    if (!current()) return;
+    await refreshProviderReadiness(current);
+    if (!current()) return;
+    if (committed) {
       if (id === "gemini") {
-        renderAsrCredentialStatus(await invoke<AsrCredentialStatus>("asr_credential_status"));
-        if (settingsGeminiApiKey) settingsGeminiApiKey.value = "";
+        const status = await invoke<AsrCredentialStatus>("asr_credential_status");
+        if (!current()) return;
+        renderAsrCredentialStatus(status, settingsGeminiApiKey?.value === asrSecret);
       }
-      if (settingsProvider?.value === id && apiKeyStatus) apiKeyStatus.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；连接状态请查看卡片。`;
-      if (settingsMessage) settingsMessage.textContent = `${id} 凭据已${button.hasAttribute("data-delete-provider-key") ? "删除" : "保存"}；${id === "gemini" ? "语音识别与翻译共用此 Key，音频上传仍需单独授权。" : "其他后端配置未改变。"}`;
-    } catch (error) { if (settingsMessage) settingsMessage.textContent = String(error); }
-    finally { button.disabled = false; }
-  };
-  renderProviderCards();
+      const verb = action === "delete" ? "删除" : "保存";
+      if (settingsProvider?.value === id && apiKeyStatus) apiKeyStatus.textContent = `${id} 凭据已${verb}；连接状态请查看卡片。`;
+      if (settingsMessage) settingsMessage.textContent = `${id} 凭据已${verb}；${id === "gemini" ? "语音识别与翻译共用此 Key，音频上传仍需单独授权。" : "其他后端配置未改变。"}`;
+    }
+  } catch (error) {
+    if (current() && settingsMessage) settingsMessage.textContent = committed ? `凭据已${action === "delete" ? "删除" : "保存"}，但状态刷新失败：${String(error)}` : `${action === "test" ? "连接测试失败：" : ""}${String(error)}`;
+    if (action === "test" && current()) await refreshProviderReadiness(current).catch(() => {});
+  }
 }
 
 function organizeSettings(): void {
@@ -5272,7 +5137,6 @@ function organizeSettings(): void {
   optionalAsr.innerHTML='<summary>可选：Gemini 局部修复</summary>';
   optionalAsr.append(asr); models.append(optionalAsr);
   translation.querySelector("strong")!.textContent = "翻译";
-  organizeTranslationCards(translation);
   network.querySelector("strong")!.textContent = "网络与高级";
   dictionaries.querySelector("strong")!.textContent = "词典";
   const nav = document.createElement("nav");
