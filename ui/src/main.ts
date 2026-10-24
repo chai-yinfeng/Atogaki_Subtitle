@@ -1,3 +1,7 @@
+import { createSettingsMutationGate } from "./settings-mutation-gate";
+import { createAsrCredentialBackend } from "./asr-credential-backend";
+import { createAsrCredentialSession } from "./asr-credential-session";
+import { mountAsrCredentialView } from "./asr-credential-view";
 import { createNetworkTestBackend } from "./network-test-backend";
 import { createNetworkTestSession } from "./network-test-session";
 import { mountNetworkTestView } from "./network-test-view";
@@ -669,9 +673,6 @@ const apiKeyStatus = document.querySelector<HTMLParagraphElement>("#api-key-stat
 const credentialStoreLabel = document.querySelector<HTMLSpanElement>("#credential-store-label");
 const asrCredentialStoreLabel = document.querySelector<HTMLSpanElement>("#asr-credential-store-label");
 const settingsGeminiApiKey = document.querySelector<HTMLInputElement>("#settings-gemini-api-key");
-const saveGeminiApiKeyButton = document.querySelector<HTMLButtonElement>("#save-gemini-api-key");
-const checkGeminiApiKeyButton = document.querySelector<HTMLButtonElement>("#check-gemini-api-key");
-const clearGeminiApiKeyButton = document.querySelector<HTMLButtonElement>("#clear-gemini-api-key");
 const geminiApiKeyStatus = document.querySelector<HTMLParagraphElement>("#gemini-api-key-status");
 const modelCatalogHost = document.querySelector<HTMLDivElement>("#model-catalog");
 const modelDownloadMessage = document.querySelector<HTMLParagraphElement>("#model-download-message");
@@ -721,6 +722,7 @@ let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelManagement: ReturnType<typeof createModelManagementSession> | null = null;
 let modelCatalogView: ReturnType<typeof mountModelManagementView> | null = null;
+let asrCredentialView: ReturnType<typeof mountAsrCredentialView> | null = null;
 let networkTestView: ReturnType<typeof mountNetworkTestView> | null = null;
 let modelPickerView: ReturnType<typeof mountModelPickerView> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
@@ -732,6 +734,7 @@ const providerDrafts = createTranslationProviderDrafts();
 let providerFields: ReturnType<typeof mountTranslationProviderFields> | null = null;
 let providerActions: ReturnType<typeof createTranslationProviderActions> | null = null;
 let providerCardsView: ReturnType<typeof mountTranslationProviderView> | null = null;
+const settingsMutations = createSettingsMutationGate();
 const settingsDirtyFields = createVersionedDirtyFields();
 let settingsVisit = 0;
 let learningItems: LearningItemDetail[] = [];
@@ -1124,6 +1127,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  asrCredentials.dispose();
+  asrCredentialView?.dispose();
   networkTest.dispose();
   networkTestView?.dispose();
   modelPicker.dispose();
@@ -1412,7 +1417,7 @@ function renderDictionaryCredentials(): void {
 
 async function loadDictionarySettings(): Promise<void> { await settingsLoad.loadDictionaries(); }
 
-function renderAsrCredentialStatus(status: AsrCredentialStatus, clearInput = true): void {
+function renderAsrCredentialStatus(status: AsrCredentialStatus, clearInput = false): void {
   if (asrCredentialStoreLabel) asrCredentialStoreLabel.textContent = status.credentialStore;
   if (geminiApiKeyStatus) {
     geminiApiKeyStatus.textContent = status.configured
@@ -1421,39 +1426,6 @@ function renderAsrCredentialStatus(status: AsrCredentialStatus, clearInput = tru
     geminiApiKeyStatus.classList.toggle("warning", !status.configured);
   }
   if (clearInput && settingsGeminiApiKey) settingsGeminiApiKey.value = "";
-}
-
-async function saveGeminiCredential(clear: boolean): Promise<void> {
-  if (!settingsGeminiApiKey || !geminiApiKeyStatus) return;
-  const apiKey = settingsGeminiApiKey.value.trim();
-  if (!clear && !apiKey) {
-    geminiApiKeyStatus.textContent = "请输入 Gemini API Key。";
-    geminiApiKeyStatus.classList.add("warning");
-    return;
-  }
-  geminiApiKeyStatus.textContent = clear ? "正在删除 Gemini Key…" : "正在保存 Gemini Key…";
-  try {
-    const status = await invoke<AsrCredentialStatus>("save_asr_credential", {
-      request: { apiKey: clear ? null : apiKey, clear },
-    });
-    renderAsrCredentialStatus(status);
-    await refreshProviderReadiness();
-    if (settingsApiKey && settingsProvider?.value === "gemini") settingsApiKey.value = "";
-  } catch (error) {
-    geminiApiKeyStatus.textContent = `操作失败：${String(error)}`;
-    geminiApiKeyStatus.classList.add("warning");
-  }
-}
-
-async function checkGeminiCredential(): Promise<void> {
-  if (!geminiApiKeyStatus) return;
-  geminiApiKeyStatus.textContent = `正在检查系统凭据；${credentialCheckHint}…`;
-  try {
-    renderAsrCredentialStatus(await invoke<AsrCredentialStatus>("check_asr_credential"));
-  } catch (error) {
-    geminiApiKeyStatus.textContent = `检查失败：${String(error)}`;
-    geminiApiKeyStatus.classList.add("warning");
-  }
 }
 
 async function startDictionaryDownload(dictionaryId: string): Promise<void> {
@@ -1566,6 +1538,7 @@ const settingsLoad = createDesktopSettingsLoad({
   dictionaryMessage: text => { if (dictionaryDownloadMessage) dictionaryDownloadMessage.textContent = text; },
 });
 const settingsSave = createDesktopSettingsSave({
+  mutations: settingsMutations,
   backend: settingsBackend,
   visit: () => settingsVisit,
   capture: finishOnboarding => {
@@ -1611,6 +1584,34 @@ const settingsSave = createDesktopSettingsSave({
   message: text => { if (settingsMessage) settingsMessage.textContent = text; },
 });
 async function saveSettings(finishOnboarding: boolean): Promise<void> { await settingsSave.save(finishOnboarding); }
+
+const asrCredentials = createAsrCredentialSession({
+  backend: createAsrCredentialBackend(invoke),
+  mutations: settingsMutations,
+  visit: () => settingsVisit,
+  isOpen: () => settingsDialog?.open ?? false,
+  checkHint: credentialCheckHint,
+  clearMessage: text => { if (geminiApiKeyStatus?.textContent === text) geminiApiKeyStatus.textContent = ""; },
+  capture: clear => {
+    if (!settingsGeminiApiKey) return null;
+    const input = settingsGeminiApiKey, value = input.value;
+    const translationValue = settingsApiKey?.value, provider = settingsProvider?.value;
+    const fields = settingsDirtyFields.snapshot();
+    return { apiKey: clear ? null : value, acknowledge: () => {
+      if (input.value === value && settingsDirtyFields.snapshot().get(input.id) === fields.get(input.id)) {
+        input.value = ""; settingsDirtyFields.acknowledge(fields, input.id);
+      }
+      if (provider === "gemini" && settingsProvider?.value === provider && settingsApiKey && settingsApiKey.value === translationValue && settingsDirtyFields.snapshot().get(settingsApiKey.id) === fields.get(settingsApiKey.id)) {
+        settingsApiKey.value = ""; settingsDirtyFields.acknowledge(fields, settingsApiKey.id);
+      }
+    } };
+  },
+  accepted: status => renderAsrCredentialStatus(status),
+  invalidate: () => { settingsLoad.invalidate(); providerActions?.invalidateProfiles(); },
+  refresh: () => refreshProviderReadiness(),
+  changed: () => asrCredentialView?.render(),
+  message: (text, warning) => { if (geminiApiKeyStatus) { geminiApiKeyStatus.textContent = text; geminiApiKeyStatus.classList.toggle("warning", warning); } },
+});
 
 const networkTest = createNetworkTestSession({
   backend: createNetworkTestBackend(invoke),
@@ -4439,11 +4440,12 @@ settingsView = mountDesktopSettingsView(settingsDialog!, {
   visit: () => settingsVisit,
   opening: () => { ++settingsVisit; settingsDirtyFields.clear(); },
   opened: () => { modelManagement?.observe(); void loadDesktopSettings(false); },
-  closed: () => { ++settingsVisit; networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
+  closed: () => { ++settingsVisit; asrCredentials.hidden(); networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
   dirty: id => settingsDirtyFields.add(id),
   save: finish => { void saveSettings(finish); },
   applyTheme,
 });
+asrCredentialView = mountAsrCredentialView(settingsDialog!, asrCredentials, () => settingsVisit);
 networkTestView = mountNetworkTestView(settingsDialog!, networkTest, () => settingsVisit);
 modelPickerView = mountModelPickerView(settingsDialog!, modelPicker, () => settingsVisit);
 function updateProviderProfiles(profiles: TranslationProfileSummary[]): void {
@@ -4455,6 +4457,7 @@ providerFields = mountTranslationProviderFields(document.querySelector<HTMLEleme
   changed: () => renderProviderCards(),
 });
 providerActions = createTranslationProviderActions({
+  mutations: settingsMutations,
   backend: createTranslationProviderBackend(invoke),
   visit: () => settingsVisit,
   isOpen: () => settingsDialog?.open ?? false,
@@ -4578,9 +4581,6 @@ previewRetranscriptionButton?.addEventListener("click", () => void previewSelect
 retranscriptionDialog?.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => candidateTool.close());
 retranscriptionDialog?.querySelector<HTMLButtonElement>("#cancel-retranscription")?.addEventListener("click", () => candidateTool.close());
 confirmRetranscriptionButton?.addEventListener("click", () => void confirmSelectedRangeReplacement());
-saveGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(false));
-clearGeminiApiKeyButton?.addEventListener("click", () => void saveGeminiCredential(true));
-checkGeminiApiKeyButton?.addEventListener("click", () => void checkGeminiCredential());
 karaokeOpenWorkspaceButton?.addEventListener("click", () => void showEditorTools("translation"));
 
 document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());

@@ -1,7 +1,9 @@
+import type { SettingsMutationGate } from "./settings-mutation-gate.ts";
 import type { TranslationProfileSummary } from "./desktop-settings-types.ts";
 import type { AsrCredentialStatus, ProviderAction, TranslationCredentialCheck } from "./translation-provider-types.ts";
 
 type Options = {
+  mutations?: SettingsMutationGate;
   backend: {
     test(provider: string): Promise<unknown>;
     check(provider: string): Promise<TranslationCredentialCheck>;
@@ -40,8 +42,14 @@ export function createTranslationProviderActions(options: Options) {
       if (disposed || !["deepseek", "gemini", "deepl", "openai-compatible"].includes(id)) return;
       const key = action === "save" || action === "delete" ? "credential" : `${action}:${id}`;
       if (pending.has(key)) return;
+      const write = action === "save" || action === "delete";
+      const release = write ? options.mutations?.acquire() : null;
+      if (options.mutations && (write ? !release : options.mutations.busy)) {
+        options.message("另一个配置或凭据操作正在进行，请完成后重试。"); return;
+      }
+      const mutationRevision = options.mutations?.revision;
       const visit = options.visit(), notice = ++noticeGeneration;
-      const current = () => currentVisit(visit) && viewCurrent();
+      const current = () => currentVisit(visit) && viewCurrent() && (write || mutationRevision === options.mutations?.revision);
       const message = (text: string) => { if (current() && notice === noticeGeneration) options.message(text); };
       pending.add(key);
       let committed = false;
@@ -55,7 +63,7 @@ export function createTranslationProviderActions(options: Options) {
           ++profileGeneration; options.invalidateSettingsLoads();
           await options.backend.credential(id, capture!.apiKey, action === "delete");
           committed = true;
-          ++profileGeneration; options.invalidateSettingsLoads();
+          if (!disposed) { ++profileGeneration; options.invalidateSettingsLoads(); }
           if (!current()) return;
           capture!.applied();
         }
@@ -76,7 +84,7 @@ export function createTranslationProviderActions(options: Options) {
         message(committed ? `凭据已${action === "delete" ? "删除" : "保存"}，但状态刷新失败：${String(error)}` : `${action === "test" ? "连接测试失败：" : ""}${String(error)}`);
         if (action === "test" && current()) await profiles(current).catch(() => {});
       } finally {
-        pending.delete(key);
+        release?.(); pending.delete(key);
         if (!disposed && visit !== options.visit() && options.isOpen()) {
           const freshVisit = options.visit();
           try { await profiles(() => currentVisit(freshVisit)); }

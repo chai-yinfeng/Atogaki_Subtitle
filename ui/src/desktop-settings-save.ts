@@ -1,3 +1,4 @@
+import type { SettingsMutationGate } from "./settings-mutation-gate.ts";
 import type { DesktopSettings, SaveDesktopSettingsRequest, TranslationProfileSummary } from "./desktop-settings-types.ts";
 
 /** One dirty registry, with versions so an acknowledgement cannot clear newer input. */
@@ -21,6 +22,7 @@ export function createVersionedDirtyFields() {
 }
 
 type Options = {
+  mutations?: SettingsMutationGate;
   backend: { save(request: SaveDesktopSettingsRequest): Promise<DesktopSettings>; profiles(): Promise<TranslationProfileSummary[]> };
   visit(): number;
   capture(finishOnboarding: boolean): { request: SaveDesktopSettingsRequest; acknowledge(): void; hasNewInput(): boolean } | null;
@@ -40,8 +42,11 @@ export function createDesktopSettingsSave(options: Options) {
   return {
     async save(finishOnboarding: boolean): Promise<void> {
       if (busy || disposed) return;
-      const snapshot = options.capture(finishOnboarding);
-      if (!snapshot) return;
+      const release = options.mutations?.acquire();
+      if (options.mutations && !release) { options.message("另一个配置或凭据操作正在进行，请完成后重试。"); return; }
+      let snapshot: ReturnType<Options["capture"]>;
+      try { snapshot = options.capture(finishOnboarding); } catch (error) { release?.(); throw error; }
+      if (!snapshot) { release?.(); return; }
       const visit = options.visit();
       const current = () => !disposed && visit === options.visit();
       busy = true; options.invalidateLoads(); options.changed(true);
@@ -69,7 +74,7 @@ export function createDesktopSettingsSave(options: Options) {
       } catch (error) {
         if (current()) options.message(committed ? `配置已保存，但界面刷新失败：${String(error)}` : `保存失败：${String(error)}`);
       } finally {
-        busy = false;
+        release?.(); busy = false;
         if (!disposed) {
           options.changed(false);
           // Reopening during an in-flight save may have read the pre-save settings.
