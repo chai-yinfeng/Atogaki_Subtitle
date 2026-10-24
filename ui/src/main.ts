@@ -1,3 +1,4 @@
+import { mountModelManagementView } from "./model-management-view";
 import { createModelManagementSession } from "./model-management-session";
 import { createModelManagementBackend } from "./model-management-backend";
 import { createTranslationProviderDrafts } from "./translation-provider-drafts";
@@ -724,6 +725,7 @@ let desktopSettings: DesktopSettings | null = null;
 let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelManagement: ReturnType<typeof createModelManagementSession> | null = null;
+let modelCatalogView: ReturnType<typeof mountModelManagementView> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
@@ -1126,6 +1128,7 @@ editorRoot.addEventListener("click", event => {
 
 window.addEventListener("pagehide", () => {
   modelManagement?.dispose();
+  modelCatalogView?.dispose();
   providerFields?.dispose();
   settingsView?.dispose();
   providerActions?.dispose();
@@ -1296,8 +1299,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
 }
 
-function syncProviderSettings(): void { renderProviderCards(); }
-
 function syncNetworkSettings(): void {
   const customProxy = settingsProxyMode?.value === "custom";
   const proxyField = document.querySelector<HTMLElement>("#proxy-url-field");
@@ -1359,59 +1360,11 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   if (modelPath && settings.whisperModelPath) modelPath.value = settings.whisperModelPath;
   if (vadModelPath && settings.vadModelPath) vadModelPath.value = settings.vadModelPath;
   updateTaskPipelineSummary();
-  syncProviderSettings();
   syncNetworkSettings();
   renderModelCatalog();
 }
 
-function renderModelCatalog(): void {
-  if (!modelCatalogHost) return;
-  const activeDownload = modelDownloads.find((download) =>
-    download.status === "queued" || download.status === "downloading" || download.status === "cancelling"
-  );
-  modelCatalogHost.innerHTML = availableModels.map((model) => {
-    const download = modelDownloads.find((item) => item.modelId === model.id);
-    const progress = download?.totalBytes
-      ? Math.min(1, download.downloadedBytes / download.totalBytes)
-      : null;
-    const source = download?.source ? ` · ${download.source}` : "";
-    const state = download?.status === "done"
-      ? `${download.active ? "已下载 · 当前使用" : "已下载"}${source}`
-      : download?.status === "failed"
-        ? `失败：${download.error ?? "未知错误"}${source}`
-        : download?.status === "cancelled"
-          ? `已取消；保留临时文件供续传${source}`
-          : download?.status === "cancelling"
-            ? `正在取消…${source}`
-            : download?.status === "downloading"
-              ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${formatBytes(download.totalBytes)}` : ""}${source}`
-              : download?.status === "queued" ? `等待下载${source}` : "";
-    const action = download && ["queued", "downloading", "cancelling"].includes(download.status) ? "cancel" : "download";
-    const buttonLabel = action === "cancel" ? download?.status === "cancelling" ? "正在取消" : "取消"
-      : download?.status === "failed" || download?.status === "cancelled" ? "继续下载" : "下载";
-    const disabled = modelManagement?.busy || (action === "cancel"
-      ? download?.status === "cancelling"
-      : Boolean(activeDownload));
-    const actions = download?.status === "done"
-      ? `<div>${download.active ? "" : `<button type="button" data-model-action="select" data-model-id="${escapeHtml(model.id)}" ${modelManagement?.busy ? "disabled" : ""}>设为当前</button>`}<button type="button" class="secondary" data-model-action="uninstall" data-model-id="${escapeHtml(model.id)}" ${modelManagement?.busy ? "disabled" : ""}>卸载</button></div>`
-      : `<button type="button" class="secondary" data-model-action="${action}" data-model-id="${escapeHtml(model.id)}" ${disabled ? "disabled" : ""}>${buttonLabel}</button>`;
-    return `<article class="model-card">
-      <div><strong>${escapeHtml(model.name)}</strong><span>${escapeHtml(model.sizeLabel)} · ${escapeHtml(model.recommendedFor)}</span></div>
-      ${progress === null ? "" : `<progress max="1" value="${progress}"></progress>`}
-      <div class="model-card-action"><span class="${download?.status === "failed" ? "warning" : ""}">${escapeHtml(state)}</span>${actions}</div>
-    </article>`;
-  }).join("");
-  modelCatalogHost.querySelectorAll<HTMLButtonElement>("[data-model-action]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const modelId = button.dataset.modelId ?? "";
-      if (button.dataset.modelAction === "cancel") void cancelModelDownload(modelId);
-      else if (button.dataset.modelAction === "uninstall") void uninstallModel(modelId);
-      else if (button.dataset.modelAction === "select") void selectModel(modelId);
-      else void startModelDownload(modelId);
-    });
-  });
-  renderProviderCards();
-}
+function renderModelCatalog(): void { modelCatalogView?.render(); renderProviderCards(); }
 
 function renderDictionaryCatalog(): void {
   if (!dictionaryCatalogHost) return;
@@ -1707,7 +1660,7 @@ modelManagement = createModelManagementSession({
   isOpen: () => settingsDialog?.open ?? false,
   catalog: () => availableModels,
   downloads: () => modelDownloads,
-  accepted: states => { modelDownloads = states; renderModelCatalog(); renderProviderCards(); },
+  accepted: states => { modelDownloads = states; renderModelCatalog(); },
   changed: () => renderModelCatalog(),
   captureNetwork: () => {
     if (!settingsProxyMode || !settingsProxyUrl || !settingsModelMirror) return null;
@@ -1726,10 +1679,13 @@ modelManagement = createModelManagementSession({
   reload: () => settingsLoad.load(false),
   message: text => { if (modelDownloadMessage) modelDownloadMessage.textContent = text; },
 });
-async function startModelDownload(modelId: string): Promise<void> { await modelManagement?.run("start", modelId); }
-async function cancelModelDownload(modelId: string): Promise<void> { await modelManagement?.run("cancel", modelId); }
-async function uninstallModel(modelId: string): Promise<void> { await modelManagement?.run("uninstall", modelId); }
-async function selectModel(modelId: string): Promise<void> { await modelManagement?.run("select", modelId); }
+modelCatalogView = mountModelManagementView(modelCatalogHost!, {
+  visit: () => settingsVisit,
+  state: () => ({ catalog: availableModels, downloads: modelDownloads, busy: modelManagement?.busy ?? false }),
+  action: (action, id) => modelManagement!.run(action, id),
+  formatBytes,
+  error: text => { if (modelDownloadMessage) modelDownloadMessage.textContent = text; },
+});
 
 function renderGlossaryOptions(): void {
   const taskSelection = taskGlossary?.value ?? "";

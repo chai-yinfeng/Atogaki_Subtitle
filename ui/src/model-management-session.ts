@@ -1,7 +1,7 @@
 import type { ModelCatalogItem, ModelDownloadState } from "./desktop-settings-types.ts";
 import type { DownloadNetwork, createModelManagementBackend } from "./model-management-backend.ts";
 
-type Action = "start" | "cancel" | "select" | "uninstall";
+export type ModelAction = "start" | "cancel" | "select" | "uninstall";
 type Options = {
   backend: ReturnType<typeof createModelManagementBackend>;
   visit(): number; isOpen(): boolean;
@@ -59,7 +59,7 @@ export function createModelManagementSession(options: Options) {
       };
       reading = ticket; ticket.promise = work(); return ticket.promise;
     },
-    async run(action: Action, modelId: string): Promise<void> {
+    async run(action: ModelAction, modelId: string): Promise<void> {
       if (disposed || mutation || !options.isOpen()) return;
       const model = options.catalog().find(item => item.id === modelId); if (!model) return;
       const visit = options.visit();
