@@ -1,3 +1,6 @@
+import { createMediaRelinkBackend } from "./media-relink-backend";
+import { createMediaRelinkSession, type MediaRelinkContext } from "./media-relink-session";
+import { mountMediaRelinkView } from "./media-relink-view";
 import { createTaskFilePickerBackend } from "./task-file-picker-backend";
 import { createTaskFilePickerSession } from "./task-file-picker-session";
 import { mountTaskFilePickerView } from "./task-file-picker-view";
@@ -738,6 +741,7 @@ let modelPickerView: ReturnType<typeof mountModelPickerView> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
+let mediaRelink: ReturnType<typeof createMediaRelinkSession> | null = null;
 let taskFilePickerView: ReturnType<typeof mountTaskFilePickerView> | null = null;
 let dictionaryDownloadView: ReturnType<typeof mountDictionaryDownloadView> | null = null;
 let dictionaryDownloadSession: ReturnType<typeof createDictionaryDownloadSession> | null = null;
@@ -1139,6 +1143,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  mediaRelinkView.dispose();
+  mediaRelink?.dispose();
   taskFilePicker.dispose();
   taskFilePickerView?.dispose();
   dictionaryDownloadSession?.dispose();
@@ -1843,7 +1849,7 @@ function updateTranslationControls(): void {
   subtitleList?.querySelectorAll<HTMLButtonElement>(".capture-glossary-term").forEach((button) => {
     button.disabled = taskBusy || !workspaceGlossary?.value;
   });
-  if (relinkJobMediaButton) relinkJobMediaButton.disabled = taskBusy;
+  if (relinkJobMediaButton) relinkJobMediaButton.disabled = taskBusy || Boolean(mediaRelink?.busy);
 }
 
 function setWorkspaceAction(message: string, isError = false): void {
@@ -1864,7 +1870,7 @@ function setSubtitleEditAction(message: string, isError = false): void {
 
 function setWorkspaceBusy(busy: boolean): void {
   workspaceActionBusy = busy;
-  if (relinkJobMediaButton) relinkJobMediaButton.disabled = busy;
+  if (relinkJobMediaButton) relinkJobMediaButton.disabled = busy || Boolean(mediaRelink?.busy);
   updateTranslationControls();
 }
 
@@ -3451,7 +3457,7 @@ function renderWorkspace(detail: JobDetail): void {
   const sourceMediaMissing = Boolean(detail.job.input_path && !detail.playback_path);
   relinkJobMediaButton?.classList.toggle("hidden", !sourceMediaMissing);
   if (relinkJobMediaButton) {
-    relinkJobMediaButton.disabled = workspaceActionBusy;
+    relinkJobMediaButton.disabled = workspaceActionBusy || Boolean(mediaRelink?.busy);
     relinkJobMediaButton.title = sourceMediaMissing
       ? "选择移动后的原音频或视频；不会改动字幕和任务音频"
       : "";
@@ -3468,33 +3474,25 @@ function renderWorkspace(detail: JobDetail): void {
 
 }
 
-async function relinkActiveJobMedia(): Promise<void> {
-  if (!activeDetail || workspaceActionBusy) return;
-  if (hasUnsavedSubtitleEdits()) {
-    setWorkspaceAction("请先保存或放弃尚未保存的字幕修改，再重新定位原媒体。", true);
-    return;
-  }
-  setWorkspaceBusy(true);
-  setWorkspaceAction("正在选择移动后的原媒体…");
-  try {
-    const updated = await invoke<LocalJob | null>("relink_job_media", {
-      jobId: activeDetail.job.job_id,
-    });
-    if (!updated) {
-      setWorkspaceAction("已取消重新定位。");
-      return;
-    }
-    setWorkspaceBusy(false);
-    if (currentArea === "karaoke") await enterSubtitleEditor(activeDetail.job.job_id);
-    else await openJob(activeDetail.job.job_id, currentWorkspaceSection);
-    setWorkspaceAction(`已重新定位原媒体：${updated.input_path ?? ""}`);
-  } catch (error) {
-    setWorkspaceAction(`重新定位原媒体失败：${String(error)}`, true);
-  } finally {
-    setWorkspaceBusy(false);
-    updateTranslationControls();
-  }
-}
+mediaRelink = createMediaRelinkSession({
+  backend: createMediaRelinkBackend(invoke),
+  context: () => activeDetail && (currentArea === "karaoke" || currentArea === "workspace") ? {
+    jobId: activeDetail.job.job_id, navigation: navigationRequestId, area: currentArea, section: currentWorkspaceSection,
+  } : null,
+  dirty: () => hasUnsavedSubtitleEdits() || (currentArea === "karaoke" && editorTimingDirty()),
+  acquire: () => { if (workspaceActionBusy) return null; setWorkspaceBusy(true); return () => setWorkspaceBusy(false); },
+  reload: (context: MediaRelinkContext) => {
+    const operation = context.area === "karaoke" ? openKaraokeJob(context.jobId) : openJob(context.jobId, context.section);
+    const navigation = navigationRequestId;
+    const current = () => navigation === navigationRequestId && currentArea === context.area && currentWorkspaceSection === context.section && (!activeDetail || activeDetail.job.job_id === context.jobId);
+    return { current, done: operation.then(() => {
+      if (current() && activeDetail?.job.job_id !== context.jobId) throw Error("任务读取未完成，请重新打开任务");
+    }) };
+  },
+  message: setWorkspaceAction,
+  changed: () => updateTranslationControls(),
+});
+const mediaRelinkView = mountMediaRelinkView(relinkJobMediaButton!, mediaRelink, () => navigationRequestId);
 
 function isAudioPath(path: string): boolean {
   return /\.(mp3|m4a|aac|wav|flac|ogg)$/i.test(path);
@@ -4449,7 +4447,6 @@ workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")?.addEventListene
 workspaceView.querySelector<HTMLButtonElement>("#reload-detail")?.addEventListener("click", () => {
   if (activeDetail) void openJob(activeDetail.job.job_id, currentWorkspaceSection);
 });
-relinkJobMediaButton?.addEventListener("click", () => void relinkActiveJobMedia());
 openSubtitleEditorButton?.addEventListener("click", () => {
   if (!activeDetail) return;
   if (hasUnsavedSubtitleEdits()) {

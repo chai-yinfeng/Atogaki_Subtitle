@@ -227,3 +227,12 @@ dispose abort 委托监听器、删除自有卡片并清空引用；迟到错误
 `task-file-picker-view.ts` 管理控件、委托事件、焦点及每字段事件版本，仅缓存控件／版本，不存另一份任务草稿或 selectedMediaFiles。回填同时核对字段原值和版本，同值 input 也使旧结果失效；媒体手工输入继续清除批量选择。模型预设应用显式失效 model／vad 选择意图，VAD 开关变化独立失效 VAD 回执；表单 reset 失效原快照，并在默认 reset 后更新控件。VAD disabled／required 与选择按钮状态在同一视图呈现，避免旧 finally 或开关监听器误启用忙中的按钮。
 
 选择只改现有字段与原批量数组，不创建／提交任务、不复制媒体／模型或新增保存器。显式提交仍使用原 request 与顺序批量提交。AbortController 释放事件，dispose 后迟到回执／焦点和 reset 微任务不读上下文；焦点只在原访问、按钮可见且用户未进入其他控件时恢复。已有任务的 relink_job_media 是另一条后端写入用例，当前任务身份与旧回执处理仍待单独迁移，不把新建表单保护外推过去。
+
+
+## 2026-10-24：已有任务媒体重定位身份
+
+`media-relink-session.ts` 从 main 接管已有任务的重定位流程，`media-relink-backend.ts` 复用 relink_job_media(jobId)，仅声明当前 UI 使用的原返回字段；后端选文件、媒体校验及原任务写入流程不变。开始时冻结 jobId、navigation、area 和工具 section，返回前仍核对原身份；不再用等待后当前 activeDetail 的 ID 重开任务。返回任务身份不匹配时不重载，取消或失败不触发重载。
+
+文字和未提交时间修改均阻止开始；等待中新增修改时，只报告路径已保存并保留输入，保存后由用户重开任务加载媒体。重载复用现有 openKaraokeJob／openJob，拥有自己的新导航 guard；正常编辑器刷新保留同任务锁定句，旧刷新若被其他导航取代不切回旧任务或显示旧成功／错误。路径写入已完成但当前刷新失败须单独报告。
+
+workspace busy 通过单个幂等 release 释放，现有导航要求解锁时先释放，finally 不再无条件解除另一个操作的 busy。会话本身在重载结束前仍 busy，按钮状态同时考虑它与已有 task busy，避免可见但无响应的入口；dispose 释放仍拥有的锁并忽略迟到回执。`media-relink-view.ts` 解除事件和迟到焦点恢复，取消后的按钮只在原访问、可见且用户未转入其他控件时恢复焦点。
