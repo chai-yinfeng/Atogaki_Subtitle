@@ -548,3 +548,15 @@ Shift+Tab 后截图焦点环在插入按钮；Tab 后实际粘贴改到开始时
 点击取消返回编辑器，随后按 Enter 打开更多编辑菜单，验证可见入口焦点已恢复。重新打开表单后起止恢复 2.800／3.000 秒，原译文为空；Escape 关闭。QA 正常退出、启动会话 exit 0，全部 20 表行数与排序内容 SHA-256 不变，integrity_check=ok、foreign_key_check 为空。没有实际插入字幕、制造原生磁盘错误、运行识别／翻译或改动正式 App。
 
 完整 AX、截图、包清单、前后数据及限制在 `local-artifacts/editor-insert-native-ec31842/`。原生实际插入／撤销、Join／拖动与真实失败重试继续待验收；失败保留输入、异步身份与 dispose 仍由本轮十二组 WebKit 覆盖。打包重新运行类型／生产构建，文档提交执行两套 fmt／diff 检查，没有把原生取消扩大为事务成功证明。正式仍为 1020e05，性能、首次空白和 Windows 门禁保持。
+
+## 2026-10-25：ec31842 原生结构事务与会话边界
+
+复用现有四 sidecar QA 包，27 文件摘要与 ec31842 包清单一致；未重新打包或覆盖正式 App。隔离 A／B 任务原有 40 段。首次实际插入返回 `WAV must be nonempty mono 16kHz PCM16`，表单保留范围及双语输入，20 表未变。查明合成 audio.wav 为 mono 8 kHz PCM16；仅在没有 ASR run／采用来源的 B 任务，用原合成视频重新生成符合既有合同的 16 kHz WAV，旧 8 kHz 文件原位改名保留。A 的音频、采用证据及原视频未修改；这不是生产音频迁移或新增完整备份。
+
+B 实际插入 2.800–3.000 秒双语字幕，20→21 段，SQLite 核对新 ID、时间与文本。将开始时间改为 2.810 秒后撤销受阻，输入保留；Escape 恢复后撤销成功，全部原始 40 条字幕记录逐字段一致。随后播放头移至 2.700 秒，Cut 成功为 21 段，并验证待保存时间阻止 Join。此会话后来结束，未完成 Cut 撤销；撤销历史只在当前 App 会话内存在，不能把后续重启当作旧历史恢复。
+
+续验首先确认旧启动会话终止。观察到未绑定隔离目录的 QA 首次配置窗口后正常退出，再显式以 ATOGAKI_DATA_DIR 启动；工作台确认路径与两任务身份。以保留上次 Cut 的 A20／B21 共 41 段作为新会话基线：开始时间 0.010 秒时 Join 被阻止并保留输入；Escape 恢复后 Join 将 B21→20，撤销回 21，全部 41 条字幕记录与新基线逐字段一致。随后在 0.100 秒实际 Cut，B21→22，撤销回 21，再次逐字段恢复。两次撤销均通过真实 Tauri／SQLite 事务；没有用原始 SQL 重置 cue 或伪造会话历史。B 的两个相邻同文块仍是前一会话留下的 Cut 测试现场。
+
+QA 正常退出，启动会话 exit 0，integrity_check=ok、foreign_key_check 为空。最终相对新会话基线仅 local_jobs 的 updated_at_unix／workspace_revision 与 local_subtitle_provenance 的 updated_at_unix 改变，符合结构提交及撤销的递增语义；不宣称所有 20 表未变。相对最初基线，A 的任务、字幕、provenance、ASR runs 和质量信号记录均一致；A WAV、原视频、保留的 B 8 kHz WAV 与新 B 16 kHz WAV 摘要均通过。AX、各阶段全表快照、音频格式／摘要、包清单与最终核验位于忽略目录 `local-artifacts/editor-structure-roundtrip-ec31842/`。
+
+本次新增原生事务证据，未新增业务代码；文档提交执行两套 fmt 与 diff 检查。接缝专项另复跑 8 项通过，不扩大为本轮前端或 Rust 全量回归。原生拖动、真实磁盘失败／延迟、IME、重启草稿冲突、长期多操作内存、原生滚动 P95、首次空白和 Windows 门禁继续保留；格式失败不能代替磁盘失败验证。正式 App 仍为 1020e05。
