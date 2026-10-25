@@ -24,6 +24,7 @@ export function mountEditorFollow<T extends EditorCue>(root: HTMLElement, option
   const message = root.querySelector<HTMLElement>("#editor-selection-message")!;
   const events = new AbortController();
   let intent = 0;
+  let timingRevision = 0;
   const syncMessage = () => {
     if (events.signal.aborted) return;
     const id = session.selectedCueId;
@@ -53,18 +54,23 @@ export function mountEditorFollow<T extends EditorCue>(root: HTMLElement, option
     if (!await options.flush() || events.signal.aborted || request !== intent || navigation !== options.navigation() || options.jobId() !== jobId || !options.active()) return;
     session.resumePlayback(); options.resumed(); sync();
   };
-  for (const input of [start, end]) input.addEventListener("keydown", event => {
-    if (event.key !== "Escape") return;
-    event.preventDefault(); event.stopPropagation();
-    const cue = options.current();
-    start.value = cue ? options.time(cue.start_ms) : "";
-    end.value = cue ? options.time(cue.end_ms) : "";
-    options.status("已恢复当前段尚未保存的时间输入。");
-  }, { signal: events.signal });
+  for (const input of [start, end]) {
+    input.addEventListener("input", () => { timingRevision++; }, { signal: events.signal });
+    input.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      event.preventDefault(); event.stopPropagation();
+      timingRevision++;
+      const cue = options.current();
+      start.value = cue ? options.time(cue.start_ms) : "";
+      end.value = cue ? options.time(cue.end_ms) : "";
+      options.status("已恢复当前段尚未保存的时间输入。");
+    }, { signal: events.signal });
+  }
   root.addEventListener("focusin", event => {
     if ((event.target as HTMLElement).closest(".karaoke-current-segment")) lock();
   }, { signal: events.signal });
   return { lock, resume, sync, syncMessage, timingDirty,
+    get timingRevision() { return timingRevision; },
     browse() {
       if (events.signal.aborted) return;
       // A fresh manual scroll also cancels a pending resume, even when already paused.

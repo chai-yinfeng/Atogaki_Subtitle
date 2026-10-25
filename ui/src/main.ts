@@ -1019,12 +1019,17 @@ async function flushEditorStructureDrafts(): Promise<boolean> {
 async function saveEditorCueTime(): Promise<void> {
   const startInput = editorStart.value, endInput = editorEnd.value;
   const selectedId = editorSession.selectedCueId;
+  const jobId = activeDetail?.job.job_id, navigation = navigationRequestId, timingRevision = editorFollow.timingRevision;
   if (workspaceActionBusy || !await flushEditorStructureDrafts() || !activeDetail) return;
+  if (workspaceActionBusy || currentArea !== "karaoke" || navigationRequestId !== navigation || activeDetail.job.job_id !== jobId) return;
+  if (selectedId !== editorSession.selectedCueId || timingRevision !== editorFollow.timingRevision || startInput !== editorStart.value || endInput !== editorEnd.value) {
+    setSubtitleEditAction("时间输入或编辑段已变化，请确认后重新保存。", true); return;
+  }
   const cue = karaokeDraftSegment();
   if (!cue || cue.id !== selectedId) return;
   const startMs = parseTimecode(startInput), endMs = parseTimecode(endInput);
   if (startMs === null || endMs === null || startMs < 0 || endMs <= startMs) { setSubtitleEditAction("请输入有效的开始和结束时间。", true); return; }
-  const jobId = activeDetail.job.job_id, before = cloneSubtitleSegments(activeDetail.segments);
+  const before = cloneSubtitleSegments(activeDetail.segments);
   const after = before.map(item => item.id === cue.id ? { ...item, start_ms: startMs, end_ms: endMs } : item);
   setEditorMutationBusy(true);
   try {
