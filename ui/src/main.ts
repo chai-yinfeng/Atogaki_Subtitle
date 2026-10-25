@@ -2217,10 +2217,18 @@ function showWorkspace(show: boolean): void {
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", show);
 }
 
-async function stopActivePlayback(): Promise<void> {
+function assertPlaybackCanStop(): void {
   if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
+  if (currentArea === "karaoke" && editorTimingDirty()) {
+    throw new Error("请先保存时间，或在时间输入框按 Escape 恢复，再离开字幕编辑。");
+  }
+}
+
+async function stopActivePlayback(): Promise<void> {
+  assertPlaybackCanStop();
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
+  assertPlaybackCanStop();
   videoRenderSession.close();
   subtitleStyles.close();
   subtitleExport.reset();
@@ -2254,7 +2262,7 @@ async function stopActivePlayback(): Promise<void> {
 
 async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editorDetail?: JobDetail, editorJobId?: string): Promise<void> {
   closeLearningSelection();
-  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
+  assertPlaybackCanStop();
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;
@@ -2294,7 +2302,7 @@ async function openListeningJob(
   autoplay = false,
 ): Promise<void> {
   if (!jobId || !listeningMediaMessage) return;
-  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
+  assertPlaybackCanStop();
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId || currentArea !== "listening") return;
@@ -2836,7 +2844,7 @@ async function playLearningSource(itemId: string): Promise<void> {
 async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<void> {
   if (!jobId || !karaokeMediaMessage) return;
   const reopeningSelectedJob = karaokeSelectedJobId === jobId;
-  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
+  assertPlaybackCanStop();
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
@@ -2863,6 +2871,7 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
     if (!detail.segments.length || !matchesTerminalStatus(detail.job.status)) { await openJob(jobId, "review"); return; }
     activeDetail = detail;
     editorSession.open(jobId, detail.segments);
+    editorTimeFingerprint = "";
     editorSearch.value = editorSession.query; editorFilter.value = editorSession.filter;
     asrQualitySignals = [];
     currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList(); syncEditorFollow();
@@ -3405,7 +3414,7 @@ async function openJob(jobId: string, initialSection?: WorkspaceSection): Promis
   if (!jobId || !workspaceMessage) return;
   const known = latestJobs.find(job => job.job_id === jobId);
   if ((initialSection === undefined || initialSection === "review") && known && known.segment_count > 0 && matchesTerminalStatus(known.status)) { await enterSubtitleEditor(jobId); return; }
-  if (workspaceActionBusy) throw new Error("请等待当前字幕操作完成后再离开");
+  assertPlaybackCanStop();
   const requestId = ++navigationRequestId;
   await stopActivePlayback();
   if (requestId !== navigationRequestId) return;

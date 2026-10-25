@@ -9,14 +9,14 @@ await page.addInitScript(({audioUrl,cueCount,durationMs})=>{
   window.__test={cues,job,calls:[],fail:false,delay:0};
   window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'main'},currentWebview:{label:'main'}},transformCallback:()=>1,unregisterCallback:()=>{},convertFileSrc:path=>path==='/fixture.wav'?window.__qaAudio:path,invoke:async(cmd,args={})=>{
     window.__test.calls.push({cmd,args});
-    if(cmd==='get_job_detail')return {job,segments:cues,translation_runs:[],translation_context_stale_ids:[],playback_path:'/fixture.wav',audio_fallback_path:null};
+    if(cmd==='get_job_detail')return {job:{...job},segments:cues.map(cue=>({...cue})),translation_runs:[],translation_context_stale_ids:[],playback_path:'/fixture.wav',audio_fallback_path:null};
     if(cmd==='list_jobs' || cmd==='list_job_summaries')return [job];
     if(cmd==='desktop_settings')return {translationProviderId:'none',translationStyleInstruction:'',modelsDirectory:'/test/models',networkProxyMode:'environment',credentialStore:'test',needsOnboarding:false};
     if(cmd==='translation_status')return {provider_id:'none',provider:'测试翻译',configured:false,model:null,endpoint_kind:'none',configuration_hint:'测试'};
     if(cmd==='get_waveform_window'){const {startMs,endMs,pointCount}=args.request;return {start_ms:startMs,end_ms:endMs,duration_ms:durationMs,peaks:Array.from({length:pointCount},(_,i)=>({min:-Math.abs(Math.sin(i/8))*.7,max:Math.abs(Math.sin(i/8))*.7}))};}
     if(cmd==='list_asr_quality_signals')return [{id:'signal',signal_kind:'boundary_repetition',start_ms:3000,end_ms:5800,severity:'warning',message:'测试提示',latest_decision:null}];
     if(cmd==='update_subtitle') { await new Promise(resolve=>setTimeout(resolve,window.__test.delay)); if(window.__test.fail)throw Error('disk full'); const r=args.request,c=cues.find(c=>c.id===r.segmentId);Object.assign(c,{source_text:r.sourceText,translated_text:r.translatedText,start_ms:r.startMs,end_ms:r.endMs,source_edited:true});return {...c}; }
-    if(cmd==='save_subtitle_timing'){cues.splice(0,cues.length,...args.request.afterSegments);return cues;}
+    if(cmd==='save_subtitle_timing'){cues.splice(0,cues.length,...args.request.afterSegments);return cues.map(cue=>({...cue}));}
     if(cmd==='data_directory')return '/test/isolated';
     if(cmd==='theme_artwork_settings')return null;
     if(cmd.startsWith('plugin:'))return 1;
