@@ -73,7 +73,9 @@ provider 卡片静态结构进入 `translation-provider-template.ts`，单个共
 
 任务后续翻译 provider 由 `task-translation-provider.ts` 管理任务／navigation 绑定的读取、在途保存与选择草稿，视图和原两条 IPC 适配独立；静态控件复用任务工具模板。旧访问返回不能更新当前状态，保存中新输入按版本保留；不增加凭据存储，也不自动翻译。模型卡片及设置模型路径选择器已分离；其余设置字段和 Rust 剩余边界继续按需收敛。
 
-Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有 `editor-backend.ts`。准备阶段先预留单次操作，继续调用唯一草稿 flush 和时间保护；flush 后复核任务、navigation 与编辑选择。提交期间复用 workspace busy，成功记录同一份结构历史，只有原访问能应用结果或显示错误；dispose 释放自己的 busy 并忽略迟到呈现，不取消或重试已提交的 Rust 事务。插入／删除、结构撤销及导航协调仍留在 main，继续逐用例收敛。
+Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有 `editor-backend.ts`。准备阶段先预留单次操作，继续调用唯一草稿 flush 和时间保护；flush 后复核任务、navigation 与编辑选择。提交期间复用 workspace busy，成功记录同一份结构历史，只有原访问能应用结果或显示错误；dispose 释放自己的 busy 并忽略迟到呈现，不取消或重试已提交的 Rust 事务。插入／删除及导航协调仍留在 main，继续逐用例收敛。
+
+`editor-structure-history.ts` 持有唯一的结构撤销历史，替代 main 的全局 Map；每任务最多十条 before／after 快照，只在当前 App 会话有效。文字撤回保持独立，记录结构操作时仍清除该任务旧文字撤回记录。撤销先保护文字／时间输入，核对原任务、navigation、选择和最新历史／字幕快照，再经 editor-backend 调用原 restore_subtitle_structure 事务；失败保留历史，迟到返回不应用到新访问。dispose 释放自身 busy 和历史快照，既不持久化历史，也不自动重试后端请求。
 
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
 

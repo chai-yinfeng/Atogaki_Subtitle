@@ -25,5 +25,8 @@ export function createEditorBackend(invoke: Invoke) {
     merge(request: { jobId: string; leftSegmentId: string; rightSegmentId: string; sourceText: string; translatedText: string | null }) {
       return invoke<SubtitleSegment[]>("merge_subtitles", { request });
     },
+    restoreStructure(jobId: string, beforeSegments: SubtitleSegment[], afterSegments: SubtitleSegment[]) {
+      return invoke<SubtitleSegment[]>("restore_subtitle_structure", { request: { jobId, beforeSegments, afterSegments } });
+    },
   };
 }

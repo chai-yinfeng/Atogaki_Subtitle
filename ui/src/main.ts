@@ -1,3 +1,4 @@
+import { createEditorStructureHistory } from "./editor-structure-history";
 import { createEditorStructureActions } from "./editor-structure-actions";
 import { mountInsertSubtitleBlock } from "./insert-subtitle-block";
 import { createMediaRelinkBackend } from "./media-relink-backend";
@@ -193,12 +194,6 @@ type GlossaryApplyResult = {
 type SubtitleUndoEntry = {
   before: SubtitleSegment;
   afterFingerprint: string;
-};
-
-type SubtitleStructureUndoEntry = {
-  before: SubtitleSegment[];
-  after: SubtitleSegment[];
-  label: string;
 };
 
 type JobDetail = {
@@ -718,7 +713,6 @@ const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
 const editorBackend = createEditorBackend(invoke);
 const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(editorBackend.updateText, updateSubtitleDraftUI);
 
-const subtitleStructureUndoHistory = new Map<string, SubtitleStructureUndoEntry[]>();
 let workspaceActionBusy = false;
 let glossaries: Glossary[] = [];
 let editingGlossaryId: string | null = null;
@@ -1177,6 +1171,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  editorStructureHistory.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -3476,36 +3471,28 @@ function cloneSubtitleSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
   return segments.map((segment) => ({ ...segment }));
 }
 
-function subtitleStructureFingerprint(segments: SubtitleSegment[]): string {
-  return JSON.stringify(segments);
-}
-
-function currentStructureUndoEntry(): SubtitleStructureUndoEntry | undefined {
-  if (!activeDetail) return undefined;
-  return subtitleStructureUndoHistory.get(activeDetail.job.job_id)?.at(-1);
-}
-
+const editorStructureHistory = createEditorStructureHistory({
+  context: () => activeDetail ? {
+    jobId: activeDetail.job.job_id, navigation: navigationRequestId,
+    selectedId: editorSession.selectedCueId, segments: activeDetail.segments,
+  } : null,
+  available: () => !workspaceActionBusy, dirty: () => currentCueEditor.dirty,
+  flush: flushEditorStructureDrafts, backend: editorBackend,
+  busy: setEditorMutationBusy, status: setSubtitleEditAction, apply: applySubtitleStructure,
+  changed: updateStructureUndoButton,
+  clearTextHistory: jobId => {
+    for (const key of subtitleUndoHistory.keys()) if (key.startsWith(`${jobId}:`)) subtitleUndoHistory.delete(key);
+  },
+});
 function updateStructureUndoButton(): void {
   if (!undoSubtitleStructureButton) return;
-  const entry = currentStructureUndoEntry();
-  const available = Boolean(
-    activeDetail && entry && subtitleStructureFingerprint(activeDetail.segments) === subtitleStructureFingerprint(entry.after),
-  );
-  undoSubtitleStructureButton.disabled = !available;
-  undoSubtitleStructureButton.title = available
-    ? `撤销${entry?.label ?? "上一次结构修改"}`
-    : "当前会话还没有可撤销的打轴或结构修改";
+  const state = editorStructureHistory.presentation();
+  undoSubtitleStructureButton.disabled = !state.available;
+  undoSubtitleStructureButton.title = state.available
+    ? `撤销${state.label}` : "当前会话还没有可撤销的打轴或结构修改";
 }
-
 function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment[], label: string, jobId = activeDetail?.job.job_id): void {
-  if (!jobId) return;
-  const history = subtitleStructureUndoHistory.get(jobId) ?? [];
-  history.push({ before: cloneSubtitleSegments(before), after: cloneSubtitleSegments(after), label });
-  if (history.length > 10) history.shift();
-  subtitleStructureUndoHistory.set(jobId, history);
-  for (const key of subtitleUndoHistory.keys()) {
-    if (key.startsWith(`${jobId}:`)) subtitleUndoHistory.delete(key);
-  }
+  if (jobId) editorStructureHistory.remember(before, after, label, jobId);
 }
 
 function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?: string): void {
@@ -3525,39 +3512,7 @@ function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?:
   updateStructureUndoButton();
 }
 
-async function undoSubtitleStructure(): Promise<void> {
-  if (!activeDetail || !undoSubtitleStructureButton || !await flushEditorStructureDrafts()) return;
-  if (currentCueEditor.dirty) {
-    setSubtitleEditAction("撤销打轴前请先保存或放弃当前文字修改。", true);
-    return;
-  }
-  const jobId = activeDetail.job.job_id;
-  const selectedId = editorSession.selectedCueId;
-  const history = subtitleStructureUndoHistory.get(jobId);
-  const entry = history?.at(-1);
-  if (!entry) return;
-  undoSubtitleStructureButton.disabled = true;
-  setEditorMutationBusy(true);
-  try {
-    const restored = await invoke<SubtitleSegment[]>("restore_subtitle_structure", {
-      request: {
-        jobId,
-        beforeSegments: entry.before,
-        afterSegments: entry.after,
-      },
-    });
-    if (activeDetail?.job.job_id !== jobId) return;
-    history?.pop();
-    if (history?.length === 0) subtitleStructureUndoHistory.delete(activeDetail.job.job_id);
-    applySubtitleStructure(restored, selectedId ?? undefined);
-    setSubtitleEditAction(`已撤销${entry.label}。撤销历史只在当前 App 会话内保留。`);
-  } catch (error) {
-    setSubtitleEditAction(`无法撤销结构修改：${String(error)}`, true);
-  } finally {
-    setEditorMutationBusy(false);
-    updateStructureUndoButton();
-  }
-}
+async function undoSubtitleStructure(): Promise<void> { await editorStructureHistory.undo(); }
 
 function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleSegment): void {
   try { localStorage.setItem("atogaki.subtitleDrafts", subtitleDrafts.snapshot()); } catch { /* SQLite autosave still runs. */ }
