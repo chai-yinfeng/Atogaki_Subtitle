@@ -1,3 +1,4 @@
+import { mountInsertSubtitleBlock } from "./insert-subtitle-block";
 import { createMediaRelinkBackend } from "./media-relink-backend";
 import { createMediaRelinkSession, type MediaRelinkContext } from "./media-relink-session";
 import { mountMediaRelinkView } from "./media-relink-view";
@@ -1052,6 +1053,21 @@ async function saveEditorCueTime(): Promise<void> {
   } catch (error) { setSubtitleEditAction(`时间保存失败：${String(error)}`, true); }
   finally { setEditorMutationBusy(false); }
 }
+const insertBlockView = mountInsertSubtitleBlock(shell!, {
+  trigger: editorRoot.querySelector<HTMLElement>(".editor-menu > summary")!,
+  context: () => currentArea === "karaoke" && activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
+  time: formatPreciseTime, parse: parseTimecode,
+  overlaps: (startMs, endMs) => !!activeDetail?.segments.some(cue => cue.start_ms < endMs && cue.end_ms > startMs),
+  submit: async (context, value) => {
+    if (currentArea !== "karaoke" || activeDetail?.job.job_id !== context.jobId || navigationRequestId !== context.navigation) return "任务已切换，请重新打开插入工具。";
+    const insertion: SubtitleSegment = {
+      id: crypto.randomUUID(), job_id: context.jobId, segment_index: 0,
+      start_ms: value.startMs, end_ms: value.endMs, source_text: value.source, translated_text: value.translation || null,
+      source_edited: true, translation_edited: !!value.translation, translation_stale: false, timing_edited: true,
+    };
+    return changeKaraokeBlock(null, insertion);
+  },
+});
 const taskTools = mountTaskTools(workspaceView, editorRoot, closeEditorTools);
 const cleanupConfirmation = mountCandidateCleanupConfirmation(shell!);
 const repairTool = mountToolDialog(editorRepairDialog, () => { reviewSignals.clear(); candidateHistory.clear(); }, () => !cleanupConfirmation.open);
@@ -1160,6 +1176,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  insertBlockView.dispose();
   mediaRelinkView.dispose();
   mediaRelink?.dispose();
   taskFilePicker.dispose();
@@ -2241,6 +2258,7 @@ async function stopActivePlayback(): Promise<void> {
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
   assertPlaybackCanStop();
+  insertBlockView.cancel();
   videoRenderSession.close();
   subtitleStyles.close();
   subtitleExport.reset();
@@ -3266,8 +3284,8 @@ function seekKaraokeBy(milliseconds: number): void {
   updateKaraokePosition(mediaPlayer.positionMs);
 }
 
-async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSegment | null): Promise<void> {
-  if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
+async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSegment | null): Promise<string | null> {
+  if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return "操作未执行，请先完成当前编辑后重试。";
   const jobId = activeDetail.job.job_id;
   const before = cloneSubtitleSegments(activeDetail.segments);
   setEditorMutationBusy(true);
@@ -3279,7 +3297,8 @@ async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSe
       if (insertion) { seekTo(insertion.start_ms, false); updateActiveSubtitle(insertion.start_ms); }
       setSubtitleEditAction("已保存，可用“撤销上次打轴”撤回；仅实际依赖被删除块的机器译文需要核对。");
     }
-  } catch(error) { setSubtitleEditAction(`字幕块操作失败：${String(error)}`, true); }
+    return null;
+  } catch(error) { const message = `字幕块操作失败：${String(error)}`; setSubtitleEditAction(message, true); return message; }
   finally { setEditorMutationBusy(false); }
 }
 async function openInsertSubtitleBlock(): Promise<void> {
@@ -3287,31 +3306,13 @@ async function openInsertSubtitleBlock(): Promise<void> {
   if (currentCueEditor.dirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
   if (!mediaPlayer.media || !Number.isFinite(mediaPlayer.media.duration) || mediaPlayer.media.duration <= 0) { setSubtitleEditAction("媒体时长尚未就绪，请等待加载或重新定位媒体。", true); return; }
   mediaPlayer.media.pause();
-  const jobId = activeDetail.job.job_id;
   const position = Math.round((mediaPlayer.media?.currentTime ?? 0) * 1000 / 10) * 10;
   const current = activeDetail.segments.find(s=>s.start_ms <= position && s.end_ms > position);
   const start = current?.end_ms ?? position;
   const next = activeDetail.segments.find(s=>s.start_ms >= start);
   const duration = Number.isFinite(mediaPlayer.media?.duration) ? Math.round(mediaPlayer.media!.duration*1000) : start+2000;
   const end = Math.min(start+2000, next?.start_ms ?? duration, duration);
-  const dialog = document.createElement("dialog"); dialog.className="rename-job-dialog insert-block-dialog";
-  dialog.innerHTML='<form><h2>插入字幕块</h2><p>在空白区间新增字幕，不移动已有块。</p><label>开始<input name="start" required></label><label>结束<input name="end" required></label><label>原文<textarea name="source" rows="3" required></textarea></label><label>译文（可选）<textarea name="translation" rows="2"></textarea></label><p role="status"></p><div class="confirmation-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit">插入</button></div></form>';
-  const field = (name:string)=>dialog.querySelector<HTMLInputElement|HTMLTextAreaElement>(`[name="${name}"]`)!;
-  field("start").value=formatPreciseTime(start); field("end").value=formatPreciseTime(Math.max(start,end));
-  if (end <= start) dialog.querySelector('[role="status"]')!.textContent="当前位置后方没有空白，请手动选择其他空白区间，或先修剪已有字幕边界。";
-  dialog.querySelector("[data-close]")!.addEventListener("click",()=>dialog.close());
-  dialog.addEventListener("close",()=>dialog.remove());
-  dialog.querySelector("form")!.onsubmit=async event=>{
-    event.preventDefault();
-    const startMs=parseTimecode(field("start").value), endMs=parseTimecode(field("end").value), source=field("source").value.trim();
-    if (activeDetail?.job.job_id !== jobId) { dialog.close(); return; }
-    if (startMs===null || endMs===null || startMs<0 || endMs<=startMs || endMs>duration || !source || activeDetail.segments.some(s=>s.start_ms<endMs && s.end_ms>startMs)) {
-      dialog.querySelector('[role="status"]')!.textContent="请输入有效原文和媒体范围内的空白区间，不能与已有字幕重叠。"; return;
-    }
-    const insertion:SubtitleSegment={id:crypto.randomUUID(),job_id:jobId,segment_index:0,start_ms:startMs,end_ms:endMs,source_text:source,translated_text:field("translation").value.trim()||null,source_edited:true,translation_edited:!!field("translation").value.trim(),translation_stale:false,timing_edited:true};
-    dialog.close(); await changeKaraokeBlock(null,insertion);
-  };
-  document.body.append(dialog); dialog.showModal();
+  insertBlockView.open({ startMs: start, endMs: end, durationMs: duration });
 }
 async function deleteCurrentSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy) return;

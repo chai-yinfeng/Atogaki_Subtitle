@@ -127,6 +127,8 @@ provider 卡片静态结构进入 `translation-provider-template.ts`，单个共
 
 四区默认布局为左侧视频、右侧波形与上下双语编辑、下方整宽虚拟字幕列表。`editor-session` 区分跟随／锁定、编辑段、播放段与列表自动滚动；`editor-layout` 持有 v3 本机布局偏好，分别调整左右、工作区／列表、右侧波形／编辑比例，折叠只隐藏媒体预览；`editor-menus` 管理紧凑操作菜单的关闭和焦点生命周期；`editor-cue-list` 只呈现视口行。`media-player` 是编辑／收听共用的单一媒体所有者，管理回退、事件、RAF 与卸载，Tauri 资源 URL 解析通过回调注入；`editor-follow` 协调编辑锁定、恢复请求代次与时间输入保护；`editor-timeline-view` 持有静态波形缓存、播放头与播放段独立绘制及 ResizeObserver，绘制与拖动命中共用几何规则；`editor-waveform` 管理请求代次、窗口快照与 16 ms 合并定时器，新视窗意图立即失效旧返回，Tauri 请求经 `editor-backend`；`editor-timeline-gestures` 持有可取消的指针／平移／缩放预览，`timeline-timing` 限制时间边界，提交仍由会话 flush 和文本重基；`current-cue-editor` 使用原 SubtitleDrafts 管理输入交互，`editor-backend` 集中适配文字／时间持久化，`task-tools` 持有工具 DOM 的挂载与焦点生命周期。工具模板与视图逻辑独立于主入口，关闭工具不重建媒体或草稿。
 
+`insert-subtitle-block` 维护一个可关闭／释放的插入表单，复用具名工具区域和现有结构写入；任务／导航身份、IME、忙时关闭和失败保留输入在视图访问内管理，写入结果通过明确的成功／错误合同返回。它不持有第二套字幕草稿，主入口继续决定插入的 cue ID、范围和后端事务。
+
 主入口仍协调播放器、时间轴和部分处理用例，后续每次抽取一条边界，不能将当前结构写成已经完成全模块拆分。任务卡片通过 SQLite 摘要读取，恢复与采用仍完整验证来源证据；见 [0056](decisions/0056-editor-virtual-list-and-task-summary.md) 和 [0057](decisions/0057-editor-view-lifecycles.md)。
 
 前端类型检查启用 `noUnusedLocals`／`noUnusedParameters`，删除项先通过调用搜索确认。旧粗修保存／撤销入口已移除；现有两类历史继续由唯一字幕编辑工作面使用，不统一命令历史。
