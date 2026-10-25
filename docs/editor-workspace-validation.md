@@ -560,3 +560,11 @@ B 实际插入 2.800–3.000 秒双语字幕，20→21 段，SQLite 核对新 ID
 QA 正常退出，启动会话 exit 0，integrity_check=ok、foreign_key_check 为空。最终相对新会话基线仅 local_jobs 的 updated_at_unix／workspace_revision 与 local_subtitle_provenance 的 updated_at_unix 改变，符合结构提交及撤销的递增语义；不宣称所有 20 表未变。相对最初基线，A 的任务、字幕、provenance、ASR runs 和质量信号记录均一致；A WAV、原视频、保留的 B 8 kHz WAV 与新 B 16 kHz WAV 摘要均通过。AX、各阶段全表快照、音频格式／摘要、包清单与最终核验位于忽略目录 `local-artifacts/editor-structure-roundtrip-ec31842/`。
 
 本次新增原生事务证据，未新增业务代码；文档提交执行两套 fmt 与 diff 检查。接缝专项另复跑 8 项通过，不扩大为本轮前端或 Rust 全量回归。原生拖动、真实磁盘失败／延迟、IME、重启草稿冲突、长期多操作内存、原生滚动 P95、首次空白和 Windows 门禁继续保留；格式失败不能代替磁盘失败验证。正式 App 仍为 1020e05。
+
+## 2026-10-25：Cut／Join 用例协调独立
+
+`editor-structure-actions.ts` 从 main 接管 Cut／Join 的草稿准备、编辑选择检查、命令提交、成功应用与失败提示；原 split_subtitle／merge_subtitles 命令名、request 字段和文本拼接规则进入既有 editor-backend，Rust／SQLite 合同不变。准备阶段预留单次操作，阻止等待草稿期间重复提交；草稿／时间保护和 workspace busy 继续复用。请求同时绑定 job ID 与 navigation，flush 后还核对 selected cue；同任务重新访问或跨任务的迟到成功／失败不会改写新视图或创建该访问的历史。pagehide dispose 释放所持 busy 并阻止迟到回调，不取消、重放或模拟回滚已提交的后端事务。结构历史仍只有 main 中原先的一份，插入／删除和撤销用例继续留待后续抽取。
+
+新增七项会话测试覆盖真实 adapter 参数、原双语文本和 10 ms 吸附、历史 before 快照、语言拼接与缺失译文、flush 中选择／任务／navigation 变化、准备重复调用、脏文字／空白拒绝、旧成功／失败、dispose 及显式失败重试。全部前端 255 项通过，类型／生产构建、两套 fmt 和 diff 检查通过。八组 WebKit 为结构时间、插入、时间保存、时间导航、跟随、手势、编辑闭环和紧凑布局；结构专项另外补 Cut→Join→撤销 Join→撤销 Cut，恢复 30 段并核对四条 IPC 顺序。
+
+首次扩展专项在等待 Join 撤销标签时超时：fixture 的 split 复制了 segment_index，使左右都为第 1 段；真实后端会重排。fixture 现按结构提交结果重排序号并实现相接 merge，再跑专项通过；没有修改产品标签来迎合错误 fixture。首次 Vite 受沙箱 EPERM 阻止监听 localhost，按权限流程启动仅绑定 127.0.0.1 的服务器后完成测试。未重跑 Rust 全量、未重建原生包或替换正式 App；上一节 ec31842 原生证据不作为本轮抽取已经原生验收的证明。性能与 Windows 门禁保持。

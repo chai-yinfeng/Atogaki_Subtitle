@@ -1,3 +1,4 @@
+import { createEditorStructureActions } from "./editor-structure-actions";
 import { mountInsertSubtitleBlock } from "./insert-subtitle-block";
 import { createMediaRelinkBackend } from "./media-relink-backend";
 import { createMediaRelinkSession, type MediaRelinkContext } from "./media-relink-session";
@@ -1176,6 +1177,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
   mediaRelink?.dispose();
@@ -3327,90 +3329,19 @@ async function deleteCurrentSubtitleBlock(): Promise<void> {
   if (activeDetail?.job.job_id===jobId) await changeKaraokeBlock(id,null);
 }
 
-async function cutKaraokeSegmentAtPlayhead(): Promise<void> {
-  if (!activeDetail || workspaceActionBusy) return;
-  const selectedId = editorSession.selectedCueId;
-  const boundary = Math.round((mediaPlayer.media?.currentTime ?? 0) * 1_000 / 10) * 10;
-  lockEditorCue();
-  if (!await flushEditorStructureDrafts() || editorSession.selectedCueId !== selectedId) return;
-  if (currentCueEditor.dirty) {
-    setSubtitleEditAction("Cut 前请先保存或放弃当前文字修改。", true);
-    return;
-  }
-  const segment = karaokeDraftSegment();
-  if (!segment || boundary <= segment.start_ms || boundary >= segment.end_ms) {
-    setSubtitleEditAction("播放头必须位于当前编辑段内部才能切开。", true);
-    return;
-  }
-  const jobId = activeDetail.job.job_id;
-  const before = cloneSubtitleSegments(activeDetail.segments);
-  setEditorMutationBusy(true);
-  setSubtitleEditAction(`正在播放头 ${formatPreciseTime(boundary)} 切开第 ${segment.segment_index + 1} 段…`);
-  try {
-    const after = await invoke<SubtitleSegment[]>("split_subtitle", {
-      request: {
-        jobId,
-        segmentId: segment.id,
-        boundaryMs: boundary,
-        leftSourceText: segment.source_text,
-        rightSourceText: segment.source_text,
-        leftTranslatedText: segment.translated_text,
-        rightTranslatedText: segment.translated_text,
-      },
-    });
-    if (activeDetail?.job.job_id !== jobId) return;
-    rememberStructureEdit(before, after, `第 ${segment.segment_index + 1} 段 Cut`);
-    applySubtitleStructure(after, segment.id);
-    setSubtitleEditAction("已在播放头切开；为保证连续播放观感，文字暂时复制到两块，请在当前编辑框继续整理。 ");
-  } catch (error) {
-    setSubtitleEditAction(`切开失败：${String(error)}`, true);
-  } finally {
-    setEditorMutationBusy(false);
-  }
-}
-
-async function joinKaraokeSegmentWithNext(): Promise<void> {
-  if (!activeDetail || !editorSession.selectedCueId || workspaceActionBusy) return;
-  const selectedId = editorSession.selectedCueId;
-  if (!await flushEditorStructureDrafts() || selectedId !== editorSession.selectedCueId) return;
-  if (currentCueEditor.dirty) {
-    setSubtitleEditAction("Join 前请先保存或放弃当前文字修改。", true);
-    return;
-  }
-  const index = activeDetail.segments.findIndex((item) => item.id === editorSession.selectedCueId);
-  const left = activeDetail.segments[index];
-  const right = activeDetail.segments[index + 1];
-  if (!left || !right) return;
-  if (left.end_ms !== right.start_ms) {
-    setSubtitleEditAction("两块之间存在空白；请保留为两个字幕块，或先独立修剪到同一边界。", true);
-    return;
-  }
-  const jobId = activeDetail.job.job_id;
-  const before = cloneSubtitleSegments(activeDetail.segments);
-  setEditorMutationBusy(true);
-  setSubtitleEditAction(`正在连接第 ${left.segment_index + 1}、${right.segment_index + 1} 段…`);
-  try {
-    const after = await invoke<SubtitleSegment[]>("merge_subtitles", {
-      request: {
-        jobId,
-        leftSegmentId: left.id,
-        rightSegmentId: right.id,
-        sourceText: joinedSubtitleText(left.source_text, right.source_text, activeSourceLanguage()),
-        translatedText: left.translated_text && right.translated_text
-          ? joinedSubtitleText(left.translated_text, right.translated_text, activeTargetLanguage())
-          : null,
-      },
-    });
-    if (activeDetail?.job.job_id !== jobId) return;
-    rememberStructureEdit(before, after, `第 ${left.segment_index + 1}、${right.segment_index + 1} 段 Join`);
-    applySubtitleStructure(after, left.id);
-    setSubtitleEditAction("已连接相接的字幕块；文字已顺序拼接。 ");
-  } catch (error) {
-    setSubtitleEditAction(`连接失败：${String(error)}`, true);
-  } finally {
-    setEditorMutationBusy(false);
-  }
-}
+const editorStructureActions = createEditorStructureActions({
+  context: () => activeDetail ? {
+    jobId: activeDetail.job.job_id, navigation: navigationRequestId, selectedId: editorSession.selectedCueId,
+    segments: activeDetail.segments, sourceLanguage: activeSourceLanguage(), targetLanguage: activeTargetLanguage(),
+  } : null,
+  available: () => !workspaceActionBusy, dirty: () => currentCueEditor.dirty,
+  flush: flushEditorStructureDrafts, lock: lockEditorCue,
+  positionMs: () => (mediaPlayer.media?.currentTime ?? 0) * 1_000, time: formatPreciseTime,
+  busy: setEditorMutationBusy, status: setSubtitleEditAction,
+  remember: rememberStructureEdit, apply: applySubtitleStructure, backend: editorBackend,
+});
+async function cutKaraokeSegmentAtPlayhead(): Promise<void> { await editorStructureActions.cut(); }
+async function joinKaraokeSegmentWithNext(): Promise<void> { await editorStructureActions.join(); }
 
 
 function showWorkspaceSection(section: WorkspaceSection): void {
@@ -3592,16 +3523,6 @@ function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?:
   updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
   lastSubtitleOverlayKey = "";
   updateStructureUndoButton();
-}
-
-function joinedSubtitleText(left: string, right: string, language: LanguageCode): string {
-  const leftText = left.trim();
-  const rightText = right.trim();
-  if (!leftText) return rightText;
-  if (!rightText) return leftText;
-  const noSeparator = /\s$/.test(left) || /^\s/.test(right) || /^[，。！？、,.!?;；:：…]/.test(rightText);
-  const separator = noSeparator || (language !== "en" && language !== "ko") ? "" : " ";
-  return `${leftText}${separator}${rightText}`;
 }
 
 async function undoSubtitleStructure(): Promise<void> {

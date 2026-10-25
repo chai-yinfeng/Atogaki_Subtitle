@@ -73,6 +73,8 @@ provider 卡片静态结构进入 `translation-provider-template.ts`，单个共
 
 任务后续翻译 provider 由 `task-translation-provider.ts` 管理任务／navigation 绑定的读取、在途保存与选择草稿，视图和原两条 IPC 适配独立；静态控件复用任务工具模板。旧访问返回不能更新当前状态，保存中新输入按版本保留；不增加凭据存储，也不自动翻译。模型卡片及设置模型路径选择器已分离；其余设置字段和 Rust 剩余边界继续按需收敛。
 
+Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有 `editor-backend.ts`。准备阶段先预留单次操作，继续调用唯一草稿 flush 和时间保护；flush 后复核任务、navigation 与编辑选择。提交期间复用 workspace busy，成功记录同一份结构历史，只有原访问能应用结果或显示错误；dispose 释放自己的 busy 并忽略迟到呈现，不取消或重试已提交的 Rust 事务。插入／删除、结构撤销及导航协调仍留在 main，继续逐用例收敛。
+
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
 
 任务样式的异步读取、保存与预览通过 `subtitle-style-session.ts` 协调，四条调用集中到 `subtitle-style-backend.ts`。每次打开绑定任务／导航代次，修改递增草稿版本，串行渲染只接受最新版本；关闭释放 debounce 和迟到呈现。字体、颜色与预览视图由 `subtitle-style-view.ts` 持有，模板独立；关闭即卸载节点，dispose 释放全局监听器，字体候选关闭即释放选项。具名 region 与显式焦点边界替代样式 showModal，FFmpeg/libass 与实际样式服务保持原实现。
