@@ -64,3 +64,12 @@ python3 scripts/inventory-local-artifacts.py \
 盘点脚本始终没有删除入口；根配置中的 retention 仅为记录。后续清理必须基于新清单的明确候选和现有授权，保留恢复点、人工评审、权威发行来源及已采用识别证据。编辑器性能、模块与 Windows 门禁继续见[路线图](roadmap.md)。
 
 2026-10-23 本机候选更新后，App 回退轮换为 `.Atogaki.previous.20261023-candidate`（86c46c8）与稳定版 `.Atogaki.previous-20261020T210406Z`（0.1.1）；在新包／数据验证后按完整摘要清除被取代的 `.Atogaki.previous.20261021-modules` 及本次暂存副本，约 193 MiB 逻辑内容。新增一份删除旧任务后的一致性 SQLite 快照，未复制模型／媒体。新清单与核验材料在 `local-artifacts/install-backups/20261023-candidate/`，详见[安装记录](local-editor-installation.md)；本页较早盘点中的 App 路径为历史状态，不能据此再次删除。
+
+
+## 2026-10-24：自建原生滚动诊断清理
+
+本轮仅处理刚生成于 `local-artifacts/editor-native-scroll-7eadbef/` 的 `scroll-input-webcontent.trace` 和 `scroll-webcontent.trace`。用途为 7eadbef 隔离 release QA 的 Animation Hitches 实验；两个录制器、全部导出进程已终止，所需 XML 表／TOC／动作时间与摘要已保存。原始容器未建立 QA 窗口的可靠帧归属，不是产品发行物、任务证据或恢复点。
+
+第二份录制收尾临时占用约 21 GiB，保存后逻辑 1,864,598,230 字节、分配 1,885,097,984 字节；初始无有效滚动 trace 经索引／导出后逻辑 1,158,892,282 字节、分配 1,168,240,640 字节。逐文件 SHA-256、路径、用途和来源版本分别保存在 `raw-trace-retention.json`／`initial-trace-retention.json`，仅在核验录制器停止及明确输出路径后删除这两份自建容器。合计逻辑内容约 2.82 GiB、分配口径约 2.84 GiB，不能视为文件系统空闲空间的精确等额增加。
+
+当前保留材料约 4.1 MiB，包含原生 AX／截图、导出 XML、动作及进程身份、包摘要、数据核验与可复算报告。最初曾计划保留较小的首次 trace，索引使其增大后按第二份独立清单继续清理；清理时序分别留痕。既有 WebKit 基线 trace、正式／隔离数据库、原视频、模型、已采用 ASR 证据及安装回退点均未进入本次清理。

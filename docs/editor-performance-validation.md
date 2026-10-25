@@ -164,3 +164,20 @@ QA 正常退出后，隔离数据库全部 20 张表内容摘要与测试前一�
 同次修复 browse 的新意图使挂起的 resume 失效：等待草稿 flush 时用户再次手动滚动，旧请求不能在返回后开启自动滚动，即使列表原先已经处于暂停状态。该竞态有独立复现，但与早先真实长任务的偶发锁定尚未建立因果关系，原锁定问题仍待追溯。dispose 后同步／浏览／恢复入口不再回调已释放上下文。
 
 248 项前端测试、类型／生产构建、根目录和 Tauri fmt、diff 检查及十七组 WebKit 回归通过。新增 `verify-editor-browse.cjs` 验证暂停后重复 browse 不写 DOM／不调用筛选查询、sync 幂等、新滚动取消挂起恢复、显式重试和 dispose；现有编辑跟随、重定位、任务选择与设置等十六组同步通过。本轮没有原生重装、真实任务写入或 RSS／heap 新测量；正式 App 仍为 05b2e07。
+
+
+## 2026-10-24：7eadbef release 原生滚动与 Instruments 有效性
+
+从当前 7eadbef 源码构建完整四 sidecar release QA 包，identifier 为 com.chai-yinfeng.atogaki.editor-qa，核验签名及 27 文件摘要。覆盖同一路径的临时 QA App，复用 long-task-data 隔离副本，没有新增 App 恢复点、数据库或媒体副本，也未覆盖正式 App。打开 3,089 段《教父》，视频／波形展开、媒体停在 0，End 锁定 #3089；截图中的波形仍显示准备状态，本轮不作为解码／波形完成或播放负载验收。
+
+整张 AX table 作为滚动目标曾返回 noWindowsAvailable，但同一窗口仍可读。改为从当前 AX 中选取可见行后滚动成功；没有重启 QA 掩盖故障。该现象与表格整体和虚拟行的定位有关，但尚未证明自动化错误的底层原因。首次 45.887 秒 Animation Hitches trace 没有覆盖任何成功滚动，明确排除出滚动样本；其后单独记录的三页滚动仅作功能准备。
+
+第二次附加本次新启动的 WebContent PID 76833，QA 主进程为 76822，GPU／Networking 为 76832／76834；启动前后进程差集、命令与启动时间有记录，未选用正式 App 的同名 XPC。记录 46.674 秒，其中 36 次 CUA scroll 调用全部落在录制窗口内，输入首尾跨度 28.945 秒，24 次向上／12 次向下，每次 pages 参数为 1。该参数不等于固定像素量或原生 wheel 事件数。每次先读取当前 AX 再选行，观测 22–23 行；列表最终浏览到约 #3031，编辑框、原译文和时间仍锁在 #3089。AX 与截图确认了手动浏览不切换编辑对象。AX 观察与滚动交错，会引入额外工作，不能作为纯触控板延迟样本。
+
+导出检查：hitches-renders 有 2,750 行，displayed-surfaces-interval 有 2,738 行，但缺少可直接归属到 QA 进程的列；目标 hitches-updates／visual-connection 为空，compositor-process 表仅 1 行，未建立可靠的进程／surface 映射。potential-hangs 与 hitches 表也为空，这些空表不证明应用无卡顿。初始 frame-lifetimes 的 duration 是 frame lifetime，不是相邻 presentation interval；不得用约 65 ms lifetime 计算滚动帧 P95。最终 presentation_interval_p95_ms 保持 null，没有得到原生 P95 或前后改善结论。
+
+录制结束后的 Instruments 收尾曾产生约 21 GiB 临时 attachment，数分钟高 CPU；正常中断后保存的第二份 trace 约 1.8 GiB。该收尾发生在输入记录之后，不是应用运行时内存／CPU 指标。初始 trace 也在索引／导出后增大到约 1.1 GiB。所有导出进程及录制器终止后，逐文件记录路径、用途、版本、大小和 SHA-256，再仅清理本轮自建的两份原始 trace，逻辑内容合计 3,023,490,512 字节；保留约 4.1 MiB 的 TOC、导出表、动作时间、包／进程身份、校验清单及摘要。没有删除以前的基线 trace、备份、ASR 证据、模型或数据库，详见[保留清单](local-artifact-retention.md)。
+
+新增只读工具 `scripts/summarize-native-scroll-evidence.py` 从已完成导出的 XML 与 actions.jsonl 对齐输入窗口、汇总表结构／行数，明确不计算未归属的 P95，拒绝覆盖已有输出。实际导出重算摘要一致，重复输出拒绝且原文件不变，Python 语法检查通过。私有证据目录为 `local-artifacts/editor-native-scroll-7eadbef/`；原始容器已按上述清单清理，保留导出不要求重新访问真实媒体。
+
+QA 正常退出后 20 表行数及排序内容摘要全部一致，integrity_check=ok、foreign_key_check 为空，原视频 size／mtime_ns／inode 不变（未计算整片内容 hash）。本轮没有识别／翻译／字幕写入或导出任务。业务源码未改，原生打包运行类型／生产构建，两套 fmt／diff 检查通过；未重复跑 248 项前端测试／十七组 WebKit 或 Rust 全量测试，其结果仍对应 7eadbef。原生滚动 P95、长时内存、播放中交互、原偶发锁定和 Windows 门禁保持；下一次应先验证宿主窗口的帧归属与采集成本，避免再对空映射重复录制。
