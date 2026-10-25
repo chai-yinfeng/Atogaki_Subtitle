@@ -1,3 +1,6 @@
+import { createTaskFilePickerBackend } from "./task-file-picker-backend";
+import { createTaskFilePickerSession } from "./task-file-picker-session";
+import { mountTaskFilePickerView } from "./task-file-picker-view";
 import { mountDictionaryDownloadView } from "./dictionary-download-view";
 import { createDictionaryDownloadBackend } from "./dictionary-download-backend";
 import { createDictionaryDownloadSession } from "./dictionary-download-session";
@@ -735,6 +738,7 @@ let modelPickerView: ReturnType<typeof mountModelPickerView> | null = null;
 let availableDictionaries: DictionaryCatalogItem[] = [];
 let dictionaryDownloads: DictionaryDownloadState[] = [];
 let dictionaryCredentials: DictionaryCredentialStatus[] = [];
+let taskFilePickerView: ReturnType<typeof mountTaskFilePickerView> | null = null;
 let dictionaryDownloadView: ReturnType<typeof mountDictionaryDownloadView> | null = null;
 let dictionaryDownloadSession: ReturnType<typeof createDictionaryDownloadSession> | null = null;
 let settingsView: ReturnType<typeof mountDesktopSettingsView> | null = null;
@@ -1135,6 +1139,8 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  taskFilePicker.dispose();
+  taskFilePickerView?.dispose();
   dictionaryDownloadSession?.dispose();
   dictionaryDownloadView?.dispose();
   dictionaryCredentialSession.dispose();
@@ -4601,47 +4607,24 @@ document.addEventListener("keydown", (event) => {
   event.preventDefault();
 });
 
-async function chooseFile(kind: "media" | "model" | "vad"): Promise<void> {
-  const buttonSelector = kind === "media" ? "#choose-media" : kind === "model" ? "#choose-model" : "#choose-vad-model";
-  const button = document.querySelector<HTMLButtonElement>(
-    buttonSelector,
-  );
-  if (button) button.disabled = true;
-  const label = kind === "media" ? "媒体" : kind === "model" ? "Whisper 模型" : "VAD 模型";
-  if (taskMessage) taskMessage.textContent = `正在打开${label}选择器…`;
-  try {
-    const command = kind === "media" ? "pick_media_file" : kind === "model" ? "pick_model_file" : "pick_vad_model_file";
-    const selected = kind === "media" ? await invoke<string[]>("pick_media_files") : null;
-    const path = selected ? selected[0] : await invoke<string | null>(command);
-    if (kind === "media") selectedMediaFiles = selected ?? [];
-    if (typeof path === "string") {
-      const input = kind === "media" ? mediaPath : kind === "model" ? modelPath : vadModelPath;
-      if (input) input.value = path;
-      if (taskMessage) taskMessage.textContent = `已选择${label}${kind === "media" && selectedMediaFiles.length > 1 ? ` ${selectedMediaFiles.length} 个文件` : ""}。`;
-    } else if (taskMessage) {
-      taskMessage.textContent = "已取消选择。";
-    }
-  } catch (error) {
-    if (taskMessage) taskMessage.textContent = `无法打开文件选择器：${String(error)}`;
-  } finally {
-    if (button) button.disabled = kind === "vad" && !vadEnabled?.checked;
-  }
-}
+const taskFilePicker = createTaskFilePickerSession({
+  backend: createTaskFilePickerBackend(invoke),
+  visit: () => navigationRequestId,
+  isOpen: () => currentArea === "workbench",
+  capture: kind => taskFilePickerView?.capture(kind) ?? null,
+  changed: () => taskFilePickerView?.render(),
+  message: text => { if (taskMessage) taskMessage.textContent = text; },
+  clearMessage: text => { if (taskMessage?.textContent === text) taskMessage.textContent = ""; },
+});
+taskFilePickerView = mountTaskFilePickerView(document.querySelector<HTMLFormElement>("#task-form")!, taskFilePicker, {
+  visit: () => navigationRequestId,
+  mediaAccepted: files => { selectedMediaFiles = files; },
+  mediaEdited: () => { selectedMediaFiles = []; },
+  modelAccepted: () => updateTaskPipelineSummary(),
+});
 
-function syncVadControls(): void {
-  const enabled = vadEnabled?.checked ?? false;
-  if (vadModelPath) {
-    vadModelPath.disabled = !enabled;
-    vadModelPath.required = enabled;
-  }
-  const chooseButton = document.querySelector<HTMLButtonElement>("#choose-vad-model");
-  if (chooseButton) chooseButton.disabled = !enabled;
-}
+function syncVadControls(): void { taskFilePickerView?.render(); }
 
-document.querySelector<HTMLButtonElement>("#choose-media")?.addEventListener("click", () => void chooseFile("media"));
-document.querySelector<HTMLButtonElement>("#choose-model")?.addEventListener("click", () => void chooseFile("model"));
-document.querySelector<HTMLButtonElement>("#choose-vad-model")?.addEventListener("click", () => void chooseFile("vad"));
-vadEnabled?.addEventListener("change", syncVadControls);
 taskGlossary?.addEventListener("change", () => void refreshTaskGlossaryConfiguration());
 sourceLanguage?.addEventListener("change", () => {
   renderGlossaryOptions();
@@ -4861,9 +4844,6 @@ function addOfflineTools(): void {
 }
 addOfflineTools();
 
-mediaPath?.addEventListener("input", () => {
-  selectedMediaFiles = [];
-});
 const presetTools = document.createElement("div");
 presetTools.className = "offline-tools";
 presetTools.innerHTML =
@@ -4895,6 +4875,7 @@ presetTools.querySelector<HTMLSelectElement>("select")!.onchange = async (event)
   if (!value) return;
   const config = taskPresets[Number(value)]?.configuration;
   if (!config) return;
+  taskFilePickerView?.invalidateModels();
   if (modelPath) modelPath.value = config.modelPath;
   if (sourceLanguage) sourceLanguage.value = config.sourceLanguage;
   renderGlossaryOptions();

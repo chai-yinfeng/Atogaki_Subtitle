@@ -414,3 +414,14 @@ catalog 从 main 的 innerHTML 整块重建迁到 dictionary-download-view，按
 完整四 sidecar、独立 identifier 的 debug QA App 编译／签名验证通过，复用原临时 App／合成数据，无新增数据库或恢复备份。原生显示 JMdict、Tomoshi 与 ECDICT 三张卡片，名称、说明、许可／署名、来源和未安装状态完整可访问；Tab 从导航依次到达三个下载按钮，下方按钮被滚入内部视口，截图有可见焦点环，未按 Enter 或激活下载、凭据或保存。QA 正常退出后 20 表行数和排序内容 SHA-256 一致，integrity_check=ok、foreign_key_check 为空。证据在忽略目录 `local-artifacts/dictionary-view-native/`，含包与源码摘要、AX／截图及核验结果。
 
 本次原生只验证静态呈现／键盘导航；动态下载进度、失败重试与焦点保护为 WebKit fixture 结果，不能外推真实网络／文件系统或 Windows。Rust 源码与事务未改，未重跑全量 Rust 测试；未覆盖正式 App，仍为 05b2e07。滚动 P95、长期内存及其他原生门禁继续保留。
+
+
+## 2026-10-24：任务文件选择与取消保留批量
+
+新建任务的 chooseFile 从 main 移入 session／backend／view；修复取消媒体多选后清空 selectedMediaFiles、旧路径回执覆盖新输入及旧 finally 恢复错误按钮状态的问题。保留原批量数组和提交逻辑，选择不创建任务。视图负责字段事件版本和 VAD 控件，预设与 reset 使相关旧快照失效，导航核对原访问。
+
+237 项前端测试通过，新增八项覆盖原三命令／无取消 fallback、批量复制与提示、防重复／跨入口互斥、取消不回填空批量／失败重试、新输入拒绝旧回执、导航及隐藏、无效入口和 dispose 后迟到成功／错误不读上下文。类型／生产构建、根目录与 Tauri cargo fmt --check、git diff --check 通过。Rust 未改，未重跑全量 Rust 测试。
+
+新增 `scripts/verify-task-file-picker.cjs` WebKit 实际表单验证：挂起选择后新输入保留、同值 input 事件保护、三个入口禁用／重复不补发、取消恢复焦点、日文与尖括号路径按输入原样保存；先选两文件再取消，原批量仍发出两个 mock submit_transcription 请求。错误重试可用，模型值相同的预设切换仍阻止旧模型回填，VAD 关闭使旧 VAD 选择失效且按钮保持禁用，离开收听再返回不呈现旧媒体回执。独立加载实际视图验证 reset 使旧快照失效、dispose 后事件与迟到焦点恢复不读已释放上下文。首次批量测试漏选必填翻译方式，补选仅转录后通过；产品必填校验保持。其余十四组词典、ASR、网络、模型、provider、设置与编辑跟随回归通过；最后迁入 VAD 控件后重跑任务选择、设置视图、模型选择与编辑跟随通过，共十五组。
+
+文件、模型、任务提交均为 fixture，没有实际读取／复制媒体、下载模型、创建任务或修改正式数据。本轮未打包原生候选、覆盖正式 App 或增加备份，正式安装仍为 05b2e07。原生多选／取消、Windows、已有任务媒体 relink 身份保护与长期性能继续保留，不能从本表单回归推导通过。
