@@ -28,5 +28,8 @@ export function createEditorBackend(invoke: Invoke) {
     restoreStructure(jobId: string, beforeSegments: SubtitleSegment[], afterSegments: SubtitleSegment[]) {
       return invoke<SubtitleSegment[]>("restore_subtitle_structure", { request: { jobId, beforeSegments, afterSegments } });
     },
+    editBlock(jobId: string, beforeSegments: SubtitleSegment[], removeId: string | null, insertion: SubtitleSegment | null) {
+      return invoke<SubtitleSegment[]>("edit_subtitle_block", { request: { jobId, beforeSegments, removeId, insertion } });
+    },
   };
 }

@@ -1,3 +1,4 @@
+import { createEditorBlockActions } from "./editor-block-actions";
 import { createEditorStructureHistory } from "./editor-structure-history";
 import { createEditorStructureActions } from "./editor-structure-actions";
 import { mountInsertSubtitleBlock } from "./insert-subtitle-block";
@@ -1060,7 +1061,7 @@ const insertBlockView = mountInsertSubtitleBlock(shell!, {
       start_ms: value.startMs, end_ms: value.endMs, source_text: value.source, translated_text: value.translation || null,
       source_edited: true, translation_edited: !!value.translation, translation_stale: false, timing_edited: true,
     };
-    return changeKaraokeBlock(null, insertion);
+    return editorBlockActions.insert(context, insertion);
   },
 });
 const taskTools = mountTaskTools(workspaceView, editorRoot, closeEditorTools);
@@ -1171,6 +1172,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  editorBlockActions.dispose();
   editorStructureHistory.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
@@ -3281,23 +3283,18 @@ function seekKaraokeBy(milliseconds: number): void {
   updateKaraokePosition(mediaPlayer.positionMs);
 }
 
-async function changeKaraokeBlock(removeId: string | null, insertion: SubtitleSegment | null): Promise<string | null> {
-  if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return "操作未执行，请先完成当前编辑后重试。";
-  const jobId = activeDetail.job.job_id;
-  const before = cloneSubtitleSegments(activeDetail.segments);
-  setEditorMutationBusy(true);
-  try {
-    const after = await invoke<SubtitleSegment[]>("edit_subtitle_block", {request:{jobId, beforeSegments:before, removeId, insertion}});
-    rememberStructureEdit(before, after, removeId ? "删除字幕块" : "插入字幕块", jobId);
-    if (activeDetail?.job.job_id === jobId) {
-      applySubtitleStructure(after, insertion?.id ?? after[0]?.id);
-      if (insertion) { seekTo(insertion.start_ms, false); updateActiveSubtitle(insertion.start_ms); }
-      setSubtitleEditAction("已保存，可用“撤销上次打轴”撤回；仅实际依赖被删除块的机器译文需要核对。");
-    }
-    return null;
-  } catch(error) { const message = `字幕块操作失败：${String(error)}`; setSubtitleEditAction(message, true); return message; }
-  finally { setEditorMutationBusy(false); }
-}
+const editorBlockActions = createEditorBlockActions({
+  context: () => currentArea === "karaoke" && activeDetail ? {
+    jobId: activeDetail.job.job_id, navigation: navigationRequestId,
+    selectedId: editorSession.selectedCueId, segments: activeDetail.segments,
+  } : null,
+  available: () => !workspaceActionBusy, dirty: () => currentCueEditor.dirty,
+  flush: flushEditorStructureDrafts, backend: editorBackend,
+  pause: () => mediaPlayer.media?.pause(),
+  seek: milliseconds => { seekTo(milliseconds, false); updateActiveSubtitle(milliseconds); },
+  confirm: confirmAction, busy: setEditorMutationBusy, status: setSubtitleEditAction,
+  remember: rememberStructureEdit, apply: applySubtitleStructure,
+});
 async function openInsertSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
   if (currentCueEditor.dirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
@@ -3311,18 +3308,7 @@ async function openInsertSubtitleBlock(): Promise<void> {
   const end = Math.min(start+2000, next?.start_ms ?? duration, duration);
   insertBlockView.open({ startMs: start, endMs: end, durationMs: duration });
 }
-async function deleteCurrentSubtitleBlock(): Promise<void> {
-  if (!activeDetail || workspaceActionBusy) return;
-  const selectedId = editorSession.selectedCueId;
-  if (!await flushEditorStructureDrafts() || selectedId !== editorSession.selectedCueId) return;
-  if (currentCueEditor.dirty) { setSubtitleEditAction("删除前请先保存或放弃文字修改。", true); return; }
-  const jobId=activeDetail.job.job_id;
-  const id=editorSession.selectedCueId;
-  if (!id || !activeDetail.segments.some(s=>s.id===id)) { setSubtitleEditAction("请先选择要删除的字幕块。",true); return; }
-  mediaPlayer.media?.pause();
-  if (!await confirmAction({title:"删除当前字幕块？",message:"删除原文、译文及此块时间范围；不会移动其他字幕。学习收藏保留来源快照。当前会话可用“撤销上次打轴”恢复。",confirmLabel:"删除字幕块",danger:true})) return;
-  if (activeDetail?.job.job_id===jobId) await changeKaraokeBlock(id,null);
-}
+async function deleteCurrentSubtitleBlock(): Promise<void> { await editorBlockActions.deleteSelected(); }
 
 const editorStructureActions = createEditorStructureActions({
   context: () => activeDetail ? {

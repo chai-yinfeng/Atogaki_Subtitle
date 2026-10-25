@@ -8,11 +8,16 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
   await page.addInitScript(()=>{
    const invoke=window.__TAURI_INTERNALS__.invoke,state=window.__insert={calls:[],hold:true,release:null};
    window.__TAURI_INTERNALS__.invoke=async(cmd,args={})=>{
+    if(cmd==='restore_subtitle_structure'){
+     const cues=window.__test.cues;cues.splice(0,cues.length,...args.request.beforeSegments.map(cue=>({...cue})));
+     return cues.map(cue=>({...cue}));
+    }
     if(cmd!=='edit_subtitle_block')return invoke(cmd,args);
     state.calls.push(args.request);
     if(state.hold)await new Promise((resolve,reject)=>state.release=fail=>fail?reject(Error('fixture disk full')):resolve());
     const cues=window.__test.cues,r=args.request;
     if(r.insertion)cues.push(r.insertion);
+    if(r.removeId){const index=cues.findIndex(cue=>cue.id===r.removeId);if(index<0)throw Error('fixture missing delete target');cues.splice(index,1);}
     cues.sort((a,b)=>a.start_ms-b.start_ms);cues.forEach((cue,i)=>cue.segment_index=i);
     return cues.map(cue=>({...cue}));
    };
@@ -30,6 +35,13 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
   await page.evaluate(()=>window.__insert.release(true));await page.waitForFunction(()=>!document.querySelector('#insert-subtitle-block-dialog fieldset').disabled);assert.match(await status.innerText(),/disk full/);assert.equal(await source.inputValue(),'插入回归');assert.equal(await translation.inputValue(),'translation');
   await page.evaluate(()=>window.__insert.hold=false);await submit.click();await dialog.waitFor({state:'detached'});
   assert.equal(await page.evaluate(()=>window.__test.cues.length),31);assert.equal(await page.locator('#karaoke-current-source').inputValue(),'插入回归');assert.equal(await page.locator('.editor-menu > summary').evaluate(e=>e===document.activeElement),true,await page.evaluate(()=>({tag:document.activeElement?.tagName,id:document.activeElement?.id})));
+  const insertedId=await page.evaluate(()=>window.__insert.calls.at(-1).insertion.id);
+  const remove=async()=>{await page.locator('.editor-menu > summary').click();await page.locator('#karaoke-delete-block').click();await page.locator('#confirmation-dialog[open]').waitFor();};
+  await remove();await page.locator('#cancel-confirmation').click();assert.equal(await page.evaluate(()=>window.__test.cues.length),31);
+  await remove();await page.locator('#accept-confirmation').click();await page.waitForFunction(()=>window.__test.cues.length===30);
+  assert.equal(await page.evaluate(id=>window.__test.cues.some(cue=>cue.id===id),insertedId),false);
+  await page.getByRole('button',{name:'撤销打轴',exact:true}).click();await page.waitForFunction(()=>window.__test.cues.length===31);
+  assert.equal(await page.evaluate(id=>window.__test.cues.find(cue=>cue.id===id)?.source_text,insertedId),'插入回归');
   await open();await dialog.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await page.locator('.editor-menu > summary').evaluate(e=>e===document.activeElement),true);
   await open();await page.locator('[data-editor-action="back"]').evaluate(b=>b.click());await page.locator('.job-open').first().waitFor();assert.equal(await dialog.count(),0);
   const isolated=await browser.newPage();isolated.on('pageerror',e=>errors.push(String(e)));await isolated.setContent('<main><button id="trigger">open</button></main>');
@@ -44,6 +56,6 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
   await begin();await isolated.evaluate(()=>{const s=window.__isolated;s.old=s.release;s.view.cancel();s.open();});await isolated.locator('[name="source"]').fill('new visit');await isolated.evaluate(()=>window.__isolated.old(null));assert.equal(await isolated.locator('[name="source"]').inputValue(),'new visit');
   await isolated.evaluate(()=>window.__isolated.view.cancel());await begin();await isolated.evaluate(()=>{window.__isolated.context={jobId:'b',navigation:2};window.__isolated.release(null);});await isolated.locator('dialog').waitFor({state:'detached'});
   await begin();await isolated.evaluate(()=>{const s=window.__isolated;s.view.dispose();s.dead=true;s.release(null);});assert.equal(await isolated.locator('dialog').count(),0);assert.equal(await isolated.locator('#trigger').evaluate(e=>!!e.closest('[inert]')),false);
-  assert.deepEqual(errors,[]);console.log('PASS: insert region/geometry/focus, validation/IME, duplicate and busy close protection, failure input retention/retry, navigation, late results and disposal');
+  assert.deepEqual(errors,[]);console.log('PASS: insert region/focus, validation/IME, busy/duplicate protection, failure retention/retry, delete cancel/confirm/undo, navigation, late results and disposal');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
