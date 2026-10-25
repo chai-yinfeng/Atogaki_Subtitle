@@ -604,3 +604,13 @@ QA 正常退出，启动会话 exit 0；integrity_check=ok、foreign_key_check �
 公共确认也用于词表 modal 内删除，因此 mountToolDialog.open 增加可选 host：优先挂到焦点所在原生 modal，保持在系统允许交互的后代范围；无 modal 时使用原锚点。父 modal 的兄弟控件仅在确认期间 inert，关闭后恢复原状态／焦点，父 modal 保持打开。其他工具不传 host，沿用原挂载位置；未增加第二份确认状态或修改业务／数据库合同。
 
 全部前端 270 项、类型／生产构建、两套 fmt／diff 检查通过。十一组 WebKit 为独立公共确认、插入、结构时间、时间保存、时间导航、跟随、手势、编辑闭环、紧凑布局、复核工具及翻译。新增专项验证纯文本、具名区域、焦点循环／返回、请求替换、危险样式复位、嵌套原生 modal 的取消／确认、外部关闭与 dispose；插入专项补编辑确认区域、Escape／Tab 与删除撤销。复核专项按关闭时节点已卸载的生命周期核对无打开确认，不再读取不存在的 closed dialog。此处为源码及浏览器结论，原生 AX 修复待新 QA 包复查；正式仍为 1020e05，性能与平台门禁保持。
+
+## 2026-10-25 2950a6d 公共确认原生复查
+
+从干净 2950a6d 完整构建四 sidecar release QA，类型／生产构建通过，核验隔离 identifier、deep／strict 签名与 27 文件摘要后原位更新现有 QA。逐文件核对后移除被取代的 e0a6bcb QA 包约 96.6 MiB 逻辑内容；没有新增完整 App／SQLite 备份或覆盖正式 App。仍显式指定原隔离数据目录，核对 A／B 身份和 A20／B21 共 41 段。
+
+原生删除确认 AX 现在包含具名容器、标题、说明、取消及删除按钮，替代上一轮空 HTML content；截图为紧凑中性色，内容位于窗口内。初始取消焦点、Shift+Tab 到删除、Tab 返回取消与 Escape 关闭通过；关闭后按 Enter 实际展开“更多编辑”，验证可见入口焦点返回。取消阶段全部 20 表记录与基线一致。再次打开后通过 AX 点击取消，再重新打开并直接 AX 点击删除，B21→20；点击撤销 B20→21，最终 41 条完整 cue 与启动前逐字段一致。QA 正常退出、启动会话 exit 0，integrity_check=ok、foreign_key_check 为空。A 的任务、字幕、provenance、ASR runs 和质量信号以及四项媒体摘要均未变。
+
+额外的全表核对明确了既有撤销范围：B 的任务 updated_at_unix／workspace_revision 及 provenance updated_at_unix 推进；被删 legacy cue 恢复后的 source_kind 从 legacy 变为 structural，alignment_status 从 unknown 变为 stale。restore_segment_structure 仅接收 before／after cue，重插被删 ID 时 persist_structure_segments 没有旧 provenance 而按新结构块标记；本轮没有改写该 Rust 行为。不能宣称所有来源／翻译依赖／学习引用恢复，仅证明 cue 字段恢复；此项后续独立评估，再讨论是否扩展历史快照或事务合同。正式数据及 A 的采用来源未用于此测试。
+
+包／轮换清单、AX、两张焦点截图、各阶段全表、核验与 checksum manifest 位于 `local-artifacts/action-confirmation-native-2950a6d/`，保留规则已补充。原生只验收编辑确认；嵌套原生 modal 的父子行为仍是本轮 WebKit 专项结果。270 项前端与十一组 WebKit 来自本提交此前回归，文档提交运行两套 fmt／diff，没有重跑 Rust 全量。正式仍为 1020e05；来源撤销范围、长期内存／滚动 P95、原生拖动、真实磁盘失败、文件面板、首次空白及 Windows 门禁保留。

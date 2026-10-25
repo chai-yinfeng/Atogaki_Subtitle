@@ -22,7 +22,7 @@
 | 当前／继承工作树 `local-artifacts/install-backups/` | 独立恢复点与迁移／修复前数据；既有快照 hash／integrity 记录继续有效 | 全部保留，本轮没有再次合并或删除数据库 |
 | `issue21*`、`recovery/`、`long-media-followup/`、`staged-pipeline/` | 故障与恢复证据、实际识别产物、已验证 checkpoint | 保留，不能只因目录陈旧视为缓存 |
 | 主检出 `local-artifacts/evaluation/`、`hy-mt2/`，继承树 `mlx/` | 人工评审、冻结结果、研究模型；版本来自各自 manifest，未全量重算内容 hash | 保留；包含的模型、评审及来源不进入自动清理 |
-| 当前树 `editor-*`、docs-index 等 local-artifacts | 对应提交的截图、AX、trace、RSS、数据库核验 | 保留，不把验收证据当作构建缓存 |
+| 当前树 `editor-*`、`action-confirmation-native-*`、docs-index 等 local-artifacts | 对应提交的截图、AX、trace、RSS、数据库核验 | 保留，不把验收证据当作构建缓存 |
 | 已知 `/tmp/atogaki-*` 目录 | QA 数据、fixture、Instruments、格式修复备份、浏览器与 MLX 环境；部分用途未完全分类 | 全部保留，临时路径不等于可删除 |
 | `/Applications/Atogaki.app` | 0.1.2；版本／identifier／主程序 hash 单独记录 | 保留，未覆盖或启动 |
 | `.Atogaki.previous.20261021-modules` 与 `.Atogaki.previous-20261020T210406Z` | 0.1.2 上一版与 0.1.1 稳定回退；主程序 hash 单独记录 | 两份回退均保留 |
