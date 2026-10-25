@@ -37,7 +37,11 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
   assert.equal(await page.evaluate(()=>window.__test.cues.length),31);assert.equal(await page.locator('#karaoke-current-source').inputValue(),'插入回归');assert.equal(await page.locator('.editor-menu > summary').evaluate(e=>e===document.activeElement),true,await page.evaluate(()=>({tag:document.activeElement?.tagName,id:document.activeElement?.id})));
   const insertedId=await page.evaluate(()=>window.__insert.calls.at(-1).insertion.id);
   const remove=async()=>{await page.locator('.editor-menu > summary').click();await page.locator('#karaoke-delete-block').click();await page.locator('#confirmation-dialog[open]').waitFor();};
-  await remove();await page.locator('#cancel-confirmation').click();assert.equal(await page.evaluate(()=>window.__test.cues.length),31);
+  await remove();const confirmation=page.locator('#confirmation-dialog');assert.equal(await confirmation.getAttribute('role'),'region');assert.equal(await confirmation.getAttribute('aria-label'),'删除当前字幕块？');assert.equal(await confirmation.evaluate(d=>d.matches(':modal')),false);
+  assert.equal(await page.locator('#cancel-confirmation').evaluate(e=>e===document.activeElement),true);
+  await page.locator('#cancel-confirmation').press('Shift+Tab');assert.equal(await page.locator('#accept-confirmation').evaluate(e=>e===document.activeElement),true);
+  await page.locator('#accept-confirmation').press('Tab');assert.equal(await page.locator('#cancel-confirmation').evaluate(e=>e===document.activeElement),true);
+  await confirmation.press('Escape');assert.equal(await page.evaluate(()=>window.__test.cues.length),31);assert.equal(await confirmation.count(),0);assert.equal(await page.locator('.editor-menu > summary').evaluate(e=>e===document.activeElement),true);
   await remove();await page.locator('#accept-confirmation').click();await page.waitForFunction(()=>window.__test.cues.length===30);
   assert.equal(await page.evaluate(id=>window.__test.cues.some(cue=>cue.id===id),insertedId),false);
   await page.getByRole('button',{name:'撤销打轴',exact:true}).click();await page.waitForFunction(()=>window.__test.cues.length===31);

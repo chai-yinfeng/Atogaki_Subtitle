@@ -596,3 +596,11 @@ QA 正常退出，启动会话 exit 0，integrity_check=ok、foreign_key_check �
 QA 正常退出，启动会话 exit 0；integrity_check=ok、foreign_key_check 为空。A 的任务／字幕／provenance／ASR run／质量信号均与基线一致，A WAV、B 原 8 kHz 与现 16 kHz WAV、合成视频摘要均未变。B 的 local_jobs updated_at_unix／workspace_revision 与 provenance updated_at_unix 按结构提交／撤销推进，其余表记录一致，不宣称全部 20 表未变。build.log、包／轮换清单、AX／确认截图、各阶段全表快照及带 checksum 的 manifest 位于 `local-artifacts/editor-structure-native-e0a6bcb/`，按现有 editor-* 证据保留规则保留。
 
 本次无业务代码变更，文档提交运行两套 fmt／diff 检查；继承 e0a6bcb 的 270 项前端与八组 WebKit，没有重复跑 Rust／前端全量。正式仍为 1020e05，确认框 AX、原生拖动与真实磁盘失败、长时内存／滚动 P95、文件面板、首次空白和 Windows 门禁继续保留。
+
+## 2026-10-25：公共确认视图与嵌套 modal 修复
+
+`action-confirmation.ts` 接管原公共确认表单、单个 resolver、取消／确认事件及 dispose，main 只保留 confirmAction 适配。使用既有 mountToolDialog 的具名 region／show、inert、焦点循环及返回，避免 e0a6bcb 中动态 showModal 过滤确认控件；编辑页使用紧凑中性色。新请求取消旧请求，替换后排队的旧 close 不会结算新请求；Escape、外部 close 和 dispose 返回 false，消息按纯文本展示。删除入口先聚焦可见的更多编辑 summary，关闭后返回该入口。
+
+公共确认也用于词表 modal 内删除，因此 mountToolDialog.open 增加可选 host：优先挂到焦点所在原生 modal，保持在系统允许交互的后代范围；无 modal 时使用原锚点。父 modal 的兄弟控件仅在确认期间 inert，关闭后恢复原状态／焦点，父 modal 保持打开。其他工具不传 host，沿用原挂载位置；未增加第二份确认状态或修改业务／数据库合同。
+
+全部前端 270 项、类型／生产构建、两套 fmt／diff 检查通过。十一组 WebKit 为独立公共确认、插入、结构时间、时间保存、时间导航、跟随、手势、编辑闭环、紧凑布局、复核工具及翻译。新增专项验证纯文本、具名区域、焦点循环／返回、请求替换、危险样式复位、嵌套原生 modal 的取消／确认、外部关闭与 dispose；插入专项补编辑确认区域、Escape／Tab 与删除撤销。复核专项按关闭时节点已卸载的生命周期核对无打开确认，不再读取不存在的 closed dialog。此处为源码及浏览器结论，原生 AX 修复待新 QA 包复查；正式仍为 1020e05，性能与平台门禁保持。

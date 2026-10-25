@@ -34,7 +34,7 @@ const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
   await page.locator('[data-cancel-cleanup]').focus();await page.keyboard.press('Shift+Tab');assert.equal(await page.evaluate(()=>document.activeElement.hasAttribute('data-accept-cleanup')),true);
   await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.hasAttribute('data-cancel-cleanup')),true);
   await page.keyboard.press('Escape');assert.equal(await page.locator('#candidate-cleanup-dialog').count(),0);
-  assert.equal(await page.evaluate(()=>document.querySelector('#confirmation-dialog').open),false);
+  assert.equal(await page.locator('#confirmation-dialog[open]').count(),0);
 
   await page.locator('[data-release-run]').click();await page.locator('[data-accept-cleanup]').click();await page.waitForFunction(()=>document.querySelector('.candidate-history')?.textContent.includes('产物已清理'));
   assert.equal(await page.locator('[data-release-run]').count(),0);assert.match(await page.locator('#retranscription-message').textContent(),/1 KiB/);

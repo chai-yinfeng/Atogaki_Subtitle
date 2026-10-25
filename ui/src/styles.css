@@ -357,6 +357,7 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .glossary-dialog::backdrop { background: rgba(32, 35, 31, .38); backdrop-filter: blur(3px); }
 .rename-job-dialog { width: min(520px, calc(100vw - 40px)); border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: var(--ink); background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
 .rename-job-dialog::backdrop, .video-render-dialog::backdrop, .subtitle-style-dialog::backdrop { background: rgba(32, 35, 31, .38); backdrop-filter: blur(3px); }
+.action-confirmation[open] { position: fixed; inset: 50% 0 auto; transform: translateY(-50%); z-index: 60; max-height: 90dvh; overflow: auto; box-shadow: 0 0 0 100vmax #0006, 0 18px 75px #0b1c3550; }
 .settings-dialog { width: min(900px, calc(100vw - 40px)); max-height: calc(100vh - 40px); border: 1px solid #cfc6b7; border-radius: 18px; padding: 24px; color: var(--ink); background: #f7f3ea; box-shadow: 0 24px 80px rgba(32, 35, 31, .25); }
 .settings-dialog::backdrop { background: rgba(32, 35, 31, .45); backdrop-filter: blur(4px); }
 .settings-dialog form { display: grid; gap: 18px; }

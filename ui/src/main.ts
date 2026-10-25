@@ -1,3 +1,4 @@
+import { mountActionConfirmation, type ActionConfirmation } from "./action-confirmation";
 import { createEditorBlockActions } from "./editor-block-actions";
 import { createEditorStructureHistory } from "./editor-structure-history";
 import { createEditorStructureActions } from "./editor-structure-actions";
@@ -656,10 +657,6 @@ const retranscriptionOriginalList = document.querySelector<HTMLDivElement>("#ret
 const retranscriptionCandidateList = document.querySelector<HTMLDivElement>("#retranscription-candidate-list");
 const retranscriptionConfirmMessage = document.querySelector<HTMLParagraphElement>("#retranscription-confirm-message");
 const confirmRetranscriptionButton = document.querySelector<HTMLButtonElement>("#confirm-retranscription");
-const confirmationForm = document.querySelector<HTMLFormElement>("#confirmation-form");
-const confirmationTitle = document.querySelector<HTMLHeadingElement>("#confirmation-title");
-const confirmationMessage = document.querySelector<HTMLParagraphElement>("#confirmation-message");
-const acceptConfirmationButton = document.querySelector<HTMLButtonElement>("#accept-confirmation");
 const undoSubtitleStructureButton = document.querySelector<HTMLButtonElement>("#undo-subtitle-structure");
 const glossaryCorrectionDialog = document.querySelector<HTMLDialogElement>("#glossary-correction-dialog");
 const glossaryCorrectionForm = document.querySelector<HTMLFormElement>("#glossary-correction-form");
@@ -719,7 +716,6 @@ let glossaries: Glossary[] = [];
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
 let renamingJob: LocalJob | null = null;
-let confirmationResolver: ((confirmed: boolean) => void) | null = null;
 let pendingGlossaryCorrection: {
   glossaryId: string;
   state: HTMLElement;
@@ -1172,6 +1168,7 @@ editorRoot.addEventListener("click", event => {
 });
 
 window.addEventListener("pagehide", () => {
+  actionConfirmation.dispose();
   editorBlockActions.dispose();
   editorStructureHistory.dispose();
   editorStructureActions.dispose();
@@ -1314,34 +1311,8 @@ function runningJob(job: LocalJob): boolean {
   return !matchesTerminalStatus(job.status);
 }
 
-function settleConfirmation(confirmed: boolean): void {
-  const resolve = confirmationResolver;
-  confirmationResolver = null;
-  if (confirmationDialog?.open) confirmationDialog.close();
-  resolve?.(confirmed);
-}
-
-function confirmAction(options: {
-  title: string;
-  message: string;
-  confirmLabel: string;
-  danger?: boolean;
-}): Promise<boolean> {
-  if (!confirmationDialog || !confirmationTitle || !confirmationMessage || !acceptConfirmationButton) {
-    return Promise.resolve(false);
-  }
-  if (confirmationResolver) settleConfirmation(false);
-  confirmationTitle.textContent = options.title;
-  confirmationMessage.textContent = options.message;
-  acceptConfirmationButton.textContent = options.confirmLabel;
-  acceptConfirmationButton.classList.toggle("danger", options.danger ?? false);
-  confirmationDialog.inert = false;
-  confirmationDialog.showModal();
-  document.querySelector<HTMLButtonElement>("#cancel-confirmation")?.focus();
-  return new Promise<boolean>((resolve) => {
-    confirmationResolver = resolve;
-  });
-}
+const actionConfirmation = mountActionConfirmation(confirmationDialog!, () => currentArea === "karaoke");
+function confirmAction(options: ActionConfirmation): Promise<boolean> { return actionConfirmation.ask(options); }
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => {
@@ -3292,7 +3263,8 @@ const editorBlockActions = createEditorBlockActions({
   flush: flushEditorStructureDrafts, backend: editorBackend,
   pause: () => mediaPlayer.media?.pause(),
   seek: milliseconds => { seekTo(milliseconds, false); updateActiveSubtitle(milliseconds); },
-  confirm: confirmAction, busy: setEditorMutationBusy, status: setSubtitleEditAction,
+  confirm: options => { editorRoot.querySelector<HTMLElement>(".editor-menu > summary")?.focus(); return confirmAction(options); },
+  busy: setEditorMutationBusy, status: setSubtitleEditAction,
   remember: rememberStructureEdit, apply: applySubtitleStructure,
 });
 async function openInsertSubtitleBlock(): Promise<void> {
@@ -4441,20 +4413,6 @@ document.querySelector<HTMLButtonElement>("#cancel-rename-job")?.addEventListene
 renameJobDialog?.addEventListener("close", () => {
   renamingJob = null;
   if (renameJobMessage) renameJobMessage.textContent = "";
-});
-confirmationForm?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  settleConfirmation(true);
-});
-document.querySelector<HTMLButtonElement>("#cancel-confirmation")?.addEventListener("click", () => {
-  settleConfirmation(false);
-});
-confirmationDialog?.addEventListener("cancel", (event) => {
-  event.preventDefault();
-  settleConfirmation(false);
-});
-confirmationDialog?.addEventListener("close", () => {
-  if (confirmationResolver) settleConfirmation(false);
 });
 undoSubtitleStructureButton?.addEventListener("click", () => void undoSubtitleStructure());
 glossaryCorrectionForm?.addEventListener("submit", (event) => {

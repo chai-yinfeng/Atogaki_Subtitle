@@ -21,7 +21,7 @@ _最后更新：2026-10-25_
 | 模块边界 | 编辑会话／列表／当前段／跟随／播放器、时间轴绘制／手势／请求、处理与复核工具、导出／翻译／样式／烧录及设置用例逐步独立；26 条 Rust 命令和 SQLite 编辑／发布／读取模块已抽取 | main.ts 中结构操作、导航与初始化的协调边界；其余 Rust 命令／repository 按用例渐进整理，保留事务合同 |
 | 文档与产物 | 有效 ADR／文档索引、两次路线图历史归档、Web Serve／Postgres 影响报告、32 目录保留清单、重复副本与当前树缓存分批清理 | 未分类数据与共享缓存继续保留；Web 退役实施另行讨论，不作为本轮已执行项 |
 
-本轮插入／删除抽取通过 270 项测试、类型／生产构建、两套 fmt 和八组相关 WebKit；此前插入视图为 248 项及十二组 WebKit。共享库 158／5 ignored、桌面 33／4 ignored 来自前序提交的对应回归，不合并成一次最新全平台测试。环境、范围及失败记录分别见[窗口验收](editor-workspace-validation.md)、[性能验证](editor-performance-validation.md)与 [0059](decisions/0059-desktop-command-and-repository-modules.md)。模块责任与目录见[架构说明](architecture.md#字幕编辑前端的渐进边界)。
+本轮公共确认修复通过 270 项测试、类型／生产构建、两套 fmt 和十一组相关 WebKit（含独立确认视图专项）；此前插入视图为 248 项及十二组 WebKit。共享库 158／5 ignored、桌面 33／4 ignored 来自前序提交的对应回归，不合并成一次最新全平台测试。环境、范围及失败记录分别见[窗口验收](editor-workspace-validation.md)、[性能验证](editor-performance-validation.md)与 [0059](decisions/0059-desktop-command-and-repository-modules.md)。模块责任与目录见[架构说明](architecture.md#字幕编辑前端的渐进边界)。
 
 ## 下一步与验收门禁
 

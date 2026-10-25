@@ -77,6 +77,8 @@ Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有
 
 `editor-block-actions.ts` 协调插入提交与删除确认，原 edit_subtitle_block 通过同一 editor-backend 接入；继续使用现有插入视图、公共确认框、唯一草稿和结构历史。删除确认绑定任务／navigation／选段及确认前的字幕快照，确认后与第二次草稿 flush 后都检查身份和内容；确认期间新输入或已保存内容变化时保留数据并要求重试。局部操作预留防止重复确认／提交，真正写入时才取得 workspace busy，dispose 只释放自己的所有权；迟到提交不向新访问应用结果、记录历史或定位播放。
 
+公共确认由 `action-confirmation.ts` 持有唯一视图和单个待决 Promise，复用原表单与 mountToolDialog 的具名区域、inert、焦点循环／返回和按需挂载；替代 main 中的 resolver 及追加式监听。新请求先取消旧请求，Escape／外部关闭／dispose 均返回 false，确认只结算一次。编辑页采用紧凑中性色，其余区域保留原主题。词表等原生 modal 内的确认挂到当前焦点所属 modal 内，防止非 modal 区域被系统隔离；关闭仅恢复其背景 inert 状态与原焦点，不关闭父 modal。
+
 `editor-structure-history.ts` 持有唯一的结构撤销历史，替代 main 的全局 Map；每任务最多十条 before／after 快照，只在当前 App 会话有效。文字撤回保持独立，记录结构操作时仍清除该任务旧文字撤回记录。撤销先保护文字／时间输入，核对原任务、navigation、选择和最新历史／字幕快照，再经 editor-backend 调用原 restore_subtitle_structure 事务；失败保留历史，迟到返回不应用到新访问。dispose 释放自身 busy 和历史快照，既不持久化历史，也不自动重试后端请求。
 
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。

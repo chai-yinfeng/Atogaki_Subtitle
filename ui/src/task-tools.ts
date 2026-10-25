@@ -89,11 +89,12 @@ export function mountToolDialog(dialog: HTMLDialogElement, hidden: () => void, c
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }, { signal: events.signal });
   return {
-    open() {
+    open(host?: HTMLElement) {
       if (dialog.open) return;
       previousInert = dialog.inert; dialog.inert = false; mounted = true;
       returnFocus = document.activeElement as HTMLElement | null;
-      if (!dialog.isConnected) anchor.after(dialog);
+      if (host) host.append(dialog);
+      else if (!dialog.isConnected) anchor.after(dialog);
       let branch: HTMLElement = dialog;
       while (branch.parentElement && branch !== document.body) {
         for (const sibling of branch.parentElement.children) if (sibling !== branch && sibling instanceof HTMLElement) {
