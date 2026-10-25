@@ -143,3 +143,24 @@ WebContent 前段抬升、后段回落；最后五分钟 OLS 斜率约 −2.61 M
 QA 正常退出后，隔离数据库全部 20 张表内容摘要与测试前一致，integrity_check=ok。未发起识别／翻译请求、修改字幕或复制数据库／媒体。原始 warmup／steady／paused／left-editor JSONL、PID 身份、前后 AX、vmmap、二进制／媒体身份、summary.json、steady.csv、数据核验及可复算脚本在忽略目录 `local-artifacts/editor-steady-rss-05b2e07/`。
 
 本轮补齐固定负载的十分钟采样证据；WebContent 初段抬升的 heap／原生归因、跨任务重复进入、连续播放／滚动／输入的长期趋势仍待验证。滚动 P95、原生偶发锁定与 Windows 门禁不变，不能把这个循环场景外推到所有使用方式。
+
+
+## 2026-10-24：真实 wheel 输入的跟随控件热路径
+
+旧脚本设置 scrollTop，未触发 wheel／touchmove 的 browse 回调。实际回调在列表已暂停自动滚动后仍执行 sync，重复写入跟随按钮属性／文字，并对 visible cues 执行当前编辑段查找。编辑段位于末尾时，这条查找随字幕数量增长。现已改为暂停状态只记录新浏览意图，首次从自动滚动转为手动时才 sync；显式 sync 的相同属性／文字也不重复写入。不跳过虚拟窗口绘制或改变编辑／播放段身份。
+
+新增 `scripts/measure-editor-wheel.cjs` 使用同一台机器、1180×760、生产构建与 headless Playwright WebKit，合成 IPC／三小时时间范围。基线为 9d09ca4，前后 main.ts 与 editor-cue-list.ts SHA 相同，仅 editor-follow.ts 改变。各规模先用 End 锁定末段，再从列表中点开始，每轮 60 次 page.mouse.wheel、14 px／次、间隔 20 ms，三轮向下／向上／向下；前后实际滚动位置与选中段逐项一致，每轮恰有 60 个 isTrusted wheel，未出现 untrusted 事件，最大挂载行均为 23。两个测量串行执行，期间没有运行构建或其他测试；回归在测量结束后执行。
+
+测量分别记录三个跟随控件的 MutationObserver、实际列表 wheel 监听器的同步 wall time、连续 RAF 帧间隔。监听器通过测试 harness 包装，生产代码不加测量 hook；它不含浏览器默认滚动／后续虚拟窗口绘制，不等同 CPU profile。performance.now 最小观测步长为 1 ms，记录为 0 表示该次未被时钟分辨，不代表零 CPU 成本；量化累计也有采样误差。
+
+| 段数 | 每轮跟随控件更新，前→后 | 每轮监听器量化累计耗时中位数，前→后（ms） | 三轮帧间隔 P95，前→后（ms） |
+|---|---:|---:|---|
+| 300 | 120→0 | 10→0（未分辨） | 18/18/18→18/18/18 |
+| 3,000 | 120→0 | 13→1 | 18/17/17→17/18/17 |
+| 10,000 | 120→0 | 21→0（未分辨） | 18/17/18→18/17/18 |
+
+所有样本均无 >50 ms 帧间隔。这证明本条 wheel 回调的冗余更新与查找已减少，帧间隔 P95 没有可证实改善；不能据此关闭原生滚动、长任务、持续内存或 Windows 门禁。原始逐事件时间／逐帧间隔、运行环境、源码摘要与可复算 summary 在忽略目录 `local-artifacts/editor-performance/2026-10-24-wheel/`；复现沿用既有浏览器路径和 ATOGAKI_EDITOR_URL，设置 ATOGAKI_MEASUREMENT_LABEL 后运行新脚本，拒绝覆盖原证据。
+
+同次修复 browse 的新意图使挂起的 resume 失效：等待草稿 flush 时用户再次手动滚动，旧请求不能在返回后开启自动滚动，即使列表原先已经处于暂停状态。该竞态有独立复现，但与早先真实长任务的偶发锁定尚未建立因果关系，原锁定问题仍待追溯。dispose 后同步／浏览／恢复入口不再回调已释放上下文。
+
+248 项前端测试、类型／生产构建、根目录和 Tauri fmt、diff 检查及十七组 WebKit 回归通过。新增 `verify-editor-browse.cjs` 验证暂停后重复 browse 不写 DOM／不调用筛选查询、sync 幂等、新滚动取消挂起恢复、显式重试和 dispose；现有编辑跟随、重定位、任务选择与设置等十六组同步通过。本轮没有原生重装、真实任务写入或 RSS／heap 新测量；正式 App 仍为 05b2e07。
