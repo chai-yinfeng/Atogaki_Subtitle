@@ -955,6 +955,7 @@ const timelineGestures = mountTimelineGestures<SubtitleSegment>(karaokeWaveform!
     currentMs: (mediaPlayer.media?.currentTime ?? 0) * 1_000, viewStartMs: editorWaveform.startMs, durationMs: karaokeWindowDurationMs(),
   } : null,
   select: id => {
+    if (editorTimingDirty()) { setSubtitleEditAction("请先保存时间，或在时间输入框按 Escape 恢复，再调整字幕块。", true); return false; }
     if (currentCueEditor.dirty) { setSubtitleEditAction("调整其他字幕块前，请先保存或放弃当前文字修改。", true); return false; }
     return selectEditorCue(id);
   },
@@ -1007,20 +1008,31 @@ function setEditorMutationBusy(busy: boolean): void {
   const panel = editorRoot.querySelector<HTMLElement>(".karaoke-current-segment");
   if (panel) panel.inert = busy;
 }
-async function flushEditorStructureDrafts(): Promise<boolean> {
+async function flushEditorStructureDrafts(options: { allowPendingTiming?: boolean } = {}): Promise<boolean> {
   const jobId = activeDetail?.job.job_id;
+  const navigation = navigationRequestId;
+  const timingBlocked = () => {
+    if (options.allowPendingTiming || currentArea !== "karaoke" || !editorTimingDirty()) return false;
+    setSubtitleEditAction("请先保存时间，或在时间输入框按 Escape 恢复，再修改字幕块。", true);
+    return true;
+  };
+  if (workspaceActionBusy || timingBlocked()) return false;
   try {
     await subtitleDrafts.flushAll();
     if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === jobId && (draft.composing || subtitleDrafts.pending(draft)))) throw new Error("请完成输入法选字或保存草稿后再执行操作");
   }
-  catch (error) { setSubtitleEditAction(`文字保存失败，操作未执行：${String(error)}`, true); return false; }
-  return !!jobId && activeDetail?.job.job_id === jobId;
+  catch (error) {
+    if (activeDetail?.job.job_id === jobId && navigationRequestId === navigation) setSubtitleEditAction(`文字保存失败，操作未执行：${String(error)}`, true);
+    return false;
+  }
+  if (!jobId || activeDetail?.job.job_id !== jobId || navigationRequestId !== navigation || workspaceActionBusy) return false;
+  return !timingBlocked();
 }
 async function saveEditorCueTime(): Promise<void> {
   const startInput = editorStart.value, endInput = editorEnd.value;
   const selectedId = editorSession.selectedCueId;
   const jobId = activeDetail?.job.job_id, navigation = navigationRequestId, timingRevision = editorFollow.timingRevision;
-  if (workspaceActionBusy || !await flushEditorStructureDrafts() || !activeDetail) return;
+  if (workspaceActionBusy || !await flushEditorStructureDrafts({ allowPendingTiming: true }) || !activeDetail) return;
   if (workspaceActionBusy || currentArea !== "karaoke" || navigationRequestId !== navigation || activeDetail.job.job_id !== jobId) return;
   if (selectedId !== editorSession.selectedCueId || timingRevision !== editorFollow.timingRevision || startInput !== editorStart.value || endInput !== editorEnd.value) {
     setSubtitleEditAction("时间输入或编辑段已变化，请确认后重新保存。", true); return;
@@ -1115,7 +1127,7 @@ function openEditorRepair(): void {
   if (activeDetail) void loadAsrQualitySignals(activeDetail.job.job_id);
 }
 async function showEditorTools(section: WorkspaceSection): Promise<void> {
-  if (!activeDetail || !await flushEditorStructureDrafts()) return;
+  if (!activeDetail || !await flushEditorStructureDrafts({ allowPendingTiming: true })) return;
   taskTools.mountOverlay();
   renderWorkspace(activeDetail);
   showWorkspaceSection(section);
@@ -3048,6 +3060,10 @@ async function previewSelectedRange(): Promise<void> {
 
 async function confirmSelectedRangeReplacement(): Promise<void> {
   if (workspaceActionBusy || !activeDetail || !editorProcessing.preview || editorProcessing.busy) return;
+  if (currentArea === "karaoke" && editorTimingDirty()) {
+    if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "采用候选前请先保存时间，或在时间输入框按 Escape 恢复。";
+    return;
+  }
   if (hasUnsavedSubtitleEdits()) {
     if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "采用候选前请先保存或放弃当前文字草稿。";
     return;
