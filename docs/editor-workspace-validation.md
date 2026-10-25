@@ -584,3 +584,15 @@ QA 正常退出，启动会话 exit 0，integrity_check=ok、foreign_key_check �
 原删除确认返回后只比较任务 ID，未核对同任务新 navigation、选段及确认后修改的内容。现在准备阶段预留一次操作，确认前冻结所选 cue；确认返回及第二次 flush 后复核任务／navigation、选段与 cue 快照，遇到新输入、已保存文字或时间变化即保留内容并要求重试。待保存时间继续由现有 flush 保护，磁盘写入仍只使用一次原后端事务。提交返回检查访问身份，旧成功／失败不更新新视图、不创建该访问历史或跳转；dispose 释放所持 workspace busy，不补发或模拟回滚请求。
 
 新增八项测试覆盖原 IPC、提交快照、删除确认、确认期间身份／文字／时间／选段变化、二次 flush 变化、重复准备、取消、错误保留与重试、旧返回及三个等待阶段的 dispose。全部前端 270 项通过，类型／生产构建、两套 fmt 和 diff 检查通过。八组 WebKit（插入、结构时间、时间保存、时间导航、跟随、手势、编辑闭环、紧凑布局）通过；插入专项增加实际删除取消、确认删除及撤销恢复相同 ID／文字，fixture 复用原 restore 请求快照并执行删除／序号重排。未调用 ASR／云端、未重跑 Rust 全量或重建原生包，正式仍为 1020e05；当前原生 QA ec31842 不作为本轮模块抽取验收，性能及平台门禁保留。
+
+## 2026-10-25：e0a6bcb 结构模块整合原生验收
+
+从干净 e0a6bcb 使用共享 target 完整构建四 sidecar release QA 包，重新执行类型／生产构建；核验 identifier `com.chai-yinfeng.atogaki.editor-qa`、deep／strict 签名和 27 文件摘要，原位更新现有 QA App。被取代的 ec31842 QA 包逐文件核对后删除，约 96.5 MiB 逻辑内容；未新增完整 App 或 SQLite 备份，未替换正式 App。复用原隔离 A20／B21 共 41 段，B 中前次跨会话 Cut 的现场保持。
+
+明确指定隔离数据目录启动，工作台核对路径与任务身份后进入 B。开始时间输入 0.010 秒时 Join 被阻止且输入保留；Escape 恢复后 Join 将 B21→20，撤销回 21，全部 41 cue 逐字段恢复。播放头 0.100 秒实际 Cut，B21→22，撤销回 21，再次与基线一致。点击另一段时间码会启动播放；暂停后使用实际所在块的空白建议，插入 41.800–42.000 秒双语新 cue，B21→22，SQLite 核对新 ID／范围／文字；不把此次定位记录为固定 2.800 秒样本。
+
+删除确认出现明确原生可访问性缺陷：截图中标题、说明、取消与删除按钮可见，AX 只有 HTML content 和视频 value indicators，没有确认控件。Escape 取消后仍为 22 段；重新打开，通过初始取消焦点的 Tab→Return 确认删除新 cue，B22→21，SQLite 确认只删该 ID。撤销删除 B21→22，42 条完整 cue 与插入后快照逐字段一致；再次撤销插入 B22→21，最终全部 41 cue 与启动前逐字段一致。此处仅证明键盘提交及事务成功，不把空 AX 当作可访问性通过；公共确认 showModal 视图列为下一项修复。
+
+QA 正常退出，启动会话 exit 0；integrity_check=ok、foreign_key_check 为空。A 的任务／字幕／provenance／ASR run／质量信号均与基线一致，A WAV、B 原 8 kHz 与现 16 kHz WAV、合成视频摘要均未变。B 的 local_jobs updated_at_unix／workspace_revision 与 provenance updated_at_unix 按结构提交／撤销推进，其余表记录一致，不宣称全部 20 表未变。build.log、包／轮换清单、AX／确认截图、各阶段全表快照及带 checksum 的 manifest 位于 `local-artifacts/editor-structure-native-e0a6bcb/`，按现有 editor-* 证据保留规则保留。
+
+本次无业务代码变更，文档提交运行两套 fmt／diff 检查；继承 e0a6bcb 的 270 项前端与八组 WebKit，没有重复跑 Rust／前端全量。正式仍为 1020e05，确认框 AX、原生拖动与真实磁盘失败、长时内存／滚动 P95、文件面板、首次空白和 Windows 门禁继续保留。
