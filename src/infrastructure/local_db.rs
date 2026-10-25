@@ -3,6 +3,8 @@ mod structure_undo_scope_tests;
 mod subtitle_edits;
 mod subtitle_publication;
 mod subtitle_queries;
+mod subtitle_structure_undo;
+pub use subtitle_structure_undo::{LocalStructureEdit, LocalStructureUndoResult};
 
 use std::{
     collections::{HashMap, HashSet},

@@ -28,6 +28,7 @@ _更新：2026-10-25_
 | [0058 紧凑布局与跟随](decisions/0058-compact-editor-and-playback-follow.md) | 左视频、右波形与上下双语编辑、底部列表；默认跟随、手动锁定、输入保护与工具焦点 |
 | [0059 Rust 模块边界](decisions/0059-desktop-command-and-repository-modules.md) | IPC 与 repository 渐进拆分，保留方法、SQL、revision 与事务合同 |
 | [0060 音频块接缝](decisions/0060-overlap-alignment-before-acoustic-selection.md) | 重叠区先对齐后选择，无法可靠匹配时保留两侧观测并进入复核 |
+| [0061 完整结构撤销](decisions/0061-transactional-structure-undo-metadata.md) | 已确认的来源／依赖恢复、单调修订与后端收据；分步接入中，旧 UI 尚未迁移 |
 
 ## 验收证据与运行记录
 
@@ -43,7 +44,7 @@ _更新：2026-10-25_
 
 ## 研究、能力对照与待讨论方案
 
-- [结构撤销元数据范围](structure-undo-metadata-proposal.md)：来源与翻译依赖丢失的隔离审计，以及尚未采纳的恢复方案。
+- [结构撤销元数据范围](structure-undo-metadata-proposal.md)：来源与翻译依赖丢失的隔离审计、已采纳方案与替代方案背景；实际实施以 0061 和验收记录为准。
 - [字幕工作面调研](editor-workspace-review.md)：改造前的审计与布局备选，已采纳部分由 0055–0059 和当前路线图承接。
 - [Aegisub 能力映射](aegisub-capability-map.md)：当前独立实现的能力与后续候选，不是完整复刻或扩大制作软件范围的承诺。
 - [管线演进计划](pipeline-evolution.md)：保留研究阶段的接口与质量门禁；已落地部分应对照后继 ADR 和验收记录，不按原审阅基线推断当前实现。

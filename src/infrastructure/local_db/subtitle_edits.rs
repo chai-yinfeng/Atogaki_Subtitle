@@ -193,67 +193,8 @@ impl LocalDatabase {
         insertion: Option<LocalSubtitleSegmentRecord>,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         let mut tx = self.pool.begin().await?;
-        ensure_structure_editable(&mut tx, job_id).await?;
-        let mut segments = list_segments_in_transaction(&mut tx, job_id).await?;
-        if segments != before {
-            return Err(anyhow!("字幕已变化，请重新读取后再操作"));
-        }
-        // Existing translations retain their frozen inputs on insertion. On deletion,
-        // only recorded consumers of the removed context can become stale.
-        let affected: HashSet<String> = if let Some(id) = remove_id {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT s.id FROM local_translation_dependency_edges e
-                 JOIN local_subtitle_segments s ON s.id = e.target_segment_id
-                 WHERE e.context_segment_id = ? AND s.job_id = ?
-                   AND s.translated_text IS NOT NULL AND s.translation_edited = 0",
-            )
-            .bind(id)
-            .bind(job_id)
-            .fetch_all(&mut *tx)
-            .await?
-            .into_iter()
-            .collect()
-        } else {
-            HashSet::new()
-        };
-        match (remove_id, insertion) {
-            (Some(id), None) => {
-                let index = segments
-                    .iter()
-                    .position(|s| s.id == id)
-                    .ok_or_else(|| anyhow!("字幕块不存在"))?;
-                segments.remove(index);
-            }
-            (None, Some(mut block)) => {
-                if block.job_id != job_id || segments.iter().any(|s| s.id == block.id) {
-                    return Err(anyhow!("invalid new subtitle identity"));
-                }
-                if block.start_ms < 0
-                    || block.end_ms <= block.start_ms
-                    || segments
-                        .iter()
-                        .any(|s| s.start_ms < block.end_ms && s.end_ms > block.start_ms)
-                {
-                    return Err(anyhow!("插入范围无效或与已有字幕重叠，请选择空白区间"));
-                }
-                block.source_edited = true;
-                block.translation_edited = block
-                    .translated_text
-                    .as_ref()
-                    .is_some_and(|s| !s.trim().is_empty());
-                block.translation_stale = false;
-                block.timing_edited = true;
-                segments.push(block);
-                segments.sort_by_key(|s| (s.start_ms, s.end_ms));
-            }
-            _ => return Err(anyhow!("choose exactly one subtitle block operation")),
-        }
-        for s in &mut segments {
-            if affected.contains(&s.id) {
-                s.translation_stale = true;
-            }
-        }
-        persist_structure_segments(&mut tx, job_id, &mut segments).await?;
+        let segments =
+            edit_block_in_transaction(&mut tx, job_id, before, remove_id, insertion).await?;
         tx.commit().await?;
         Ok(segments)
     }
@@ -655,4 +596,76 @@ pub(super) async fn persist_structure_segments(
     .await
     .context("failed to freeze edited subtitle structure")?;
     Ok(())
+}
+
+/// Shared operation body; the caller owns begin/commit and optional undo capture.
+pub(super) async fn edit_block_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    before: &[LocalSubtitleSegmentRecord],
+    remove_id: Option<&str>,
+    insertion: Option<LocalSubtitleSegmentRecord>,
+) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+    ensure_structure_editable(tx, job_id).await?;
+    let mut segments = list_segments_in_transaction(tx, job_id).await?;
+    if segments != before {
+        return Err(anyhow!("字幕已变化，请重新读取后再操作"));
+    }
+    // Existing translations retain their frozen inputs on insertion. On deletion,
+    // only recorded consumers of the removed context can become stale.
+    let affected: HashSet<String> = if let Some(id) = remove_id {
+        sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT s.id FROM local_translation_dependency_edges e
+             JOIN local_subtitle_segments s ON s.id = e.target_segment_id
+             WHERE e.context_segment_id = ? AND s.job_id = ?
+               AND s.translated_text IS NOT NULL AND s.translation_edited = 0",
+        )
+        .bind(id)
+        .bind(job_id)
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .collect()
+    } else {
+        HashSet::new()
+    };
+    match (remove_id, insertion) {
+        (Some(id), None) => {
+            let index = segments
+                .iter()
+                .position(|s| s.id == id)
+                .ok_or_else(|| anyhow!("字幕块不存在"))?;
+            segments.remove(index);
+        }
+        (None, Some(mut block)) => {
+            if block.job_id != job_id || segments.iter().any(|s| s.id == block.id) {
+                return Err(anyhow!("invalid new subtitle identity"));
+            }
+            if block.start_ms < 0
+                || block.end_ms <= block.start_ms
+                || segments
+                    .iter()
+                    .any(|s| s.start_ms < block.end_ms && s.end_ms > block.start_ms)
+            {
+                return Err(anyhow!("插入范围无效或与已有字幕重叠，请选择空白区间"));
+            }
+            block.source_edited = true;
+            block.translation_edited = block
+                .translated_text
+                .as_ref()
+                .is_some_and(|s| !s.trim().is_empty());
+            block.translation_stale = false;
+            block.timing_edited = true;
+            segments.push(block);
+            segments.sort_by_key(|s| (s.start_ms, s.end_ms));
+        }
+        _ => return Err(anyhow!("choose exactly one subtitle block operation")),
+    }
+    for s in &mut segments {
+        if affected.contains(&s.id) {
+            s.translation_stale = true;
+        }
+    }
+    persist_structure_segments(tx, job_id, &mut segments).await?;
+    Ok(segments)
 }

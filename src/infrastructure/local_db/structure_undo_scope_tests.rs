@@ -1,6 +1,6 @@
-//! Characterizes a known gap, not the desired undo contract. Replace the loss
-//! assertions when the metadata restore proposal is accepted and implemented.
-use super::{LocalDatabase, NewLocalLearningSelection};
+//! Recorded undo contract: adopted lineage, context dependencies and monotonic
+//! revisions restore atomically; learning snapshots keep their existing scope.
+use super::{LocalDatabase, LocalMachineTranslation, NewLocalLearningSelection};
 use crate::{
     application::{
         AsrInputScope, AsrRun, CandidateCue, CandidateCueSet, job_manifest::JobManifest,
@@ -12,7 +12,7 @@ use crate::{
 use std::fs;
 
 #[tokio::test]
-async fn current_structure_undo_restores_cues_but_loses_deleted_relations() {
+async fn recorded_structure_undo_restores_lineage_and_dependency_propagation() {
     let root = std::env::temp_dir().join(format!("atogaki-undo-scope-{}", uuid::Uuid::new_v4()));
     let job = Job::create_in(&root).unwrap();
     let job_id = job.id();
@@ -101,16 +101,18 @@ async fn current_structure_undo_restores_cues_but_loses_deleted_relations() {
     let before_provenance = database.list_subtitle_provenance(&job_id).await.unwrap();
     assert!(database.asr_run_is_protected(&run.id).await.unwrap());
 
-    let deleted = database
-        .edit_subtitle_block(&job_id, &before, Some(&segments[0].id), None)
+    let receipt = database
+        .edit_subtitle_block_recorded(&job_id, &before, Some(&segments[0].id), None)
         .await
         .unwrap();
-    assert!(deleted[0].translation_stale);
-    let restored = database
-        .restore_segment_structure(&job_id, &before, &deleted)
-        .await
-        .unwrap();
-    assert_eq!(restored, before, "visible cue fields do restore exactly");
+    assert!(receipt.segments()[0].translation_stale);
+    let result = database.undo_recorded_structure(&receipt).await.unwrap();
+    let restored = result.segments();
+    assert_eq!(
+        restored,
+        before.as_slice(),
+        "visible cue fields do restore exactly"
+    );
     let provenance = database.list_subtitle_provenance(&job_id).await.unwrap();
     let recreated = provenance
         .iter()
@@ -122,22 +124,61 @@ async fn current_structure_undo_restores_cues_but_loses_deleted_relations() {
         .unwrap();
     assert_eq!(old.source_run_id.as_deref(), Some(run.id.as_str()));
     assert_eq!((old.source_revision, old.translation_revision), (7, 3));
-    assert!(recreated.source_run_id.is_none());
-    assert_eq!(recreated.timed_unit_ids_json, "[]");
+    assert_eq!(recreated.source_run_id, old.source_run_id);
+    assert_eq!(recreated.timed_unit_ids_json, old.timed_unit_ids_json);
     assert_eq!(
-        (&*recreated.source_kind, &*recreated.alignment_status),
-        ("structural", "stale")
+        (
+            &*recreated.source_kind,
+            &*recreated.alignment_status,
+            &*recreated.timing_source
+        ),
+        ("asr", "current", "model")
     );
     assert_eq!(
         (recreated.source_revision, recreated.translation_revision),
-        (0, 0)
+        (8, 4)
     );
-    let edges: Vec<(String, String, i64)> = sqlx::query_as("SELECT target_segment_id,context_segment_id,context_source_revision FROM local_translation_dependency_edges ORDER BY target_segment_id,context_segment_id")
+    let edges: Vec<(String, String, i64)> = sqlx::query_as("SELECT target_segment_id,context_segment_id,context_source_revision FROM local_translation_dependency_edges")
         .fetch_all(&database.pool).await.unwrap();
-    assert_eq!(
-        edges,
-        vec![(segments[2].id.clone(), segments[1].id.clone(), 0)],
-        "both relations touching the deleted cue are lost; unrelated edge survives"
+    assert_eq!(edges.len(), 3);
+    assert!(edges.contains(&(segments[1].id.clone(), segments[0].id.clone(), 8)));
+    assert!(edges.contains(&(segments[0].id.clone(), segments[1].id.clone(), 0)));
+    assert!(edges.contains(&(segments[2].id.clone(), segments[1].id.clone(), 0)));
+    let late = database
+        .apply_machine_translations(
+            &job_id,
+            &[LocalMachineTranslation {
+                segment_id: segments[0].id.clone(),
+                source_text: before[0].source_text.clone(),
+                expected_translated_text: before[0].translated_text.clone(),
+                expected_translation_edited: false,
+                expected_source_revision: Some(7),
+                expected_translation_revision: Some(3),
+                translated_text: "late result".into(),
+            }],
+        )
+        .await;
+    assert!(
+        late.is_err(),
+        "old revision must not become valid again after undo"
+    );
+    let late_consumer = database
+        .apply_machine_translations(
+            &job_id,
+            &[LocalMachineTranslation {
+                segment_id: segments[1].id.clone(),
+                source_text: before[1].source_text.clone(),
+                expected_translated_text: before[1].translated_text.clone(),
+                expected_translation_edited: false,
+                expected_source_revision: Some(0),
+                expected_translation_revision: Some(0),
+                translated_text: "old consumer result".into(),
+            }],
+        )
+        .await;
+    assert!(
+        late_consumer.is_err(),
+        "restoring dependencies invalidates the consumer's old translation request too"
     );
     let kept = database
         .get_learning_item(&learning.item.id)
@@ -152,7 +193,7 @@ async fn current_structure_undo_restores_cues_but_loses_deleted_relations() {
     );
     assert!(
         database.asr_run_is_protected(&run.id).await.unwrap(),
-        "adoption ledger protects evidence despite lost cue relation"
+        "adoption ledger still protects evidence"
     );
     assert_eq!(fs::read(&evidence).unwrap(), b"{\"synthetic\":true}");
     assert_eq!(database.list_asr_runs(&job_id).await.unwrap().len(), 1);
@@ -170,12 +211,12 @@ async fn current_structure_undo_restores_cues_but_loses_deleted_relations() {
         .unwrap();
     let after_edit = database.list_subtitle_provenance(&job_id).await.unwrap();
     assert!(
-        !after_edit
+        after_edit
             .iter()
             .find(|p| p.segment_id == segments[1].id)
             .unwrap()
             .translation_dependency_stale,
-        "known gap: missing edge prevents later context-stale propagation"
+        "restored dependency must propagate later context changes"
     );
     assert!(!database.list_segments(&job_id).await.unwrap()[1].translation_stale);
     assert!(

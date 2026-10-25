@@ -622,3 +622,13 @@ QA 正常退出，启动会话 exit 0；integrity_check=ok、foreign_key_check �
 ASR run 和合成证据字节仍在，采用台账使 asr_run_is_protected 保持 true；学习收藏外键为空但文本／时间快照保留，符合已有不推测重连范围。完整结论、推荐的事务内来源／依赖快照与会话 token，以及较小的保守失效替代方案见[提案](structure-undo-metadata-proposal.md)。本轮没有改写运行时事务、schema 或 IPC；现状丢失断言不代表目标行为，实施修复时应替换。
 
 专项 1 passed，共享库全量 159 passed／5 环境依赖 ignored，两套 fmt／diff 检查通过。未改前端或桌面 Rust 运行时代码，因此未重跑前端／Tauri 全量、未打包或重装。日志和摘要在 `local-artifacts/editor-undo-scope-audit-20261025/`，正式仍为 1020e05，QA 为 2950a6d。方案待用户确认，其他原生性能、导航及平台门禁保持。
+
+## 2026-10-25：0061 插入／删除事务收据基础
+
+用户选择完整来源／翻译依赖恢复、学习收藏保持快照规则，已记录 0061。新增 subtitle_structure_undo repository 模块：recorded 插入／删除在原写入事务中捕获完整 before／after cue、provenance、依赖及 workspace revision，commit 成功后才产生 opaque 收据。类型字段私有且无 Deserialize，未通过 IPC 接受来源快照。原 edit_subtitle_block 与新路径共用一次事务内 helper；抽取的旧函数体在借用与格式归一后 token 等价，旧接口不增加快照开销。
+
+撤销同一事务比较完整 after 状态，拒绝只有 provenance／依赖变化而 cue 未变的情况。恢复源 run／timed-unit／时间来源与过期语义，改变或重建的源／译修订取更大值，未改变项不回退；仅把原本匹配当前上下文修订的依赖映射到新修订，旧过期边不刷新。空任务也推进 workspace revision。连续撤销必须用相接收据与对应恢复身份重绑定前一 expected after，拒绝跳过修改和回放已用收据；学习已解除引用不重连，采用台账与证据保留。
+
+原来源审计测试已替换为 recorded 路径目标断言：ASR 关联和三条依赖恢复、源／译修订 7／3→8／4，恢复块及消费者的旧翻译请求均拒绝，随后上下文编辑能传播过期。四项新增边界覆盖 metadata-only 冲突、两处中途 SQL 故障（恢复第一行后、provenance 恢复后写依赖时）完整回滚与重试、连续删除到空再撤销、旧过期边保留。依赖按 target 建索引比较，避免对每 cue 全扫依赖。
+
+共享库 163 passed／5 环境依赖 ignored，Tauri cargo check、两套 fmt 与 diff 检查通过；未修改前端、schema、现有 IPC 或安装包。原有 UI 仍调用 legacy 路径，尚未获得完整来源恢复；后续必须补其他结构用例、会话预算／token 与前端单一历史迁移，不能把本次基础库测试作为整套功能已交付。日志、检查及来源文件摘要保留于 `local-artifacts/editor-recorded-undo-foundation-20261025/`；正式仍为 1020e05，QA 为 2950a6d，性能／原生门禁继续保留。
