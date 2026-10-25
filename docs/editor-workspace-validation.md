@@ -614,3 +614,11 @@ QA 正常退出，启动会话 exit 0；integrity_check=ok、foreign_key_check �
 额外的全表核对明确了既有撤销范围：B 的任务 updated_at_unix／workspace_revision 及 provenance updated_at_unix 推进；被删 legacy cue 恢复后的 source_kind 从 legacy 变为 structural，alignment_status 从 unknown 变为 stale。restore_segment_structure 仅接收 before／after cue，重插被删 ID 时 persist_structure_segments 没有旧 provenance 而按新结构块标记；本轮没有改写该 Rust 行为。不能宣称所有来源／翻译依赖／学习引用恢复，仅证明 cue 字段恢复；此项后续独立评估，再讨论是否扩展历史快照或事务合同。正式数据及 A 的采用来源未用于此测试。
 
 包／轮换清单、AX、两张焦点截图、各阶段全表、核验与 checksum manifest 位于 `local-artifacts/action-confirmation-native-2950a6d/`，保留规则已补充。原生只验收编辑确认；嵌套原生 modal 的父子行为仍是本轮 WebKit 专项结果。270 项前端与十一组 WebKit 来自本提交此前回归，文档提交运行两套 fmt／diff，没有重跑 Rust 全量。正式仍为 1020e05；来源撤销范围、长期内存／滚动 P95、原生拖动、真实磁盘失败、文件面板、首次空白及 Windows 门禁保留。
+
+## 2026-10-25：结构撤销来源与依赖范围审计
+
+新增独立 test-only 模块 structure_undo_scope_tests，通过真实候选采用／删除／恢复 repository 方法刻画现状；只为非零 revision 和依赖边设置合成有效 fixture。三段字幕、一个采用 run、一个证据文件与学习收藏位于唯一临时目录，测试结束清理，不修改正式或 QA 数据，不调用模型／API。删除／撤销恢复所有 cue 字段，但被删 ASR cue 的 run／timed-unit 关系丢失、修订从 7／3 重置为 0／0，两条涉及该 cue 的依赖丢失，第三条无关依赖保留。随后修改恢复 cue 的上下文时，其原消费者既无 translation_dependency_stale 也无 translation_stale，确认不是只有显示标签变化。
+
+ASR run 和合成证据字节仍在，采用台账使 asr_run_is_protected 保持 true；学习收藏外键为空但文本／时间快照保留，符合已有不推测重连范围。完整结论、推荐的事务内来源／依赖快照与会话 token，以及较小的保守失效替代方案见[提案](structure-undo-metadata-proposal.md)。本轮没有改写运行时事务、schema 或 IPC；现状丢失断言不代表目标行为，实施修复时应替换。
+
+专项 1 passed，共享库全量 159 passed／5 环境依赖 ignored，两套 fmt／diff 检查通过。未改前端或桌面 Rust 运行时代码，因此未重跑前端／Tauri 全量、未打包或重装。日志和摘要在 `local-artifacts/editor-undo-scope-audit-20261025/`，正式仍为 1020e05，QA 为 2950a6d。方案待用户确认，其他原生性能、导航及平台门禁保持。

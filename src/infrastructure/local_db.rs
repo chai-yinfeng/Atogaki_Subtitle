@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod structure_undo_scope_tests;
 mod subtitle_edits;
 mod subtitle_publication;
 mod subtitle_queries;
