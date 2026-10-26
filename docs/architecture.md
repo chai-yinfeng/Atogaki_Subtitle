@@ -83,6 +83,8 @@ Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有
 
 完整来源撤销按 [0061](decisions/0061-transactional-structure-undo-metadata.md) 迁移中。`local_db/subtitle_structure_undo.rs` 已提供插入／删除、Cut／Join、时间调整和候选采用的 opt-in 事务收据，均共用原事务内 helper 并捕获 cue／provenance／依赖／revision。候选替换、ASR 来源赋值及永久采用保护台账在同一事务，采用完成后才捕获 after；沿用旧 ID 时保留新 ASR 来源，撤销恢复旧来源且不删除采用台账。收据和恢复结果不支持反序列化，外部只能读取 token／任务／字幕及同一状态的 revision／上下文过期 ID。recorded 路径保护正向修订、手动来源与机器消费者过期，恢复严格比较完整 after 状态并重映射有效依赖，连续撤销验证收据边界及恢复身份。应用服务／有界会话／IPC／前端尚未迁移；现有数组历史仍是唯一 UI 历史，不能将旧路径宣称为已完整恢复来源。
 
+`application/structure_undo_history.rs` 已实现独立的有界会话管理器，移动持有后端收据，以任务队列与全局队首索引限制最多十条／任务、96 MiB 核算预算。record 校验链连续性并报告淘汰／超大项；undo 验证最新 token 与任务，复用真实数据库恢复后重绑定前一项，错误时保留收据；forget_job／clear 释放记录和索引。对外只序列化描述符、字幕、revision 和过期 ID，原始元数据仍不接受 IPC 反序列化。容量测量见性能记录；服务还须接入统一写入门闩并在删除任务时释放历史，目前没有第二套已启用的 UI 历史。
+
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
 
 任务样式的异步读取、保存与预览通过 `subtitle-style-session.ts` 协调，四条调用集中到 `subtitle-style-backend.ts`。每次打开绑定任务／导航代次，修改递增草稿版本，串行渲染只接受最新版本；关闭释放 debounce 和迟到呈现。字体、颜色与预览视图由 `subtitle-style-view.ts` 持有，模板独立；关闭即卸载节点，dispose 释放全局监听器，字体候选关闭即释放选项。具名 region 与显式焦点边界替代样式 showModal，FFmpeg/libass 与实际样式服务保持原实现。

@@ -652,3 +652,11 @@ ASR run 和合成证据字节仍在，采用台账使 asr_run_is_protected 保�
 新增四项回归覆盖新／旧 ID、同文新来源、完整恢复和过期 ID、学习快照、采用后撤销仍受保护，以及旧 revision／截断原段／证据不匹配拒绝。分别在台账插入及台账插入后元数据更新时注入失败，验证字幕、来源、修订、依赖及采用保护一起回滚；去掉故障后可重试。首次编译因 TranscriptSegment 无 PartialEq、测试参数泛型类型不明确失败，改为显式源字段比较和 String 后通过，未改领域类型。
 
 专项 4 passed，共享库全量 169 passed／5 环境依赖 ignored，Tauri check、两套 fmt／diff 通过。新路径尚未接入实际候选服务／IPC／UI，不能据此宣称原生采用已获完整元数据撤销；未重跑前端或重装。下一步先测量快照预算、建立有界后端 token 历史，再迁移唯一前端历史。日志与摘要在 `local-artifacts/editor-recorded-adoption-20261026/`；正式 1020e05、QA 2950a6d 均未替换，性能／原生门禁保持。
+
+## 2026-10-26：有界后端 token 历史
+
+新增独立 StructureUndoHistory，移动接收已经提交的 opaque 收据，维护每任务最多十条与全局 96 MiB 核算预算；默认值来自 300／3,000／10,000 段真实收据测量，详见[预算记录](editor-performance-validation.md#2026-10-26结构撤销收据预算)。超过预算按全局最老队首淘汰；单份过大时清除本任务旧历史并返回 oversized／无 token，不影响其他任务或已提交数据。外部变更打断 before／after 连续性时从新链开始，避免留下跨越未记录操作的旧撤销。
+
+undo 只接受该任务最新 token，数据库失败保留记录；成功后消费收据并用真实恢复结果重绑定前一项，返回最新 token／revision／过期 ID。释放任务、清空或新建会话不会改写 SQLite，旧 token 不再可用。队首索引不会积累失效记录，重新绑定后重新核算容量；对外不序列化原始来源快照。调用者必须以共同门闩包住提交与 record、undo；此管理器尚未挂入旧 WorkspaceService、候选服务或 IPC，旧 UI 数组历史仍是当前唯一启用的历史。
+
+专项七项通过，共享库全量 176 passed／5 环境依赖 ignored，example 构建、Tauri check、两套 fmt／diff 通过。原生 App、前端和 IPC 未改，未重跑前端或安装；六组同程序合成内存测量并非原生长期内存门禁。下一步接入共享服务门闩及 token 返回，再迁移前端与原生验收。日志、测量与 manifest 在 `local-artifacts/editor-undo-budget-20261026/`；正式 1020e05、QA 2950a6d 保持。

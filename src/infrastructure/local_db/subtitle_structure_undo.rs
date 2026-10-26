@@ -26,6 +26,40 @@ struct State {
     dependencies: Vec<Dependency>,
 }
 impl State {
+    fn heap_bytes(&self) -> usize {
+        self.job_id.capacity()
+            + self.segments.capacity() * std::mem::size_of::<LocalSubtitleSegmentRecord>()
+            + self.provenance.capacity() * std::mem::size_of::<LocalSubtitleProvenanceRecord>()
+            + self.dependencies.capacity() * std::mem::size_of::<Dependency>()
+            + self
+                .segments
+                .iter()
+                .map(|cue| {
+                    cue.id.capacity()
+                        + cue.job_id.capacity()
+                        + cue.source_text.capacity()
+                        + cue.translated_text.as_ref().map_or(0, String::capacity)
+                })
+                .sum::<usize>()
+            + self
+                .provenance
+                .iter()
+                .map(|cue| {
+                    cue.segment_id.capacity()
+                        + cue.job_id.capacity()
+                        + cue.source_kind.capacity()
+                        + cue.source_run_id.as_ref().map_or(0, String::capacity)
+                        + cue.timed_unit_ids_json.capacity()
+                        + cue.timing_source.capacity()
+                        + cue.alignment_status.capacity()
+                })
+                .sum::<usize>()
+            + self
+                .dependencies
+                .iter()
+                .map(|edge| edge.target_segment_id.capacity() + edge.context_segment_id.capacity())
+                .sum::<usize>()
+    }
     fn context_stale_ids(&self) -> Vec<String> {
         self.provenance
             .iter()
@@ -48,6 +82,17 @@ pub struct LocalStructureUndoResult {
     state: State,
 }
 impl LocalStructureEdit {
+    /// Owned snapshot allocation estimate, including spare Vec/String capacity.
+    /// Excludes allocator bookkeeping, database caches and transient restore state.
+    pub fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.id.capacity()
+            + self.before.heap_bytes()
+            + self.after.heap_bytes()
+    }
+    pub fn follows(&self, previous: &Self) -> bool {
+        self.before == previous.after
+    }
     pub fn token(&self) -> &str {
         &self.id
     }
