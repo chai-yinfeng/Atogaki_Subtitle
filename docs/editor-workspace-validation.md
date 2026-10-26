@@ -668,3 +668,15 @@ undo 只接受该任务最新 token，数据库失败保留记录；成功后消
 五项新增隔离回归覆盖服务克隆与连续撤销、同快照并发只提交／记录一次、持锁时不写数据库、媒体预检和 SQL 故障不发布 token，以及真实服务的合成候选采用／辅助文件故障／重复采用拒绝／共享历史撤销和采用保护。仅使用临时目录、合成 provider／媒体占位和数据库，无模型或云端调用，未修改正式数据。
 
 共享库全量 181 passed／5 环境依赖 ignored；Tauri check、根目录及 Tauri fmt／diff 通过。Tauri fmt 首次提示新增调用换行，格式化后重查通过；未重跑前端或打包安装。旧 IPC／前端数组历史尚未切换，不能宣称旧 UI 的元数据丢失已修复。下一步迁移命令与唯一 UI token 历史，并显示预算变化／提交后 warning；原生、性能与 Windows 门禁保留。日志在 `local-artifacts/editor-shared-undo-session-20261026/`；正式 1020e05、QA 2950a6d 未替换。
+
+## 2026-10-26：结构 token IPC 与唯一前端历史
+
+结构提交／撤销命令统一接入 StructureEditSession，Rust DTO 要求 Cut／Join 的 expectedRevision，撤销只接受 jobId／token 并拒绝客户端恢复快照／来源字段。旧结构写入、confirm_retranscription 和数组恢复命令已移出桌面注册表；legacy repository／服务仍保持非 UI 兼容。前端移除结构数组历史，缓存最新描述符并通过后端返回值连续撤销；任务重开按需恢复 token。结构／撤销同时更新上下文过期 ID；预算淘汰、超大项和提交后 warning 明确显示，超大项不宣称仍可撤销。
+
+新 state 命令只读字幕与 revision，不加载原始证据。Cut／Join 在 flush 后占用前端 busy，核对按需返回的字幕与当前访问／选段，再发送 revision；后台提交仍受 SQLite revision 保护。旧 state 读取不能覆盖新记录或文字保存，文字／翻译／词表改动使本地描述符失效；请求不自动重试，迟到提交仍保留后端历史并在重开后读取，不涂改新访问。
+
+共享库 182 passed／5 环境依赖 ignored，桌面 Rust 35 passed／4 ignored，前端 274 项及类型／生产构建通过。八组 WebKit（structure-timing、insert、time-save、processing、token-history、time-navigation、gestures、timeline）验证连续 Cut／Join 撤销、插入／删除、草稿／IME／时间保护、模拟失败／重试、候选冲突与迟到返回、token 重开／仅 token 撤销、文字保存失效、warning 和超预算提示。全部使用合成静音、候选及 IPC；来源与依赖的真实 SQLite 恢复由共享库回归覆盖，不将二者拼接为原生端到端证明。
+
+迁移中首次前端检查发现已删除用途的 action 局部变量并移除，首次桌面重编译发现注册表末尾残留 save_subtitle_timing 并移除；更新旧测试合同后重查通过。gestures／timeline 首次因默认 1420 端口连接失败，以 ATOGAKI_EDITOR_URL 显式指向当前 1430 后重跑通过，失败日志保留。日志及源码摘要在 `local-artifacts/editor-recorded-ipc-20261026/`。
+
+正式 1020e05、QA 2950a6d 未替换。下一步构建隔离原生候选并核对实际提交前后 cue／来源／依赖／revision，验证重启 token 失效、拖动、候选采用及连续撤销；性能长时、多规模与 Windows 门禁保留。

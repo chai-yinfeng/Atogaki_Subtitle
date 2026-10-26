@@ -1,4 +1,5 @@
-import type { createEditorBackend } from "./editor-backend";
+import type { createStructureEditBackend } from "./editor-structure-backend";
+import type { StructureEditResult } from "./editor-structure-types";
 import type { SubtitleSegment } from "./editor-types";
 
 type Context = {
@@ -10,9 +11,9 @@ type Options = {
   available(): boolean; dirty(): boolean; flush(): Promise<boolean>;
   lock(): void; positionMs(): number; time(ms: number): string;
   busy(value: boolean): void; status(message: string, error?: boolean): void;
-  remember(before: SubtitleSegment[], after: SubtitleSegment[], label: string, jobId: string): void;
-  apply(segments: SubtitleSegment[], selectedId: string): void;
-  backend: Pick<ReturnType<typeof createEditorBackend>, "split" | "merge">;
+  remember(result: StructureEditResult, jobId: string): string;
+  apply(result: StructureEditResult, selectedId: string): void;
+  backend: Pick<ReturnType<typeof createStructureEditBackend>, "split" | "merge" | "state">;
 };
 function joinedText(left: string, right: string, language: string): string {
   const leftText = left.trim(), rightText = right.trim();
@@ -56,25 +57,31 @@ export function createEditorStructureActions(options: Options) {
       if (kind === "join" && left.end_ms !== right.start_ms) {
         options.status("两块之间存在空白；请保留为两个字幕块，或先独立修剪到同一边界。", true); return;
       }
-      const before = context.segments.map(cue => ({ ...cue }));
       ownsBusy = true; options.busy(true);
+      const expected = JSON.stringify(context.segments);
+      const state = await options.backend.state(context.jobId);
+      const now = current(context);
+      if (!now || now.selectedId !== context.selectedId) return;
+      if (options.dirty() || JSON.stringify(now.segments) !== expected || JSON.stringify(state.segments) !== expected) {
+        options.status("字幕已变化，请保存当前草稿并重新打开任务后重试。", true); return;
+      }
       options.status(kind === "cut"
         ? `正在播放头 ${options.time(boundary)} 切开第 ${left.segment_index + 1} 段…`
         : `正在连接第 ${left.segment_index + 1}、${right.segment_index + 1} 段…`);
       const after = kind === "cut"
-        ? await options.backend.split({ jobId: context.jobId, segmentId: left.id, boundaryMs: boundary,
+        ? await options.backend.split({ jobId: context.jobId, expectedRevision: state.workspace_revision, segmentId: left.id, boundaryMs: boundary,
           leftSourceText: left.source_text, rightSourceText: left.source_text,
           leftTranslatedText: left.translated_text, rightTranslatedText: left.translated_text })
-        : await options.backend.merge({ jobId: context.jobId, leftSegmentId: left.id, rightSegmentId: right.id,
+        : await options.backend.merge({ jobId: context.jobId, expectedRevision: state.workspace_revision, leftSegmentId: left.id, rightSegmentId: right.id,
           sourceText: joinedText(left.source_text, right.source_text, context.sourceLanguage),
           translatedText: left.translated_text && right.translated_text
             ? joinedText(left.translated_text, right.translated_text, context.targetLanguage) : null });
       if (!current(context)) return;
-      options.remember(before, after, kind === "cut" ? `第 ${left.segment_index + 1} 段 Cut` : `第 ${left.segment_index + 1}、${right.segment_index + 1} 段 Join`, context.jobId);
+      const notice = options.remember(after, context.jobId);
       options.apply(after, left.id);
-      options.status(kind === "cut"
+      options.status((kind === "cut"
         ? "已在播放头切开；为保证连续播放观感，文字暂时复制到两块，请在当前编辑框继续整理。 "
-        : "已连接相接的字幕块；文字已顺序拼接。 ");
+        : "已连接相接的字幕块；文字已顺序拼接。 ") + notice);
     } catch (error) {
       if (current(opened)) options.status(`${kind === "cut" ? "切开" : "连接"}失败：${String(error)}`, true);
     } finally { release(); preparing = false; }

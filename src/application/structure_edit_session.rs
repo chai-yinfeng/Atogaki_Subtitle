@@ -29,6 +29,13 @@ pub struct StructureEditResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct StructureEditState {
+    pub segments: Vec<LocalSubtitleSegmentRecord>,
+    pub workspace_revision: i64,
+    pub latest: Option<StructureUndoDescriptor>,
+}
+
 #[derive(Clone)]
 pub struct StructureEditSession {
     database: LocalDatabase,
@@ -46,6 +53,20 @@ impl StructureEditSession {
             database,
             history: Arc::new(Mutex::new(StructureUndoHistory::default())),
         }
+    }
+    /// On-demand state for reopening a task or preparing a revision-guarded edit.
+    /// Text saves need not change their existing per-cue response contract.
+    pub async fn state(&self, job: &str) -> Result<StructureEditState> {
+        let history = self.history.lock().await;
+        let (workspace_revision, segments) = self.database.subtitle_workspace_snapshot(job).await?;
+        let latest = history
+            .latest(job)
+            .filter(|entry| entry.expected_revision == workspace_revision);
+        Ok(StructureEditState {
+            segments,
+            workspace_revision,
+            latest,
+        })
     }
     pub async fn latest(&self, job: &str) -> Option<StructureUndoDescriptor> {
         self.history.lock().await.latest(job)

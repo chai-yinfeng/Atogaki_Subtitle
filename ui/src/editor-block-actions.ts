@@ -1,4 +1,5 @@
-import type { createEditorBackend } from "./editor-backend";
+import type { createStructureEditBackend } from "./editor-structure-backend";
+import type { StructureEditResult } from "./editor-structure-types";
 import type { SubtitleSegment } from "./editor-types";
 
 type Identity = { jobId: string; navigation: number };
@@ -7,10 +8,10 @@ type Options = {
   context(): Context | null; available(): boolean; dirty(): boolean; flush(): Promise<boolean>;
   pause(): void; seek(ms: number): void;
   confirm(options: { title: string; message: string; confirmLabel: string; danger: boolean }): Promise<boolean>;
-  backend: Pick<ReturnType<typeof createEditorBackend>, "editBlock">;
+  backend: Pick<ReturnType<typeof createStructureEditBackend>, "editBlock">;
   busy(value: boolean): void; status(message: string, error?: boolean): void;
-  remember(before: SubtitleSegment[], after: SubtitleSegment[], label: string, jobId: string): void;
-  apply(segments: SubtitleSegment[], selectedId?: string): void;
+  remember(result: StructureEditResult, jobId: string): string;
+  apply(result: StructureEditResult, selectedId?: string): void;
 };
 const notExecuted = "操作未执行，请先完成当前编辑后重试。";
 const changed = "字幕或编辑内容已变化，未删除；请核对后重试。";
@@ -37,10 +38,10 @@ export function createEditorBlockActions(options: Options) {
     ownsBusy = true; options.busy(true);
     const after = await options.backend.editBlock(context.jobId, before, confirmed?.id ?? null, insertion);
     if (current(identity)) {
-      options.remember(before, after, confirmed ? "删除字幕块" : "插入字幕块", context.jobId);
-      options.apply(after, insertion?.id ?? after[0]?.id);
+      const notice = options.remember(after, context.jobId);
+      options.apply(after, insertion?.id ?? after.segments[0]?.id);
       if (insertion) options.seek(insertion.start_ms);
-      options.status("已保存，可用“撤销上次打轴”撤回；仅实际依赖被删除块的机器译文需要核对。");
+      options.status(`已保存${after.undo.latest ? "，可用“撤销上次打轴”撤回" : ""}；仅实际依赖被删除块的机器译文需要核对。${notice}`);
     }
     return null;
   };
@@ -70,7 +71,7 @@ export function createEditorBlockActions(options: Options) {
         if (!cue) { options.status("请先选择要删除的字幕块。", true); return; }
         const confirmed = { ...cue };
         options.pause();
-        if (!await options.confirm({ title: "删除当前字幕块？", message: "删除原文、译文及此块时间范围；不会移动其他字幕。学习收藏保留来源快照。当前会话可用“撤销上次打轴”恢复。", confirmLabel: "删除字幕块", danger: true })) return;
+        if (!await options.confirm({ title: "删除当前字幕块？", message: "删除原文、译文及此块时间范围；不会移动其他字幕。学习收藏保留来源快照。当前会话可用“撤销上次打轴”恢复，历史受内存预算限制。", confirmLabel: "删除字幕块", danger: true })) return;
         const now = current(opened);
         if (!now) return;
         if (!unchanged(now, confirmed)) { options.status(changed, true); return; }

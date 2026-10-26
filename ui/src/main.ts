@@ -1,6 +1,8 @@
 import { mountActionConfirmation, type ActionConfirmation } from "./action-confirmation";
 import { createEditorBlockActions } from "./editor-block-actions";
-import { createEditorStructureHistory } from "./editor-structure-history";
+import { createStructureEditBackend } from "./editor-structure-backend";
+import type { StructureEditResult, StructureUndoResult } from "./editor-structure-types";
+import { structureEditNotice, createEditorStructureHistory } from "./editor-structure-history";
 import { createEditorStructureActions } from "./editor-structure-actions";
 import { mountInsertSubtitleBlock } from "./insert-subtitle-block";
 import { createMediaRelinkBackend } from "./media-relink-backend";
@@ -709,6 +711,7 @@ let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
 const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
 const editorBackend = createEditorBackend(invoke);
+const structureBackend = createStructureEditBackend(invoke);
 const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(editorBackend.updateText, updateSubtitleDraftUI);
 
 let workspaceActionBusy = false;
@@ -832,11 +835,13 @@ const subtitleTranslation = createSubtitleTranslation<JobDetail>({
   },
   acceptSegments: cues => {
     if (!activeDetail) return;
+    editorStructureHistory.invalidate(activeDetail.job.job_id);
     activeDetail.segments = cues; renderSubtitleListPreservingView(cues);
     updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
   },
   acceptDetail: detail => {
     if (!activeDetail) return;
+    editorStructureHistory.invalidate(activeDetail.job.job_id);
     activeDetail.job = detail.job; activeDetail.segments = detail.segments;
     activeDetail.translation_runs = detail.translation_runs;
     activeDetail.translation_context_stale_ids = detail.translation_context_stale_ids;
@@ -1038,11 +1043,11 @@ async function saveEditorCueTime(): Promise<void> {
   const after = before.map(item => item.id === cue.id ? { ...item, start_ms: startMs, end_ms: endMs } : item);
   setEditorMutationBusy(true);
   try {
-    const saved = await editorBackend.saveTiming(jobId, before, after);
-    rememberStructureEdit(before, saved, "手动调整时间", jobId);
-    if (activeDetail?.job.job_id !== jobId) return;
-    applySubtitleStructure(saved, cue.id); setSubtitleEditAction("时间已保存，未移动相邻字幕。");
-  } catch (error) { setSubtitleEditAction(`时间保存失败：${String(error)}`, true); }
+    const saved = await structureBackend.saveTiming(jobId, before, after);
+    if (activeDetail?.job.job_id !== jobId || navigationRequestId !== navigation) return;
+    const notice = rememberStructureEdit(saved, jobId);
+    applyStructureResult(saved, cue.id); setSubtitleEditAction("时间已保存，未移动相邻字幕。" + notice);
+  } catch (error) { if (activeDetail?.job.job_id === jobId && navigationRequestId === navigation) setSubtitleEditAction(`时间保存失败：${String(error)}`, true); }
   finally { setEditorMutationBusy(false); }
 }
 const insertBlockView = mountInsertSubtitleBlock(shell!, {
@@ -1068,7 +1073,6 @@ const editorProcessing = createEditorProcessing({
   backend: processingBackend,
   context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
   visible: () => editorRepairDialog.open || !!retranscriptionDialog?.open,
-  segments: () => activeDetail?.segments ?? [],
   busyChanged: (busy, phase) => {
     if (previewRetranscriptionButton) previewRetranscriptionButton.disabled = busy;
     if (confirmRetranscriptionButton) confirmRetranscriptionButton.disabled = busy;
@@ -1078,13 +1082,13 @@ const editorProcessing = createEditorProcessing({
   },
   mutationLock: setEditorMutationBusy,
   previewed: showRetranscriptionPreview,
-  adopted: (before, after, preview, signalId) => {
-    rememberStructureEdit(before, after, `局部重新识别 ${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)}`, preview.job_id);
-    applySubtitleStructure(after, preview.candidate_segments[0]?.id);
+  adopted: (result, preview, signalId) => {
+    const notice = rememberStructureEdit(result, preview.job_id);
+    applyStructureResult(result, preview.candidate_segments[0]?.id);
     candidateTool.close(); activeRepairSignalId = null;
     candidateHistory.adopted(preview.preview_id);
     if (signalId) void saveAsrReviewDecision(signalId, "resolved");
-    setSubtitleEditAction(`已替换所选范围为 ${preview.candidate_segments.length} 段新识别字幕；新段需要重新翻译，可用会话撤销恢复。`);
+    setSubtitleEditAction(`已替换所选范围为 ${preview.candidate_segments.length} 段新识别字幕；新段需要重新翻译。${notice || " 可用会话撤销恢复。"}`);
   },
   status: setRetranscriptionMessage,
   comparisonStatus: message => { if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = message; },
@@ -2871,6 +2875,7 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
     if (!detail.segments.length || !matchesTerminalStatus(detail.job.status)) { await openJob(jobId, "review"); return; }
     activeDetail = detail;
     editorSession.open(jobId, detail.segments);
+    void editorStructureHistory.refresh();
     editorTimeFingerprint = "";
     editorSearch.value = editorSession.query; editorFilter.value = editorSession.filter;
     asrQualitySignals = [];
@@ -3134,20 +3139,21 @@ async function commitKaraokeTimingDrag(drag: TimingGesture<SubtitleSegment>): Pr
   setSubtitleEditAction("正在原子保存字幕块时间…");
   setEditorMutationBusy(true);
   try {
-    const saved = await editorBackend.saveTiming(jobId, before, after);
-    if (!activeDetail || activeDetail.job.job_id !== jobId) return;
-    const segment = saved[drag.segmentIndex];
-    const action = drag.mode === "move" ? "移动" : drag.mode === "start" ? "入点调整" : "出点调整";
-    rememberStructureEdit(before, saved, `第 ${segment.segment_index + 1} 段${action}`);
-    activeDetail.segments = saved;
-    editorSession.reconcile(saved, segment.id);
+    const saved = await structureBackend.saveTiming(jobId, before, after);
+    if (!activeDetail || activeDetail.job.job_id !== jobId || navigationRequestId !== navigation) return;
+    const segment = saved.segments[drag.segmentIndex];
+    const notice = rememberStructureEdit(saved, jobId);
+    activeDetail.translation_context_stale_ids = saved.translation_context_stale_ids;
+    activeDetail.segments = saved.segments;
+    editorSession.reconcile(saved.segments, segment.id);
     currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList();
     updateStructureUndoButton();
     syncKaraokeWaveformStatus();
     updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
     renderKaraokeTimeline();
-    setSubtitleEditAction(`第 ${segment.segment_index + 1} 段已保存为 ${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)}；相邻空白保持不变。`);
+    setSubtitleEditAction(`第 ${segment.segment_index + 1} 段已保存为 ${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)}；相邻空白保持不变。${notice}`);
   } catch (error) {
+    if (activeDetail?.job.job_id !== jobId || navigationRequestId !== navigation) return;
     renderKaraokeTimeline();
     setSubtitleEditAction(`边界保存失败：${String(error)}`, true);
   } finally { setEditorMutationBusy(false); }
@@ -3260,12 +3266,12 @@ const editorBlockActions = createEditorBlockActions({
     selectedId: editorSession.selectedCueId, segments: activeDetail.segments,
   } : null,
   available: () => !workspaceActionBusy, dirty: () => currentCueEditor.dirty,
-  flush: flushEditorStructureDrafts, backend: editorBackend,
+  flush: flushEditorStructureDrafts, backend: structureBackend,
   pause: () => mediaPlayer.media?.pause(),
   seek: milliseconds => { seekTo(milliseconds, false); updateActiveSubtitle(milliseconds); },
   confirm: options => { editorRoot.querySelector<HTMLElement>(".editor-menu > summary")?.focus(); return confirmAction(options); },
   busy: setEditorMutationBusy, status: setSubtitleEditAction,
-  remember: rememberStructureEdit, apply: applySubtitleStructure,
+  remember: rememberStructureEdit, apply: applyStructureResult,
 });
 async function openInsertSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
@@ -3291,7 +3297,7 @@ const editorStructureActions = createEditorStructureActions({
   flush: flushEditorStructureDrafts, lock: lockEditorCue,
   positionMs: () => (mediaPlayer.media?.currentTime ?? 0) * 1_000, time: formatPreciseTime,
   busy: setEditorMutationBusy, status: setSubtitleEditAction,
-  remember: rememberStructureEdit, apply: applySubtitleStructure, backend: editorBackend,
+  remember: rememberStructureEdit, apply: applyStructureResult, backend: structureBackend,
 });
 async function cutKaraokeSegmentAtPlayhead(): Promise<void> { await editorStructureActions.cut(); }
 async function joinKaraokeSegmentWithNext(): Promise<void> { await editorStructureActions.join(); }
@@ -3435,8 +3441,8 @@ const editorStructureHistory = createEditorStructureHistory({
     selectedId: editorSession.selectedCueId, segments: activeDetail.segments,
   } : null,
   available: () => !workspaceActionBusy, dirty: () => currentCueEditor.dirty,
-  flush: flushEditorStructureDrafts, backend: editorBackend,
-  busy: setEditorMutationBusy, status: setSubtitleEditAction, apply: applySubtitleStructure,
+  flush: flushEditorStructureDrafts, backend: structureBackend,
+  busy: setEditorMutationBusy, status: setSubtitleEditAction, apply: applyStructureResult,
   changed: updateStructureUndoButton,
   clearTextHistory: jobId => {
     for (const key of subtitleUndoHistory.keys()) if (key.startsWith(`${jobId}:`)) subtitleUndoHistory.delete(key);
@@ -3449,8 +3455,14 @@ function updateStructureUndoButton(): void {
   undoSubtitleStructureButton.title = state.available
     ? `撤销${state.label}` : "当前会话还没有可撤销的打轴或结构修改";
 }
-function rememberStructureEdit(before: SubtitleSegment[], after: SubtitleSegment[], label: string, jobId = activeDetail?.job.job_id): void {
-  if (jobId) editorStructureHistory.remember(before, after, label, jobId);
+function rememberStructureEdit(result: StructureEditResult, jobId: string): string {
+  editorStructureHistory.remember(result, jobId);
+  return structureEditNotice(result);
+}
+function applyStructureResult(result: StructureEditResult | StructureUndoResult, selectedId?: string): void {
+  if (!activeDetail) return;
+  activeDetail.translation_context_stale_ids = result.translation_context_stale_ids;
+  applySubtitleStructure(result.segments, selectedId);
 }
 
 function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?: string): void {
@@ -3475,7 +3487,7 @@ async function undoSubtitleStructure(): Promise<void> { await editorStructureHis
 function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleSegment): void {
   try { localStorage.setItem("atogaki.subtitleDrafts", subtitleDrafts.snapshot()); } catch { /* SQLite autosave still runs. */ }
   const saved = draft.saved;
-  if (before) rememberSubtitleSave(before, saved);
+  if (before) { rememberSubtitleSave(before, saved); editorStructureHistory.invalidate(saved.job_id); }
   if (activeDetail?.job.job_id !== saved.job_id) return;
   if (before) {
     const index = subtitleTimeline(), position = index.position(saved.id);
@@ -3571,6 +3583,7 @@ async function restoreSegment(snapshot: SubtitleSegment): Promise<SubtitleSegmen
 function replaceActiveSegment(updated: SubtitleSegment): void {
   if (!activeDetail) return;
   if (activeDetail.job.job_id !== updated.job_id) return;
+  editorStructureHistory.invalidate(updated.job_id);
   activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
   subtitleDrafts.ensure(updated);
   if (currentArea === "karaoke") { currentCueEditor.sync(karaokeDraftSegment()); renderEditorList(); }
@@ -4211,6 +4224,7 @@ async function applyPreviewedGlossary(): Promise<void> {
       jobId: activeDetail.job.job_id,
       glossaryId: pendingGlossaryPreview.glossary_id,
     });
+    editorStructureHistory.invalidate(activeDetail.job.job_id);
     activeDetail.segments = applied.segments;
     clearGlossaryPreview();
     renderSubtitleListPreservingView(activeDetail.segments);

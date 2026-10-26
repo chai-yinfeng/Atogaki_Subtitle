@@ -42,7 +42,7 @@ const assert=require('node:assert/strict');
   await page.waitForFunction(()=>document.querySelector('#karaoke-timing-message').textContent.includes('时间'));
   assert.equal(await start.isVisible(),true);assert.equal(await start.inputValue(),'00:00:00.200');
   assert.equal(await page.locator('#karaoke-current-source').inputValue(),'leave preflight text');
-  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing').length),0);
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing_recorded').length),0);
   await start.press('Escape');await back.click();await page.locator('.job-open').first().waitFor();
   assert.deepEqual(errors,[]);
   console.log('PASS: pending time blocks navigation before and after text flush; tools retain input, Escape permits leaving, same-task reopen shows saved time');

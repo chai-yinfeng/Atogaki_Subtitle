@@ -1417,13 +1417,13 @@ async fn preview_retranscription(
 }
 
 #[tauri::command]
-async fn confirm_retranscription(
+async fn confirm_retranscription_recorded(
     state: State<'_, DesktopState>,
     request: ConfirmRetranscriptionRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+) -> Result<atogaki_subtitle::application::structure_edit_session::StructureEditResult, String> {
     state
         .retranscription_service
-        .confirm_comparison(
+        .confirm_comparison_recorded(
             &request.job_id,
             &request.preview_id,
             request.comparison_id.as_deref(),
@@ -2206,7 +2206,7 @@ fn main() {
             test_translation_connection,
             save_translation_credential,
             preview_full_retranscription,
-            confirm_retranscription,
+            confirm_retranscription_recorded,
             list_glossaries,
             list_asr_quality_signals,
             list_asr_runs,
@@ -2276,11 +2276,12 @@ fn main() {
             use_learning_dictionary_definition,
             commands::editor::update_subtitle,
             commands::editor::restore_subtitle,
-            commands::editor::split_subtitle,
-            commands::editor::edit_subtitle_block,
-            commands::editor::merge_subtitles,
-            commands::editor::restore_subtitle_structure,
-            commands::editor::save_subtitle_timing
+            commands::editor::get_structure_edit_state,
+            commands::editor::edit_subtitle_block_recorded,
+            commands::editor::split_subtitle_recorded,
+            commands::editor::merge_subtitles_recorded,
+            commands::editor::save_subtitle_timing_recorded,
+            commands::editor::undo_subtitle_structure,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Atogaki desktop application");

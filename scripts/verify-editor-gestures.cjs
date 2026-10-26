@@ -12,7 +12,7 @@ const assert=require('node:assert/strict');
   await p.locator('#karaoke-waveform').evaluate(c=>c.addEventListener('pointerdown',e=>window.__gesturePointer=e.pointerId));
  };
  await open();const canvas=p.locator('#karaoke-waveform');
- const calls=()=>p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing').length);
+ const calls=()=>p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing_recorded').length);
  const box=await canvas.boundingBox(),height=box.height;
  const trackTop=28+Math.max(12,(height-56)*.5)+(height<100?6:14),y=box.y+(trackTop+height-4)/2;
  const state=await p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1).args.request);
@@ -24,7 +24,7 @@ const assert=require('node:assert/strict');
  // Loss of capture cancels every gesture state and must not block another drag.
  await startDrag();await canvas.evaluate(c=>c.releasePointerCapture(window.__gesturePointer));await p.mouse.move(endX-19,y);await p.mouse.up();
  assert.equal(await calls(),0);
- await startDrag();await p.mouse.up();await p.waitForFunction(()=>window.__test.calls.some(c=>c.cmd==='save_subtitle_timing'));
+ await startDrag();await p.mouse.up();await p.waitForFunction(()=>window.__test.calls.some(c=>c.cmd==='save_subtitle_timing_recorded'));
  assert.ok(await p.evaluate(original=>window.__test.cues[0].end_ms<original,original));
  const savedWrites=await calls();
  // Cancelling a later gesture never sends another transaction.

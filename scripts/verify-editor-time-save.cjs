@@ -12,7 +12,7 @@ const assert=require('node:assert/strict');
    window.__TAURI_INTERNALS__.invoke=async(cmd,args={})=>{
     const state=window.__timeSave;
     if(cmd==='update_subtitle'&&state.hold){state.hold=false;await new Promise(resolve=>state.release=resolve);if(state.fail)throw Error('fixture text write failed');}
-    if(cmd==='save_subtitle_timing')state.timing.push(args.request);
+    if(cmd==='save_subtitle_timing_recorded')state.timing.push(args.request);
     return invoke(cmd,args);
    };
   });

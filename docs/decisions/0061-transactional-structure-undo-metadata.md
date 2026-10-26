@@ -37,3 +37,11 @@ StructureUndoHistory 移动持有收据，不复制另一套快照。只允许�
 新增 StructureEditSession 持有数据库及唯一共享 Mutex 历史，锁在事务开始前获取，持有至提交后的同步 record；undo 同锁。返回字幕、revision、过期 ID 来自已提交收据，不另读拼接。工作区克隆及切换 provider 保留会话；候选服务显式注入工作区会话，未配置时 recorded 采用在写入前拒绝。Tauri 已完成注入和删除任务成功后的历史释放。
 
 候选采用沿用共同的预检／证据读取和辅助标记 helper，artifact 锁先于会话锁；撤销不获取 artifact 锁。台账与字幕／收据提交后，修复状态或 adopted.json 写入失败只返回 warning，不把已提交结果和 undo token 隐藏为一般失败。旧接口仍保留原错误合同，前端尚未切换；下一步迁移 IPC 和唯一 UI 历史，不把本阶段视为正式 App 已修复。
+
+## 2026-10-26 IPC 与唯一前端历史切换
+
+当前源码的全部桌面结构写入与撤销已走共享会话，旧数组恢复和旧结构写入 IPC 已从注册表移除。前端只缓存最新 token／标签，来源快照只由后端持有。提交／恢复结果同步应用字幕与上下文过期 ID；预算淘汰、超大项及提交后 warning 均显式呈现。文字撤回维持原独立范围。
+
+由于文字自动保存保持单 cue 响应，新增 get_structure_edit_state 按需返回同一 SQLite 读取事务的字幕与 revision，并在会话锁下匹配最新描述符。任务重开时只同步匹配当前字幕的 token；Cut／Join 在 flush 后获取 state，核对等待期间的内容、选段和访问后携带 expectedRevision 提交，后台变更仍由 repository 拒绝。前端 state 请求有代次，旧读取不能覆盖新提交或文字保存。该路径不轮询任务或原始 ASR 证据；新增读取的初始打开／大任务耗时仍属于后续性能门禁。
+
+单元／WebKit 已验证 token-only 请求、连续撤销、重开、文字保存失效、预算／warning 与迟到访问保护；正式和 QA 安装包未替换，新的真实 Tauri／SQLite 原生链路仍待验收，不从合成 IPC 推导已完成原生修复。

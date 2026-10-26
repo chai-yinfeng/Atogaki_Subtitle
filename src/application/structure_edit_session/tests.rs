@@ -170,3 +170,45 @@ async fn media_preflight_and_transaction_failure_never_publish_tokens() {
     assert_eq!(db.list_segments(&job).await.unwrap(), success.segments);
     close(root, db).await;
 }
+
+#[tokio::test]
+async fn state_pairs_rows_and_revision_and_hides_history_invalidated_by_text_save() {
+    let (root, db, job) = fixture().await;
+    let session = StructureEditSession::new(db.clone());
+    let initial = session.state(&job).await.unwrap();
+    assert!(initial.latest.is_none());
+    let mut after = initial.segments.clone();
+    after[0].end_ms = 900;
+    let saved = session
+        .save_timing(&job, &initial.segments, &after)
+        .await
+        .unwrap();
+    let state = session.state(&job).await.unwrap();
+    assert_eq!(state.segments, saved.segments);
+    assert_eq!(state.workspace_revision, saved.workspace_revision);
+    assert_eq!(state.latest, saved.undo.latest);
+    let cue = &state.segments[0];
+    db.update_segment(
+        &job,
+        &cue.id,
+        "new text".into(),
+        cue.translated_text.clone(),
+        cue.start_ms,
+        cue.end_ms,
+    )
+    .await
+    .unwrap();
+    let changed = session.state(&job).await.unwrap();
+    assert!(changed.workspace_revision > state.workspace_revision);
+    assert_eq!(changed.segments[0].source_text, "new text");
+    assert!(changed.latest.is_none());
+    assert!(
+        session
+            .undo(&job, &state.latest.unwrap().token)
+            .await
+            .is_err()
+    );
+    assert_eq!(session.stats().await.entries, 1); // conflicts retain the receipt, but don't advertise it as current.
+    assert!(session.state("missing").await.is_err());
+    close(root, db).await;
+}

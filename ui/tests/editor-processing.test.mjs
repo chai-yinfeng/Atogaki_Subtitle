@@ -19,10 +19,10 @@ test('closed tools and same-job navigation invalidate candidate presentation',as
  const h=harness(),a=h.processing.previewFull();h.hide();h.requests[0].resolve(preview());await a;assert.equal(h.processing.preview,null);
  const b=h.processing.previewFull();h.setContext({jobId:'a',navigation:3});h.requests[1].resolve(preview());await b;assert.equal(h.events.some(e=>e[0]==='preview'),false);
 });
-test('adoption snapshots input and retains the originating quality signal',async()=>{
+test('adoption forwards the committed token, warnings and originating quality signal',async()=>{
  const h=harness(),p=h.processing.previewRange(range);h.requests[0].resolve(preview());await p;
  const a=h.processing.adopt();h.segments[0].source_text='later';assert.equal(h.processing.adopting,true);
- h.requests[1].resolve([{id:'new'}]);await a;const adopted=h.events.find(e=>e[0]==='adopt');assert.equal(adopted[1][0].source_text,'before');assert.equal(adopted[4],'signal');assert.equal(h.processing.preview,null);assert.deepEqual(h.events.filter(e=>e[0]==='lock'),[['lock',true],['lock',false]]);
+ const result={segments:[{id:'new'}],workspace_revision:42,translation_context_stale_ids:['consumer'],undo:{latest:{token:'opaque',label:'采用识别候选',expected_revision:42},discarded_entries:0,oversized:false},warnings:['marker failed']};h.requests[1].resolve(result);await a;const adopted=h.events.find(e=>e[0]==='adopt');assert.equal(adopted[1],result);assert.equal(adopted[3],'signal');assert.equal(h.processing.preview,null);assert.deepEqual(h.events.filter(e=>e[0]==='lock'),[['lock',true],['lock',false]]);
 });
 test('late adoption after reset never applies a task snapshot',async()=>{
  const h=harness(),p=h.processing.previewFull();h.requests[0].resolve(preview());await p;const a=h.processing.adopt();h.processing.reset();h.setContext({jobId:'b',navigation:2});h.requests[1].resolve([]);await a;assert.equal(h.events.some(e=>e[0]==='adopt'),false);

@@ -22,9 +22,9 @@ const assert=require('node:assert/strict');
  await p.waitForFunction(before=>window.__test.cues[0].end_ms<before,before,{timeout:5000});
  assert.equal(await p.locator('[data-editor-action="follow"]').getAttribute('aria-pressed'),'false');
  assert.match(await p.locator('[data-cue-id="cue-0"]').getAttribute('class'),/selected/);
- assert.ok(await p.evaluate(()=>window.__test.calls.some(c=>c.cmd==='save_subtitle_timing')));
+ assert.ok(await p.evaluate(()=>window.__test.calls.some(c=>c.cmd==='save_subtitle_timing_recorded')));
  // Refusing a selection must also refuse its timeline drag, not just the list click.
- const writes=await p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing').length);
+ const writes=await p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing_recorded').length);
  const dragOther=async()=>{
   const x=box.x+(4400-window.startMs)/(window.endMs-window.startMs)*box.width;
   await p.mouse.move(x,y);await p.mouse.down();await p.mouse.move(x+12,y,{steps:2});await p.mouse.up();
@@ -36,7 +36,7 @@ const assert=require('node:assert/strict');
  await p.locator('#karaoke-current-source').evaluate(input=>input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true})));
  await dragOther();
  assert.match(await p.locator('[data-cue-id="cue-0"]').getAttribute('class'),/selected/);
- assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing').length),writes);
+ assert.equal(await p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing_recorded').length),writes);
  await p.locator('#karaoke-current-source').evaluate(input=>input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
  await p.locator('[data-editor-toggle="waveform"]').click();
  await p.waitForTimeout(100);

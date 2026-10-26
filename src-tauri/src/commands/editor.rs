@@ -2,6 +2,10 @@
 //! persistence, revisions and transactions; this module owns wire DTOs only.
 use std::path::PathBuf;
 
+use atogaki_subtitle::application::{
+    structure_edit_session::{StructureEditResult, StructureEditState},
+    structure_undo_history::StructureHistoryUndo,
+};
 use atogaki_subtitle::infrastructure::{
     local_db::{LocalSubtitleSegmentRecord, LocalTranslationRunRecord},
     waveform::WaveformWindow,
@@ -32,8 +36,8 @@ pub(crate) struct EditSubtitleBlockRequest {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SplitSubtitleRequest {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RecordedSplitSubtitleRequest {
     job_id: String,
     segment_id: String,
     boundary_ms: i64,
@@ -41,24 +45,25 @@ pub(crate) struct SplitSubtitleRequest {
     right_source_text: String,
     left_translated_text: Option<String>,
     right_translated_text: Option<String>,
+    expected_revision: i64,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MergeSubtitlesRequest {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RecordedMergeSubtitlesRequest {
     job_id: String,
     left_segment_id: String,
     right_segment_id: String,
     source_text: String,
     translated_text: Option<String>,
+    expected_revision: i64,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RestoreSubtitleStructureRequest {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UndoStructureRequest {
     job_id: String,
-    before_segments: Vec<LocalSubtitleSegmentRecord>,
-    after_segments: Vec<LocalSubtitleSegmentRecord>,
+    token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,32 +167,50 @@ pub(crate) async fn restore_subtitle(
         .map_err(|error| error.to_string())
 }
 
+// All editor structure operations use the same backend session. No IPC accepts
+// client snapshots for restoring provenance or translation dependencies.
 #[tauri::command]
-pub(crate) async fn edit_subtitle_block(
+pub(crate) async fn get_structure_edit_state(
     state: State<'_, DesktopState>,
-    request: EditSubtitleBlockRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    job_id: String,
+) -> Result<StructureEditState, String> {
     state
         .workspace_service
-        .edit_subtitle_block(
+        .structure_edits()
+        .state(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn edit_subtitle_block_recorded(
+    state: State<'_, DesktopState>,
+    request: EditSubtitleBlockRequest,
+) -> Result<StructureEditResult, String> {
+    state
+        .workspace_service
+        .structure_edits()
+        .edit_block(
             &request.job_id,
             &request.before_segments,
             request.remove_id.as_deref(),
             request.insertion,
         )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub(crate) async fn split_subtitle(
+pub(crate) async fn split_subtitle_recorded(
     state: State<'_, DesktopState>,
-    request: SplitSubtitleRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    request: RecordedSplitSubtitleRequest,
+) -> Result<StructureEditResult, String> {
     state
         .workspace_service
-        .split_subtitle(
+        .structure_edits()
+        .split(
             &request.job_id,
+            request.expected_revision,
             &request.segment_id,
             request.boundary_ms,
             request.left_source_text,
@@ -200,14 +223,16 @@ pub(crate) async fn split_subtitle(
 }
 
 #[tauri::command]
-pub(crate) async fn merge_subtitles(
+pub(crate) async fn merge_subtitles_recorded(
     state: State<'_, DesktopState>,
-    request: MergeSubtitlesRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    request: RecordedMergeSubtitlesRequest,
+) -> Result<StructureEditResult, String> {
     state
         .workspace_service
-        .merge_subtitles(
+        .structure_edits()
+        .merge(
             &request.job_id,
+            request.expected_revision,
             &request.left_segment_id,
             &request.right_segment_id,
             request.source_text,
@@ -218,13 +243,14 @@ pub(crate) async fn merge_subtitles(
 }
 
 #[tauri::command]
-pub(crate) async fn restore_subtitle_structure(
+pub(crate) async fn save_subtitle_timing_recorded(
     state: State<'_, DesktopState>,
-    request: RestoreSubtitleStructureRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    request: SaveSubtitleTimingRequest,
+) -> Result<StructureEditResult, String> {
     state
         .workspace_service
-        .restore_subtitle_structure(
+        .structure_edits()
+        .save_timing(
             &request.job_id,
             &request.before_segments,
             &request.after_segments,
@@ -234,17 +260,14 @@ pub(crate) async fn restore_subtitle_structure(
 }
 
 #[tauri::command]
-pub(crate) async fn save_subtitle_timing(
+pub(crate) async fn undo_subtitle_structure(
     state: State<'_, DesktopState>,
-    request: SaveSubtitleTimingRequest,
-) -> Result<Vec<LocalSubtitleSegmentRecord>, String> {
+    request: UndoStructureRequest,
+) -> Result<StructureHistoryUndo, String> {
     state
         .workspace_service
-        .save_subtitle_timing(
-            &request.job_id,
-            &request.before_segments,
-            &request.after_segments,
-        )
+        .structure_edits()
+        .undo(&request.job_id, &request.token)
         .await
         .map_err(|error| error.to_string())
 }
@@ -298,4 +321,53 @@ fn register_playback_file(
         return Ok(None);
     };
     registry.register(&path).map(Some)
+}
+
+#[cfg(test)]
+mod structure_wire_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn recorded_cut_and_join_require_explicit_workspace_revision() {
+        let mut cut = json!({"jobId":"job","segmentId":"cue","boundaryMs":500,
+            "leftSourceText":"left","rightSourceText":"right",
+            "leftTranslatedText":null,"rightTranslatedText":null});
+        assert!(serde_json::from_value::<RecordedSplitSubtitleRequest>(cut.clone()).is_err());
+        cut["expectedRevision"] = json!(42);
+        let request: RecordedSplitSubtitleRequest = serde_json::from_value(cut.clone()).unwrap();
+        assert_eq!(request.expected_revision, 42);
+        assert_eq!(request.job_id, "job");
+        cut["sourceRunId"] = json!("forged");
+        assert!(serde_json::from_value::<RecordedSplitSubtitleRequest>(cut).is_err());
+        let mut join = json!({"jobId":"job","leftSegmentId":"left","rightSegmentId":"right",
+            "sourceText":"joined","translatedText":null});
+        assert!(serde_json::from_value::<RecordedMergeSubtitlesRequest>(join.clone()).is_err());
+        join["expectedRevision"] = json!(43);
+        assert_eq!(
+            serde_json::from_value::<RecordedMergeSubtitlesRequest>(join)
+                .unwrap()
+                .expected_revision,
+            43
+        );
+    }
+
+    #[test]
+    fn undo_accepts_only_task_and_opaque_token_not_client_snapshots() {
+        let request: UndoStructureRequest =
+            serde_json::from_value(json!({"jobId":"job","token":"opaque"})).unwrap();
+        assert_eq!(request.token, "opaque");
+        assert!(
+            serde_json::from_value::<UndoStructureRequest>(
+                json!({"jobId":"job","beforeSegments":[],"afterSegments":[]})
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<UndoStructureRequest>(
+                json!({"jobId":"job","token":"opaque","provenance":[]})
+            )
+            .is_err()
+        );
+    }
 }

@@ -1,4 +1,4 @@
-import type { SubtitleSegment } from "./editor-types";
+import type { StructureEditResult } from "./editor-structure-types";
 import type { AsrQualitySignal, CandidateProgress, PreviewRequest, RetranscriptionPreview, ReviewDecision } from "./editor-processing-types";
 
 type Context = { jobId: string; navigation: number };
@@ -9,7 +9,7 @@ type Backend = {
   full(jobId: string): Promise<RetranscriptionPreview>;
   refresh(jobId: string, runId: string): Promise<RetranscriptionPreview>;
   reopen(jobId: string, runId: string): Promise<RetranscriptionPreview>;
-  adopt(jobId: string, previewId: string, comparisonId: string | null): Promise<SubtitleSegment[]>;
+  adopt(jobId: string, previewId: string, comparisonId: string | null): Promise<StructureEditResult>;
   cancel(jobId: string): Promise<void>;
   progress(jobId: string): Promise<CandidateProgress | null>;
   signals(jobId: string): Promise<AsrQualitySignal[]>;
@@ -19,11 +19,10 @@ type Options = {
   backend: Backend;
   context(): Context | null;
   visible(): boolean;
-  segments(): readonly SubtitleSegment[];
   busyChanged(busy: boolean, phase: Phase | null): void;
   mutationLock(locked: boolean): void;
   previewed(preview: RetranscriptionPreview): void;
-  adopted(before: SubtitleSegment[], after: SubtitleSegment[], preview: RetranscriptionPreview, signalId: string | null): void;
+  adopted(result: StructureEditResult, preview: RetranscriptionPreview, signalId: string | null): void;
   status(message: string, error?: boolean): void;
   comparisonStatus(message: string, error?: boolean): void;
   time(ms: number): string;
@@ -118,13 +117,12 @@ export function createEditorProcessing(options: Options, timers: Timers = {
       const context = options.context(), selected = preview;
       if (!context || !selected || context.jobId !== selected.job_id) return;
       const ticket = begin("adopt", previewSignalId); if (!ticket) return;
-      const before = options.segments().map(cue => ({ ...cue }));
       options.comparisonStatus("正在原子替换所选范围…");
       try {
         const after = await options.backend.adopt(ticket.jobId, selected.preview_id, selected.comparison_id ?? null);
         if (!current(ticket) || preview !== selected) return;
         preview = null; finish(ticket);
-        options.adopted(before, after, selected, ticket.signalId);
+        options.adopted(after, selected, ticket.signalId);
       } catch (error) { if (current(ticket)) options.comparisonStatus(`替换失败：${String(error)}`, true); }
       finally { finish(ticket); }
     },

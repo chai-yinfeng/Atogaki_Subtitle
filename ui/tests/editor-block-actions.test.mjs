@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEditorBlockActions } from '../src/editor-block-actions.ts';
-import { createEditorBackend } from '../src/editor-backend.ts';
+import { createStructureEditBackend } from '../src/editor-structure-backend.ts';
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 const cue=(id='left',start=0)=>({id,job_id:'a',segment_index:0,start_ms:start,end_ms:start+1000,source_text:'source',translated_text:'译文',source_edited:false,translation_edited:false,translation_stale:false,timing_edited:false});
 const identity={jobId:'a',navigation:1};
@@ -11,18 +11,18 @@ function harness(){
  const actions=createEditorBlockActions({
   context:()=>{assert.equal(dead,false,'disposed module must not read context');return ctx;},available:()=>available,dirty:()=>dirty,flush:()=>flush(),
   confirm:async value=>{confirmations.push(value);return confirm();},pause:()=>pauses++,seek:value=>seeks.push(value),
-  backend:createEditorBackend(async(command,args)=>{calls.push({command,args});return work(args);}),
-  busy:value=>{locks.push(value);available=!value;},status:(...args)=>messages.push(args),remember:(...args)=>history.push(args),apply:(...args)=>applied.push(args),
+  backend:createStructureEditBackend(async(command,args)=>{calls.push({command,args});const segments=await work(args);return {segments,workspace_revision:42,translation_context_stale_ids:[],undo:{latest:{token:"token",label:args.request.removeId?"删除字幕块":"插入字幕块",expected_revision:42},discarded_entries:0,oversized:false},warnings:[]};}),
+  busy:value=>{locks.push(value);available=!value;},status:(...args)=>messages.push(args),remember:(...args)=>{history.push(args);return "";},apply:(...args)=>applied.push(args),
  });
  return {actions,calls,messages,locks,history,applied,seeks,confirmations,get pauses(){return pauses;},get ctx(){return ctx;},change:value=>ctx={...ctx,...value},flush:value=>flush=value,confirm:value=>confirm=value,work:value=>work=value,dirty:value=>dirty=value,deny:()=>dead=true};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 test('insertion uses original block IPC and history, snapshots submitted cue before draft flush, then seeks selected new block',async()=>{
  const h=harness(),pending=deferred(),insertion=cue('new',1200);h.flush(()=>pending.promise);const run=h.actions.insert(identity,insertion);insertion.source_text='later';pending.resolve(true);assert.equal(await run,null);
- assert.deepEqual(h.calls,[{command:'edit_subtitle_block',args:{request:{jobId:'a',beforeSegments:[cue()],removeId:null,insertion:cue('new',1200)}}}]);assert.equal(h.applied[0][1],'new');assert.deepEqual(h.seeks,[1200]);assert.equal(h.history[0][2],'插入字幕块');assert.deepEqual(h.locks,[true,false]);
+ assert.deepEqual(h.calls,[{command:'edit_subtitle_block_recorded',args:{request:{jobId:'a',beforeSegments:[cue()],removeId:null,insertion:cue('new',1200)}}}]);assert.equal(h.applied[0][1],'new');assert.deepEqual(h.seeks,[1200]);assert.equal(h.history[0][0].undo.latest.label,'插入字幕块');assert.deepEqual(h.locks,[true,false]);
 });
 test('confirmed deletion uses exact original cue and current before snapshot, no seek, same history',async()=>{
- const h=harness();await h.actions.deleteSelected();assert.equal(h.pauses,1);assert.equal(h.confirmations[0].danger,true);assert.deepEqual(h.calls,[{command:'edit_subtitle_block',args:{request:{jobId:'a',beforeSegments:[cue()],removeId:'left',insertion:null}}}]);assert.equal(h.history[0][2],'删除字幕块');assert.deepEqual(h.seeks,[]);assert.deepEqual(h.locks,[true,false]);
+ const h=harness();await h.actions.deleteSelected();assert.equal(h.pauses,1);assert.equal(h.confirmations[0].danger,true);assert.deepEqual(h.calls,[{command:'edit_subtitle_block_recorded',args:{request:{jobId:'a',beforeSegments:[cue()],removeId:'left',insertion:null}}}]);assert.equal(h.history[0][0].undo.latest.label,'删除字幕块');assert.deepEqual(h.seeks,[]);assert.deepEqual(h.locks,[true,false]);
 });
 test('changed visit, task, selection, saved content or new draft while confirmation waits cancels the old deletion',async()=>{
  for(const change of [{jobId:'b'},{navigation:2},{selectedId:'other'},{segments:[{...cue(),source_text:'new saved text'}]},'dirty']){

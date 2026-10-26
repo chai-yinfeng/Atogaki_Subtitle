@@ -23,10 +23,10 @@ module.exports.installProcessingFixture = async page => {
     test.previews[args.runId]=value;return defer('refresh',args.jobId,value);
    }
    if(cmd==='reopen_asr_candidate'){if(test.failReopen)throw Error('candidate payload unavailable');return defer('reopen',args.jobId,test.previews[args.runId]);}
-   if(cmd==='confirm_retranscription'){
+   if(cmd==='confirm_retranscription_recorded'){
     if(test.confirmConflict)throw Error('revision conflict: workspace changed');
-    const jobId=args.request.jobId,after=segments(jobId).map((c,i)=>i?{...c}:{...c,source_text:`采用 ${jobId}`,source_edited:true});
-    await defer('adopt',jobId,null);test.adopted.push(args.request.previewId);segments(jobId).splice(0,segments(jobId).length,...after);return after;
+    const jobId=args.request.jobId,before=structuredClone(segments(args.request.jobId)),after=segments(jobId).map((c,i)=>i?{...c}:{...c,source_text:`采用 ${jobId}`,source_edited:true});
+    await defer('adopt',jobId,null);test.adopted.push(args.request.previewId);segments(jobId).splice(0,segments(jobId).length,...after);return test.recordStructure(before,'采用识别候选',jobId);
    }
    if(cmd==='asr_candidate_progress')return defer('progress',args.jobId,{phase:'transcribing',completed_ms:1000,duration_ms:2800});
    if(cmd==='list_asr_quality_signals')return defer('signals',args.jobId,structuredClone(test.signals??result));

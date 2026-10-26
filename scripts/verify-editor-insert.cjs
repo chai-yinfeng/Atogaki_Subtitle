@@ -8,18 +8,14 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
   await page.addInitScript(()=>{
    const invoke=window.__TAURI_INTERNALS__.invoke,state=window.__insert={calls:[],hold:true,release:null};
    window.__TAURI_INTERNALS__.invoke=async(cmd,args={})=>{
-    if(cmd==='restore_subtitle_structure'){
-     const cues=window.__test.cues;cues.splice(0,cues.length,...args.request.beforeSegments.map(cue=>({...cue})));
-     return cues.map(cue=>({...cue}));
-    }
-    if(cmd!=='edit_subtitle_block')return invoke(cmd,args);
+    if(cmd!=='edit_subtitle_block_recorded')return invoke(cmd,args);
     state.calls.push(args.request);
     if(state.hold)await new Promise((resolve,reject)=>state.release=fail=>fail?reject(Error('fixture disk full')):resolve());
-    const cues=window.__test.cues,r=args.request;
+    const cues=window.__test.cues,r=args.request,before=structuredClone(window.__test.cues);
     if(r.insertion)cues.push(r.insertion);
     if(r.removeId){const index=cues.findIndex(cue=>cue.id===r.removeId);if(index<0)throw Error('fixture missing delete target');cues.splice(index,1);}
     cues.sort((a,b)=>a.start_ms-b.start_ms);cues.forEach((cue,i)=>cue.segment_index=i);
-    return cues.map(cue=>({...cue}));
+    return window.__test.recordStructure(before,r.removeId?'删除字幕块':'插入字幕块',r.jobId);
    };
   });
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();

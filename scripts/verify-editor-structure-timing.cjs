@@ -13,18 +13,19 @@ const assert=require('node:assert/strict');
    window.__TAURI_INTERNALS__.invoke=async(cmd,args={})=>{
     const s=window.__structure;
     if(cmd==='update_subtitle'&&s.hold){s.hold=false;await new Promise(resolve=>s.release=resolve);}
-    if(['split_subtitle','merge_subtitles','edit_subtitle_block','restore_subtitle_structure'].includes(cmd)){
+    if(['split_subtitle_recorded','merge_subtitles_recorded','edit_subtitle_block_recorded','undo_subtitle_structure'].includes(cmd)){
      s.calls.push(cmd);const r=args.request;
-     if(cmd==='split_subtitle')test.cues.splice(0,1,{...test.cues[0],end_ms:r.boundaryMs},{...test.cues[0],id:'split-right',start_ms:r.boundaryMs});
-     if(cmd==='merge_subtitles'){
+     if(cmd==='undo_subtitle_structure')return base(cmd,args);
+     const before=structuredClone(test.cues);
+     if(cmd==='split_subtitle_recorded')test.cues.splice(0,1,{...test.cues[0],end_ms:r.boundaryMs},{...test.cues[0],id:'split-right',start_ms:r.boundaryMs});
+     if(cmd==='merge_subtitles_recorded'){
       const index=test.cues.findIndex(c=>c.id===r.leftSegmentId),left=test.cues[index],right=test.cues[index+1];
       const adjacent=right?.id===r.rightSegmentId&&left.end_ms===right.start_ms;
       if(!adjacent)throw Error('fixture merge requires adjacent requested cues');
       test.cues.splice(index,2,{...left,end_ms:right.end_ms,source_text:r.sourceText,translated_text:r.translatedText});
      }
-     if(cmd==='restore_subtitle_structure')test.cues.splice(0,test.cues.length,...r.beforeSegments);
      test.cues.forEach((cue,index)=>cue.segment_index=index);
-     return test.cues.map(c=>({...c}));
+     return test.recordStructure(before,cmd==='split_subtitle_recorded'?'Cut':'Join',r.jobId);
     }
     return base(cmd,args);
    };
@@ -55,7 +56,7 @@ const assert=require('node:assert/strict');
   const edge=box.x+(3000-view.startMs)/(view.endMs-view.startMs)*box.width;
   const trackTop=28+Math.max(12,(box.height-56)*.5)+(box.height<100?6:14),trackY=box.y+(trackTop+box.height-4)/2;
   await page.mouse.move(edge-2,trackY);await page.mouse.down();await page.mouse.move(edge-17,trackY,{steps:2});await page.mouse.up();
-  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing').length),0);
+  assert.equal(await page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='save_subtitle_timing_recorded').length),0);
   assert.equal(await start.inputValue(),'00:00:00.100');assert.match(await notice.innerText(),/先保存时间/);
   await open();await page.evaluate(()=>window.__structure.hold=true);
   await page.locator('#karaoke-current-source').fill('structure flush text');await action('cut');
@@ -63,15 +64,15 @@ const assert=require('node:assert/strict');
   await page.waitForFunction(()=>document.querySelector('#karaoke-timing-message').textContent.includes('先保存时间'));
   assert.equal(await page.evaluate(()=>window.__structure.calls.length),0);assert.equal(await start.inputValue(),'00:00:00.200');
   await start.press('Escape');await action('cut');await page.waitForFunction(()=>window.__structure.calls.length===1);
-  assert.equal(await page.evaluate(()=>window.__structure.calls[0]),'split_subtitle');
+  assert.equal(await page.evaluate(()=>window.__structure.calls[0]),'split_subtitle_recorded');
   await page.waitForFunction(()=>document.querySelector('#karaoke-timing-message').textContent.includes('已在播放头切开'));
   await action('join');await page.waitForFunction(()=>document.querySelector('#karaoke-timing-message').textContent.includes('已连接相接'));
   assert.equal(await page.evaluate(()=>window.__test.cues.length),30);
-  await action('undo');await page.waitForFunction(()=>document.querySelector('#karaoke-timing-message').textContent.includes('已撤销第 1、2 段 Join'));
+  await action('undo');await page.waitForFunction(()=>document.querySelector('#karaoke-timing-message').textContent.includes('已撤销Join'));
   assert.equal(await page.evaluate(()=>window.__test.cues.length),31);
-  await action('undo');await page.waitForFunction(()=>document.querySelector('#karaoke-timing-message').textContent.includes('已撤销第 1 段 Cut'));
+  await action('undo');await page.waitForFunction(()=>document.querySelector('#karaoke-timing-message').textContent.includes('已撤销Cut'));
   assert.equal(await page.evaluate(()=>window.__test.cues.length),30);
-  assert.deepEqual(await page.evaluate(()=>window.__structure.calls),['split_subtitle','merge_subtitles','restore_subtitle_structure','restore_subtitle_structure']);
+  assert.deepEqual(await page.evaluate(()=>window.__structure.calls),['split_subtitle_recorded','merge_subtitles_recorded','undo_subtitle_structure','undo_subtitle_structure']);
   const candidate=await browser.newPage({viewport:{width:1180,height:760}});candidate.on('pageerror',e=>errors.push(String(e)));
   await require('./editor-processing-fixture.cjs').installProcessingFixture(candidate);
   await candidate.goto(url);await candidate.locator('.job-open').first().click();

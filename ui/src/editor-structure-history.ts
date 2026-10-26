@@ -1,23 +1,26 @@
 import type { SubtitleSegment } from "./editor-types";
-import type { createEditorBackend } from "./editor-backend";
+import type { createStructureEditBackend } from "./editor-structure-backend";
+import type { StructureEditResult, StructureUndoDescriptor, StructureUndoResult } from "./editor-structure-types";
 
 type Context = { jobId: string; navigation: number; selectedId: string | null; segments: readonly SubtitleSegment[] };
-type Entry = { before: SubtitleSegment[]; after: SubtitleSegment[]; label: string };
 type Options = {
   context(): Context | null; available(): boolean; dirty(): boolean; flush(): Promise<boolean>;
-  backend: Pick<ReturnType<typeof createEditorBackend>, "restoreStructure">;
+  backend: Pick<ReturnType<typeof createStructureEditBackend>, "undo" | "state">;
   busy(value: boolean): void; status(message: string, error?: boolean): void;
-  apply(segments: SubtitleSegment[], selectedId?: string): void;
+  apply(result: StructureUndoResult, selectedId?: string): void;
   clearTextHistory(jobId: string): void; changed(): void;
 };
-const clone = (segments: readonly SubtitleSegment[]) => segments.map(cue => ({ ...cue }));
-const fingerprint = (segments: readonly SubtitleSegment[]) => JSON.stringify(segments);
+export function structureEditNotice(result: Pick<StructureEditResult, "undo" | "warnings">): string {
+  const notices = [...result.warnings];
+  if (result.undo.oversized) notices.push("本次修改已保存，但超过撤销内存预算，无法撤销；本任务之前的结构历史已清除。");
+  else if (result.undo.discarded_entries) notices.push(`已释放 ${result.undo.discarded_entries} 条较早或失效的结构历史；可撤销范围以当前按钮为准。`);
+  return notices.length ? ` ${notices.join(" ")}` : "";
+}
 
-/** The only structure history: per-job, at most ten entries, app-session only.
- * Restore still uses the existing atomic Rust comparison and transaction. */
+/** UI caches only the latest opaque descriptor. Backend owns the sole bounded history. */
 export function createEditorStructureHistory(options: Options) {
-  const histories = new Map<string, Entry[]>();
-  let disposed = false, preparing = false, ownsBusy = false;
+  const latest = new Map<string, StructureUndoDescriptor>();
+  let disposed = false, preparing = false, ownsBusy = false, generation = 0;
   const current = (context: Context) => {
     if (disposed) return null;
     const now = options.context();
@@ -25,43 +28,52 @@ export function createEditorStructureHistory(options: Options) {
   };
   const release = () => { if (ownsBusy) { ownsBusy = false; options.busy(false); } };
   return {
-    remember(before: readonly SubtitleSegment[], after: readonly SubtitleSegment[], label: string, jobId: string) {
+    remember(result: StructureEditResult, jobId: string) {
       if (disposed) return;
-      const history = histories.get(jobId) ?? [];
-      history.push({ before: clone(before), after: clone(after), label });
-      if (history.length > 10) history.shift();
-      histories.set(jobId, history);
+      generation++;
+      if (result.undo.discarded_entries) latest.clear();
+      if (result.undo.latest) latest.set(jobId, { ...result.undo.latest }); else latest.delete(jobId);
       options.clearTextHistory(jobId);
+    },
+    invalidate(jobId: string) { if (disposed) return; generation++; latest.delete(jobId); options.changed(); },
+    async refresh() {
+      if (disposed) return;
+      const opened = options.context(); if (!opened) return;
+      const request = ++generation;
+      latest.delete(opened.jobId); options.changed();
+      try {
+        const state = await options.backend.state(opened.jobId), now = current(opened);
+        if (!now || request !== generation) return;
+        if (JSON.stringify(now.segments) === JSON.stringify(state.segments) && state.latest) latest.set(opened.jobId, { ...state.latest });
+      } catch { /* A missing session/history is never an invitation to restore client snapshots. */ }
+      finally { if (current(opened) && request === generation) options.changed(); }
     },
     presentation() {
       if (disposed) return { available: false, label: "" };
-      const context = options.context(), entry = context && histories.get(context.jobId)?.at(-1);
-      return { available: !!(context && entry && !preparing && fingerprint(context.segments) === fingerprint(entry.after)), label: entry?.label ?? "" };
+      const context = options.context(), entry = context && latest.get(context.jobId);
+      return { available: !!(entry && !preparing), label: entry?.label ?? "" };
     },
     async undo() {
       if (disposed || preparing || !options.available()) return;
-      const opened = options.context();
-      if (!opened) return;
-      const history = histories.get(opened.jobId), entry = history?.at(-1);
-      if (!entry) return;
+      const opened = options.context(); if (!opened) return;
+      const entry = latest.get(opened.jobId); if (!entry) return;
       preparing = true; options.changed();
       try {
         if (!await options.flush()) return;
         const context = current(opened);
         if (!context || context.selectedId !== opened.selectedId || !options.available()) return;
         if (options.dirty()) { options.status("撤销打轴前请先保存或放弃当前文字修改。", true); return; }
-        if (history?.at(-1) !== entry || fingerprint(context.segments) !== fingerprint(entry.after)) {
+        if (latest.get(context.jobId) !== entry) {
           options.status("字幕或撤销历史已变化，请核对当前内容后重试。", true); return;
         }
         ownsBusy = true; options.busy(true);
-        const restored = await options.backend.restoreStructure(context.jobId, clone(entry.before), clone(entry.after));
+        const restored = await options.backend.undo(context.jobId, entry.token);
         if (!current(context)) return;
-        // Never pop a newer entry if another completed operation recorded one.
-        const index = history.indexOf(entry);
-        if (index >= 0) history.splice(index, 1);
-        if (history.length === 0) histories.delete(context.jobId);
+        generation++;
+        if (restored.discarded_entries) latest.clear();
+        if (restored.latest) latest.set(context.jobId, { ...restored.latest }); else latest.delete(context.jobId);
         options.apply(restored, context.selectedId ?? undefined);
-        options.status(`已撤销${entry.label}。撤销历史只在当前 App 会话内保留。`);
+        options.status(`已撤销${entry.label}。撤销历史只在当前 App 会话内保留。${restored.discarded_entries ? ` 已释放 ${restored.discarded_entries} 条失效或超出预算的历史。` : ""}`);
       } catch (error) {
         if (current(opened)) options.status(`无法撤销结构修改：${String(error)}`, true);
       } finally {
@@ -69,6 +81,6 @@ export function createEditorStructureHistory(options: Options) {
         if (!disposed) options.changed();
       }
     },
-    dispose() { if (disposed) return; disposed = true; release(); histories.clear(); },
+    dispose() { if (disposed) return; disposed = true; generation++; release(); latest.clear(); },
   };
 }
