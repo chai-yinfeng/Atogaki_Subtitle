@@ -135,6 +135,7 @@ pub enum LocalSubtitleExportArtifact {
 #[derive(Debug, Clone)]
 pub struct LocalWorkspaceService {
     database: LocalDatabase,
+    structure_edits: super::structure_edit_session::StructureEditSession,
     translation_provider: Arc<dyn TranslationProvider>,
     translation_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
@@ -164,6 +165,9 @@ impl LocalWorkspaceService {
         translation_provider: Arc<dyn TranslationProvider>,
     ) -> Self {
         Self {
+            structure_edits: super::structure_edit_session::StructureEditSession::new(
+                database.clone(),
+            ),
             database,
             translation_provider,
             translation_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -173,9 +177,14 @@ impl LocalWorkspaceService {
     pub fn using_provider(&self, provider: Arc<dyn TranslationProvider>) -> Self {
         Self {
             database: self.database.clone(),
+            structure_edits: self.structure_edits.clone(),
             translation_provider: provider,
             translation_locks: Arc::clone(&self.translation_locks),
         }
+    }
+
+    pub fn structure_edits(&self) -> super::structure_edit_session::StructureEditSession {
+        self.structure_edits.clone()
     }
 
     pub async fn playback_position(&self, job_id: &str) -> Result<i64> {
@@ -348,18 +357,12 @@ impl LocalWorkspaceService {
         remove_id: Option<&str>,
         insertion: Option<LocalSubtitleSegmentRecord>,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
-        if let Some(block) = &insertion {
-            let record = self
-                .database
-                .get_job(job_id)
-                .await?
-                .ok_or_else(|| anyhow!("task not found"))?;
-            let job = Job::open(record.storage_dir.into())?;
-            let duration = crate::application::acoustic_plan::wav_duration(&job.audio_wav)?;
-            if block.end_ms < 0 || block.end_ms as u64 > duration {
-                return Err(anyhow!("字幕范围超过媒体时长"));
-            }
-        }
+        super::structure_edit_session::validate_block_media(
+            &self.database,
+            job_id,
+            insertion.as_ref(),
+        )
+        .await?;
         self.database
             .edit_subtitle_block(job_id, before, remove_id, insertion)
             .await

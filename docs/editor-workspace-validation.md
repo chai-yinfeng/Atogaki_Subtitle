@@ -660,3 +660,11 @@ ASR run 和合成证据字节仍在，采用台账使 asr_run_is_protected 保�
 undo 只接受该任务最新 token，数据库失败保留记录；成功后消费收据并用真实恢复结果重绑定前一项，返回最新 token／revision／过期 ID。释放任务、清空或新建会话不会改写 SQLite，旧 token 不再可用。队首索引不会积累失效记录，重新绑定后重新核算容量；对外不序列化原始来源快照。调用者必须以共同门闩包住提交与 record、undo；此管理器尚未挂入旧 WorkspaceService、候选服务或 IPC，旧 UI 数组历史仍是当前唯一启用的历史。
 
 专项七项通过，共享库全量 176 passed／5 环境依赖 ignored，example 构建、Tauri check、两套 fmt／diff 通过。原生 App、前端和 IPC 未改，未重跑前端或安装；六组同程序合成内存测量并非原生长期内存门禁。下一步接入共享服务门闩及 token 返回，再迁移前端与原生验收。日志、测量与 manifest 在 `local-artifacts/editor-undo-budget-20261026/`；正式 1020e05、QA 2950a6d 保持。
+
+## 2026-10-26：共享结构编辑会话与候选接线
+
+新增 StructureEditSession，在同一个会话锁下执行结构数据库提交、移动记录收据及撤销。工作区 clone／using_provider 共享历史；插入的 WAV 时长预检与旧入口共用。候选服务共用工作区会话，沿用原候选验证与证据读取，artifact → session → SQLite 锁顺序；采用的辅助标记失败返回已提交结果、token 和 warning，采用保护继续由事务内台账决定。Tauri 启动注入同一会话，删除任务成功后等待门闩并释放历史。
+
+五项新增隔离回归覆盖服务克隆与连续撤销、同快照并发只提交／记录一次、持锁时不写数据库、媒体预检和 SQL 故障不发布 token，以及真实服务的合成候选采用／辅助文件故障／重复采用拒绝／共享历史撤销和采用保护。仅使用临时目录、合成 provider／媒体占位和数据库，无模型或云端调用，未修改正式数据。
+
+共享库全量 181 passed／5 环境依赖 ignored；Tauri check、根目录及 Tauri fmt／diff 通过。Tauri fmt 首次提示新增调用换行，格式化后重查通过；未重跑前端或打包安装。旧 IPC／前端数组历史尚未切换，不能宣称旧 UI 的元数据丢失已修复。下一步迁移命令与唯一 UI token 历史，并显示预算变化／提交后 warning；原生、性能与 Windows 门禁保留。日志在 `local-artifacts/editor-shared-undo-session-20261026/`；正式 1020e05、QA 2950a6d 未替换。

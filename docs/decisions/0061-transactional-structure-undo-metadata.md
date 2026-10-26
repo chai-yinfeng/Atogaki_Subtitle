@@ -31,3 +31,9 @@ recorded Cut／Join 核对 expected workspace revision；时间调整继续核�
 全局按最早记录的任务队首淘汰，只删除最老可撤销项；若外部修改打断收据连续性，则从新操作建立新链。单份已提交操作超过预算时不暴露 token，清除该任务旧历史，保留其他任务历史与已提交数据；返回 oversized／discarded 信息，后续 UI 必须明确呈现可撤销范围。不能回退到一个无法跨过未记录操作的旧 token。
 
 StructureUndoHistory 移动持有收据，不复制另一套快照。只允许该任务最新 token 撤销，失败保留收据以重试；成功后用真实结果重绑定前一项，不能重绑定则释放旧链。任务删除／会话清空释放收据与索引，新会话不恢复 token。应用服务必须以同一门闩串行化“写入＋record”和 undo；当前管理器已独立实现，尚未挂入旧 WorkspaceService 或 UI。
+
+## 2026-10-26 共享服务接入
+
+新增 StructureEditSession 持有数据库及唯一共享 Mutex 历史，锁在事务开始前获取，持有至提交后的同步 record；undo 同锁。返回字幕、revision、过期 ID 来自已提交收据，不另读拼接。工作区克隆及切换 provider 保留会话；候选服务显式注入工作区会话，未配置时 recorded 采用在写入前拒绝。Tauri 已完成注入和删除任务成功后的历史释放。
+
+候选采用沿用共同的预检／证据读取和辅助标记 helper，artifact 锁先于会话锁；撤销不获取 artifact 锁。台账与字幕／收据提交后，修复状态或 adopted.json 写入失败只返回 warning，不把已提交结果和 undo token 隐藏为一般失败。旧接口仍保留原错误合同，前端尚未切换；下一步迁移 IPC 和唯一 UI 历史，不把本阶段视为正式 App 已修复。

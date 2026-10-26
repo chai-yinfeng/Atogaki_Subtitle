@@ -890,7 +890,13 @@ async fn delete_job(state: State<'_, DesktopState>, job_id: String) -> Result<()
         .task_service
         .delete_persisted_job(&job_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    state
+        .workspace_service
+        .structure_edits()
+        .forget_job(&job_id)
+        .await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -2097,7 +2103,8 @@ fn main() {
                 config.whisper_cli.clone(),
                 database.clone(),
             )
-            .with_stage_scheduler(task_service.stage_scheduler());
+            .with_stage_scheduler(task_service.stage_scheduler())
+            .with_structure_edits(workspace_service.structure_edits());
             let subtitle_style_service = SubtitleStyleService::new(
                 config.ffmpeg.clone(),
                 workspace_service.clone(),

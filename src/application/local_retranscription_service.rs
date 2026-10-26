@@ -48,6 +48,7 @@ pub struct LocalRetranscriptionService {
     artifact_lock: Arc<Mutex<()>>,
     cancellations: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
     scheduler: Option<Arc<crate::application::stage_scheduler::StageScheduler>>,
+    structure_edits: Option<super::structure_edit_session::StructureEditSession>,
 }
 
 impl LocalRetranscriptionService {
@@ -60,7 +61,17 @@ impl LocalRetranscriptionService {
             artifact_lock: Arc::new(Mutex::new(())),
             cancellations: Arc::new(Mutex::new(HashMap::new())),
             scheduler: None,
+            structure_edits: None,
         }
+    }
+
+    /// Inject the workspace's existing session, created from the same database.
+    pub fn with_structure_edits(
+        mut self,
+        session: super::structure_edit_session::StructureEditSession,
+    ) -> Self {
+        self.structure_edits = Some(session);
+        self
     }
 
     pub fn with_asr_provider(mut self, provider: Arc<dyn AsrProvider>) -> Self {
@@ -656,6 +667,73 @@ impl LocalRetranscriptionService {
         comparison_id: Option<&str>,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         let _guard = self.artifact_lock.lock().await;
+        let (preview, revision, artifacts, cue_set) = self
+            .prepare_adoption(job_id, preview_id, comparison_id)
+            .await?;
+        let updated = self
+            .database
+            .replace_segment_range_with_revision(
+                job_id,
+                preview.start_ms,
+                preview.end_ms,
+                &preview.original_segments,
+                &preview.candidate_segments,
+                Some((preview_id, &cue_set)),
+                Some(revision),
+            )
+            .await?;
+        self.finish_adoption_marks(preview_id, &artifacts).await?;
+        Ok(updated)
+    }
+
+    pub async fn confirm_comparison_recorded(
+        &self,
+        job_id: &str,
+        preview_id: &str,
+        comparison_id: Option<&str>,
+    ) -> Result<super::structure_edit_session::StructureEditResult> {
+        let session = self
+            .structure_edits
+            .as_ref()
+            .ok_or_else(|| anyhow!("shared structure edit session is not configured"))?;
+        // Lock order: artifact gate -> edit session -> SQLite. Undo never takes artifact gate.
+        let _guard = self.artifact_lock.lock().await;
+        let (preview, revision, artifacts, cue_set) = self
+            .prepare_adoption(job_id, preview_id, comparison_id)
+            .await?;
+        let mut updated = session
+            .adopt(
+                job_id,
+                preview.start_ms,
+                preview.end_ms,
+                &preview.original_segments,
+                &preview.candidate_segments,
+                preview_id,
+                &cue_set,
+                revision,
+            )
+            .await?;
+        // The adoption ledger has already committed with the subtitles and receipt.
+        // Losing a supplementary marker must not hide the committed result/token.
+        if let Err(error) = self.finish_adoption_marks(preview_id, &artifacts).await {
+            updated
+                .warnings
+                .push(format!("字幕已采用，但候选状态标记未完成：{error}"));
+        }
+        Ok(updated)
+    }
+
+    async fn prepare_adoption(
+        &self,
+        job_id: &str,
+        preview_id: &str,
+        comparison_id: Option<&str>,
+    ) -> Result<(
+        LocalRetranscriptionPreview,
+        i64,
+        AsrRunArtifacts,
+        CandidateCueSet,
+    )> {
         let preview = if let Some(comparison) = comparison_id {
             uuid::Uuid::parse_str(comparison).context("invalid comparison id")?;
             let record = self
@@ -699,23 +777,19 @@ impl LocalRetranscriptionService {
         let job = Job::open(PathBuf::from(job_record.storage_dir))?;
         let artifacts = AsrRunArtifacts::open(&job, preview_id)?;
         let cue_set = artifacts.read_candidate_cues()?;
-        let updated = self
-            .database
-            .replace_segment_range_with_revision(
-                job_id,
-                preview.start_ms,
-                preview.end_ms,
-                &preview.original_segments,
-                &preview.candidate_segments,
-                Some((preview_id, &cue_set)),
-                Some(revision),
-            )
-            .await?;
+        Ok((preview, revision, artifacts, cue_set))
+    }
+
+    async fn finish_adoption_marks(
+        &self,
+        preview_id: &str,
+        artifacts: &AsrRunArtifacts,
+    ) -> Result<()> {
         self.database
             .mark_asr_repair_attempts_for_run(preview_id, RepairAttemptStatus::Adopted)
             .await?;
         crate::application::acoustic_plan::write_json(&artifacts.dir.join("adopted.json"), &true)?;
-        Ok(updated)
+        Ok(())
     }
 }
 
@@ -787,6 +861,93 @@ mod tests {
             })
         }
     }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn recorded_adoption_shares_workspace_history_and_keeps_token_after_marker_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("atogaki-recorded-service-{}", uuid::Uuid::new_v4()));
+        let job = Job::create_in(&root).unwrap();
+        let ffmpeg = root.join("ffmpeg");
+        fs::write(
+            &ffmpeg,
+            "#!/bin/sh\nfor destination do :; done\n: > \"$destination\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&ffmpeg, fs::Permissions::from_mode(0o755)).unwrap();
+        let original = TranscriptSegment::new(0, 1000, "元の文".into());
+        job.write_segments(&[original]).unwrap();
+        job.write_recognition_options(&TranscriptionOptions::japanese(root.join("model")))
+            .unwrap();
+        fs::write(&job.audio_wav, b"fixture").unwrap();
+        let mut manifest = JobManifest::new(&job, None, None, LanguagePair::default());
+        manifest.mark(JobStatus::Done);
+        job.write_manifest(&manifest).unwrap();
+        let db = LocalDatabase::open(root.join("state.sqlite"))
+            .await
+            .unwrap();
+        db.sync_snapshot(&JobSnapshot::load(&job.dir).unwrap())
+            .await
+            .unwrap();
+        let workspace = LocalWorkspaceService::new(db.clone());
+        let session = workspace.structure_edits();
+        let service = LocalRetranscriptionService::new(ffmpeg, "unused".into(), db.clone())
+            .with_asr_provider(Arc::new(Fixture));
+        let preview = service.preview(&job.id(), 0, 1000).await.unwrap();
+        let before = db.list_segments(&job.id()).await.unwrap();
+        assert!(
+            service
+                .confirm_comparison_recorded(&job.id(), &preview.preview_id, None)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("not configured")
+        );
+        assert_eq!(db.list_segments(&job.id()).await.unwrap(), before);
+        assert_eq!(session.stats().await.entries, 0);
+        let service = service.with_structure_edits(session.clone());
+        let artifacts = AsrRunArtifacts::open(&job, &preview.preview_id).unwrap();
+        // A directory blocks the supplemental JSON write after the SQLite commit.
+        fs::create_dir(artifacts.dir.join("adopted.json")).unwrap();
+        let result = service
+            .confirm_comparison_recorded(&job.id(), &preview.preview_id, None)
+            .await
+            .unwrap();
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("字幕已采用"));
+        assert_eq!(result.segments[0].source_text, "候補");
+        assert_eq!(session.latest(&job.id()).await, result.undo.latest);
+        assert!(db.asr_run_is_protected(&preview.preview_id).await.unwrap());
+        let committed = db.subtitle_workspace_snapshot(&job.id()).await.unwrap();
+        assert!(
+            service
+                .confirm_comparison_recorded(&job.id(), &preview.preview_id, None)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            db.subtitle_workspace_snapshot(&job.id()).await.unwrap(),
+            committed
+        );
+        assert_eq!(session.stats().await.entries, 1);
+        let undo = workspace
+            .structure_edits()
+            .undo(&job.id(), &result.undo.latest.unwrap().token)
+            .await
+            .unwrap();
+        assert_eq!(undo.segments, before);
+        assert!(db.asr_run_is_protected(&preview.preview_id).await.unwrap());
+        assert!(
+            service
+                .release_candidate(&job.id(), &preview.preview_id)
+                .await
+                .is_err()
+        );
+        assert_eq!(session.stats().await.retained_bytes, 0);
+        db.close().await;
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn persisted_candidate_reopens_after_restart_and_rejects_new_edits() {
