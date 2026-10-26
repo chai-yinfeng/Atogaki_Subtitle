@@ -80,3 +80,11 @@ python3 scripts/inventory-local-artifacts.py \
 正式安装 1020e05 后保留上一版 05b2e07 与稳定 0.1.1 两份 App；完整摘要匹配旧清单、保留包签名及正式 20 表验证通过后，清理 `/Applications/.Atogaki.previous.20261023-candidate`（86c46c8），逻辑内容 101,227,093 字节。暂存正式包经原子重命名成为当前 App，没有遗留另一份暂存包。现有 QA App 原位覆盖，没有追加 QA 副本。
 
 本次一致性 SQLite 快照 SHA-256 与 20261023-candidate 完全一致，新恢复路径使用相对链接复用旧 34,852,864 字节文件；没有新增数据副本。保留目录、版本、用途、27 文件校验、轮换前后及快照链接凭据在 `local-artifacts/install-backups/20261025-time-guards/`，隔离原生证据在 `local-artifacts/editor-time-native-1020e05/`。没有清理模型、任务、媒体、采用证据或其他独立恢复点；逻辑内容不视为精确 APFS 空闲增量。
+
+## 2026-10-26：token 原生验收现场
+
+新增临时 QA `/tmp/atogaki-token-native-c360cc9/Atogaki.app`，来自 c360cc9 complete release bundle，签名通过，主程序 SHA-256 为 `dfcfb9455da289fd5e750e7ac19214e17febcac8308982803c9a70874773f2bd`；完整逐文件摘要见 `local-artifacts/editor-token-native-c360cc9/package.json`。这是当前原生 token 验收候选，正式 App 和旧 QA 均保留，新包尚未满足替换门禁。
+
+独立视频现场为 `seed.json` 指向的 atogaki-token-qa-6eb49ab2-b019-49c7-99ec-0744bc68ebb4，另保留默认 WAV 种子的成功复跑目录（见 seed-audio-only.json），用于下一轮上下文状态显示缺口复验。只含合成媒体、字幕、来源和依赖；不是正式数据备份。AX、截图、SQLite 只读阶段 JSON 与核验脚本保留在上述证据目录，不另建整份 App／数据备份。
+
+本轮两个种子失败目录（46efd2ae… 与 b6a035c9…）经路径、ID 和逐文件 checksum／用途核对后清理，共 3,172,916 字节逻辑内容；清单在 failed-fixtures-inventory.json，失败日志保留。它们均为本轮刚生成的合成测试数据，未涉及正式／既有 QA 数据、模型、真实媒体、人工评审、采用证据或恢复点；逻辑字节不等于精确磁盘释放量。

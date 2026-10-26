@@ -680,3 +680,17 @@ undo 只接受该任务最新 token，数据库失败保留记录；成功后消
 迁移中首次前端检查发现已删除用途的 action 局部变量并移除，首次桌面重编译发现注册表末尾残留 save_subtitle_timing 并移除；更新旧测试合同后重查通过。gestures／timeline 首次因默认 1420 端口连接失败，以 ATOGAKI_EDITOR_URL 显式指向当前 1430 后重跑通过，失败日志保留。日志及源码摘要在 `local-artifacts/editor-recorded-ipc-20261026/`。
 
 正式 1020e05、QA 2950a6d 未替换。下一步构建隔离原生候选并核对实际提交前后 cue／来源／依赖／revision，验证重启 token 失效、拖动、候选采用及连续撤销；性能长时、多规模与 Windows 门禁保留。
+
+## 2026-10-26：c360cc9 release 原生 token／元数据验收
+
+使用共享 release target 构建 macOS complete app，严格深度 codesign 验证通过，复制到 `/tmp/atogaki-token-native-c360cc9/Atogaki.app`；正式 `/Applications/Atogaki.app` 和旧 QA 未替换。新增 `examples/seed_structure_undo_qa.rs`，只创建唯一临时目录，通过真实 SQLite/API 创建十段双语、已采用来源和三条依赖；不运行 ASR／翻译模型或云端请求。可选本机 ffmpeg 生成 30 秒 VideoToolbox H.264／静音视频；默认纯 WAV。原生数据目录为 `seed.json` 指向的独立合成目录，UI 首次配置选择稍后再说并确认可见路径。
+
+真实 CUA 窗口操作及只读 SQLite 核对：删除第一段 10→9，依赖 3→1、消费者过期；撤销回十段、三条依赖，所有 cue 字段与 ASR run／timed-unit／时间来源恢复，revision 单调且有效依赖映射到新 revision。接着 Cut→Join（移除实际 ASR 原块）→手动时间保存→三次撤销，各阶段 workspace revision 为 51→63→74→85→96→108→119；最终所有 cue 字段、来源及三条依赖与链前一致，过期标记恢复，integrity_check=ok。
+
+修改恢复的第一段原文后，真实数据库将第三段消费者标为上下文过期，三条边仍存在，证明恢复后的传播有效；但当前列表第三段仍显示已保存，重新打开才显示待重译，见[已定位缺口](editor-context-stale-display-bug.md)。此问题保留为优先修复项，不能把数据恢复通过外推成全部界面通过。
+
+从历史 ASR 对照读取合成替换，通过正式采用事务 10→1、依赖 3→0；离开并重开任务后，后端 token 仍可用。撤销回十段／三条依赖，恢复包括已有 stale 引用的语义，不将过期边刷新为当前；新增采用台账保留。再保存第一段结束时间为 0.900 秒，退出前撤销可用；正常退出重启同一隔离目录后数据／来源／依赖／台账／revision 完全一致，撤销按钮禁用，证明 token 不跨 App 会话恢复。再次正常退出，未留下测试 App 进程。
+
+准备数据时首次错误选择未打包的 libx264，改为 bundled VideoToolbox；第二次暴露种子沿用采用前译文的错误假设，改为采用后通过真实机器翻译 API 填入字幕。两个失败合成目录经 ID／文件清单校验后清理，记录在 failed-fixtures-inventory.json；正式数据、旧 QA 和成功现场保留。原生窗口打开视频时出现 ScreenCaptureKit -3812／-3811，QA 进程仍存活，重新绑定同一窗口后恢复捕获，无需重启 App。一次保存 AX 后索引重编号导致旧按钮索引失效，刷新 AX 后执行，未触发错误数据操作。
+
+package 文件 hash、build／seed 日志、阶段 JSON、只读 snapshot／compare 脚本、AX 和截图在 `local-artifacts/editor-token-native-c360cc9/`。最终可复用种子补上候选 marker，并以默认 WAV 模式复跑成功；本轮视频现场的替换 run 在 UI 标为原始识别，对照／采用使用同一实际服务，不把本轮视为候选清理资格的原生验证。尚未验证原生拖动保存、真实 SQL／磁盘失败恢复、长期性能及 Windows；本轮未替换正式包。
