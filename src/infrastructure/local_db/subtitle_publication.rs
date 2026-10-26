@@ -151,97 +151,17 @@ impl LocalDatabase {
             .begin()
             .await
             .context("failed to begin selected-range replacement transaction")?;
-        ensure_structure_editable(&mut tx, job_id).await?;
-        if let Some(expected) = expected_revision {
-            let current: i64 =
-                sqlx::query_scalar("SELECT workspace_revision FROM local_jobs WHERE job_id = ?")
-                    .bind(job_id)
-                    .fetch_one(&mut *tx)
-                    .await?;
-            if current != expected {
-                return Err(anyhow!(
-                    "subtitle workspace revision changed; refresh the comparison before adoption"
-                ));
-            }
-        }
-        let current = list_segments_in_transaction(&mut tx, job_id).await?;
-        let affected = current
-            .iter()
-            .filter(|segment| segment.start_ms < end_ms && segment.end_ms > start_ms)
-            .cloned()
-            .collect::<Vec<_>>();
-        if affected != expected_segments {
-            return Err(anyhow!(
-                "subtitles changed while the retranscription preview was open"
-            ));
-        }
-        if affected
-            .iter()
-            .any(|segment| segment.start_ms < start_ms || segment.end_ms > end_ms)
-        {
-            return Err(anyhow!(
-                "selected range cuts through an existing subtitle; align or expand the range first"
-            ));
-        }
-
-        let mut replacements = Vec::with_capacity(candidates.len());
-        for candidate in candidates {
-            let candidate_start = to_i64(candidate.start_ms, "candidate start")?;
-            let candidate_end = to_i64(candidate.end_ms, "candidate end")?;
-            if candidate_start < start_ms
-                || candidate_end > end_ms
-                || candidate_end <= candidate_start
-            {
-                return Err(anyhow!(
-                    "retranscription candidate is outside the selected range"
-                ));
-            }
-            replacements.push(LocalSubtitleSegmentRecord {
-                id: candidate.id.clone(),
-                job_id: job_id.to_string(),
-                segment_index: 0,
-                start_ms: candidate_start,
-                end_ms: candidate_end,
-                source_text: candidate.source_text.clone(),
-                translated_text: None,
-                source_edited: false,
-                translation_edited: false,
-                translation_stale: false,
-                timing_edited: false,
-            });
-        }
-        replacements.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
-        if replacements
-            .windows(2)
-            .any(|pair| pair[0].end_ms > pair[1].start_ms)
-        {
-            return Err(anyhow!("retranscription candidates overlap on one track"));
-        }
-
-        let mut updated = current
-            .into_iter()
-            .filter(|segment| segment.end_ms <= start_ms || segment.start_ms >= end_ms)
-            .collect::<Vec<_>>();
-        // Legacy ASR overlaps outside this scope are not caused by adoption.
-        if replacements.iter().any(|candidate| {
-            updated.iter().any(|existing| {
-                candidate.start_ms < existing.end_ms && candidate.end_ms > existing.start_ms
-            })
-        }) {
-            return Err(anyhow!(
-                "selected-range replacement would overlap an adjacent subtitle"
-            ));
-        }
-        updated.extend(replacements);
-        updated.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
-        persist_structure_segments(&mut tx, job_id, &mut updated).await?;
-        if let Some((run_id, candidates)) = asr_provenance {
-            assign_asr_cue_provenance_in_transaction(&mut tx, job_id, run_id, candidates).await?;
-            sqlx::query("INSERT OR IGNORE INTO local_asr_candidate_adoptions(run_id) VALUES (?)")
-                .bind(run_id)
-                .execute(&mut *tx)
-                .await?;
-        }
+        let updated = replace_range_in_transaction(
+            &mut tx,
+            job_id,
+            start_ms,
+            end_ms,
+            expected_segments,
+            candidates,
+            asr_provenance,
+            expected_revision,
+        )
+        .await?;
         tx.commit()
             .await
             .context("failed to commit selected-range replacement")?;
@@ -466,4 +386,107 @@ async fn insert_segment(
     .await
     .context("failed to insert local subtitle segment")?;
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn replace_range_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    start_ms: i64,
+    end_ms: i64,
+    expected_segments: &[LocalSubtitleSegmentRecord],
+    candidates: &[TranscriptSegment],
+    asr_provenance: Option<(&str, &CandidateCueSet)>,
+    expected_revision: Option<i64>,
+) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+    ensure_structure_editable(tx, job_id).await?;
+    if let Some(expected) = expected_revision {
+        let current: i64 =
+            sqlx::query_scalar("SELECT workspace_revision FROM local_jobs WHERE job_id = ?")
+                .bind(job_id)
+                .fetch_one(&mut **tx)
+                .await?;
+        if current != expected {
+            return Err(anyhow!(
+                "subtitle workspace revision changed; refresh the comparison before adoption"
+            ));
+        }
+    }
+    let current = list_segments_in_transaction(tx, job_id).await?;
+    let affected = current
+        .iter()
+        .filter(|segment| segment.start_ms < end_ms && segment.end_ms > start_ms)
+        .cloned()
+        .collect::<Vec<_>>();
+    if affected != expected_segments {
+        return Err(anyhow!(
+            "subtitles changed while the retranscription preview was open"
+        ));
+    }
+    if affected
+        .iter()
+        .any(|segment| segment.start_ms < start_ms || segment.end_ms > end_ms)
+    {
+        return Err(anyhow!(
+            "selected range cuts through an existing subtitle; align or expand the range first"
+        ));
+    }
+
+    let mut replacements = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        let candidate_start = to_i64(candidate.start_ms, "candidate start")?;
+        let candidate_end = to_i64(candidate.end_ms, "candidate end")?;
+        if candidate_start < start_ms || candidate_end > end_ms || candidate_end <= candidate_start
+        {
+            return Err(anyhow!(
+                "retranscription candidate is outside the selected range"
+            ));
+        }
+        replacements.push(LocalSubtitleSegmentRecord {
+            id: candidate.id.clone(),
+            job_id: job_id.to_string(),
+            segment_index: 0,
+            start_ms: candidate_start,
+            end_ms: candidate_end,
+            source_text: candidate.source_text.clone(),
+            translated_text: None,
+            source_edited: false,
+            translation_edited: false,
+            translation_stale: false,
+            timing_edited: false,
+        });
+    }
+    replacements.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
+    if replacements
+        .windows(2)
+        .any(|pair| pair[0].end_ms > pair[1].start_ms)
+    {
+        return Err(anyhow!("retranscription candidates overlap on one track"));
+    }
+
+    let mut updated = current
+        .into_iter()
+        .filter(|segment| segment.end_ms <= start_ms || segment.start_ms >= end_ms)
+        .collect::<Vec<_>>();
+    // Legacy ASR overlaps outside this scope are not caused by adoption.
+    if replacements.iter().any(|candidate| {
+        updated.iter().any(|existing| {
+            candidate.start_ms < existing.end_ms && candidate.end_ms > existing.start_ms
+        })
+    }) {
+        return Err(anyhow!(
+            "selected-range replacement would overlap an adjacent subtitle"
+        ));
+    }
+    updated.extend(replacements);
+    updated.sort_by_key(|segment| (segment.start_ms, segment.end_ms));
+    persist_structure_segments(tx, job_id, &mut updated).await?;
+    if let Some((run_id, candidates)) = asr_provenance {
+        assign_asr_cue_provenance_in_transaction(tx, job_id, run_id, candidates).await?;
+        sqlx::query("INSERT OR IGNORE INTO local_asr_candidate_adoptions(run_id) VALUES (?)")
+            .bind(run_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(updated)
 }

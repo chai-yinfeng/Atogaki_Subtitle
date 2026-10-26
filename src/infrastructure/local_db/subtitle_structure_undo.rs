@@ -4,7 +4,9 @@ use super::subtitle_edits::{
     merge_in_transaction, normalized_optional_subtitle_text, normalized_subtitle_text,
     persist_structure_segments, split_in_transaction, timing_in_transaction,
 };
+use super::subtitle_publication::replace_range_in_transaction;
 use super::{LocalDatabase, LocalSubtitleProvenanceRecord, LocalSubtitleSegmentRecord};
+use crate::{application::CandidateCueSet, domain::TranscriptSegment};
 use anyhow::{Result, ensure};
 use sqlx::{FromRow, Sqlite, Transaction};
 use std::collections::{HashMap, HashSet};
@@ -154,9 +156,13 @@ fn dependencies_by_target(edges: &[Dependency]) -> HashMap<&str, Vec<&Dependency
 
 /// Apply cue-trigger semantics that DELETE/INSERT reconstruction cannot fire.
 /// Only this opt-in path changes versions; legacy callers keep their contract.
-async fn finish_recorded(
+async fn finish_recorded(tx: Transaction<'_, Sqlite>, before: State) -> Result<LocalStructureEdit> {
+    finish_recorded_with_adoption(tx, before, &HashSet::new()).await
+}
+async fn finish_recorded_with_adoption(
     mut tx: Transaction<'_, Sqlite>,
     before: State,
+    adopted_ids: &HashSet<String>,
 ) -> Result<LocalStructureEdit> {
     let changed = capture(&mut tx, &before.job_id).await?;
     let old_cues = before
@@ -183,9 +189,13 @@ async fn finish_recorded(
         .segments
         .iter()
         .filter(|cue| {
-            current_cues
-                .get(cue.id.as_str())
-                .is_none_or(|now| !source_matches(cue, now))
+            current_cues.get(cue.id.as_str()).is_none_or(|now| {
+                !source_matches(cue, now)
+                    || !lineage_matches(
+                        old_provenance[cue.id.as_str()],
+                        current_provenance[cue.id.as_str()],
+                    )
+            })
         })
         .map(|cue| cue.id.as_str())
         .collect::<HashSet<_>>();
@@ -206,7 +216,7 @@ async fn finish_recorded(
         };
         let saved = old_provenance[id];
         let current = current_provenance[id];
-        let source_changed = !source_matches(old, cue);
+        let source_changed = !source_matches(old, cue) || !lineage_matches(saved, current);
         let translation_replaced = old.translated_text != cue.translated_text
             || old.translation_edited != cue.translation_edited;
         let translation_changed = translation_replaced
@@ -226,17 +236,19 @@ async fn finish_recorded(
             current.translation_revision,
             translation_changed,
         )?;
-        let source_kind = if old.source_text != cue.source_text {
+        let source_kind = if old.source_text != cue.source_text && !adopted_ids.contains(id) {
             "manual"
         } else {
             &current.source_kind
         };
-        let timing_source = if old.start_ms != cue.start_ms || old.end_ms != cue.end_ms {
+        let timing_source = if (old.start_ms != cue.start_ms || old.end_ms != cue.end_ms)
+            && !adopted_ids.contains(id)
+        {
             "manual"
         } else {
             &current.timing_source
         };
-        let alignment = if old.source_text != cue.source_text {
+        let alignment = if old.source_text != cue.source_text && !adopted_ids.contains(id) {
             "stale"
         } else {
             &current.alignment_status
@@ -265,6 +277,54 @@ async fn finish_recorded(
 }
 
 impl LocalDatabase {
+    /// Candidate identity is checked before the shared adoption transaction.
+    /// Provenance assignment and its permanent protection ledger commit with the receipt.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn replace_segment_range_recorded(
+        &self,
+        job_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+        expected_segments: &[LocalSubtitleSegmentRecord],
+        candidates: &[TranscriptSegment],
+        asr_provenance: Option<(&str, &CandidateCueSet)>,
+        expected_revision: i64,
+    ) -> Result<LocalStructureEdit> {
+        ensure!(
+            start_ms >= 0 && end_ms > start_ms,
+            "invalid retranscription range"
+        );
+        let adopted_ids = if let Some((_, evidence)) = asr_provenance {
+            ensure!(
+                evidence.cues.len() == candidates.len()
+                    && evidence.cues.iter().zip(candidates).all(|(e, cue)| {
+                        e.cue.id == cue.id
+                            && e.cue.start_ms == cue.start_ms
+                            && e.cue.end_ms == cue.end_ms
+                            && e.cue.source_text == cue.source_text
+                    }),
+                "candidate provenance does not match the replacement cues"
+            );
+            candidates.iter().map(|cue| cue.id.clone()).collect()
+        } else {
+            HashSet::new()
+        };
+        let mut tx = self.pool.begin().await?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let before = capture(&mut tx, job_id).await?;
+        replace_range_in_transaction(
+            &mut tx,
+            job_id,
+            start_ms,
+            end_ms,
+            expected_segments,
+            candidates,
+            asr_provenance,
+            Some(expected_revision),
+        )
+        .await?;
+        finish_recorded_with_adoption(tx, before, &adopted_ids).await
+    }
     /// Opt-in recorded path; legacy callers keep their original return contract.
     pub async fn edit_subtitle_block_recorded(
         &self,
@@ -669,3 +729,6 @@ mod tests {
 
 #[cfg(test)]
 mod operation_tests;
+
+#[cfg(test)]
+mod adoption_tests;

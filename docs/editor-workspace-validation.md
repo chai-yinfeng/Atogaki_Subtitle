@@ -642,3 +642,13 @@ ASR run 和合成证据字节仍在，采用台账使 asr_run_is_protected 保�
 新增隔离链路 Cut→Join（移除一个有 ASR 来源的原块）→调整时间→三次撤销，验证 cue 全量恢复、ASR run／timed-unit／时间来源恢复、所有依赖按新修订映射、旧翻译与旧操作 revision 拒绝，最后修改恢复上下文仍使消费者过期。测试也核对过期 ID 的只读结果。第二项在 Cut／Join／时间的 recorded 元数据阶段分别注入 SQL 失败，确认完整状态、修订、来源和依赖回滚，移除故障后可显式重试。
 
 专项 2 passed，共享库全量 165 passed／5 环境依赖 ignored，Tauri check、两套 fmt／diff 通过。没有前端或 IPC 改动，未重跑前端或打包安装；旧 UI 仍有来源恢复缺口。候选采用、有界会话历史／token 和前端迁移仍未完成，下一步依次接入。日志与摘要在 `local-artifacts/editor-recorded-operations-20261026/`；正式 1020e05、QA 2950a6d 均未替换，性能及原生门禁保留。
+
+## 2026-10-26：候选采用 repository 收据
+
+范围替换抽出共用事务内 helper，原采用函数体在借用／格式归一后 token 等价，原调用仍不额外捕获快照。新增 replace_segment_range_recorded：在同一事务捕获 before、校验 preview revision／范围／原段、替换、赋予 ASR 来源、插入永久采用台账、执行 recorded 收尾并捕获 after，commit 后才产生收据。新路径额外核对证据 ID／时间／原文与替换单元一致，不接受只套用其他 cue 的来源。
+
+收尾明确区分本次已赋予 ASR 来源的 cue；即使沿用旧 ID 且原文或时间改变，也保留新 run／timed-unit／model／current 身份，推进必要修订。原文未变但来源改变时同样推进 source revision，并精确使原机器消费者上下文过期。撤销恢复之前的来源和依赖，保留采用台账及 run 索引；学习已解除的外键不重连，快照仍可读。全部为唯一临时目录中的合成 run／候选和数据库，未运行识别、翻译或真实产物校验。
+
+新增四项回归覆盖新／旧 ID、同文新来源、完整恢复和过期 ID、学习快照、采用后撤销仍受保护，以及旧 revision／截断原段／证据不匹配拒绝。分别在台账插入及台账插入后元数据更新时注入失败，验证字幕、来源、修订、依赖及采用保护一起回滚；去掉故障后可重试。首次编译因 TranscriptSegment 无 PartialEq、测试参数泛型类型不明确失败，改为显式源字段比较和 String 后通过，未改领域类型。
+
+专项 4 passed，共享库全量 169 passed／5 环境依赖 ignored，Tauri check、两套 fmt／diff 通过。新路径尚未接入实际候选服务／IPC／UI，不能据此宣称原生采用已获完整元数据撤销；未重跑前端或重装。下一步先测量快照预算、建立有界后端 token 历史，再迁移唯一前端历史。日志与摘要在 `local-artifacts/editor-recorded-adoption-20261026/`；正式 1020e05、QA 2950a6d 均未替换，性能／原生门禁保持。

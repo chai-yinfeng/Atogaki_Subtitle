@@ -9,7 +9,7 @@ use crate::{
 };
 use std::{fs, path::PathBuf};
 
-async fn fixture() -> (PathBuf, LocalDatabase, State) {
+pub(super) async fn fixture() -> (PathBuf, LocalDatabase, State) {
     let root = std::env::temp_dir().join(format!(
         "atogaki-recorded-operations-{}",
         uuid::Uuid::new_v4()
@@ -80,13 +80,13 @@ async fn fixture() -> (PathBuf, LocalDatabase, State) {
     let before = state(&db, &job.id()).await;
     (root, db, before)
 }
-async fn state(db: &LocalDatabase, job: &str) -> State {
+pub(super) async fn state(db: &LocalDatabase, job: &str) -> State {
     let mut tx = db.pool.begin().await.unwrap();
     let state = capture(&mut tx, job).await.unwrap();
     tx.rollback().await.unwrap();
     state
 }
-async fn close(root: PathBuf, db: LocalDatabase) {
+pub(super) async fn close(root: PathBuf, db: LocalDatabase) {
     db.close().await;
     fs::remove_dir_all(root).unwrap();
 }
