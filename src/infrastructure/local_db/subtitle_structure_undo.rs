@@ -1,12 +1,13 @@
 //! Trusted, transaction-captured undo state. No metadata is deserialized from IPC.
 use super::subtitle_edits::{
     edit_block_in_transaction, ensure_structure_editable, list_segments_in_transaction,
-    persist_structure_segments,
+    merge_in_transaction, normalized_optional_subtitle_text, normalized_subtitle_text,
+    persist_structure_segments, split_in_transaction, timing_in_transaction,
 };
 use super::{LocalDatabase, LocalSubtitleProvenanceRecord, LocalSubtitleSegmentRecord};
 use anyhow::{Result, ensure};
 use sqlx::{FromRow, Sqlite, Transaction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 struct Dependency {
@@ -21,6 +22,15 @@ struct State {
     segments: Vec<LocalSubtitleSegmentRecord>,
     provenance: Vec<LocalSubtitleProvenanceRecord>,
     dependencies: Vec<Dependency>,
+}
+impl State {
+    fn context_stale_ids(&self) -> Vec<String> {
+        self.provenance
+            .iter()
+            .filter(|cue| cue.translation_dependency_stale)
+            .map(|cue| cue.segment_id.clone())
+            .collect()
+    }
 }
 /// Opaque backend receipt, constructible only by a committed repository edit.
 #[derive(Debug, Clone)]
@@ -45,6 +55,12 @@ impl LocalStructureEdit {
     pub fn segments(&self) -> &[LocalSubtitleSegmentRecord] {
         &self.after.segments
     }
+    pub fn workspace_revision(&self) -> i64 {
+        self.after.revision
+    }
+    pub fn translation_context_stale_ids(&self) -> Vec<String> {
+        self.after.context_stale_ids()
+    }
     pub fn rebase_after_undo(
         &mut self,
         undone: &Self,
@@ -61,6 +77,12 @@ impl LocalStructureEdit {
 impl LocalStructureUndoResult {
     pub fn segments(&self) -> &[LocalSubtitleSegmentRecord] {
         &self.state.segments
+    }
+    pub fn workspace_revision(&self) -> i64 {
+        self.state.revision
+    }
+    pub fn translation_context_stale_ids(&self) -> Vec<String> {
+        self.state.context_stale_ids()
     }
 }
 
@@ -130,6 +152,118 @@ fn dependencies_by_target(edges: &[Dependency]) -> HashMap<&str, Vec<&Dependency
     targets
 }
 
+/// Apply cue-trigger semantics that DELETE/INSERT reconstruction cannot fire.
+/// Only this opt-in path changes versions; legacy callers keep their contract.
+async fn finish_recorded(
+    mut tx: Transaction<'_, Sqlite>,
+    before: State,
+) -> Result<LocalStructureEdit> {
+    let changed = capture(&mut tx, &before.job_id).await?;
+    let old_cues = before
+        .segments
+        .iter()
+        .map(|cue| (cue.id.as_str(), cue))
+        .collect::<HashMap<_, _>>();
+    let current_cues = changed
+        .segments
+        .iter()
+        .map(|cue| (cue.id.as_str(), cue))
+        .collect::<HashMap<_, _>>();
+    let old_provenance = before
+        .provenance
+        .iter()
+        .map(|p| (p.segment_id.as_str(), p))
+        .collect::<HashMap<_, _>>();
+    let current_provenance = changed
+        .provenance
+        .iter()
+        .map(|p| (p.segment_id.as_str(), p))
+        .collect::<HashMap<_, _>>();
+    let changed_contexts = before
+        .segments
+        .iter()
+        .filter(|cue| {
+            current_cues
+                .get(cue.id.as_str())
+                .is_none_or(|now| !source_matches(cue, now))
+        })
+        .map(|cue| cue.id.as_str())
+        .collect::<HashSet<_>>();
+    let consumers = before
+        .dependencies
+        .iter()
+        .filter(|edge| changed_contexts.contains(edge.context_segment_id.as_str()))
+        .filter_map(|edge| current_cues.get(edge.target_segment_id.as_str()).copied())
+        .filter(|cue| cue.translated_text.is_some() && !cue.translation_edited)
+        .map(|cue| cue.id.as_str())
+        .collect::<HashSet<_>>();
+    let old_edges = dependencies_by_target(&before.dependencies);
+    let new_edges = dependencies_by_target(&changed.dependencies);
+    for cue in &changed.segments {
+        let id = cue.id.as_str();
+        let Some(old) = old_cues.get(id).copied() else {
+            continue;
+        };
+        let saved = old_provenance[id];
+        let current = current_provenance[id];
+        let source_changed = !source_matches(old, cue);
+        let translation_replaced = old.translated_text != cue.translated_text
+            || old.translation_edited != cue.translation_edited;
+        let translation_changed = translation_replaced
+            || old.translation_stale != cue.translation_stale
+            || old_edges.get(id) != new_edges.get(id)
+            || consumers.contains(id);
+        if !source_changed && !translation_changed {
+            continue;
+        }
+        let source_revision = next_revision(
+            saved.source_revision,
+            current.source_revision,
+            source_changed,
+        )?;
+        let translation_revision = next_revision(
+            saved.translation_revision,
+            current.translation_revision,
+            translation_changed,
+        )?;
+        let source_kind = if old.source_text != cue.source_text {
+            "manual"
+        } else {
+            &current.source_kind
+        };
+        let timing_source = if old.start_ms != cue.start_ms || old.end_ms != cue.end_ms {
+            "manual"
+        } else {
+            &current.timing_source
+        };
+        let alignment = if old.source_text != cue.source_text {
+            "stale"
+        } else {
+            &current.alignment_status
+        };
+        let dependency_stale = !translation_replaced
+            && (current.translation_dependency_stale || consumers.contains(id));
+        sqlx::query("UPDATE local_subtitle_provenance SET source_kind=?,timing_source=?,alignment_status=?,source_revision=?,translation_revision=?,translation_dependency_stale=?,updated_at_unix=? WHERE job_id=? AND segment_id=?")
+            .bind(source_kind).bind(timing_source).bind(alignment).bind(source_revision).bind(translation_revision).bind(dependency_stale)
+            .bind(chrono::Utc::now().timestamp().max(current.updated_at_unix)).bind(&before.job_id).bind(id).execute(&mut *tx).await?;
+        if translation_replaced {
+            sqlx::query("DELETE FROM local_translation_dependency_edges WHERE target_segment_id=?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    // Explicit advancement also covers deletion to an empty workspace.
+    advance(&mut tx, &before.job_id).await?;
+    let after = capture(&mut tx, &before.job_id).await?;
+    tx.commit().await?;
+    Ok(LocalStructureEdit {
+        id: uuid::Uuid::new_v4().to_string(),
+        before,
+        after,
+    })
+}
+
 impl LocalDatabase {
     /// Opt-in recorded path; legacy callers keep their original return contract.
     pub async fn edit_subtitle_block_recorded(
@@ -143,15 +277,91 @@ impl LocalDatabase {
         ensure_structure_editable(&mut tx, job_id).await?;
         let before = capture(&mut tx, job_id).await?;
         edit_block_in_transaction(&mut tx, job_id, expected, remove_id, insertion).await?;
-        // DELETE-to-empty has no insert trigger, but still invalidates old work.
-        advance(&mut tx, job_id).await?;
-        let after = capture(&mut tx, job_id).await?;
-        tx.commit().await?;
-        Ok(LocalStructureEdit {
-            id: uuid::Uuid::new_v4().to_string(),
-            before,
-            after,
-        })
+        finish_recorded(tx, before).await
+    }
+
+    pub async fn split_segment_recorded(
+        &self,
+        job_id: &str,
+        expected_revision: i64,
+        segment_id: &str,
+        boundary_ms: i64,
+        left_source_text: String,
+        right_source_text: String,
+        left_translated_text: Option<String>,
+        right_translated_text: Option<String>,
+    ) -> Result<LocalStructureEdit> {
+        let left_source_text = normalized_subtitle_text(left_source_text, "left source subtitle")?;
+        let right_source_text =
+            normalized_subtitle_text(right_source_text, "right source subtitle")?;
+        let left_translated_text = normalized_optional_subtitle_text(left_translated_text);
+        let right_translated_text = normalized_optional_subtitle_text(right_translated_text);
+        let mut tx = self.pool.begin().await?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let before = capture(&mut tx, job_id).await?;
+        ensure!(
+            before.revision == expected_revision,
+            "subtitle revision changed before Cut"
+        );
+        split_in_transaction(
+            &mut tx,
+            job_id,
+            segment_id,
+            boundary_ms,
+            left_source_text,
+            right_source_text,
+            left_translated_text,
+            right_translated_text,
+        )
+        .await?;
+        finish_recorded(tx, before).await
+    }
+
+    pub async fn merge_adjacent_segments_recorded(
+        &self,
+        job_id: &str,
+        expected_revision: i64,
+        left_id: &str,
+        right_id: &str,
+        source_text: String,
+        translated_text: Option<String>,
+    ) -> Result<LocalStructureEdit> {
+        let source_text = normalized_subtitle_text(source_text, "merged source subtitle")?;
+        let translated_text = normalized_optional_subtitle_text(translated_text);
+        let mut tx = self.pool.begin().await?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let before = capture(&mut tx, job_id).await?;
+        ensure!(
+            before.revision == expected_revision,
+            "subtitle revision changed before Join"
+        );
+        merge_in_transaction(
+            &mut tx,
+            job_id,
+            left_id,
+            right_id,
+            source_text,
+            translated_text,
+        )
+        .await?;
+        finish_recorded(tx, before).await
+    }
+
+    pub async fn save_segment_timing_recorded(
+        &self,
+        job_id: &str,
+        before_segments: &[LocalSubtitleSegmentRecord],
+        after_segments: &[LocalSubtitleSegmentRecord],
+    ) -> Result<LocalStructureEdit> {
+        ensure!(
+            before_segments.len() == after_segments.len(),
+            "timing edits cannot add or remove subtitle segments"
+        );
+        let mut tx = self.pool.begin().await?;
+        ensure_structure_editable(&mut tx, job_id).await?;
+        let before = capture(&mut tx, job_id).await?;
+        timing_in_transaction(&mut tx, job_id, before_segments, after_segments).await?;
+        finish_recorded(tx, before).await
     }
 
     pub async fn undo_recorded_structure(
@@ -456,3 +666,6 @@ mod tests {
         close(root, db).await;
     }
 }
+
+#[cfg(test)]
+mod operation_tests;

@@ -81,7 +81,7 @@ Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有
 
 `editor-structure-history.ts` 持有唯一的结构撤销历史，替代 main 的全局 Map；每任务最多十条 before／after 快照，只在当前 App 会话有效。文字撤回保持独立，记录结构操作时仍清除该任务旧文字撤回记录。撤销先保护文字／时间输入，核对原任务、navigation、选择和最新历史／字幕快照，再经 editor-backend 调用原 restore_subtitle_structure 事务；失败保留历史，迟到返回不应用到新访问。dispose 释放自身 busy 和历史快照，既不持久化历史，也不自动重试后端请求。
 
-完整来源撤销按 [0061](decisions/0061-transactional-structure-undo-metadata.md) 迁移中。`local_db/subtitle_structure_undo.rs` 已提供 opt-in 的事务收据：插入／删除共用原事务内编辑 helper，在同一事务捕获 cue／provenance／依赖／revision。收据和恢复结果不支持反序列化，外部只能读取 token／任务／字幕；恢复严格比较完整 after 状态，单调推进修订并重映射原本有效的依赖，连续撤销需验证收据边界与实际恢复身份。该基础尚未连接应用会话、IPC 或前端；现有数组历史仍是唯一 UI 历史，不能将旧路径宣称为已完整恢复来源。
+完整来源撤销按 [0061](decisions/0061-transactional-structure-undo-metadata.md) 迁移中。`local_db/subtitle_structure_undo.rs` 已提供插入／删除、Cut／Join 和时间调整的 opt-in 事务收据，均共用原事务内编辑 helper并捕获 cue／provenance／依赖／revision。收据和恢复结果不支持反序列化，外部只能读取 token／任务／字幕及同一状态的 revision／上下文过期 ID。recorded 路径在正向操作推进受影响 cue 的修订，记录手动文字／时间来源并保护机器译文过期；Cut／Join 另核对 expected workspace revision。恢复严格比较完整 after 状态，重映射原本有效的依赖，连续撤销需验证收据边界与实际恢复身份。候选采用、应用会话／IPC／前端尚未接入；现有数组历史仍是唯一 UI 历史，不能将旧路径宣称为已完整恢复来源。
 
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
 

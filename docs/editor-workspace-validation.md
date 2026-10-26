@@ -632,3 +632,13 @@ ASR run 和合成证据字节仍在，采用台账使 asr_run_is_protected 保�
 原来源审计测试已替换为 recorded 路径目标断言：ASR 关联和三条依赖恢复、源／译修订 7／3→8／4，恢复块及消费者的旧翻译请求均拒绝，随后上下文编辑能传播过期。四项新增边界覆盖 metadata-only 冲突、两处中途 SQL 故障（恢复第一行后、provenance 恢复后写依赖时）完整回滚与重试、连续删除到空再撤销、旧过期边保留。依赖按 target 建索引比较，避免对每 cue 全扫依赖。
 
 共享库 163 passed／5 环境依赖 ignored，Tauri cargo check、两套 fmt 与 diff 检查通过；未修改前端、schema、现有 IPC 或安装包。原有 UI 仍调用 legacy 路径，尚未获得完整来源恢复；后续必须补其他结构用例、会话预算／token 与前端单一历史迁移，不能把本次基础库测试作为整套功能已交付。日志、检查及来源文件摘要保留于 `local-artifacts/editor-recorded-undo-foundation-20261025/`；正式仍为 1020e05，QA 为 2950a6d，性能／原生门禁继续保留。
+
+## 2026-10-26：Cut／Join／时间收据与正向修订保护
+
+三条既有操作抽出同一事务内 helper，旧函数体在借用／格式归一后逐项 token 等价。新 recorded Cut／Join 在事务内核对 expected workspace revision；时间路径仍核对 before cue 和原有重叠／文字限制。与插入／删除共用一次 recorded 收尾，再捕获 after 并 commit；旧接口不增加快照和新收尾开销。
+
+正向结构重建不会触发原 UPDATE 逻辑，recorded 收尾显式推进改变的源／译修订，保留 ASR 来源身份并在手动文字／时间变更时更新来源标记。依据操作前冻结依赖精确标记受影响机器消费者，删除上下文或修改上下文时拒绝原消费者的旧请求；人工替换译文解除旧机器依赖，不把全部字幕失效。对外提供同一收据状态的 revision 和上下文过期 ID，避免另读数据库形成混合结果；仍不反序列化来源快照。
+
+新增隔离链路 Cut→Join（移除一个有 ASR 来源的原块）→调整时间→三次撤销，验证 cue 全量恢复、ASR run／timed-unit／时间来源恢复、所有依赖按新修订映射、旧翻译与旧操作 revision 拒绝，最后修改恢复上下文仍使消费者过期。测试也核对过期 ID 的只读结果。第二项在 Cut／Join／时间的 recorded 元数据阶段分别注入 SQL 失败，确认完整状态、修订、来源和依赖回滚，移除故障后可显式重试。
+
+专项 2 passed，共享库全量 165 passed／5 环境依赖 ignored，Tauri check、两套 fmt／diff 通过。没有前端或 IPC 改动，未重跑前端或打包安装；旧 UI 仍有来源恢复缺口。候选采用、有界会话历史／token 和前端迁移仍未完成，下一步依次接入。日志与摘要在 `local-artifacts/editor-recorded-operations-20261026/`；正式 1020e05、QA 2950a6d 均未替换，性能及原生门禁保留。

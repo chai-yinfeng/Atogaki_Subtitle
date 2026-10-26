@@ -219,42 +219,17 @@ impl LocalDatabase {
             .begin()
             .await
             .context("failed to begin subtitle split transaction")?;
-        ensure_structure_editable(&mut tx, job_id).await?;
-        let mut segments = list_segments_in_transaction(&mut tx, job_id).await?;
-        let index = segments
-            .iter()
-            .position(|segment| segment.id == segment_id)
-            .ok_or_else(|| anyhow!("subtitle segment not found: {segment_id}"))?;
-        let original = segments[index].clone();
-        if boundary_ms <= original.start_ms || boundary_ms >= original.end_ms {
-            return Err(anyhow!(
-                "subtitle split boundary must be inside the selected segment"
-            ));
-        }
-
-        let translations = match (left_translated_text, right_translated_text) {
-            (Some(left), Some(right)) => (Some(left), Some(right), true),
-            _ => (None, None, false),
-        };
-        let mut left = original.clone();
-        left.end_ms = boundary_ms;
-        left.source_text = left_source_text;
-        left.translated_text = translations.0;
-        left.source_edited = true;
-        left.translation_edited = translations.2;
-        left.translation_stale = false;
-        left.timing_edited = true;
-        let mut right = original;
-        right.id = uuid::Uuid::new_v4().to_string();
-        right.start_ms = boundary_ms;
-        right.source_text = right_source_text;
-        right.translated_text = translations.1;
-        right.source_edited = true;
-        right.translation_edited = translations.2;
-        right.translation_stale = false;
-        right.timing_edited = true;
-        segments.splice(index..=index, [left, right]);
-        persist_structure_segments(&mut tx, job_id, &mut segments).await?;
+        let segments = split_in_transaction(
+            &mut tx,
+            job_id,
+            segment_id,
+            boundary_ms,
+            left_source_text,
+            right_source_text,
+            left_translated_text,
+            right_translated_text,
+        )
+        .await?;
         tx.commit()
             .await
             .context("failed to commit subtitle split transaction")?;
@@ -276,31 +251,15 @@ impl LocalDatabase {
             .begin()
             .await
             .context("failed to begin subtitle merge transaction")?;
-        ensure_structure_editable(&mut tx, job_id).await?;
-        let mut segments = list_segments_in_transaction(&mut tx, job_id).await?;
-        let left_index = segments
-            .iter()
-            .position(|segment| segment.id == left_segment_id)
-            .ok_or_else(|| anyhow!("subtitle segment not found: {left_segment_id}"))?;
-        if left_index + 1 >= segments.len() || segments[left_index + 1].id != right_segment_id {
-            return Err(anyhow!("only adjacent subtitle segments can be merged"));
-        }
-        let left = segments[left_index].clone();
-        let right = segments[left_index + 1].clone();
-        let both_translated = left.translated_text.is_some() && right.translated_text.is_some();
-        let merged_translation = requested_translation.filter(|_| both_translated);
-        let mut merged = left.clone();
-        merged.start_ms = left.start_ms.min(right.start_ms);
-        merged.end_ms = left.end_ms.max(right.end_ms);
-        merged.source_text = source_text;
-        merged.translated_text = merged_translation.clone();
-        merged.source_edited = true;
-        merged.translation_edited = merged_translation.is_some();
-        merged.translation_stale =
-            merged_translation.is_some() && (left.translation_stale || right.translation_stale);
-        merged.timing_edited = true;
-        segments.splice(left_index..=left_index + 1, [merged]);
-        persist_structure_segments(&mut tx, job_id, &mut segments).await?;
+        let segments = merge_in_transaction(
+            &mut tx,
+            job_id,
+            left_segment_id,
+            right_segment_id,
+            source_text,
+            requested_translation,
+        )
+        .await?;
         tx.commit()
             .await
             .context("failed to commit subtitle merge transaction")?;
@@ -349,49 +308,8 @@ impl LocalDatabase {
             .begin()
             .await
             .context("failed to begin subtitle timing transaction")?;
-        ensure_structure_editable(&mut tx, job_id).await?;
-        let current = list_segments_in_transaction(&mut tx, job_id).await?;
-        if current != before_segments {
-            return Err(anyhow!(
-                "subtitle timing changed after editing started; reload before saving"
-            ));
-        }
-
-        let mut updated = after_segments.to_vec();
-        for (before, after) in before_segments.iter().zip(updated.iter_mut()) {
-            if before.id != after.id
-                || before.job_id != after.job_id
-                || before.segment_index != after.segment_index
-                || before.source_text != after.source_text
-                || before.translated_text != after.translated_text
-                || before.source_edited != after.source_edited
-                || before.translation_edited != after.translation_edited
-                || before.translation_stale != after.translation_stale
-            {
-                return Err(anyhow!(
-                    "timing edits cannot change subtitle text or structure"
-                ));
-            }
-            after.timing_edited = before.timing_edited
-                || before.start_ms != after.start_ms
-                || before.end_ms != after.end_ms;
-        }
-        for index in 0..updated.len().saturating_sub(1) {
-            let before_overlap =
-                before_segments[index].end_ms > before_segments[index + 1].start_ms;
-            let after_overlap = updated[index].end_ms > updated[index + 1].start_ms;
-            if after_overlap {
-                let overlap_was_unchanged = before_overlap
-                    && updated[index].end_ms == before_segments[index].end_ms
-                    && updated[index + 1].start_ms == before_segments[index + 1].start_ms;
-                if !overlap_was_unchanged {
-                    return Err(anyhow!(
-                        "subtitle timing edits cannot create or change overlaps on one track"
-                    ));
-                }
-            }
-        }
-        persist_structure_segments(&mut tx, job_id, &mut updated).await?;
+        let updated =
+            timing_in_transaction(&mut tx, job_id, before_segments, after_segments).await?;
         tx.commit()
             .await
             .context("failed to commit subtitle timing transaction")?;
@@ -400,7 +318,7 @@ impl LocalDatabase {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn normalized_subtitle_text(value: String, field: &str) -> Result<String> {
+pub(super) fn normalized_subtitle_text(value: String, field: &str) -> Result<String> {
     let value = value.trim();
     if value.is_empty() {
         return Err(anyhow!("{field} cannot be empty"));
@@ -408,7 +326,7 @@ fn normalized_subtitle_text(value: String, field: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
-fn normalized_optional_subtitle_text(value: Option<String>) -> Option<String> {
+pub(super) fn normalized_optional_subtitle_text(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -668,4 +586,140 @@ pub(super) async fn edit_block_in_transaction(
     }
     persist_structure_segments(tx, job_id, &mut segments).await?;
     Ok(segments)
+}
+
+pub(super) async fn split_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    segment_id: &str,
+    boundary_ms: i64,
+    left_source_text: String,
+    right_source_text: String,
+    left_translated_text: Option<String>,
+    right_translated_text: Option<String>,
+) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+    ensure_structure_editable(tx, job_id).await?;
+    let mut segments = list_segments_in_transaction(tx, job_id).await?;
+    let index = segments
+        .iter()
+        .position(|segment| segment.id == segment_id)
+        .ok_or_else(|| anyhow!("subtitle segment not found: {segment_id}"))?;
+    let original = segments[index].clone();
+    if boundary_ms <= original.start_ms || boundary_ms >= original.end_ms {
+        return Err(anyhow!(
+            "subtitle split boundary must be inside the selected segment"
+        ));
+    }
+
+    let translations = match (left_translated_text, right_translated_text) {
+        (Some(left), Some(right)) => (Some(left), Some(right), true),
+        _ => (None, None, false),
+    };
+    let mut left = original.clone();
+    left.end_ms = boundary_ms;
+    left.source_text = left_source_text;
+    left.translated_text = translations.0;
+    left.source_edited = true;
+    left.translation_edited = translations.2;
+    left.translation_stale = false;
+    left.timing_edited = true;
+    let mut right = original;
+    right.id = uuid::Uuid::new_v4().to_string();
+    right.start_ms = boundary_ms;
+    right.source_text = right_source_text;
+    right.translated_text = translations.1;
+    right.source_edited = true;
+    right.translation_edited = translations.2;
+    right.translation_stale = false;
+    right.timing_edited = true;
+    segments.splice(index..=index, [left, right]);
+    persist_structure_segments(tx, job_id, &mut segments).await?;
+    Ok(segments)
+}
+
+pub(super) async fn merge_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    left_segment_id: &str,
+    right_segment_id: &str,
+    source_text: String,
+    requested_translation: Option<String>,
+) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+    ensure_structure_editable(tx, job_id).await?;
+    let mut segments = list_segments_in_transaction(tx, job_id).await?;
+    let left_index = segments
+        .iter()
+        .position(|segment| segment.id == left_segment_id)
+        .ok_or_else(|| anyhow!("subtitle segment not found: {left_segment_id}"))?;
+    if left_index + 1 >= segments.len() || segments[left_index + 1].id != right_segment_id {
+        return Err(anyhow!("only adjacent subtitle segments can be merged"));
+    }
+    let left = segments[left_index].clone();
+    let right = segments[left_index + 1].clone();
+    let both_translated = left.translated_text.is_some() && right.translated_text.is_some();
+    let merged_translation = requested_translation.filter(|_| both_translated);
+    let mut merged = left.clone();
+    merged.start_ms = left.start_ms.min(right.start_ms);
+    merged.end_ms = left.end_ms.max(right.end_ms);
+    merged.source_text = source_text;
+    merged.translated_text = merged_translation.clone();
+    merged.source_edited = true;
+    merged.translation_edited = merged_translation.is_some();
+    merged.translation_stale =
+        merged_translation.is_some() && (left.translation_stale || right.translation_stale);
+    merged.timing_edited = true;
+    segments.splice(left_index..=left_index + 1, [merged]);
+    persist_structure_segments(tx, job_id, &mut segments).await?;
+    Ok(segments)
+}
+
+pub(super) async fn timing_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    before_segments: &[LocalSubtitleSegmentRecord],
+    after_segments: &[LocalSubtitleSegmentRecord],
+) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+    ensure_structure_editable(tx, job_id).await?;
+    let current = list_segments_in_transaction(tx, job_id).await?;
+    if current != before_segments {
+        return Err(anyhow!(
+            "subtitle timing changed after editing started; reload before saving"
+        ));
+    }
+
+    let mut updated = after_segments.to_vec();
+    for (before, after) in before_segments.iter().zip(updated.iter_mut()) {
+        if before.id != after.id
+            || before.job_id != after.job_id
+            || before.segment_index != after.segment_index
+            || before.source_text != after.source_text
+            || before.translated_text != after.translated_text
+            || before.source_edited != after.source_edited
+            || before.translation_edited != after.translation_edited
+            || before.translation_stale != after.translation_stale
+        {
+            return Err(anyhow!(
+                "timing edits cannot change subtitle text or structure"
+            ));
+        }
+        after.timing_edited = before.timing_edited
+            || before.start_ms != after.start_ms
+            || before.end_ms != after.end_ms;
+    }
+    for index in 0..updated.len().saturating_sub(1) {
+        let before_overlap = before_segments[index].end_ms > before_segments[index + 1].start_ms;
+        let after_overlap = updated[index].end_ms > updated[index + 1].start_ms;
+        if after_overlap {
+            let overlap_was_unchanged = before_overlap
+                && updated[index].end_ms == before_segments[index].end_ms
+                && updated[index + 1].start_ms == before_segments[index + 1].start_ms;
+            if !overlap_was_unchanged {
+                return Err(anyhow!(
+                    "subtitle timing edits cannot create or change overlaps on one track"
+                ));
+            }
+        }
+    }
+    persist_structure_segments(tx, job_id, &mut updated).await?;
+    Ok(updated)
 }
