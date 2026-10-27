@@ -3,9 +3,30 @@
 2026-10-21 统一编辑器的当前验收以 [面板阶段记录](editor-workspace-validation.md) 为准；下文涉及粗修／高级往返及默认翻译页的步骤属于旧界面，待文档整理阶段统一改写。
 
 
-_最后更新：2026-08-25_
+_最后更新：2026-10-26_
 
 > 当前完整窗口记录以 macOS Apple Silicon 为基线。Windows x86_64 的移植顺序、平台专项检查和真实设备验收矩阵见 `docs/windows-porting.md`；Windows 候选版本还必须复用本文中所有不依赖 macOS 专有行为的任务、翻译、编辑、导出和烧录场景。
+
+## 当前 QA 隔离方式（2026-10-26）
+
+本机破坏性回归只使用合成媒体与种子数据。QA 构建同时合并 complete 与独立标识覆盖：
+
+```bash
+cd src-tauri
+cargo tauri build --config tauri.macos-complete.conf.json --config tauri.qa.conf.json --bundles app -- --offline
+```
+
+产物为 `Atogaki QA.app`，标识 `com.chai-yinfeng.atogaki.qa`；默认配置／正式安装脚本不合并 qa 覆盖。除了 Info.plist 标识，Tauri 编译配置也必须独立，否则默认 app_data_dir 仍可能指向正式目录。无 ATOGAKI_DATA_DIR 时，QA 的默认目录为 `Application Support/com.chai-yinfeng.atogaki.qa`，已通过原生空任务列表核对。
+
+种子用 `cargo run --example seed_structure_undo_qa --offline` 创建唯一临时目录；输出 seed.json 中有 data_dir。当前保留现场的启动方式为：
+
+```bash
+ATOGAKI_DATA_DIR=/var/folders/wt/jqp2qg3x1rlgwhy_rrp_2bm80000gn/T/atogaki-token-qa-95561cb9-56d4-449b-9c76-55a5fef40671 "/tmp/atogaki-editor-token-qa/Atogaki QA.app/Contents/MacOS/atogaki-desktop"
+```
+
+先核对窗口可见目录与合成任务身份，再进行编辑。UI 自动化按独立 QA 标识绑定；同一标识只运行一个进程。退出后用原始进程句柄和只读进程清单确认结束，不再请求已退出 App 的窗口状态。本轮曾发现一份未带隔离参数的额外同标识 QA，错误显示正式目录；没有在该窗口执行测试编辑。此后采用独立编译标识并验证默认目录，避免观察／启动入口遗漏参数时落入正式目录。
+
+SQL 故障注入脚本必须验证数据库位于种子临时目录、seed 标记与唯一任务匹配；只在该库添加有记录的 QA trigger，并在测试后校验定义、移除。真实 SQLite ABORT 的回滚／草稿／重试结果不等于磁盘满或 IO 故障通过。若原生拖动接口报 noWindowsAvailable，而窗口读取／点击正常，保留原生拖动门禁，不能用时间输入框或合成 browser gesture 替代。
 
 ## 构建回归
 

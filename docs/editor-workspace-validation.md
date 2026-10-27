@@ -710,3 +710,17 @@ complete release 构建及深度严格签名通过。旧 c360cc9 QA checksum 匹
 真实窗口编辑第一段并保存，不离开／重开，第三段立即显示待重译；SQLite 的第三段仅 translation_dependency_stale=1，自身 translation_stale=0，三条边保留。原生过期菜单可选择“译文过期”，显示 2/10。选择第三段并人工保存译文后，其上下文标记和出边清除，筛选即时为 1/10；主编辑框仍在第三段（6–7 秒），保留已保存人工译文，并提示当前段不在筛选结果中。integrity_check=ok，正常退出后原进程 exit 0。
 
 native-before／native-context-saved／native-cleared 的 JSON／AX 与截图、native-package／native-seed 和构建日志在本节同一证据目录。代码和核心回归仍为 2a82da1 的 183／5 ignored、桌面 35／4 ignored、前端 281 与四组 WebKit；这次原生只补上下文呈现／清除及筛选保留，不外推原生拖动、真实磁盘失败、长期性能或 Windows 已通过。
+
+## 2026-10-26：QA 独立身份、原生 SQL 失败恢复与拖动工具限制
+
+业务代码仍为 2a82da1（HEAD 3d19984 仅文档）。本轮启动旧同标识 QA 后，窗口工具绑定到了另一份 QA 进程，其页面显示正式数据目录；立即停止测试编辑。只读进程核对为同一临时 QA 可执行文件的两个实例，其中一份未带隔离参数。两份均正常退出；没有在正式目录窗口执行测试编辑或删除。此前“退出通过”只证明所跟踪原始 PID 退出，不能据此推断其他同标识实例也不存在。
+
+新增 tauri.qa.conf.json，完整 QA release 合并两个覆盖，独立 productName／编译 identifier；只改 Info.plist 不足以隔离 Tauri 默认目录。新包默认启动原生显示 com.chai-yinfeng.atogaki.qa 目录、零任务；退出后显式绑定既有十段合成目录，界面核对路径与任务身份一致。新包签名通过，文件 checksum／覆盖配置 hash 在 qa-package.json；旧同标识 QA 临时包盘点后清除，正式 App 不替换，旧 2950a6d 基线保留。当前 QA 路径为 `/tmp/atogaki-editor-token-qa/Atogaki QA.app`，以后按独立标识绑定且退出后不再读取已关闭窗口。
+
+原生拖动 App.drag 三次分别在原窗口、重新绑定、Raise 后返回 noWindowsAvailable，截图／AX／点击可用；原生拖动未通过，不能归因为产品拖动失败，也不以已通过的 browser gesture 或时间字段替代。少量坐标校准先命中空白区，随后以截图像素成功折叠／展开视频；字幕表及 SQLite 时间未改变。
+
+受控故障脚本验证临时 seed 标记、唯一任务及库路径后，在该合成库安装只阻止原文修改的 SQLite ABORT trigger。真实窗口编辑第四段，自动保存报错且完整草稿留在输入框、列表显示保存失败。只读快照确认全部已捕获 job／cue／provenance／依赖／采用字段逐项不变，workspace revision 仍为 32。校验并移除 trigger 后数据仍未改变；点击保存文字，原草稿成功写入，revision 33，其他字幕、时间、译文、依赖及采用记录保持一致，integrity_check=ok，确认无遗留故障 trigger。此为真实 SQLite 错误通过原生 Tauri 链路，不是磁盘满／IO 错误验证。
+
+QA 首次窗口绑定有一次约 472 秒的工具延迟，进程仍存活，未据此重启。后续观察有 ScreenCaptureKit -3812，重绑同一 QA 后可读到失败草稿；不重复提交保存。最后保存 AX／截图，正常 Cmd+Q 后只读核验无 QA 进程，不再读取退出后的窗口。阶段 JSON、fault.py／snapshot.py、回滚／重试核验、默认目录 AX、旧包清单与构建／签名日志在 `local-artifacts/editor-native-gestures-2a82da1/`。原生拖动、磁盘满／IO、长期性能与 Windows 门禁仍保留。
+
+新增可选 QA 覆盖后，默认桌面配置 Rust 回归 35 passed／4 ignored，根目录与 Tauri fmt／diff 通过。未修改前端业务代码，本轮不重复前端构建／单元测试；QA release 构建及原生回滚／重试为新增验证范围。

@@ -94,3 +94,9 @@ python3 scripts/inventory-local-artifacts.py \
 c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到固定临时路径 `/tmp/atogaki-editor-token-qa/Atogaki.app` 并原位更新为 2a82da1。新包签名和原生状态复验通过；没有追加另一份 App 或正式数据库备份。旧 `/tmp/atogaki-token-native-c360cc9/Atogaki.app` 路径已被取代，旧包 checksum、视频现场与元数据验收材料仍保留；较早路径不再表示当前 App 版本。
 
 本轮复用前一轮 seed-audio-only.json 指向的成功合成数据，没有重新生成媒体／任务。新包的逐文件 checksum、版本、来源、原生阶段 JSON／AX／截图在 `local-artifacts/editor-context-state-20261026/native-package.json` 及同目录 manifest。正式 App、安装回退点、旧 QA 2950a6d、采用证据及真实媒体未修改或清理。
+
+### 独立编译 QA 身份及旧临时包清理
+
+2a82da1 业务代码以本轮 tauri.qa.conf.json 独立覆盖构建为 `/tmp/atogaki-editor-token-qa/Atogaki QA.app`；compiled identifier 为 com.chai-yinfeng.atogaki.qa，原生验证无环境参数也只进入独立空目录。原 `Atogaki.app` 临时包曾仅改 Info 标识以排查窗口绑定，已被新包取代；新包签名、默认目录、合成任务及 SQL 故障恢复通过并确认全部 QA 进程退出后，盘点并删除该旧包，101,571,045 字节逻辑内容。此前清理检查因 /tmp→/private/tmp 别名断言停止，修正为真实路径并复核后才删除。
+
+逐文件旧包 checksum、Info 原件、默认目录 AX、配置 hash 与新包清单在 `local-artifacts/editor-native-gestures-2a82da1/`；固定临时目录中的 build.json 已更新新路径。默认 `.qa` 目录是测试存储，不是正式数据备份；既有合成任务目录、原生阶段证据、旧 2950a6d 性能基线、正式 App／数据和安装回退点保留。没有新增媒体、模型或正式数据库备份。
