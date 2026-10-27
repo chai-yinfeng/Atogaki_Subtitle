@@ -6,7 +6,7 @@ type Options<D extends DetailIdentity> = {
   prepare(jobId: string): void;
   read(jobId: string): Promise<D>;
   editable(detail: D): boolean;
-  progress(jobId: string): Promise<void>;
+  progress(jobId: string, detail: D): Promise<void>;
   apply(detail: D): void;
   waveform(): Promise<void>;
   processingRange(): void;
@@ -32,7 +32,7 @@ export function createEditorNavigation<D extends DetailIdentity>(options: Option
         const detail = loadedDetail ?? await options.read(jobId);
         if (!current()) return;
         if (detail.job.job_id !== jobId) throw new Error("字幕任务身份不匹配，请重新打开任务。");
-        if (!options.editable(detail)) { await options.progress(jobId); return; }
+        if (!options.editable(detail)) { await options.progress(jobId, detail); return; }
         options.apply(detail);
         await options.waveform();
         if (!current()) return;

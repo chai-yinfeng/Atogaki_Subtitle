@@ -761,3 +761,14 @@ QA 首次窗口绑定有一次约 472 秒的工具延迟，进程仍存活，未
 新增合成 WebKit 导航用例持有真实页面波形 IPC，返回任务页后再释放，确认 list_asr_quality_signals／translation_status 调用数未增加、编辑框隐藏，随后重开正常；time-navigation、follow、token-history 三组既有回归也通过。初跑四组因当前 Playwright 1.62.1 所需 WebKit 文件缺失而未启动；安装对应官方浏览器后重跑通过，失败日志保留。上述为合成 IPC 浏览器回归，未构建新原生 QA，不推导原生延迟／性能门禁通过。
 
 日志及源码摘要保留于 `local-artifacts/editor-navigation-20261027/`。本轮不改字幕 schema／Rust 业务或正式 App；收听、进度、顶层导航及初始化仍待渐进收敛。根目录／Tauri cargo fmt --check 与 git diff --check 按本提交检查。
+
+
+## 2026-10-27：任务入口／进度页打开与陈旧摘要回退
+
+新增 task-navigation，将 main 的卡片默认路由、显式翻译／导出分区、草稿／时间离页预检、详情读取、进度接受／呈现和错误处理归入单一协调模块。main 注入具体视图回调；模块与 editor-navigation 共用原 navigationRequestId、stopActivePlayback 和 editor-backend.detail，pagehide dispose 使迟到读取失效，返回详情核对 job ID。
+
+发现旧路径中卡片仍为完成但详情已不可编辑时，editor→openJob(review) 又按旧卡片进入 editor，可能反复跳转／请求。现在 editor 回退携带刚读详情，task-navigation 优先采用详情并直接停在进度页，不重复请求。默认完成任务继续直达编辑器，详情新近完成时复用详情进入编辑；显式翻译／导出分区保持用户选择。未调整进度自动刷新、顶层切换或字幕事务。
+
+九项新单元覆盖完成卡片快速入口、两个显式分区、详情完成、两模块实际组合的陈旧卡片回退仅一次读取、预检失败／期间离开、旧详情／旧错误、身份不符及 dispose。前端全量 299 passed，类型检查与生产构建通过。扩展 WebKit navigation：卡片保持 done、详情模拟 transcribing，任务停在可见进度页且详情仅增一次读取，返回后重新完成可正常进入编辑器；time-navigation、processing、translation 三组既有回归均通过。
+
+根目录／Tauri fmt 与 diff 检查记录于 `local-artifacts/task-navigation-20261027/`，同目录保留测试／构建／WebKit 日志及源码摘要。本轮没有更新原生 QA 或正式 App，不把合成卡片／详情竞态作为原生后端并发或性能验收。收听／顶层切换、进度自动刷新与全局初始化继续留在后续边界整理范围。

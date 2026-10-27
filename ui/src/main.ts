@@ -1,3 +1,4 @@
+import { createTaskNavigation, type TaskSection } from "./task-navigation";
 import { createEditorNavigation } from "./editor-navigation";
 import { createEditorContextStatus } from "./editor-context-status";
 import { mountActionConfirmation, type ActionConfirmation } from "./action-confirmation";
@@ -304,7 +305,7 @@ type SubtitleOverlayPayload = {
   playbackRate: number;
 };
 
-type WorkspaceSection = "review" | "translation" | "export";
+type WorkspaceSection = TaskSection;
 type TopLevelArea = "workbench" | "listening" | "learning" | "karaoke" | "workspace";
 
 const desktopPlatform = navigator.userAgent.includes("Windows")
@@ -1181,6 +1182,7 @@ window.addEventListener("pagehide", () => {
   editorStructureHistory.dispose();
   editorContextStatus.dispose();
   editorNavigation.dispose();
+  taskNavigation.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -2857,7 +2859,7 @@ const editorNavigation = createEditorNavigation<JobDetail>({
   stop: stopActivePlayback,
   read: editorBackend.detail,
   editable: detail => detail.segments.length > 0 && matchesTerminalStatus(detail.job.status),
-  progress: jobId => openJob(jobId, "review"),
+  progress: (jobId, detail) => taskNavigation.open(jobId, "review", detail),
   prepare: jobId => {
     const reopeningSelectedJob = karaokeSelectedJobId === jobId;
     karaokeSelectedJobId = jobId;
@@ -3326,33 +3328,39 @@ function showWorkspaceSection(section: WorkspaceSection): void {
   }
 }
 
+const taskNavigation = createTaskNavigation<JobDetail>({
+  begin: () => { assertPlaybackCanStop(); return ++navigationRequestId; },
+  current: navigation => navigation === navigationRequestId,
+  visible: () => currentArea === "workspace",
+  stop: stopActivePlayback,
+  knownEditable: jobId => {
+    const job = latestJobs.find(job => job.job_id === jobId);
+    return !!job && job.segment_count > 0 && matchesTerminalStatus(job.status);
+  },
+  read: editorBackend.detail,
+  editable: detail => detail.segments.length > 0 && matchesTerminalStatus(detail.job.status),
+  editor: enterSubtitleEditor,
+  prepare: section => {
+    showWorkspace(true);
+    showWorkspaceSection(section);
+    workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回任务";
+    window.scrollTo({ top: 0, behavior: "auto" });
+    if (workspaceMessage) workspaceMessage.textContent = "正在读取 字幕工作区…";
+    setWorkspaceAction("");
+    if (subtitleList) subtitleList.innerHTML = `<div class="empty-state">正在读取字幕…</div>`;
+  },
+  accept: detail => { activeDetail = detail; editorContextStatus.invalidate(); },
+  render: renderWorkspace,
+  translation: refreshTranslationStatus,
+  failed: error => {
+    activeDetail = null;
+    if (workspaceMessage) workspaceMessage.textContent = `无法打开任务：${String(error)}`;
+  },
+});
+
 async function openJob(jobId: string, initialSection?: WorkspaceSection): Promise<void> {
   if (!jobId || !workspaceMessage) return;
-  const known = latestJobs.find(job => job.job_id === jobId);
-  if ((initialSection === undefined || initialSection === "review") && known && known.segment_count > 0 && matchesTerminalStatus(known.status)) { await enterSubtitleEditor(jobId); return; }
-  assertPlaybackCanStop();
-  const requestId = ++navigationRequestId;
-  await stopActivePlayback();
-  if (requestId !== navigationRequestId) return;
-  showWorkspace(true);
-  showWorkspaceSection(initialSection ?? "review");
-  workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回任务";
-  window.scrollTo({ top: 0, behavior: "auto" });
-  workspaceMessage.textContent = "正在读取 字幕工作区…";
-  setWorkspaceAction("");
-  if (subtitleList) subtitleList.innerHTML = `<div class="empty-state">正在读取字幕…</div>`;
-  try {
-    const detail = await invoke<JobDetail>("get_job_detail", { jobId });
-    if (requestId !== navigationRequestId || currentArea !== "workspace") return;
-    activeDetail = detail; editorContextStatus.invalidate();
-    if ((initialSection === undefined || initialSection === "review") && detail.segments.length > 0 && matchesTerminalStatus(detail.job.status)) { await enterSubtitleEditor(jobId, detail); return; }
-    renderWorkspace(detail);
-    await refreshTranslationStatus();
-  } catch (error) {
-    if (requestId !== navigationRequestId || currentArea !== "workspace") return;
-    activeDetail = null;
-    workspaceMessage.textContent = `无法打开任务：${String(error)}`;
-  }
+  await taskNavigation.open(jobId, initialSection);
 }
 
 async function enterSubtitleEditor(jobId: string, detail?: JobDetail): Promise<void> {
