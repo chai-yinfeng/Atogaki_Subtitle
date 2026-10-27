@@ -105,3 +105,8 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ## 2026-10-27：磁盘满故障卷收尾
 
 本轮专属 `/private/tmp/atogaki-editor-diskfull-20261026/test.dmg` 为 33,554,432 字节合成故障镜像。真实满卷验证后仅释放其中 32,260,096 字节填充文件；QA 正常退出、卸载完成、设备与标记复核后，记录镜像 SHA-256 并删除镜像。没有保留满卷，也没有新增正式数据备份。清理清单与 checksum 在 `local-artifacts/editor-diskfull-native-20261026/cleanup.json`；单份恢复合成库、JSON、AX、截图、日志与受约束操作脚本继续保留。既有合成媒体现场、当前 QA、旧性能基线及正式安装／回退点均未修改。
+
+
+### 草稿重启验收现场
+
+`local-artifacts/editor-draft-restart-20261027/seed.json` 指向本轮唯一合成数据库副本，复用既有合成媒体／证据，没有新增 App 或正式恢复备份。失败草稿缓存的只读快照只读取 QA identifier 的 WebKit 路径；成功显式保存并退出后缓存为空。临时故障 trigger 已移除，QA 已退出；小型合成库及恢复／冲突证据保留供复核。正式 WebKit、数据库、媒体、安装回退点未修改。
