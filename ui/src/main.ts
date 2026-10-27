@@ -1,3 +1,4 @@
+import { createTaskProgress } from "./task-progress";
 import { createTaskNavigation, type TaskSection } from "./task-navigation";
 import { createEditorNavigation } from "./editor-navigation";
 import { createEditorContextStatus } from "./editor-context-status";
@@ -1183,6 +1184,7 @@ window.addEventListener("pagehide", () => {
   editorContextStatus.dispose();
   editorNavigation.dispose();
   taskNavigation.dispose();
+  taskProgress.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -2197,25 +2199,28 @@ async function refresh(): Promise<void> {
   }
 }
 
-async function refreshActiveJob(): Promise<void> {
-  const current = activeDetail;
-  if (!current || matchesTerminalStatus(current.job.status) || hasUnsavedSubtitleEdits()) return;
-  try {
-    const detail = await invoke<JobDetail>("get_job_detail", { jobId: current.job.job_id });
-    if (!activeDetail || activeDetail.job.job_id !== detail.job.job_id) return;
+const taskProgress = createTaskProgress<JobDetail>({
+  context: () => currentArea === "workspace" && activeDetail && !matchesTerminalStatus(activeDetail.job.status) && !hasUnsavedSubtitleEdits()
+    ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
+  read: editorBackend.detail,
+  apply: detail => {
+    if (!activeDetail) return;
     const completedNow = matchesTerminalStatus(detail.job.status);
+    const structureChanged = detail.segments.length !== activeDetail.segments.length;
     activeDetail.job = detail.job;
     if (workspaceMessage) {
       workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message} · ${jobTimingLabel(detail.job)}`;
     }
-    if (completedNow || detail.segments.length !== activeDetail.segments.length) {
+    if (completedNow || structureChanged) {
       activeDetail = detail; editorContextStatus.invalidate();
       renderWorkspace(detail);
     }
-  } catch (error) {
+    if (completedNow) taskProgress.unmount();
+  },
+  failed: error => {
     if (workspaceMessage) workspaceMessage.textContent = `自动刷新失败：${String(error)}`;
-  }
-}
+  },
+});
 
 function showWorkspace(show: boolean): void {
   shell?.classList.toggle("workspace-open", show);
@@ -2224,7 +2229,7 @@ function showWorkspace(show: boolean): void {
   listeningView?.classList.add("hidden");
   learningView?.classList.add("hidden");
   karaokeView?.classList.add("hidden");
-  if (show) currentArea = "workspace";
+  if (show) { currentArea = "workspace"; taskProgress.mount(); } else taskProgress.unmount();
   document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", show);
 }
 
@@ -2240,6 +2245,7 @@ async function stopActivePlayback(): Promise<void> {
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
   await subtitleDrafts.flushAll();
   assertPlaybackCanStop();
+  taskProgress.unmount();
   insertBlockView.cancel();
   videoRenderSession.close();
   subtitleStyles.close();
@@ -3341,6 +3347,7 @@ const taskNavigation = createTaskNavigation<JobDetail>({
   editable: detail => detail.segments.length > 0 && matchesTerminalStatus(detail.job.status),
   editor: enterSubtitleEditor,
   prepare: section => {
+    activeDetail = null;
     showWorkspace(true);
     showWorkspaceSection(section);
     workspaceView.querySelector<HTMLButtonElement>("#back-to-jobs")!.textContent = "← 返回任务";
@@ -3349,7 +3356,10 @@ const taskNavigation = createTaskNavigation<JobDetail>({
     setWorkspaceAction("");
     if (subtitleList) subtitleList.innerHTML = `<div class="empty-state">正在读取字幕…</div>`;
   },
-  accept: detail => { activeDetail = detail; editorContextStatus.invalidate(); },
+  accept: detail => {
+    activeDetail = detail; editorContextStatus.invalidate();
+    if (matchesTerminalStatus(detail.job.status)) taskProgress.unmount();
+  },
   render: renderWorkspace,
   translation: refreshTranslationStatus,
   failed: error => {
@@ -4597,7 +4607,6 @@ void listen<{ action: PlaybackAction }>("subtitle-overlay-playback-action", (eve
   executePlaybackAction(event.payload.action);
 });
 window.setInterval(() => void refresh(), 2_000);
-window.setInterval(() => void refreshActiveJob(), 2_000);
 window.setInterval(updateVisibleJobTimings, 1_000);
 
 

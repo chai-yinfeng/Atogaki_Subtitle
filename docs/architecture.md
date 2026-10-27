@@ -162,3 +162,10 @@ Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有
 `task-navigation.ts` 接管任务卡片的默认路由、指定翻译／导出分区、离页预检、详情读取及进度页呈现。继续共享 navigationRequestId、stopActivePlayback 与 editor-backend.detail；main 只提供具体视图回调。默认先参考轻量卡片是否可编辑，拿到详情后以详情决定去向；编辑器发现任务不可编辑时，把同一份详情传回任务导航，绕过旧卡片并复用读取，防止编辑器／进度入口反复跳转。显式工具分区不会被默认编辑器路由替换。迟到详情／错误与 dispose 均受访问校验，不新增播放器、草稿或独立历史。
 
 收听、顶层区域切换、进度自动刷新及全局初始化仍由 main 协调，下一步逐用例抽取；本阶段只覆盖任务打开，不宣称所有后台刷新已经统一生命周期。
+
+
+### 进度页刷新生命周期
+
+`task-progress.ts` 持有仅在任务进度页挂载的 2 秒定时器，同一模块最多一份在途自动读取。main 通过 context 只提供当前 workspace 中尚未结束、没有未保存文字的任务身份与 navigation；读取复用 editor-backend.detail，模块在应用或显示错误前复核任务、navigation、挂载代次和资格。离页预检通过后 unmount，完成任务首次读取／刷新完成时也 unmount；pagehide dispose 释放 timer 并失效迟到返回。不能取消已发出的 Tauri 查询，新访问的显式打开不依赖这份自动读取。
+
+main 保留任务状态／段数变化的呈现回调：状态更新不重建整份列表，完成或段数变化才沿用原 renderWorkspace。新任务准备时清空旧 activeDetail，避免详情尚未读出时刷新上一任务。完成编辑器与按需工具不挂进度 timer；工作台卡片刷新和可见耗时 timer 仍属于后续初始化整理。
