@@ -783,3 +783,14 @@ QA 首次窗口绑定有一次约 472 秒的工具延迟，进程仍存活，未
 新合成 WebKit task-progress 使用页面虚拟时钟：持有自动读取并推进多次周期，确认只新增一次读取；离页后重开同任务编辑器，再释放旧成功／旧错误，保留的进度消息节点未被旧访问修改；完成编辑器推进 8 秒无完整详情读取；停留进度页直到完成后再推进 8 秒，同样不再读取。editor-navigation 与 time-navigation 两组既有 WebKit 均通过。初跑测试用 locator 查询已经卸载的进度消息节点而超时，改为在离页前保存 ElementHandle、观察同一节点后通过；失败日志保留，不作为产品失败或通过证据。
 
 根目录／Tauri fmt、diff 检查及测试／构建／源码摘要保留在 `local-artifacts/task-progress-20261027/`。本轮仅前端与合成 IPC 回归，未更新原生 QA／正式 App，不推导真实后端延迟、长期内存或滚动性能通过。工作台卡片和可见耗时的全局 timer、收听／顶层导航仍待整理。
+
+
+## 2026-10-27：收听导航与播放位置接口边界
+
+新增 listening-navigation，将 main 中收听打开的离页预检、详情／播放位置并行读取、收藏准备、视图挂载和自动播放顺序纳入独立生命周期。共享原 navigationRequestId／stopActivePlayback／media-player，任务身份在详情返回后校验，读取／收藏等待后及错误显示前核对访问；pagehide dispose。显式来源位置优先于历史位置，0 不被误当作缺省；未指定 autoplay 时保持暂停。位置读写集中 playback-position-backend，原 300 ms 保存调度、5 秒节流、取整及失败处理未改变。
+
+九项新增单元回归覆盖并行读取／阶段顺序、显式 0 与其他定位／autoplay、预检失败／期间离开、同任务旧详情和旧位置、等待收藏时离开、身份不符、当前读取失败／旧播放错误以及 dispose。前端全量 316 passed，类型与生产构建通过。
+
+新合成 WebKit listening-navigation 分别持有 get_playback_position／list_learning_items，在未完成访问离页后以同任务新位置重开，再释放旧返回；核对同一个新媒体元素保持挂载、位置未回退、只有一个媒体，离页保存为新位置。既有 media-player 的真实媒体事件验证恢复／持久化、损坏媒体回退／双源失败；editor-navigation、time-navigation 两组也通过。没有运行模型、真实云端或正式数据写入。
+
+根目录／Tauri fmt、diff、测试／构建／四组 WebKit 日志及源码摘要在 `local-artifacts/listening-navigation-20261027/`。本轮未更新原生 QA／正式 App；收听全局收藏刷新仍沿用旧缓存／视图逻辑，不将媒体访问隔离外推为其整体竞态已解决。顶层区域切换、全局初始化及原生长期性能继续待完成。

@@ -169,3 +169,10 @@ Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有
 `task-progress.ts` 持有仅在任务进度页挂载的 2 秒定时器，同一模块最多一份在途自动读取。main 通过 context 只提供当前 workspace 中尚未结束、没有未保存文字的任务身份与 navigation；读取复用 editor-backend.detail，模块在应用或显示错误前复核任务、navigation、挂载代次和资格。离页预检通过后 unmount，完成任务首次读取／刷新完成时也 unmount；pagehide dispose 释放 timer 并失效迟到返回。不能取消已发出的 Tauri 查询，新访问的显式打开不依赖这份自动读取。
 
 main 保留任务状态／段数变化的呈现回调：状态更新不重建整份列表，完成或段数变化才沿用原 renderWorkspace。新任务准备时清空旧 activeDetail，避免详情尚未读出时刷新上一任务。完成编辑器与按需工具不挂进度 timer；工作台卡片刷新和可见耗时 timer 仍属于后续初始化整理。
+
+
+### 收听任务打开协调
+
+`listening-navigation.ts` 协调离页预检、并行读取详情／恢复位置、准备收藏资料、挂载既有媒体与可选自动播放。继续共享 navigationRequestId、stopActivePlayback 和唯一 media-player；每次等待后复核访问与收听区域，详情校验 job ID，dispose 使未完成访问失效。显式 resumeOverrideMs（包括 0）优先于持久位置。main 提供具体标题／列表／媒体呈现回调，不新增播放器或位置状态副本。
+
+详情复用 editor-backend.detail；播放位置的读写 IPC 集中到 playback-position-backend，保存节流、取整及原失败处理保持不变。收藏列表仍通过既有全局 refreshLearningItems 更新，该全局缓存／视图生命周期未在本轮抽取；本模块只阻止其等待结束后旧访问继续挂载媒体。

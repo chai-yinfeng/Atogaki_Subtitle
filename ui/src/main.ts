@@ -1,3 +1,5 @@
+import { createListeningNavigation } from "./listening-navigation";
+import { createPlaybackPositionBackend } from "./playback-position-backend";
 import { createTaskProgress } from "./task-progress";
 import { createTaskNavigation, type TaskSection } from "./task-navigation";
 import { createEditorNavigation } from "./editor-navigation";
@@ -715,6 +717,7 @@ let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
 const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
 const editorBackend = createEditorBackend<JobDetail>(invoke);
+const playbackPositionBackend = createPlaybackPositionBackend(invoke);
 const structureBackend = createStructureEditBackend(invoke);
 const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(editorBackend.updateText, updateSubtitleDraftUI);
 
@@ -1185,6 +1188,7 @@ window.addEventListener("pagehide", () => {
   editorNavigation.dispose();
   taskNavigation.dispose();
   taskProgress.dispose();
+  listeningNavigation.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -2314,42 +2318,42 @@ async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editor
   window.scrollTo({ top: 0, behavior: "auto" });
 }
 
+const listeningNavigation = createListeningNavigation<JobDetail>({
+  begin: () => { assertPlaybackCanStop(); return ++navigationRequestId; },
+  current: navigation => navigation === navigationRequestId && currentArea === "listening",
+  stop: stopActivePlayback,
+  detail: editorBackend.detail,
+  position: playbackPositionBackend.read,
+  learning: refreshLearningItems,
+  prepare: () => {
+    activeDetail = null;
+    renderListeningJobs(latestJobs);
+    renderSubtitleOverlayButton();
+    if (listeningMediaMessage) listeningMediaMessage.textContent = "正在读取节目…";
+  },
+  apply: (detail, resumeMs) => {
+    activeDetail = detail; editorContextStatus.invalidate();
+    activeSegmentId = null;
+    if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
+    renderListeningJobs(latestJobs);
+    renderListeningSubtitles(detail.segments);
+    mountMedia(detail.playback_path, detail.audio_fallback_path, listeningMediaHost, listeningMediaMessage, resumeMs);
+    updateActiveSubtitle(resumeMs);
+    renderSubtitleOverlayButton();
+  },
+  play: async () => { if (mediaPlayer.media) await mediaPlayer.media.play(); },
+  failed: error => {
+    if (listeningMediaMessage) listeningMediaMessage.textContent = `无法打开节目：${String(error)}`;
+  },
+});
+
 async function openListeningJob(
   jobId: string,
   resumeOverrideMs: number | null = null,
   autoplay = false,
 ): Promise<void> {
   if (!jobId || !listeningMediaMessage) return;
-  assertPlaybackCanStop();
-  const requestId = ++navigationRequestId;
-  await stopActivePlayback();
-  if (requestId !== navigationRequestId || currentArea !== "listening") return;
-  activeDetail = null;
-  renderListeningJobs(latestJobs);
-  renderSubtitleOverlayButton();
-  listeningMediaMessage.textContent = "正在读取节目…";
-  try {
-    const [detail, savedResumeMs] = await Promise.all([
-      invoke<JobDetail>("get_job_detail", { jobId }),
-      invoke<number>("get_playback_position", { jobId }),
-    ]);
-    if (requestId !== navigationRequestId || currentArea !== "listening") return;
-    await refreshLearningItems();
-    if (requestId !== navigationRequestId) return;
-    activeDetail = detail; editorContextStatus.invalidate();
-    activeSegmentId = null;
-    if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
-    renderListeningJobs(latestJobs);
-    renderListeningSubtitles(detail.segments);
-    const resumeMs = resumeOverrideMs ?? savedResumeMs;
-    mountMedia(detail.playback_path, detail.audio_fallback_path, listeningMediaHost, listeningMediaMessage, resumeMs);
-    updateActiveSubtitle(resumeMs);
-    renderSubtitleOverlayButton();
-    if (autoplay && mediaPlayer.media) await mediaPlayer.media.play();
-  } catch (error) {
-    if (requestId !== navigationRequestId || currentArea !== "listening") return;
-    listeningMediaMessage.textContent = `无法打开节目：${String(error)}`;
-  }
+  await listeningNavigation.open(jobId, resumeOverrideMs, autoplay);
 }
 
 function renderListeningSubtitles(segments: SubtitleSegment[]): void {
@@ -3714,9 +3718,7 @@ async function persistPlaybackPosition(): Promise<void> {
 async function savePlaybackPosition(jobId: string, media: HTMLMediaElement, intendedMs = media.currentTime * 1_000): Promise<void> {
   const positionMs = Math.max(0, Math.round(intendedMs));
   lastPlaybackPositionSavedAt = Date.now();
-  await invoke("save_playback_position", {
-    request: { jobId, positionMs },
-  }).catch(() => undefined);
+  await playbackPositionBackend.save(jobId, positionMs).catch(() => undefined);
 }
 
 function updatePlaybackControls(): void {
