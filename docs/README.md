@@ -28,14 +28,14 @@ _更新：2026-10-26_
 | [0058 紧凑布局与跟随](decisions/0058-compact-editor-and-playback-follow.md) | 左视频、右波形与上下双语编辑、底部列表；默认跟随、手动锁定、输入保护与工具焦点 |
 | [0059 Rust 模块边界](decisions/0059-desktop-command-and-repository-modules.md) | IPC 与 repository 渐进拆分，保留方法、SQL、revision 与事务合同 |
 | [0060 音频块接缝](decisions/0060-overlap-alignment-before-acoustic-selection.md) | 重叠区先对齐后选择，无法可靠匹配时保留两侧观测并进入复核 |
-| [0061 完整结构撤销](decisions/0061-transactional-structure-undo-metadata.md) | 已确认的来源／依赖恢复、单调修订与后端收据；token／UI 已接入，原生元数据恢复通过；即时上下文状态回填仍有缺口 |
+| [0061 完整结构撤销](decisions/0061-transactional-structure-undo-metadata.md) | 已确认的来源／依赖恢复、单调修订与后端收据；token／UI 已接入，原生元数据恢复与即时上下文回填主要路径通过；剩余门禁见路线图 |
 
 ## 验收证据与运行记录
 
 这些文件按提交和测试环境描述观察结果；阅读时同时看限制和待验证项。
 
 - [编辑窗口与交互](editor-workspace-validation.md)、[性能与接口](editor-performance-validation.md)、[本机安装与备份轮换](local-editor-installation.md)。
-- [原文保存后的上下文过期显示缺口](editor-context-stale-display-bug.md)：c360cc9 原生复现与修复边界，后台传播已生效，轻量回填代码／合成回归已修复，新原生复验待完成。
+- [原文保存后的上下文过期显示缺口](editor-context-stale-display-bug.md)：c360cc9 原生复现与修复边界，后台传播已生效，轻量回填及 2a82da1 原生复验通过，保留修复前后证据。
 - [离线工作流验证](offline-workflow-validation.md)、[阶段队列与提前翻译验证](staged-pipeline-validation.md)。
 - [识别／翻译质量基线](evaluation.md)、[Hy-MT2 验证](hy-mt2-validation.md)、[Gemini 接入与验证](gemini-transcribe.md)。工程合同与人工质量结论分开。
 - [《教父》短片段质量基线](godfather-short-baseline.md)：旧任务删除、独立五分钟片段和识别／分段／翻译逐层排查计划。

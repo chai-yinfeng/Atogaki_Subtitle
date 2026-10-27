@@ -702,3 +702,11 @@ c360cc9 原生显示缺口按[问题记录](editor-context-stale-display-bug.md)
 只按集合差异刷新受影响行；过期筛选激活时重算同一虚拟列表与命中数，不替换当前输入框或草稿。当前编辑段的保存说明也考虑上下文过期。新增 WebKit 脚本在修复前以消费者标记 5 秒等待超时失败，修复后即时标记／清除、当前筛选、节点及输入保留、每次保存一次轻量读取、无完整任务重载均通过。三个既有 WebKit（结构输入保护／连续撤销、token 重开与预算、翻译流程）也通过。
 
 SQLite 新增一项传播／清除／租户隔离／精简响应回归，全量共享库 183 passed／5 环境依赖 ignored；前端七项新增请求合并／代次／失败／dispose 回归，全量 281，通过类型／生产构建。桌面 Rust 35 passed／4 ignored，两套 fmt／diff 通过。日志和源码摘要在 local-artifacts/editor-context-state-20261026；未更新原生 QA 或正式 App，新原生复验、真实故障及性能门禁保留。
+
+### release QA 2a82da1 原生复验
+
+complete release 构建及深度严格签名通过。旧 c360cc9 QA checksum 匹配且进程已退出后，将其移动到 `/tmp/atogaki-editor-token-qa/Atogaki.app` 固定路径并原位更新，没有新建另一份 QA App 备份；旧视频现场和原始证据保留，正式 App 未改。显式绑定前一轮成功生成的默认 WAV 数据（seed-audio-only.json），当前任务十段、三条依赖、初始上下文过期为零。启动捕获首次 ScreenCaptureKit -3811，确认同一 PID 仍存活并重新绑定窗口后恢复；未重启进程。
+
+真实窗口编辑第一段并保存，不离开／重开，第三段立即显示待重译；SQLite 的第三段仅 translation_dependency_stale=1，自身 translation_stale=0，三条边保留。原生过期菜单可选择“译文过期”，显示 2/10。选择第三段并人工保存译文后，其上下文标记和出边清除，筛选即时为 1/10；主编辑框仍在第三段（6–7 秒），保留已保存人工译文，并提示当前段不在筛选结果中。integrity_check=ok，正常退出后原进程 exit 0。
+
+native-before／native-context-saved／native-cleared 的 JSON／AX 与截图、native-package／native-seed 和构建日志在本节同一证据目录。代码和核心回归仍为 2a82da1 的 183／5 ignored、桌面 35／4 ignored、前端 281 与四组 WebKit；这次原生只补上下文呈现／清除及筛选保留，不外推原生拖动、真实磁盘失败、长期性能或 Windows 已通过。

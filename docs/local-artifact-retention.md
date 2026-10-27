@@ -88,3 +88,9 @@ python3 scripts/inventory-local-artifacts.py \
 独立视频现场为 `seed.json` 指向的 atogaki-token-qa-6eb49ab2-b019-49c7-99ec-0744bc68ebb4，另保留默认 WAV 种子的成功复跑目录（见 seed-audio-only.json），用于下一轮上下文状态显示缺口复验。只含合成媒体、字幕、来源和依赖；不是正式数据备份。AX、截图、SQLite 只读阶段 JSON 与核验脚本保留在上述证据目录，不另建整份 App／数据备份。
 
 本轮两个种子失败目录（46efd2ae… 与 b6a035c9…）经路径、ID 和逐文件 checksum／用途核对后清理，共 3,172,916 字节逻辑内容；清单在 failed-fixtures-inventory.json，失败日志保留。它们均为本轮刚生成的合成测试数据，未涉及正式／既有 QA 数据、模型、真实媒体、人工评审、采用证据或恢复点；逻辑字节不等于精确磁盘释放量。
+
+### 2a82da1 状态回填 QA 更新
+
+c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到固定临时路径 `/tmp/atogaki-editor-token-qa/Atogaki.app` 并原位更新为 2a82da1。新包签名和原生状态复验通过；没有追加另一份 App 或正式数据库备份。旧 `/tmp/atogaki-token-native-c360cc9/Atogaki.app` 路径已被取代，旧包 checksum、视频现场与元数据验收材料仍保留；较早路径不再表示当前 App 版本。
+
+本轮复用前一轮 seed-audio-only.json 指向的成功合成数据，没有重新生成媒体／任务。新包的逐文件 checksum、版本、来源、原生阶段 JSON／AX／截图在 `local-artifacts/editor-context-state-20261026/native-package.json` 及同目录 manifest。正式 App、安装回退点、旧 QA 2950a6d、采用证据及真实媒体未修改或清理。
