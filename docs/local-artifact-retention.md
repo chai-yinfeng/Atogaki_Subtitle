@@ -110,3 +110,10 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ### 草稿重启验收现场
 
 `local-artifacts/editor-draft-restart-20261027/seed.json` 指向本轮唯一合成数据库副本，复用既有合成媒体／证据，没有新增 App 或正式恢复备份。失败草稿缓存的只读快照只读取 QA identifier 的 WebKit 路径；成功显式保存并退出后缓存为空。临时故障 trigger 已移除，QA 已退出；小型合成库及恢复／冲突证据保留供复核。正式 WebKit、数据库、媒体、安装回退点未修改。
+
+
+## 2026-10-27：近期模块集成 QA 原位更新
+
+固定 `/tmp/atogaki-editor-token-qa/Atogaki QA.app` 从 2a82da1 更新为 7849794；旧包 27 文件清单匹配、无运行进程，新源包与更新后的包均签名通过后完成核对。没有增加 QA App 备份；共享 release bundle 是构建产物，固定路径用于实际窗口验收。旧包 manifest 与新 checksum 保留在 `local-artifacts/editor-native-integration-20261027/`，固定 build.json 更新到新版本。
+
+新增唯一 integration 合成 SQLite 副本，复用原合成媒体与证据；插入／撤销后保留阶段 JSON、AX、截图及核验摘要。原合成库未变，QA 正常退出。没有新增正式数据库备份，正式 App、恢复点、模型／真实媒体／采用证据不在本轮清理范围。初始误建的 src-tauri/local-artifacts 测试日志空目录已用 rmdir 清理；没有删除未知内容。
