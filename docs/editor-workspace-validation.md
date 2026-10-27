@@ -794,3 +794,14 @@ QA 首次窗口绑定有一次约 472 秒的工具延迟，进程仍存活，未
 新合成 WebKit listening-navigation 分别持有 get_playback_position／list_learning_items，在未完成访问离页后以同任务新位置重开，再释放旧返回；核对同一个新媒体元素保持挂载、位置未回退、只有一个媒体，离页保存为新位置。既有 media-player 的真实媒体事件验证恢复／持久化、损坏媒体回退／双源失败；editor-navigation、time-navigation 两组也通过。没有运行模型、真实云端或正式数据写入。
 
 根目录／Tauri fmt、diff、测试／构建／四组 WebKit 日志及源码摘要在 `local-artifacts/listening-navigation-20261027/`。本轮未更新原生 QA／正式 App；收听全局收藏刷新仍沿用旧缓存／视图逻辑，不将媒体访问隔离外推为其整体竞态已解决。顶层区域切换、全局初始化及原生长期性能继续待完成。
+
+
+## 2026-10-27：顶层区域导航与迟到学习完成
+
+新增 area-navigation，main 注入具体区域 DOM 呈现、原 stopActivePlayback、学习／词典准备与编辑打开，仍共享唯一 navigationRequestId。原流程学习 await 后没有访问检查，可能在切走后呈现词典／重置滚动；编辑子访问只检查区域，不能区分同一区域的新访问。现在学习完成后复核导航与区域，editor-navigation 成功返回实际前端访问编号，顶层用该编号复核；回退、失效、未完成返回 null。pagehide dispose 失效迟到后续动作，预检异常维持原行为。
+
+九项新增区域单元覆盖基础区域／刷新、预检失败／期间切换、学习词典并行、同区域迟到完成、编辑子编号、编辑回退／新访问、空编辑目标和 dispose；编辑导航补一项实际编号／翻译等待失效返回。首次两个单元预期遗漏已合法开始的 dictionary 回调，修正期望后通过，未为此改变产品逻辑。前端全量 326 passed，类型和生产构建通过。
+
+新合成 WebKit area-navigation 持有学习读取，分别切到工作台／重开学习，再释放旧读取，确认没有额外 scrollTo；随后正常进入编辑器。listening-navigation、editor-navigation、time-navigation、task-progress 四组既有回归也通过。这里验证的是顶层后续动作和子访问，原全局学习／词典缓存函数仍运行，不外推其内部呈现／缓存竞态全部解决。
+
+根目录／Tauri fmt、diff、测试／构建／五组 WebKit 与源码摘要在 `local-artifacts/area-navigation-20261027/`。未更新原生 QA 或正式 App，不推导原生布局／长期性能通过；全局初始化、插入范围建议及其他既有验收门禁继续保留。路线图同步改为当前模块状态与下一步，逐次计数与失败历史仍保留本页。

@@ -1,3 +1,4 @@
+import { createAreaNavigation, type MainArea } from "./area-navigation";
 import { createListeningNavigation } from "./listening-navigation";
 import { createPlaybackPositionBackend } from "./playback-position-backend";
 import { createTaskProgress } from "./task-progress";
@@ -309,7 +310,7 @@ type SubtitleOverlayPayload = {
 };
 
 type WorkspaceSection = TaskSection;
-type TopLevelArea = "workbench" | "listening" | "learning" | "karaoke" | "workspace";
+type TopLevelArea = MainArea | "workspace";
 
 const desktopPlatform = navigator.userAgent.includes("Windows")
   ? "windows"
@@ -1189,6 +1190,7 @@ window.addEventListener("pagehide", () => {
   taskNavigation.dispose();
   taskProgress.dispose();
   listeningNavigation.dispose();
+  areaNavigation.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -2282,40 +2284,41 @@ async function stopActivePlayback(): Promise<void> {
   hideSubtitleOverlay();
 }
 
-async function showTopLevelArea(area: Exclude<TopLevelArea, "workspace">, editorDetail?: JobDetail, editorJobId?: string): Promise<void> {
-  closeLearningSelection();
-  assertPlaybackCanStop();
-  const requestId = ++navigationRequestId;
-  await stopActivePlayback();
-  if (requestId !== navigationRequestId) return;
-  activeDetail = null;
-  subtitleList?.replaceChildren();
-  listeningSubtitleList?.replaceChildren();
-  currentArea = area;
-  shell?.classList.toggle("workspace-open", area === "karaoke");
-  taskTools.unmount();
-  homeView?.classList.toggle("hidden", area !== "workbench");
-  listeningView?.classList.toggle("hidden", area !== "listening");
-  learningView?.classList.toggle("hidden", area !== "learning");
-  karaokeView?.classList.toggle("hidden", area !== "karaoke");
-  document.querySelector<HTMLButtonElement>("#show-workbench")?.classList.toggle("active", area === "workbench");
-  document.querySelector<HTMLButtonElement>("#show-listening")?.classList.toggle("active", area === "listening");
-  document.querySelector<HTMLButtonElement>("#show-learning")?.classList.toggle("active", area === "learning");
-  document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", area === "karaoke");
-  updatePlaybackControls();
-  renderSubtitleOverlayButton();
-  renderListeningJobs(latestJobs);
-  if (area === "workbench" || area === "listening") void refresh();
-  if (area === "learning") {
-    await Promise.all([refreshLearningItems(), loadDictionarySettings()]);
-    if (learningDictionaryDialog?.open) renderLearningDictionary();
-  }
-  const editorTarget = editorJobId ?? karaokeSelectedJobId;
-  if (area === "karaoke" && editorTarget) {
-    await openKaraokeJob(editorTarget, editorDetail);
-    if (currentArea !== "karaoke") return;
-  }
-  window.scrollTo({ top: 0, behavior: "auto" });
+const areaNavigation = createAreaNavigation<JobDetail>({
+  begin: () => { closeLearningSelection(); assertPlaybackCanStop(); return ++navigationRequestId; },
+  current: navigation => navigation === navigationRequestId,
+  area: () => currentArea,
+  stop: stopActivePlayback,
+  apply: area => {
+    activeDetail = null;
+    subtitleList?.replaceChildren();
+    listeningSubtitleList?.replaceChildren();
+    currentArea = area;
+    shell?.classList.toggle("workspace-open", area === "karaoke");
+    taskTools.unmount();
+    homeView?.classList.toggle("hidden", area !== "workbench");
+    listeningView?.classList.toggle("hidden", area !== "listening");
+    learningView?.classList.toggle("hidden", area !== "learning");
+    karaokeView?.classList.toggle("hidden", area !== "karaoke");
+    document.querySelector<HTMLButtonElement>("#show-workbench")?.classList.toggle("active", area === "workbench");
+    document.querySelector<HTMLButtonElement>("#show-listening")?.classList.toggle("active", area === "listening");
+    document.querySelector<HTMLButtonElement>("#show-learning")?.classList.toggle("active", area === "learning");
+    document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", area === "karaoke");
+    updatePlaybackControls();
+    renderSubtitleOverlayButton();
+    renderListeningJobs(latestJobs);
+  },
+  refresh: () => { void refresh(); },
+  learning: refreshLearningItems,
+  dictionary: loadDictionarySettings,
+  renderDictionary: () => { if (learningDictionaryDialog?.open) renderLearningDictionary(); },
+  selectedEditor: () => karaokeSelectedJobId,
+  editor: openKaraokeJob,
+  scrollTop: () => window.scrollTo({ top: 0, behavior: "auto" }),
+});
+
+async function showTopLevelArea(area: MainArea, editorDetail?: JobDetail, editorJobId?: string): Promise<void> {
+  await areaNavigation.show(area, editorDetail, editorJobId);
 }
 
 const listeningNavigation = createListeningNavigation<JobDetail>({
@@ -2915,9 +2918,9 @@ const editorNavigation = createEditorNavigation<JobDetail>({
   },
 });
 
-async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<void> {
-  if (!jobId || !karaokeMediaMessage) return;
-  await editorNavigation.open(jobId, loadedDetail);
+async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<number | null> {
+  if (!jobId || !karaokeMediaMessage) return null;
+  return editorNavigation.open(jobId, loadedDetail);
 }
 
 async function saveAsrReviewDecision(

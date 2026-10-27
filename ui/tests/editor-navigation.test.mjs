@@ -47,3 +47,8 @@ test('dispose invalidates pending work and prevents later opens',async()=>{
  const wait=deferred();const f=fixture({waveform:()=>wait.promise});const flight=f.session.open('a');await new Promise(r=>setImmediate(r));f.session.dispose();wait.resolve();await flight;await f.session.open('b');
  assert.deepEqual(f.events.map(e=>e[0]),['stop','prepare','apply']);
 });
+
+test('successful editor open returns the actual visit ID and departed translation returns none',async()=>{
+ const f=fixture();assert.equal(await f.session.open('a'),1);
+ const wait=deferred(),g=fixture({translation:()=>wait.promise});const flight=g.session.open('a');await new Promise(r=>setImmediate(r));g.leave();wait.resolve();assert.equal(await flight,null);
+});

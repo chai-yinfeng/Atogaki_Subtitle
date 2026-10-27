@@ -176,3 +176,10 @@ main 保留任务状态／段数变化的呈现回调：状态更新不重建整
 `listening-navigation.ts` 协调离页预检、并行读取详情／恢复位置、准备收藏资料、挂载既有媒体与可选自动播放。继续共享 navigationRequestId、stopActivePlayback 和唯一 media-player；每次等待后复核访问与收听区域，详情校验 job ID，dispose 使未完成访问失效。显式 resumeOverrideMs（包括 0）优先于持久位置。main 提供具体标题／列表／媒体呈现回调，不新增播放器或位置状态副本。
 
 详情复用 editor-backend.detail；播放位置的读写 IPC 集中到 playback-position-backend，保存节流、取整及原失败处理保持不变。收藏列表仍通过既有全局 refreshLearningItems 更新，该全局缓存／视图生命周期未在本轮抽取；本模块只阻止其等待结束后旧访问继续挂载媒体。
+
+
+### 顶层区域切换
+
+`area-navigation.ts` 管理 workbench／listening／learning／karaoke 的离页预检、区域应用、资料准备和后续滚动。沿用 main 的唯一 navigationRequestId，main 只提供 DOM 呈现和现有服务回调。学习资料／词典并行读取结束后核对访问，旧访问不再额外呈现词典或重置滚动。编辑任务打开现在返回实际 navigation ID（未完成、回退或失效为 null），顶层等待子访问后核对该 ID，避免只凭同一区域名称授权迟到后续动作；没有新增导航时钟或持久化状态。
+
+pagehide dispose 使未完成的顶层后续动作失效，预检失败维持原输入。既有 refreshLearningItems／loadDictionarySettings 仍负责各自全局缓存与视图更新；顶层模块不宣称取消这些请求或解决其所有内部竞态。初始事件／定时器／资料加载的集中生命周期以及插入范围建议仍待抽取。
