@@ -1,3 +1,4 @@
+import { createEditorNavigation } from "./editor-navigation";
 import { createEditorContextStatus } from "./editor-context-status";
 import { mountActionConfirmation, type ActionConfirmation } from "./action-confirmation";
 import { createEditorBlockActions } from "./editor-block-actions";
@@ -711,7 +712,7 @@ let activeSegmentId: string | null = null;
 let subtitleOverlayVisible = false;
 let lastSubtitleOverlayKey = "";
 const subtitleUndoHistory = new Map<string, SubtitleUndoEntry[]>();
-const editorBackend = createEditorBackend(invoke);
+const editorBackend = createEditorBackend<JobDetail>(invoke);
 const structureBackend = createStructureEditBackend(invoke);
 const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(editorBackend.updateText, updateSubtitleDraftUI);
 
@@ -1179,6 +1180,7 @@ window.addEventListener("pagehide", () => {
   editorBlockActions.dispose();
   editorStructureHistory.dispose();
   editorContextStatus.dispose();
+  editorNavigation.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -2849,36 +2851,33 @@ async function playLearningSource(itemId: string): Promise<void> {
   await openListeningJob(occurrence.job_id, occurrence.start_ms, true);
 }
 
-async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<void> {
-  if (!jobId || !karaokeMediaMessage) return;
-  const reopeningSelectedJob = karaokeSelectedJobId === jobId;
-  assertPlaybackCanStop();
-  const requestId = ++navigationRequestId;
-  await stopActivePlayback();
-  if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
-  karaokeSelectedJobId = jobId;
-  if (!reopeningSelectedJob) {
-    karaokeResumeMs = 0;
-
-  }
-  activeDetail = null;
-  editorWaveform.reset();
-  currentCueEditor.clear();
-  karaokeFollowPlayhead = true;
-  activeRepairSignalId = null;
-  if (retranscriptionStartInput) retranscriptionStartInput.value = "";
-  if (retranscriptionEndInput) retranscriptionEndInput.value = "";
-  syncTimelineFollowState();
-  renderKaraokeTimeline();
-  karaokeMediaMessage.textContent = "正在读取字幕编辑任务…";
-  if (karaokeJobTitle) karaokeJobTitle.textContent = "正在打开任务…";
-  if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "正在准备本地波形…";
-  try {
-    const detail = loadedDetail ?? await invoke<JobDetail>("get_job_detail", { jobId });
-    if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
-    if (!detail.segments.length || !matchesTerminalStatus(detail.job.status)) { await openJob(jobId, "review"); return; }
+const editorNavigation = createEditorNavigation<JobDetail>({
+  begin: () => { assertPlaybackCanStop(); return ++navigationRequestId; },
+  current: navigation => navigation === navigationRequestId && currentArea === "karaoke",
+  stop: stopActivePlayback,
+  read: editorBackend.detail,
+  editable: detail => detail.segments.length > 0 && matchesTerminalStatus(detail.job.status),
+  progress: jobId => openJob(jobId, "review"),
+  prepare: jobId => {
+    const reopeningSelectedJob = karaokeSelectedJobId === jobId;
+    karaokeSelectedJobId = jobId;
+    if (!reopeningSelectedJob) karaokeResumeMs = 0;
+    activeDetail = null;
+    editorWaveform.reset();
+    currentCueEditor.clear();
+    karaokeFollowPlayhead = true;
+    activeRepairSignalId = null;
+    if (retranscriptionStartInput) retranscriptionStartInput.value = "";
+    if (retranscriptionEndInput) retranscriptionEndInput.value = "";
+    syncTimelineFollowState();
+    renderKaraokeTimeline();
+    if (karaokeMediaMessage) karaokeMediaMessage.textContent = "正在读取字幕编辑任务…";
+    if (karaokeJobTitle) karaokeJobTitle.textContent = "正在打开任务…";
+    if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "正在准备本地波形…";
+  },
+  apply: detail => {
     activeDetail = detail; editorContextStatus.invalidate();
-    editorSession.open(jobId, detail.segments);
+    editorSession.open(detail.job.job_id, detail.segments);
     void editorStructureHistory.refresh();
     editorTimeFingerprint = "";
     editorSearch.value = editorSession.query; editorFilter.value = editorSession.filter;
@@ -2892,16 +2891,21 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
     updateActiveSubtitle(karaokeResumeMs);
     updateStructureUndoButton();
     setSubtitleEditAction("拖动字幕块可整体移动，拖动左右边缘可单独修剪；按 10 ms 吸附，空白合法，同轨不能重叠。");
-    await loadKaraokeWaveform(karaokeResumeMs, true);
-    usePlayheadSubtitleForRetranscription(false);
-    await loadAsrQualitySignals(jobId);
-    renderEditorList();
-    await refreshTranslationStatus();
-  } catch (error) {
-    if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
-    karaokeMediaMessage.textContent = `无法打开字幕编辑任务：${String(error)}`;
+  },
+  waveform: () => loadKaraokeWaveform(karaokeResumeMs, true),
+  processingRange: () => usePlayheadSubtitleForRetranscription(false),
+  signals: loadAsrQualitySignals,
+  renderList: renderEditorList,
+  translation: refreshTranslationStatus,
+  failed: error => {
+    if (karaokeMediaMessage) karaokeMediaMessage.textContent = `无法打开字幕编辑任务：${String(error)}`;
     if (karaokeWaveformStatus) karaokeWaveformStatus.textContent = "波形不可用。";
-  }
+  },
+});
+
+async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<void> {
+  if (!jobId || !karaokeMediaMessage) return;
+  await editorNavigation.open(jobId, loadedDetail);
 }
 
 async function saveAsrReviewDecision(

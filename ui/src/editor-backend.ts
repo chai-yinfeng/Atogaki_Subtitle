@@ -4,8 +4,9 @@ import type { DraftText } from "./subtitle-drafts";
 
 type Invoke = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 /** Editor persistence adapter. Session/view modules never import Tauri. */
-export function createEditorBackend(invoke: Invoke) {
+export function createEditorBackend<Detail = unknown>(invoke: Invoke) {
   return {
+    detail(jobId: string) { return invoke<Detail>("get_job_detail", { jobId }); },
     contextStatus(jobId: string) { return invoke<TranslationContextState>("get_translation_context_state", { jobId }); },
     waveform(jobId: string, startMs: number, endMs: number, pointCount: number) {
       return invoke<WaveformWindow>("get_waveform_window", { request: { jobId, startMs, endMs, pointCount } });

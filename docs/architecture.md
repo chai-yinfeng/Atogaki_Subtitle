@@ -148,3 +148,10 @@ Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有
 主入口仍协调播放器、时间轴和部分处理用例，后续每次抽取一条边界，不能将当前结构写成已经完成全模块拆分。任务卡片通过 SQLite 摘要读取，恢复与采用仍完整验证来源证据；见 [0056](decisions/0056-editor-virtual-list-and-task-summary.md) 和 [0057](decisions/0057-editor-view-lifecycles.md)。
 
 前端类型检查启用 `noUnusedLocals`／`noUnusedParameters`，删除项先通过调用搜索确认。旧粗修保存／撤销入口已移除；现有两类历史继续由唯一字幕编辑工作面使用，不统一命令历史。
+
+
+### 编辑任务打开协调
+
+`editor-navigation.ts` 协调一次字幕编辑访问的离页预检、详情读取、进度页回退、界面应用、波形、处理选区、审查信号和翻译状态初始化。复用 main 的唯一 navigationRequestId 与 stopActivePlayback，不持有另一份 cue／草稿／播放器。编辑详情读取集中到 editor-backend；main 提供同步准备／呈现回调和既有服务，模块不操作 DOM 或导入 Tauri。读取详情核对 job ID；每个异步阶段之间核对导航代次与区域，pagehide 时 dispose 使迟到工作失效。保存失败或时间预检失败继续向原调用者返回，保持当前输入。
+
+此前仅在详情读取后检查导航，波形等待结束后仍可能为已经离开的访问设置处理选区、请求审查并刷新列表；现在在波形和审查等待后分别停止过期后续流程。收听／任务进度／顶层区域切换与全局初始化仍在 main，后续按用例抽取，不把本模块视为全部导航拆分完成。

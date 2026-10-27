@@ -750,3 +750,14 @@ QA 首次窗口绑定有一次约 472 秒的工具延迟，进程仍存活，未
 本轮证明正常 Cmd+Q 后草稿恢复、源文冲突阻止隐式保存／跟随，以及显式确认保存。未测试强杀、主机存储全满、译文冲突或存储拒绝；此前磁盘满现场跨轮退出原因未知且未恢复草稿，不能由本轮受控成功反推其原因已解决。既有 SubtitleDrafts 的恢复／冲突实现本轮未修改，不因未确定原因而改写持久化架构。证据、seed／fault 脚本、只读缓存快照、阶段 AX／截图及 verification.json 保留在 `local-artifacts/editor-draft-restart-20261027/`。正式 App 未替换。
 
 本轮 SubtitleDrafts 专项 5 passed，根目录／Tauri cargo fmt --check 和 git diff --check 通过；无产品代码改动，未重复前端全量构建或 Rust 业务测试。
+
+
+## 2026-10-27：编辑任务打开协调与迟到波形回归
+
+新增 editor-navigation，接入 main 的唯一导航代次和原 stopActivePlayback，保留草稿／IME／未提交时间保护。详情经 editor-backend 读取并核对 job ID；准备与应用视图由 main 提供，复用现有播放器、波形、审查和翻译服务。非完整任务继续回进度页；pagehide dispose 不取消已提交写入，只失效迟到初始化。
+
+原流程仅在详情读取后校验访问，await 波形之后仍继续设置处理选区、读取审查并刷新列表；新流程在波形和审查每次等待后复核访问，离开后不再进入后续阶段。九项新增单元回归覆盖预检失败、预检中切换、详情乱序及旧错误、波形／审查等待中离开、缓存详情、非完整回退、身份不符和 dispose。前端全量 290 passed，类型检查与生产构建通过。
+
+新增合成 WebKit 导航用例持有真实页面波形 IPC，返回任务页后再释放，确认 list_asr_quality_signals／translation_status 调用数未增加、编辑框隐藏，随后重开正常；time-navigation、follow、token-history 三组既有回归也通过。初跑四组因当前 Playwright 1.62.1 所需 WebKit 文件缺失而未启动；安装对应官方浏览器后重跑通过，失败日志保留。上述为合成 IPC 浏览器回归，未构建新原生 QA，不推导原生延迟／性能门禁通过。
+
+日志及源码摘要保留于 `local-artifacts/editor-navigation-20261027/`。本轮不改字幕 schema／Rust 业务或正式 App；收听、进度、顶层导航及初始化仍待渐进收敛。根目录／Tauri cargo fmt --check 与 git diff --check 按本提交检查。
