@@ -2,6 +2,7 @@ import type { DesktopSettings, SaveDesktopSettingsRequest, TranslationProfileSum
 
 export function createDesktopSettingsBackend(invoke: <T>(command: string, args: Record<string, unknown>) => Promise<T>) {
   return {
+    dataDirectory: () => invoke<string>("data_directory", {}),
     settings: () => invoke<DesktopSettings>("desktop_settings", {}),
     models: () => invoke<ModelCatalogItem[]>("model_catalog", {}),
     downloads: () => invoke<ModelDownloadState[]>("model_download_states", {}),

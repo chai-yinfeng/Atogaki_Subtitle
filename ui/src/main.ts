@@ -1,3 +1,4 @@
+import { createDesktopStartup } from "./desktop-startup";
 import { suggestSubtitleInsertionRange } from "./subtitle-insertion-range";
 import { createDesktopRuntime } from "./desktop-runtime";
 import { createAreaNavigation, type MainArea } from "./area-navigation";
@@ -726,6 +727,7 @@ const subtitleDrafts = new SubtitleDrafts<SubtitleSegment>(editorBackend.updateT
 
 let workspaceActionBusy = false;
 let glossaries: Glossary[] = [];
+let glossaryReadGeneration = 0;
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
 let renamingJob: LocalJob | null = null;
@@ -1194,6 +1196,7 @@ window.addEventListener("pagehide", () => {
   listeningNavigation.dispose();
   areaNavigation.dispose();
   desktopRuntime.dispose();
+  desktopStartup.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -1791,13 +1794,17 @@ async function refreshTaskPromptPreview(): Promise<void> {
   }
 }
 
-async function refreshGlossaries(): Promise<void> {
+async function refreshGlossaries(current: () => boolean = () => desktopStartup.active): Promise<void> {
+  const request = ++glossaryReadGeneration;
+  const active = () => current() && request === glossaryReadGeneration;
   try {
-    glossaries = await invoke<Glossary[]>("list_glossaries");
+    const loaded = await invoke<Glossary[]>("list_glossaries");
+    if (!active()) return;
+    glossaries = loaded;
     renderGlossaryOptions();
     await refreshTaskGlossaryConfiguration();
   } catch (error) {
-    if (taskMessage) taskMessage.textContent = `无法读取识别词表：${String(error)}`;
+    if (active() && taskMessage) taskMessage.textContent = `无法读取识别词表：${String(error)}`;
   }
 }
 
@@ -2182,7 +2189,7 @@ async function deleteJob(job: LocalJob): Promise<void> {
   }
 }
 
-async function refresh(): Promise<void> {
+async function refresh(current: () => boolean = () => desktopStartup.active): Promise<void> {
   if (!jobList || refreshing || jobOrderBusy || (currentArea !== "workbench" && currentArea !== "listening")) return;
   refreshing = true;
   if (!activeDetail && renderedJobsFingerprint === null && jobList.childElementCount === 0) {
@@ -2190,6 +2197,7 @@ async function refresh(): Promise<void> {
   }
   try {
     const jobs = await invoke<LocalJob[]>("list_job_summaries");
+    if (!current()) return;
     latestJobs = jobs;
     const fingerprint = JSON.stringify(jobs);
     if (currentArea !== "workbench" && currentArea !== "listening") return;
@@ -2201,6 +2209,7 @@ async function refresh(): Promise<void> {
       if (!activeDetail) window.scrollTo({ top: scrollTop, behavior: "auto" });
     }
   } catch (error) {
+    if (!current()) return;
     jobList.innerHTML = `<div class="empty-state error">无法读取本地任务：${escapeHtml(String(error))}</div>`;
     renderedJobsFingerprint = null;
   } finally {
@@ -4589,18 +4598,6 @@ registerSubtitleFollowHost(subtitleList);
 registerSubtitleFollowHost(listeningSubtitleList);
 syncVadControls();
 renderSubtitleOverlayButton();
-void loadDesktopSettings(true);
-
-void invoke<string>("data_directory")
-  .then((path) => {
-    if (dataPath) dataPath.textContent = `本地数据：${path}`;
-  })
-  .catch(() => {
-    if (dataPath) dataPath.textContent = "本地数据目录暂不可用。";
-  });
-void refreshTranslationStatus();
-void refreshGlossaries();
-void refresh();
 
 
 async function showPartialTranscript(jobId: string): Promise<void> {
@@ -4770,14 +4767,19 @@ let taskPresets: Array<{
     translationProviderId: string;
   };
 }> = [];
-async function loadTaskPresets(): Promise<void> {
+let presetReadGeneration = 0;
+async function loadTaskPresets(current: () => boolean = () => desktopStartup.active): Promise<void> {
+  const request = ++presetReadGeneration;
+  const active = () => current() && request === presetReadGeneration;
   try {
-    taskPresets = await invoke("task_presets");
+    const loaded: typeof taskPresets = await invoke("task_presets");
+    if (!active()) return;
+    taskPresets = loaded;
     presetTools.querySelector("select")!.innerHTML =
       '<option value="">选择任务预设</option>' +
       taskPresets.map((p, i) => `<option value="${i}">${escapeHtml(p.name)}</option>`).join("");
   } catch (e) {
-    if (taskMessage) taskMessage.textContent = `预设读取失败：${String(e)}`;
+    if (active() && taskMessage) taskMessage.textContent = `预设读取失败：${String(e)}`;
   }
 }
 presetTools.querySelector<HTMLSelectElement>("select")!.onchange = async (event) => {
@@ -4821,7 +4823,6 @@ presetTools.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
     if (taskMessage) taskMessage.textContent = String(e);
   }
 };
-void loadTaskPresets();
 
 function updateTaskPipelineSummary():void {
   const summary=document.querySelector<HTMLElement>("#task-pipeline-summary");
@@ -4880,3 +4881,18 @@ const desktopRuntime = createDesktopRuntime<PlaybackAction>({
   failed: error => { if (settingsMessage) settingsMessage.textContent = `桌面事件或刷新失败：${String(error)}`; },
 });
 desktopRuntime.mount();
+
+const desktopStartup = createDesktopStartup({
+  jobs: [
+    { name: "桌面设置", run: () => loadDesktopSettings(true) },
+    { name: "翻译状态", run: refreshTranslationStatus },
+    { name: "识别词表", run: refreshGlossaries },
+    { name: "任务摘要", run: refresh },
+    { name: "任务预设", run: loadTaskPresets },
+  ],
+  directory: settingsBackend.dataDirectory,
+  directoryAccepted: path => { if (dataPath) dataPath.textContent = `本地数据：${path}`; },
+  directoryFailed: () => { if (dataPath) dataPath.textContent = "本地数据目录暂不可用。"; },
+  failed: (name, error) => { if (settingsMessage) settingsMessage.textContent = `${name}初始化失败：${String(error)}`; },
+});
+desktopStartup.mount();
