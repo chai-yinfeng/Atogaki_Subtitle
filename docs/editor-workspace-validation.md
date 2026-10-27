@@ -816,3 +816,10 @@ QA 首次窗口绑定有一次约 472 秒的工具延迟，进程仍存活，未
 新合成 WebKit desktop-runtime 捕获模拟 Tauri 注册／注销并触发页面 pagehide，确认应用启动 interval 全部释放、三项事件各注销一次；另一次延迟可见性订阅到 pagehide 之后，确认注册完成立即注销。初跑清理断言把 Vite 客户端的 30 秒心跳也计入应用资源；补充调用栈确认归属后，只排除 /@vite/client 的开发服务器 interval，应用资源检查保留。失败断言与归属日志保留，没有因此修改产品逻辑。area-navigation、task-progress、time-navigation 三组既有 WebKit 通过。
 
 根目录／Tauri fmt、diff、测试／构建／四组 WebKit 与源码摘要在 `local-artifacts/desktop-runtime-20261027/`。这里验证合成 IPC 的页面清理，不宣称 OS 层原生注销／关闭或长期内存通过；未更新 QA／正式 App。初始设置／主题／词表／预设加载、其他 DOM 监听与插入范围建议仍待收敛。
+
+
+## 2026-10-27：插入字幕范围建议抽取
+
+将播放位置／当前段结束／下一段与媒体时长的建议计算抽到 subtitle-insertion-range 纯函数，main 保留原结构草稿 flush／时间保护、暂停与同一弹窗。沿用 10 ms 吸附、最多两秒、下一段截断、相邻无空白不跳过的规则；未知／无效媒体时间不生成建议。补充非 10 ms 倍数的媒体结尾限制，避免四舍五入后的建议起点超出时长。没有修改插入提交、重叠验证、token 历史或数据库事务。
+
+五项纯函数回归覆盖当前段后空白、间隙／空列表、相邻无空白、边界／末尾吸附和非法媒体时间；前端全量 338 passed，类型检查与生产构建通过。WebKit insert、structure-timing、time-navigation 三组通过，保留既有 IME、失败重试、删除／撤销、候选冲突与离页保护。根目录／Tauri fmt、diff 以及日志／源码摘要在 `local-artifacts/insertion-range-20261027/`。本提交尚未更新原生 QA／正式 App；下一步集中构建近期改动的独立 QA，再执行原生验证。

@@ -1,3 +1,4 @@
+import { suggestSubtitleInsertionRange } from "./subtitle-insertion-range";
 import { createDesktopRuntime } from "./desktop-runtime";
 import { createAreaNavigation, type MainArea } from "./area-navigation";
 import { createListeningNavigation } from "./listening-navigation";
@@ -3302,15 +3303,11 @@ const editorBlockActions = createEditorBlockActions({
 async function openInsertSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
   if (currentCueEditor.dirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
-  if (!mediaPlayer.media || !Number.isFinite(mediaPlayer.media.duration) || mediaPlayer.media.duration <= 0) { setSubtitleEditAction("媒体时长尚未就绪，请等待加载或重新定位媒体。", true); return; }
-  mediaPlayer.media.pause();
-  const position = Math.round((mediaPlayer.media?.currentTime ?? 0) * 1000 / 10) * 10;
-  const current = activeDetail.segments.find(s=>s.start_ms <= position && s.end_ms > position);
-  const start = current?.end_ms ?? position;
-  const next = activeDetail.segments.find(s=>s.start_ms >= start);
-  const duration = Number.isFinite(mediaPlayer.media?.duration) ? Math.round(mediaPlayer.media!.duration*1000) : start+2000;
-  const end = Math.min(start+2000, next?.start_ms ?? duration, duration);
-  insertBlockView.open({ startMs: start, endMs: end, durationMs: duration });
+  const media = mediaPlayer.media;
+  const range = media ? suggestSubtitleInsertionRange(activeDetail.segments, media.currentTime * 1_000, Math.round(media.duration * 1_000)) : null;
+  if (!media || !range) { setSubtitleEditAction("媒体时间尚未就绪，请等待加载或重新定位媒体。", true); return; }
+  media.pause();
+  insertBlockView.open(range);
 }
 async function deleteCurrentSubtitleBlock(): Promise<void> { await editorBlockActions.deleteSelected(); }
 
