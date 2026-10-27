@@ -33,6 +33,7 @@ await page.addInitScript(({audioUrl,cueCount,durationMs})=>{
     if(cmd==='get_waveform_window'){const {startMs,endMs,pointCount}=args.request;return {start_ms:startMs,end_ms:endMs,duration_ms:durationMs,peaks:Array.from({length:pointCount},(_,i)=>({min:-Math.abs(Math.sin(i/8))*.7,max:Math.abs(Math.sin(i/8))*.7}))};}
     if(cmd==='list_asr_quality_signals')return [{id:'signal',signal_kind:'boundary_repetition',start_ms:3000,end_ms:5800,severity:'warning',message:'测试提示',latest_decision:null}];
     if(cmd==='update_subtitle') { await new Promise(resolve=>setTimeout(resolve,window.__test.delay)); if(window.__test.fail)throw Error('disk full'); const r=args.request,c=cues.find(c=>c.id===r.segmentId);revisions.set(r.jobId,revision(r.jobId)+1);Object.assign(c,{source_text:r.sourceText,translated_text:r.translatedText,start_ms:r.startMs,end_ms:r.endMs,source_edited:true});return {...c}; }
+    if(cmd==='get_translation_context_state')return {workspace_revision:revision(args.jobId),translation_context_stale_ids:[]};
     if(cmd==='get_structure_edit_state')return {segments:structuredClone(rows(args.jobId)),workspace_revision:revision(args.jobId),latest:latest(args.jobId)};
     if(cmd==='save_subtitle_timing_recorded'){const before=structuredClone(cues);cues.splice(0,cues.length,...args.request.afterSegments);return window.__test.recordStructure(before,'调整时间',args.request.jobId);}
     if(cmd==='undo_subtitle_structure'){

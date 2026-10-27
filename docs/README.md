@@ -35,7 +35,7 @@ _更新：2026-10-26_
 这些文件按提交和测试环境描述观察结果；阅读时同时看限制和待验证项。
 
 - [编辑窗口与交互](editor-workspace-validation.md)、[性能与接口](editor-performance-validation.md)、[本机安装与备份轮换](local-editor-installation.md)。
-- [原文保存后的上下文过期显示缺口](editor-context-stale-display-bug.md)：c360cc9 原生复现与修复边界，后台传播已生效，当前列表回填待修复。
+- [原文保存后的上下文过期显示缺口](editor-context-stale-display-bug.md)：c360cc9 原生复现与修复边界，后台传播已生效，轻量回填代码／合成回归已修复，新原生复验待完成。
 - [离线工作流验证](offline-workflow-validation.md)、[阶段队列与提前翻译验证](staged-pipeline-validation.md)。
 - [识别／翻译质量基线](evaluation.md)、[Hy-MT2 验证](hy-mt2-validation.md)、[Gemini 接入与验证](gemini-transcribe.md)。工程合同与人工质量结论分开。
 - [《教父》短片段质量基线](godfather-short-baseline.md)：旧任务删除、独立五分钟片段和识别／分段／翻译逐层排查计划。

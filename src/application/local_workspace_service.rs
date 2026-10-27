@@ -279,6 +279,13 @@ impl LocalWorkspaceService {
         self.database.save_subtitle_styles(job_id, styles).await
     }
 
+    pub async fn translation_context_state(
+        &self,
+        job_id: &str,
+    ) -> Result<crate::infrastructure::local_db::LocalTranslationContextState> {
+        self.database.translation_context_state(job_id).await
+    }
+
     pub async fn update_subtitle(
         &self,
         job_id: &str,

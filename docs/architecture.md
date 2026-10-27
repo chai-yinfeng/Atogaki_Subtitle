@@ -85,6 +85,8 @@ Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有
 
 完整来源撤销按 [0061](decisions/0061-transactional-structure-undo-metadata.md) 迁移中。`local_db/subtitle_structure_undo.rs` 已提供插入／删除、Cut／Join、时间调整和候选采用的 opt-in 事务收据，均共用原事务内 helper 并捕获 cue／provenance／依赖／revision。候选替换、ASR 来源赋值及永久采用保护台账在同一事务，采用完成后才捕获 after；沿用旧 ID 时保留新 ASR 来源，撤销恢复旧来源且不删除采用台账。收据和恢复结果不支持反序列化，外部只能读取 token／任务／字幕及同一状态的 revision／上下文过期 ID。recorded 路径保护正向修订、手动来源与机器消费者过期，恢复严格比较完整 after 状态并重映射有效依赖，连续撤销验证收据边界及恢复身份。共享应用服务、有界会话、IPC 与前端 token 迁移已进入当前源码；实际安装包尚未更新，新原生链路仍待验收。
 
+`editor-context-status.ts` 管理成功文字保存后的轻量上下文状态读取，read 通过 editor-backend 的 get_translation_context_state 接入。后端在一个读取事务返回 revision／过期 cue ID，不带字幕文本或证据；前端同一时刻仅一份读取，连续请求合并为最新待决项，任务／navigation／代次校验阻止旧返回覆盖新 detail／翻译／结构状态。仅对变更 ID 的可见行更新标记，过期筛选时重算同一虚拟列表；不改草稿或完整编辑框。状态读取失败独立呈现，不改变已保存结果；dispose 释放待决工作，无 timer 或轮询。
+
 `application/structure_undo_history.rs` 已实现独立的有界会话管理器，移动持有后端收据，以任务队列与全局队首索引限制最多十条／任务、96 MiB 核算预算。record 校验链连续性并报告淘汰／超大项；undo 验证最新 token 与任务，复用真实数据库恢复后重绑定前一项，错误时保留收据；forget_job／clear 释放记录和索引。对外只序列化描述符、字幕、revision 和过期 ID，原始元数据仍不接受 IPC 反序列化。容量测量见性能记录。`application/structure_edit_session.rs` 以同一个 Arc<Mutex<StructureUndoHistory>> 包住各结构操作的事务提交与同步 record、undo；工作区 clone／using_provider 和候选服务注入均保留同一会话。插入媒体边界检查复用旧入口的 helper；失败不发布 token，响应取自同一提交收据。候选服务沿用原验证及 artifact 锁，锁顺序为 artifact → session → SQLite；采用后辅助状态写入失败返回已提交结果／token 与 warning，永久保护以事务内台账为准。Tauri 删除任务成功后等待会话并释放历史，启动时为候选服务注入工作区会话。当前源码已切换 IPC／前端至同一 token 历史，旧数组历史不再启用。
 
 单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。

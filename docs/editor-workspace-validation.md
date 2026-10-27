@@ -694,3 +694,11 @@ undo 只接受该任务最新 token，数据库失败保留记录；成功后消
 准备数据时首次错误选择未打包的 libx264，改为 bundled VideoToolbox；第二次暴露种子沿用采用前译文的错误假设，改为采用后通过真实机器翻译 API 填入字幕。两个失败合成目录经 ID／文件清单校验后清理，记录在 failed-fixtures-inventory.json；正式数据、旧 QA 和成功现场保留。原生窗口打开视频时出现 ScreenCaptureKit -3812／-3811，QA 进程仍存活，重新绑定同一窗口后恢复捕获，无需重启 App。一次保存 AX 后索引重编号导致旧按钮索引失效，刷新 AX 后执行，未触发错误数据操作。
 
 package 文件 hash、build／seed 日志、阶段 JSON、只读 snapshot／compare 脚本、AX 和截图在 `local-artifacts/editor-token-native-c360cc9/`。最终可复用种子补上候选 marker，并以默认 WAV 模式复跑成功；本轮视频现场的替换 run 在 UI 标为原始识别，对照／采用使用同一实际服务，不把本轮视为候选清理资格的原生验证。尚未验证原生拖动保存、真实 SQL／磁盘失败恢复、长期性能及 Windows；本轮未替换正式包。
+
+## 2026-10-26：文字保存后的轻量上下文状态回填
+
+c360cc9 原生显示缺口按[问题记录](editor-context-stale-display-bug.md)修复。get_translation_context_state 在 SQLite 同一读取事务返回 workspace revision／过期 cue ID，服务与 IPC 不加载完整 segments／run／证据。editor-context-status 在成功文字保存、撤回、单句翻译和词表修改后按需读取；串行合并最新待决请求，按任务／navigation／请求代次隔离，新完整／结构状态使旧读取失效。没有轮询或第二套草稿；读取失败独立提示，不把成功保存误报失败。
+
+只按集合差异刷新受影响行；过期筛选激活时重算同一虚拟列表与命中数，不替换当前输入框或草稿。当前编辑段的保存说明也考虑上下文过期。新增 WebKit 脚本在修复前以消费者标记 5 秒等待超时失败，修复后即时标记／清除、当前筛选、节点及输入保留、每次保存一次轻量读取、无完整任务重载均通过。三个既有 WebKit（结构输入保护／连续撤销、token 重开与预算、翻译流程）也通过。
+
+SQLite 新增一项传播／清除／租户隔离／精简响应回归，全量共享库 183 passed／5 环境依赖 ignored；前端七项新增请求合并／代次／失败／dispose 回归，全量 281，通过类型／生产构建。桌面 Rust 35 passed／4 ignored，两套 fmt／diff 通过。日志和源码摘要在 local-artifacts/editor-context-state-20261026；未更新原生 QA 或正式 App，新原生复验、真实故障及性能门禁保留。

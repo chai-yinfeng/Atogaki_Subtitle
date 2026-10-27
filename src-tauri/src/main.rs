@@ -2274,6 +2274,7 @@ fn main() {
             update_subtitle_overlay,
             update_learning_item_meaning,
             use_learning_dictionary_definition,
+            commands::editor::get_translation_context_state,
             commands::editor::update_subtitle,
             commands::editor::restore_subtitle,
             commands::editor::get_structure_edit_state,

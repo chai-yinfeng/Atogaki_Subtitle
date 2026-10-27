@@ -32,6 +32,13 @@ pub struct LocalDatabase {
     pool: SqlitePool,
 }
 
+/// Lightweight, consistent context status; no subtitle text or ASR evidence.
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalTranslationContextState {
+    pub workspace_revision: i64,
+    pub translation_context_stale_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct LocalJobRecord {
     pub job_id: String,

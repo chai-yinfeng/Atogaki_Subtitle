@@ -1,10 +1,12 @@
 import type { SubtitleSegment, WaveformWindow } from "./editor-types";
+import type { TranslationContextState } from "./editor-context-status";
 import type { DraftText } from "./subtitle-drafts";
 
 type Invoke = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 /** Editor persistence adapter. Session/view modules never import Tauri. */
 export function createEditorBackend(invoke: Invoke) {
   return {
+    contextStatus(jobId: string) { return invoke<TranslationContextState>("get_translation_context_state", { jobId }); },
     waveform(jobId: string, startMs: number, endMs: number, pointCount: number) {
       return invoke<WaveformWindow>("get_waveform_window", { request: { jobId, startMs, endMs, pointCount } });
     },

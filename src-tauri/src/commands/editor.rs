@@ -137,6 +137,18 @@ pub(crate) async fn get_job_detail(
 }
 
 #[tauri::command]
+pub(crate) async fn get_translation_context_state(
+    state: State<'_, DesktopState>,
+    job_id: String,
+) -> Result<atogaki_subtitle::infrastructure::local_db::LocalTranslationContextState, String> {
+    state
+        .workspace_service
+        .translation_context_state(&job_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub(crate) async fn update_subtitle(
     state: State<'_, DesktopState>,
     request: UpdateSubtitleRequest,

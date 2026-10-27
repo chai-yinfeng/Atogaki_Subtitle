@@ -1,3 +1,4 @@
+import { createEditorContextStatus } from "./editor-context-status";
 import { mountActionConfirmation, type ActionConfirmation } from "./action-confirmation";
 import { createEditorBlockActions } from "./editor-block-actions";
 import { createStructureEditBackend } from "./editor-structure-backend";
@@ -836,12 +837,14 @@ const subtitleTranslation = createSubtitleTranslation<JobDetail>({
   acceptSegments: cues => {
     if (!activeDetail) return;
     editorStructureHistory.invalidate(activeDetail.job.job_id);
+    editorContextStatus.invalidate();
     activeDetail.segments = cues; renderSubtitleListPreservingView(cues);
     updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
   },
   acceptDetail: detail => {
     if (!activeDetail) return;
     editorStructureHistory.invalidate(activeDetail.job.job_id);
+    editorContextStatus.invalidate();
     activeDetail.job = detail.job; activeDetail.segments = detail.segments;
     activeDetail.translation_runs = detail.translation_runs;
     activeDetail.translation_context_stale_ids = detail.translation_context_stale_ids;
@@ -1175,6 +1178,7 @@ window.addEventListener("pagehide", () => {
   actionConfirmation.dispose();
   editorBlockActions.dispose();
   editorStructureHistory.dispose();
+  editorContextStatus.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -2201,7 +2205,7 @@ async function refreshActiveJob(): Promise<void> {
       workspaceMessage.textContent = `${statusLabel(detail.job.status)} · ${detail.job.message} · ${jobTimingLabel(detail.job)}`;
     }
     if (completedNow || detail.segments.length !== activeDetail.segments.length) {
-      activeDetail = detail;
+      activeDetail = detail; editorContextStatus.invalidate();
       renderWorkspace(detail);
     }
   } catch (error) {
@@ -2322,7 +2326,7 @@ async function openListeningJob(
     if (requestId !== navigationRequestId || currentArea !== "listening") return;
     await refreshLearningItems();
     if (requestId !== navigationRequestId) return;
-    activeDetail = detail;
+    activeDetail = detail; editorContextStatus.invalidate();
     activeSegmentId = null;
     if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
     renderListeningJobs(latestJobs);
@@ -2873,7 +2877,7 @@ async function openKaraokeJob(jobId: string, loadedDetail?: JobDetail): Promise<
     const detail = loadedDetail ?? await invoke<JobDetail>("get_job_detail", { jobId });
     if (requestId !== navigationRequestId || currentArea !== "karaoke") return;
     if (!detail.segments.length || !matchesTerminalStatus(detail.job.status)) { await openJob(jobId, "review"); return; }
-    activeDetail = detail;
+    activeDetail = detail; editorContextStatus.invalidate();
     editorSession.open(jobId, detail.segments);
     void editorStructureHistory.refresh();
     editorTimeFingerprint = "";
@@ -3143,6 +3147,7 @@ async function commitKaraokeTimingDrag(drag: TimingGesture<SubtitleSegment>): Pr
     if (!activeDetail || activeDetail.job.job_id !== jobId || navigationRequestId !== navigation) return;
     const segment = saved.segments[drag.segmentIndex];
     const notice = rememberStructureEdit(saved, jobId);
+    editorContextStatus.invalidate();
     activeDetail.translation_context_stale_ids = saved.translation_context_stale_ids;
     activeDetail.segments = saved.segments;
     editorSession.reconcile(saved.segments, segment.id);
@@ -3335,7 +3340,7 @@ async function openJob(jobId: string, initialSection?: WorkspaceSection): Promis
   try {
     const detail = await invoke<JobDetail>("get_job_detail", { jobId });
     if (requestId !== navigationRequestId || currentArea !== "workspace") return;
-    activeDetail = detail;
+    activeDetail = detail; editorContextStatus.invalidate();
     if ((initialSection === undefined || initialSection === "review") && detail.segments.length > 0 && matchesTerminalStatus(detail.job.status)) { await enterSubtitleEditor(jobId, detail); return; }
     renderWorkspace(detail);
     await refreshTranslationStatus();
@@ -3435,6 +3440,30 @@ function cloneSubtitleSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
   return segments.map((segment) => ({ ...segment }));
 }
 
+const editorContextStatus = createEditorContextStatus({
+  context: () => activeDetail && (currentArea === "karaoke" || currentArea === "workspace") ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
+  ids: () => activeDetail?.translation_context_stale_ids ?? [],
+  read: editorBackend.contextStatus,
+  apply: (state, changedIds) => {
+    if (!activeDetail) return;
+    activeDetail.translation_context_stale_ids = state.translation_context_stale_ids;
+    editorFilterCache = null;
+    if (currentArea === "karaoke") {
+      if (editorSession.filter === "stale") renderEditorList();
+      else for (const id of changedIds) {
+        const cue = subtitleTimeline().get(id); if (cue) editorCueList.update(cue);
+      }
+      const cue = karaokeDraftSegment();
+      if (cue && changedIds.includes(cue.id)) {
+        const draft = subtitleDrafts.entries.get(cueKey(cue));
+        if (!draft || !subtitleDrafts.pending(draft) && !draft.error) setSubtitleEditAction(savedSegmentState(cue));
+      }
+    }
+    updateTranslationControls();
+  },
+  failed: message => { if (currentArea === "karaoke") setSubtitleEditAction(message, true); else if (currentArea === "workspace") setWorkspaceAction(message, true); },
+});
+
 const editorStructureHistory = createEditorStructureHistory({
   context: () => activeDetail ? {
     jobId: activeDetail.job.job_id, navigation: navigationRequestId,
@@ -3461,6 +3490,7 @@ function rememberStructureEdit(result: StructureEditResult, jobId: string): stri
 }
 function applyStructureResult(result: StructureEditResult | StructureUndoResult, selectedId?: string): void {
   if (!activeDetail) return;
+  editorContextStatus.invalidate();
   activeDetail.translation_context_stale_ids = result.translation_context_stale_ids;
   applySubtitleStructure(result.segments, selectedId);
 }
@@ -3517,7 +3547,7 @@ function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleS
     currentCueEditor.refresh(draft);
     setSubtitleEditAction(status, !!draft.error);
   }
-  if (before) updateTranslationControls();
+  if (before) { updateTranslationControls(); editorContextStatus.refresh(saved.job_id); }
   if (before) { updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000); updateStructureUndoButton(); }
 }
 
@@ -3531,7 +3561,7 @@ function renderSubtitleList(segments: SubtitleSegment[], _expandedSegmentId?: st
 }
 
 function savedSegmentState(segment: SubtitleSegment): string {
-  return segment.translation_stale ? "原文或翻译上下文已变化，请核对当前译文" : "已保存到本地";
+  return segment.translation_stale || activeDetail?.translation_context_stale_ids.includes(segment.id) ? "原文或翻译上下文已变化，请核对当前译文" : "已保存到本地";
 }
 
 function subtitleValueFingerprint(segment: SubtitleSegment): string {
@@ -3584,8 +3614,10 @@ function replaceActiveSegment(updated: SubtitleSegment): void {
   if (!activeDetail) return;
   if (activeDetail.job.job_id !== updated.job_id) return;
   editorStructureHistory.invalidate(updated.job_id);
+  editorContextStatus.invalidate();
   activeDetail.segments = activeDetail.segments.map((item) => (item.id === updated.id ? updated : item));
   subtitleDrafts.ensure(updated);
+  editorContextStatus.refresh(updated.job_id);
   if (currentArea === "karaoke") { currentCueEditor.sync(karaokeDraftSegment()); renderEditorList(); }
 }
 
@@ -4225,7 +4257,9 @@ async function applyPreviewedGlossary(): Promise<void> {
       glossaryId: pendingGlossaryPreview.glossary_id,
     });
     editorStructureHistory.invalidate(activeDetail.job.job_id);
+    editorContextStatus.invalidate();
     activeDetail.segments = applied.segments;
+    editorContextStatus.refresh(activeDetail.job.job_id);
     clearGlossaryPreview();
     renderSubtitleListPreservingView(activeDetail.segments);
     updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
