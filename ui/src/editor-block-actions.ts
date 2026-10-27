@@ -41,7 +41,8 @@ export function createEditorBlockActions(options: Options) {
       const notice = options.remember(after, context.jobId);
       options.apply(after, insertion?.id ?? after.segments[0]?.id);
       if (insertion) options.seek(insertion.start_ms);
-      options.status(`已保存${after.undo.latest ? "，可用“撤销上次打轴”撤回" : ""}；仅实际依赖被删除块的机器译文需要核对。${notice}`);
+      const dependencyNotice = insertion ? "" : "；仅实际依赖被删除块的机器译文需要核对";
+      options.status(`已${insertion ? "插入" : "删除"}字幕块${after.undo.latest ? "，可用“撤销打轴”撤回" : ""}${dependencyNotice}。${notice}`);
     }
     return null;
   };
