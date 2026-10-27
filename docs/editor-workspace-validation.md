@@ -805,3 +805,14 @@ QA 首次窗口绑定有一次约 472 秒的工具延迟，进程仍存活，未
 新合成 WebKit area-navigation 持有学习读取，分别切到工作台／重开学习，再释放旧读取，确认没有额外 scrollTo；随后正常进入编辑器。listening-navigation、editor-navigation、time-navigation、task-progress 四组既有回归也通过。这里验证的是顶层后续动作和子访问，原全局学习／词典缓存函数仍运行，不外推其内部呈现／缓存竞态全部解决。
 
 根目录／Tauri fmt、diff、测试／构建／五组 WebKit 与源码摘要在 `local-artifacts/area-navigation-20261027/`。未更新原生 QA 或正式 App，不推导原生布局／长期性能通过；全局初始化、插入范围建议及其他既有验收门禁继续保留。路线图同步改为当前模块状态与下一步，逐次计数与失败历史仍保留本页。
+
+
+## 2026-10-27：桌面常驻定时器与异步订阅释放
+
+新增 desktop-runtime，显式 mount 工作台摘要 2 秒刷新、可见耗时 1 秒刷新，以及悬浮字幕可见性／播放动作／窗口关闭三项订阅；原首次资料读取仍在 main，不调整后台处理频率。mount 幂等，pagehide dispose 清除 timer 和已完成的订阅，晚完成订阅立即注销。回调进入前核对页面生命期，活跃页错误可呈现，异步注销拒绝或同步注销异常不阻断其他资源释放。关闭回调保留原同步 preventDefault、SubtitleDrafts.flushAll、close-ready 与失败提示，未修改 Rust 退出或 Cmd+Q 合同。
+
+七项新增单元覆盖重复挂载／周期、事件 payload 与同步关闭保护、一次释放／保留回调阻断、晚注册即注销、注册失败隔离、迟到注册／处理错误及刷新错误／部分注销异常。前端全量 333 passed，类型检查与生产构建通过。
+
+新合成 WebKit desktop-runtime 捕获模拟 Tauri 注册／注销并触发页面 pagehide，确认应用启动 interval 全部释放、三项事件各注销一次；另一次延迟可见性订阅到 pagehide 之后，确认注册完成立即注销。初跑清理断言把 Vite 客户端的 30 秒心跳也计入应用资源；补充调用栈确认归属后，只排除 /@vite/client 的开发服务器 interval，应用资源检查保留。失败断言与归属日志保留，没有因此修改产品逻辑。area-navigation、task-progress、time-navigation 三组既有 WebKit 通过。
+
+根目录／Tauri fmt、diff、测试／构建／四组 WebKit 与源码摘要在 `local-artifacts/desktop-runtime-20261027/`。这里验证合成 IPC 的页面清理，不宣称 OS 层原生注销／关闭或长期内存通过；未更新 QA／正式 App。初始设置／主题／词表／预设加载、其他 DOM 监听与插入范围建议仍待收敛。

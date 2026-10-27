@@ -183,3 +183,10 @@ main 保留任务状态／段数变化的呈现回调：状态更新不重建整
 `area-navigation.ts` 管理 workbench／listening／learning／karaoke 的离页预检、区域应用、资料准备和后续滚动。沿用 main 的唯一 navigationRequestId，main 只提供 DOM 呈现和现有服务回调。学习资料／词典并行读取结束后核对访问，旧访问不再额外呈现词典或重置滚动。编辑任务打开现在返回实际 navigation ID（未完成、回退或失效为 null），顶层等待子访问后核对该 ID，避免只凭同一区域名称授权迟到后续动作；没有新增导航时钟或持久化状态。
 
 pagehide dispose 使未完成的顶层后续动作失效，预检失败维持原输入。既有 refreshLearningItems／loadDictionarySettings 仍负责各自全局缓存与视图更新；顶层模块不宣称取消这些请求或解决其所有内部竞态。初始事件／定时器／资料加载的集中生命周期以及插入范围建议仍待抽取。
+
+
+### 桌面页常驻资源
+
+`desktop-runtime.ts` 持有工作台摘要刷新（2 秒）、可见任务耗时（1 秒）及悬浮字幕可见性／播放动作／窗口关闭三项异步订阅。main 注入现有刷新、动作和草稿关闭回调，模块 mount 幂等，dispose 取消 timer、调用已取得的 unlisten；若订阅在 dispose 后才完成，立即注销。保留回调在页面失效后不再进入业务处理，活跃页的订阅／回调异常可呈现，注销失败不阻断其他注销；不会取消已进入的保存回调或事务。
+
+关闭回调仍同步 preventDefault，然后 await 唯一 SubtitleDrafts.flushAll，成功后沿用 close-ready 递归关闭规则，失败保留窗口与提示。该模块不改变 Rust 退出事件或 Cmd+Q 行为。配置／主题／词表／预设等首次资料加载，以及其余 DOM 监听器仍需逐用例整理，不能将常驻资源收敛视为全部初始化完成。

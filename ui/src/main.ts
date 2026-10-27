@@ -1,3 +1,4 @@
+import { createDesktopRuntime } from "./desktop-runtime";
 import { createAreaNavigation, type MainArea } from "./area-navigation";
 import { createListeningNavigation } from "./listening-navigation";
 import { createPlaybackPositionBackend } from "./playback-position-backend";
@@ -1191,6 +1192,7 @@ window.addEventListener("pagehide", () => {
   taskProgress.dispose();
   listeningNavigation.dispose();
   areaNavigation.dispose();
+  desktopRuntime.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -4602,17 +4604,6 @@ void invoke<string>("data_directory")
 void refreshTranslationStatus();
 void refreshGlossaries();
 void refresh();
-void listen<boolean>("subtitle-overlay-visibility", (event) => {
-  subtitleOverlayVisible = event.payload;
-  lastSubtitleOverlayKey = "";
-  renderSubtitleOverlayButton();
-});
-void listen<{ action: PlaybackAction }>("subtitle-overlay-playback-action", (event) => {
-  if (!activeDetail || !mediaPlayer.media) return;
-  executePlaybackAction(event.payload.action);
-});
-window.setInterval(() => void refresh(), 2_000);
-window.setInterval(updateVisibleJobTimings, 1_000);
 
 
 async function showPartialTranscript(jobId: string): Promise<void> {
@@ -4864,14 +4855,31 @@ document.addEventListener("click", event => {
 
 try { subtitleDrafts.recover(localStorage.getItem("atogaki.subtitleDrafts") ?? "[]"); } catch { /* SQLite remains authoritative. */ }
 let subtitleCloseReady = false;
-void getCurrentWindow().onCloseRequested(async event => {
-  if (subtitleCloseReady) return;
-  event.preventDefault();
-  try {
-    await subtitleDrafts.flushAll();
-    subtitleCloseReady = true;
-    await getCurrentWindow().close();
-  } catch (error) {
-    setSubtitleEditAction(`保存失败，窗口保持打开；草稿已保留：${String(error)}`, true);
-  }
+const desktopRuntime = createDesktopRuntime<PlaybackAction>({
+  refreshTasks: refresh,
+  updateTimings: updateVisibleJobTimings,
+  subscribeVisibility: handler => listen<boolean>("subtitle-overlay-visibility", event => handler(event.payload)),
+  subscribePlayback: handler => listen<{ action: PlaybackAction }>("subtitle-overlay-playback-action", event => handler(event.payload.action)),
+  subscribeClose: handler => getCurrentWindow().onCloseRequested(handler),
+  visibility: visible => {
+    subtitleOverlayVisible = visible;
+    lastSubtitleOverlayKey = "";
+    renderSubtitleOverlayButton();
+  },
+  playback: action => {
+    if (activeDetail && mediaPlayer.media) executePlaybackAction(action);
+  },
+  close: async event => {
+    if (subtitleCloseReady) return;
+    event.preventDefault();
+    try {
+      await subtitleDrafts.flushAll();
+      subtitleCloseReady = true;
+      await getCurrentWindow().close();
+    } catch (error) {
+      setSubtitleEditAction(`保存失败，窗口保持打开；草稿已保留：${String(error)}`, true);
+    }
+  },
+  failed: error => { if (settingsMessage) settingsMessage.textContent = `桌面事件或刷新失败：${String(error)}`; },
 });
+desktopRuntime.mount();
