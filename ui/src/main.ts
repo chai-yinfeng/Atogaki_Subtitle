@@ -82,7 +82,7 @@ import { mountEditorTimeline } from "./editor-timeline-view";
 import { mountEditorFollow } from "./editor-follow";
 import { mountEditorMenus } from "./editor-menus";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { setupImageThemes } from "./appearance";
+import { mountImageThemes } from "./appearance";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SubtitleDrafts, cueKey, type Draft } from "./subtitle-drafts";
 import { listen } from "@tauri-apps/api/event";
@@ -1197,6 +1197,7 @@ window.addEventListener("pagehide", () => {
   areaNavigation.dispose();
   desktopRuntime.dispose();
   desktopStartup.dispose();
+  imageThemes?.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -4841,7 +4842,13 @@ document.querySelector("#karaoke-insert-block")?.addEventListener("click",openIn
 document.querySelector("#karaoke-delete-block")?.addEventListener("click",()=>void deleteCurrentSubtitleBlock());
 
 const appearanceHost = document.querySelector<HTMLElement>(".appearance-settings");
-if (appearanceHost) void setupImageThemes(appearanceHost).catch(error => { if(settingsMessage) settingsMessage.textContent=String(error); });
+let imageThemes: ReturnType<typeof mountImageThemes> | null = null;
+if (appearanceHost) {
+  try {
+    imageThemes = mountImageThemes(appearanceHost);
+    void imageThemes.ready.catch(error => { if (settingsMessage) settingsMessage.textContent = String(error); });
+  } catch (error) { if (settingsMessage) settingsMessage.textContent = String(error); }
+}
 
 // External websites are opened by the OS, rather than a blocked WebView popup.
 document.addEventListener("click", event => {

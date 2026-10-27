@@ -852,3 +852,14 @@ package／旧包清单、构建签名日志、新 seed、数据库阶段 JSON、
 修正 7849794 原生验收记录的提示混用：插入显示“已插入字幕块”，删除显示“已删除字幕块”；仅删除保留“实际依赖被删除块”的核对说明。可撤销时统一引用实际按钮名“撤销打轴”，预算／warning 仍沿用原结果。本次只改提示，不修改保存、依赖失效或撤销事务。
 
 既有 block-actions 专项 8 passed，类型检查／生产构建及两套 fmt／diff 通过；没有为低影响文案新增镜像测试。日志在 `local-artifacts/editor-block-notice-20261027/`。未重新执行原生 UI 或更新 QA／正式 App，固定 QA 7849794 仍保留旧文案，待下次集中构建覆盖。
+
+
+## 2026-10-27：图片主题初始化与异步应用生命周期
+
+appearance 由等待 setup 完成改为 mountImageThemes 立即返回 ready／dispose，main 在 pagehide 释放。窗口主题事件、内置按钮及字段 change 使用 AbortController；销毁移除编辑区／署名、清空属性事件处理器与分析图片 src，并撤销所有临时 object URL。异步应用、预览和导入／重新提色核对配置身份／代次与生命期，内置主题选择使旧图片应用失效。偏好格式、调色算法、源图保留及编辑中性色隔离不变，不新增自动图片清理。
+
+新合成 WebKit image-theme-lifecycle 共七场景：缓存恢复；恢复等待中 pagehide 后不写 CSS／偏好且旧窗口监听失效；切回内置主题后旧成功／旧错误不能重新启用图片；较新手动应用成功后旧初始化错误不能清除；分析 decode 等待中销毁撤销 object URL、不保存配置；正常合成 PNG 导入及重新提色各自完成并释放临时 URL。较新应用／旧初始化失败场景先复现为 imageTheme 被 clear，补初始化应用意图检查后通过，失败日志保留。
+
+前端全量仍为 344 passed（未新增 Node DOM 镜像测试），类型与生产构建通过。settings-view、desktop-startup、desktop-runtime、editor-compact 四组既有 WebKit 也通过，包括紧凑布局、主题隔离和大字号检查。全部使用独立浏览器上下文、模拟 IPC 与合成图片，不读取用户图片或正式数据。源图在后端已导入时不会因前端销毁而删除。
+
+根目录／Tauri fmt、diff、测试／构建／五组 WebKit、复现日志及源码摘要在 `local-artifacts/image-theme-lifecycle-20261027/`。未更新原生 QA／正式 App；当前 7849794 QA 不含本提交。这里验证浏览器生命期与主题竞态，不推导原生图片面板、长期内存、滚动 P95 或 Windows 通过；其余主入口 DOM 监听仍待逐用例整理。
