@@ -100,3 +100,8 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 2a82da1 业务代码以本轮 tauri.qa.conf.json 独立覆盖构建为 `/tmp/atogaki-editor-token-qa/Atogaki QA.app`；compiled identifier 为 com.chai-yinfeng.atogaki.qa，原生验证无环境参数也只进入独立空目录。原 `Atogaki.app` 临时包曾仅改 Info 标识以排查窗口绑定，已被新包取代；新包签名、默认目录、合成任务及 SQL 故障恢复通过并确认全部 QA 进程退出后，盘点并删除该旧包，101,571,045 字节逻辑内容。此前清理检查因 /tmp→/private/tmp 别名断言停止，修正为真实路径并复核后才删除。
 
 逐文件旧包 checksum、Info 原件、默认目录 AX、配置 hash 与新包清单在 `local-artifacts/editor-native-gestures-2a82da1/`；固定临时目录中的 build.json 已更新新路径。默认 `.qa` 目录是测试存储，不是正式数据备份；既有合成任务目录、原生阶段证据、旧 2950a6d 性能基线、正式 App／数据和安装回退点保留。没有新增媒体、模型或正式数据库备份。
+
+
+## 2026-10-27：磁盘满故障卷收尾
+
+本轮专属 `/private/tmp/atogaki-editor-diskfull-20261026/test.dmg` 为 33,554,432 字节合成故障镜像。真实满卷验证后仅释放其中 32,260,096 字节填充文件；QA 正常退出、卸载完成、设备与标记复核后，记录镜像 SHA-256 并删除镜像。没有保留满卷，也没有新增正式数据备份。清理清单与 checksum 在 `local-artifacts/editor-diskfull-native-20261026/cleanup.json`；单份恢复合成库、JSON、AX、截图、日志与受约束操作脚本继续保留。既有合成媒体现场、当前 QA、旧性能基线及正式安装／回退点均未修改。

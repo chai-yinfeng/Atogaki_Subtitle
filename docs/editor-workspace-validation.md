@@ -724,3 +724,16 @@ native-before／native-context-saved／native-cleared 的 JSON／AX 与截图、
 QA 首次窗口绑定有一次约 472 秒的工具延迟，进程仍存活，未据此重启。后续观察有 ScreenCaptureKit -3812，重绑同一 QA 后可读到失败草稿；不重复提交保存。最后保存 AX／截图，正常 Cmd+Q 后只读核验无 QA 进程，不再读取退出后的窗口。阶段 JSON、fault.py／snapshot.py、回滚／重试核验、默认目录 AX、旧包清单与构建／签名日志在 `local-artifacts/editor-native-gestures-2a82da1/`。原生拖动、磁盘满／IO、长期性能与 Windows 门禁仍保留。
 
 新增可选 QA 覆盖后，默认桌面配置 Rust 回归 35 passed／4 ignored，根目录与 Tauri fmt／diff 通过。未修改前端业务代码，本轮不重复前端构建／单元测试；QA release 构建及原生回滚／重试为新增验证范围。
+
+
+## 2026-10-27：真实 ENOSPC 原生保存与同会话恢复
+
+复用独立 identifier 的 2a82da1 QA，创建约 32 MiB HFS+ 可写镜像，验证 backing image、挂载路径、随机标记、文件系统 device 与容量后，通过 SQLite backup 复制既有十段合成库。数据库位于独立卷，媒体／ASR 证据仍引用原合成现场；未填满主机、WebKit 存储或媒体卷，也未复制正式数据。填充只写入该卷专属文件，实测 free=0、errno=28 ENOSPC。
+
+上轮失败后快照全部字段及 revision=33 不变。续接时进程已不存在，未把旧句柄视为活跃；确认后显式以测试目录重开。第五句显示已保存原文，没有恢复上轮草稿，因此重启草稿恢复不计通过，退出方式与持久化原因尚未确定。本轮在仍满的同一卷重新输入完整第五句，原生自动保存显示 `保存失败，草稿已保留：failed to commit local subtitle edit`。只读快照核对 job／cue／provenance／依赖／采用台账逐字段不变、integrity_check=ok。
+
+验证标记后只删除专属填充文件，释放 32,260,096 字节；数据库仍为失败前状态，界面仍显示失败及原草稿，没有自动重放。点击保存文字成功，workspace revision 33→34；仅第五句原文、编辑／过期标记、相应手动来源及 source revision、任务更新时间发生预期变化。其余段、全部时间／译文、依赖与采用记录一致，原合成库也逐字段未变。此结果证明真实满卷下数据库提交失败与同进程显式重试，不推导其他 IO 故障或重启草稿通过；界面错误未暴露 SQLite 原始错误码，不将 errno 28 写成已观测 SQLite 13。
+
+保留失败／重试 AX、截图、阶段 JSON、受设备／标记约束的 volume_control.py、核验摘要和一份恢复后的合成 SQLite 于 `local-artifacts/editor-diskfull-native-20261026/`。QA 正常 Cmd+Q、启动句柄 exit=0，进程核对无遗留；hdiutil detach 完成后盘点 checksum 并删除本次 33,554,432 字节镜像。首次清理在 detach 尚运行时被设备断言阻止，未删除；待退出码 0 后重验才清理。没有遗留满卷或故障 trigger。正式 App 未替换。
+
+本轮没有产品代码修改。根目录／Tauri fmt 与 diff 检查见同目录日志；原生满卷保存及恢复是新增验收，前序前端与 Rust 全量结果不作为本轮重跑。原生拖动、其他 IO、重启草稿冲突、长期性能及 Windows 继续待验。
