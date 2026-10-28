@@ -1,3 +1,4 @@
+import { mountPlaybackLoopView, type LoopAction, type LoopMessage } from "./playback-loop-view";
 import { mountEditorControls } from "./editor-controls";
 import { mountPlaybackShortcutView } from "./playback-shortcut-view";
 import { createDesktopStartup } from "./desktop-startup";
@@ -1207,6 +1208,7 @@ window.addEventListener("pagehide", () => {
   imageThemes?.dispose();
   editorControls.dispose();
   playbackShortcutView.dispose();
+  playbackLoopView.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -2284,7 +2286,7 @@ async function stopActivePlayback(): Promise<void> {
   editorProcessing.reset();
   if (workspaceView?.classList.contains("editor-task-tools")) closeEditorTools();
   playbackLoop = null; loopStartMs = null;
-  document.querySelectorAll<HTMLElement>(".loop-state").forEach(e=>e.textContent="循环已关闭");
+  playbackLoopView.reset();
 
   const detail = activeDetail;
   const area = currentArea;
@@ -4654,69 +4656,6 @@ function addOfflineTools(): void {
       if (learningMessage) learningMessage.textContent = String(error);
     }
   };
-  for (const host of document.querySelectorAll(".playback-tools")) {
-    const tools = document.createElement("div");
-    tools.className = "offline-tools loop-tools";
-    tools.innerHTML =
-      '<button type="button" class="secondary" data-loop="sentence">循环当前句</button><button type="button" class="secondary" data-loop="a">设置 A</button><button type="button" class="secondary" data-loop="b">设置 B 并循环</button><button type="button" class="secondary" data-loop="head">试听句首衔接</button><button type="button" class="secondary" data-loop="tail">试听句尾衔接</button><button type="button" class="secondary" data-loop="off">关闭循环</button><span class="loop-state">循环已关闭</span>';
-    host.after(tools);
-    tools.querySelectorAll<HTMLButtonElement>("[data-loop]").forEach(
-      (button) =>
-        (button.onclick = () => {
-          if (!mediaPlayer.media) return;
-          const time = mediaPlayer.media.currentTime * 1000,
-            cue = subtitleAt(time),
-            action = button.dataset.loop;
-          if (action === "off") {
-            playbackLoop = null;
-            loopStartMs = null;
-          } else if (action === "a") {
-            loopStartMs = time;
-            playbackLoop = null;
-          } else if (action === "b") {
-            if (loopStartMs === null || time <= loopStartMs) {
-              tools.querySelector("span")!.textContent = "请先设置早于 B 的 A 点";
-              return;
-            }
-            playbackLoop = { startMs: loopStartMs, endMs: time, repeat: true };
-          } else if (cue) {
-            playbackLoop =
-              action === "sentence"
-                ? { startMs: cue.start_ms, endMs: cue.end_ms, repeat: true }
-                : action === "head"
-                  ? {
-                      startMs: Math.max(0, cue.start_ms - 500),
-                      endMs: Math.min(cue.end_ms, cue.start_ms + 1000),
-                      repeat: false,
-                    }
-                  : {
-                      startMs: Math.max(cue.start_ms, cue.end_ms - 1000),
-                      endMs: Math.min(
-                        Number.isFinite(mediaPlayer.media.duration)
-                          ? mediaPlayer.media.duration * 1000
-                          : cue.end_ms + 500,
-                        cue.end_ms + 500,
-                      ),
-                      repeat: false,
-                    };
-          }
-          if (playbackLoop) {
-            mediaPlayer.seek(playbackLoop.startMs);
-            void mediaPlayer.media.play();
-          }
-          document
-            .querySelectorAll<HTMLElement>(".loop-state")
-            .forEach(
-              (e) =>
-                (e.textContent = playbackLoop
-                  ? `${playbackLoop.repeat ? "循环" : "试听"} ${formatPreciseTime(playbackLoop.startMs)} → ${formatPreciseTime(playbackLoop.endMs)}`
-                  : loopStartMs !== null
-                    ? `A: ${formatPreciseTime(loopStartMs)}`
-                    : "循环已关闭"),
-            );
-        }),
-    );
-  }
   for (const input of [retranscriptionStartInput, retranscriptionEndInput])
     input?.addEventListener("input", () => {
       if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
@@ -4724,6 +4663,35 @@ function addOfflineTools(): void {
 
 }
 addOfflineTools();
+
+function runPlaybackLoopAction(action: LoopAction): LoopMessage | null {
+  const media = mediaPlayer.media;
+  if (!media) return null;
+  const time = media.currentTime * 1_000, cue = subtitleAt(time);
+  if (action === "off") {
+    playbackLoop = null; loopStartMs = null;
+  } else if (action === "a") {
+    loopStartMs = time; playbackLoop = null;
+  } else if (action === "b") {
+    if (loopStartMs === null || time <= loopStartMs) return { message: "请先设置早于 B 的 A 点", local: true };
+    playbackLoop = { startMs: loopStartMs, endMs: time, repeat: true };
+  } else if (cue) {
+    playbackLoop = action === "sentence"
+      ? { startMs: cue.start_ms, endMs: cue.end_ms, repeat: true }
+      : action === "head"
+        ? { startMs: Math.max(0, cue.start_ms - 500), endMs: Math.min(cue.end_ms, cue.start_ms + 1_000), repeat: false }
+        : { startMs: Math.max(cue.start_ms, cue.end_ms - 1_000), endMs: Math.min(Number.isFinite(media.duration) ? media.duration * 1_000 : cue.end_ms + 500, cue.end_ms + 500), repeat: false };
+  }
+  if (playbackLoop) {
+    mediaPlayer.seek(playbackLoop.startMs);
+    void media.play();
+  }
+  return { message: playbackLoop
+    ? `${playbackLoop.repeat ? "循环" : "试听"} ${formatPreciseTime(playbackLoop.startMs)} → ${formatPreciseTime(playbackLoop.endMs)}`
+    : loopStartMs !== null ? `A: ${formatPreciseTime(loopStartMs)}` : "循环已关闭" };
+}
+const playbackLoopView = mountPlaybackLoopView(document.querySelectorAll(".playback-tools"), runPlaybackLoopAction);
+
 
 const presetTools = document.createElement("div");
 presetTools.className = "offline-tools";

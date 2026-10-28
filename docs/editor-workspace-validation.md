@@ -874,3 +874,14 @@ appearance 由等待 setup 完成改为 mountImageThemes 立即返回 ready／di
 前端全量仍为 344 passed，类型检查与生产构建通过；follow、insert、structure-timing、time-navigation、compact 五组既有 WebKit 通过，保留 IME、失败草稿、候选冲突、连续撤销、大字号和布局隔离检查。根目录／Tauri fmt、diff、测试／构建／六组 WebKit 与源码摘要在 `local-artifacts/editor-controls-20261027/`。
 
 未更新原生 QA／正式 App，当前 QA 7849794 不含本提交；浏览器键盘／DOM 生命周期不外推原生系统快捷键或性能通过。循环工具、复核等其余监听仍留在后续范围；不将本次事件抽取宣称为全部 main.ts 清理完成。
+
+
+## 2026-10-27：播放循环工具节点与监听生命周期
+
+新增 playback-loop-view，从 addOfflineTools 移出循环当前句、A／B、句首／句尾试听和关闭循环的 DOM 创建／点击绑定。main 的命名动作回调继续使用原 playbackLoop／loopStartMs、播放头 cue 与唯一 media-player，边界算法和 updateActiveSubtitle 的重复／单次停止保持。view 只处理共享状态文字或单个工具的 B 点错误，离页 reset，pagehide dispose 释放监听并移除节点，没有新 timer／播放器／持久状态。
+
+新合成 WebKit playback-loop-view 在实际媒体事件下验证：单句重复回到起点、无 A 的 B 点错误仅本区域、有效 A–B 回放、句首／句尾试听停止、末尾按真实媒体时长截断，以及离页重置。等待首次 seek 完成后再推进到循环终点，避免把初始 seek 当作重复回放证据。另通过真实 DOM 验证多个工具的共享／局部提示、reset、销毁后保留节点不再回调、重新挂载节点数固定且不重复触发。
+
+前端全量仍为 344 passed，类型／生产构建通过。media-player、follow、editor-controls、compact、task-progress 五组既有 WebKit 通过；包括真实媒体回退、播放恢复、IME／草稿保护、控件清理、折叠与大字号。根目录／Tauri fmt、diff、测试／构建／六组 WebKit 与源码摘要在 `local-artifacts/playback-loop-view-20261027/`。
+
+未更新原生 QA／正式 App，当前 QA 7849794 不含本提交。本轮不推导原生播放器、长期内存或滚动 P95 通过；复核范围等其余监听仍待收敛，其他非编辑区域的追加式 UI 不在本次提交中改写。

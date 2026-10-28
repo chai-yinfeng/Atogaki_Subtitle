@@ -216,3 +216,10 @@ appearance 的 mountImageThemes 同步返回 ready／dispose，主入口立即�
 `editor-controls.ts` 持有搜索／筛选、data-editor-action 委托、播放／倍速／微调／波形强度、Cut／Join／插入／删除／撤销及任务工具入口的事件绑定，使用同一 AbortController；main 注入已有服务用例和呈现回调。没有新增字幕、播放或保存状态。波形增益标签由控件视图更新，真正绘制继续由原时间轴服务负责。
 
 `playback-shortcut-view.ts` 持有唯一文档 keydown 监听，读取是否有媒体、当前编辑区域及工具阻断状态；保留输入／contenteditable／按钮／分隔线、dialog、修饰键和重复切换键的原保护，以及编辑 100／10 ms 微调、Cut 与共享播放动作映射。pagehide 分别 dispose，两模块不取消已进入的后端操作；循环工具、复核等其余监听仍待逐用例收敛。
+
+
+### 播放循环工具视图
+
+`playback-loop-view.ts` 创建各现有 playback-tools 后的循环／A–B／试听工具节点，持有点击监听、全局提示和仅当前工具的错误提示；show／reset 只呈现文字，dispose abort 监听并移除自己的节点。main 的 runPlaybackLoopAction 继续读取唯一 media-player、播放头所在 cue、playbackLoop／loopStartMs；原重复 seek、单次试听停止与离页状态清空保持，不增加第二份播放状态或计时器。
+
+循环按钮不再在 addOfflineTools 的尾部匿名追加；复核范围等剩余监听仍另行整理。视图销毁不停止或重放后端任务，不修改字幕或保存偏好。
