@@ -19,7 +19,7 @@
 | 搜索、未翻译／过期／待复核筛选与命中数、筛选后导航 | editor-session／editor-controls；ui／follow／context-status 回归 | 有证据；隐藏当前段时保留输入并提示 |
 | 单击锁定、双击／时间码定位、播放与编辑独立标记 | editor-session／editor-follow；follow 回归及本机定位 | 有证据；同轨空白处不沿用旧字幕 |
 | 默认跟随、恢复播放头、手动浏览暂停自动滚动 | editor-follow／editor-browse；万段后段与 wheel 回归 | 有证据；窗口验证覆盖手动锁段和恢复，原生 P95 不由此通过 |
-| 650 ms 自动保存、IME、切段草稿、失败重试 | SubtitleDrafts／current-cue-editor；ui／follow／time-navigation | 部分：异步输入／IME 为浏览器回归；真实 SQLite ABORT、ENOSPC、正常退出恢复已验，异常终止和其他冲突仍待验 |
+| 650 ms 自动保存、IME、切段草稿、失败重试 | SubtitleDrafts／current-cue-editor；ui／follow／time-navigation | 部分：异步输入／IME 为浏览器回归；真实 SQLite ABORT、ENOSPC、正常退出恢复已验；e8d9a8d 原生 ABORT 后 SIGKILL／同库草稿恢复及显式重试已验，立即终止／满卷组合／其他冲突仍待验 |
 | 结构操作先 flush，失败阻止且保留输入 | editor-structure-actions／editor-block-actions；structure-timing／insert | 有合成竞态、故障及部分原生结构操作证据；真实全部故障组合未穷尽 |
 | 文字撤回与打轴撤销分别保留；插入／删除／Cut／Join | 唯一 token 历史；[0061](decisions/0061-transactional-structure-undo-metadata.md)及 SQLite／原生核对 | 有主要路径证据，包含来源／依赖恢复、单调 revision、重开／重启 token、冲突／回滚；学习沿用既有快照规则 |
 | 候选采用冲突、完整来源保护及导出一致性 | recorded 事务、adoption／scope 测试、原生采用／撤销、既有导出验证 | 部分：采用主路径已验；原生字幕覆盖／批量确认／烧录覆盖仍待验 |

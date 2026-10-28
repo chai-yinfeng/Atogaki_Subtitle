@@ -1005,3 +1005,14 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 确认旧正式 App 已退出、无进行中任务，核对原包 checksum，SQLite backup 的 SHA 与上一恢复点相同，因此链接复用。暂存与签名后原子安装 e8d9a8d，系统入口启动显示正式目录与 13 任务；只启动任务页，没有正式字幕写入。前后全部 20 表摘要一致，6,887 段／integrity ok／foreign key 空。当前回退为 0cf72c0 与稳定 0.1.1，完整核对后移除被取代的 1020e05，约 101,233,557 字节逻辑内容；不推断 APFS 实际回收量。
 
 证据在 local-artifacts/wave-follow-fix-20261028，六组 WebKit／346 前端与类型／构建、两套 fmt／diff 已在源码提交通过；不重复报为新的 Rust 业务测试。用户可直接在本机新版复验普通定位跟随与独立恢复按钮；剩余原生性能、长期内存与平台门禁保持。
+
+
+## 2026-10-28：真实 QA 保存失败后强制终止与草稿恢复
+
+核对独立 QA e8d9a8d 的 27 个包文件 SHA，确认无 QA 进程后，以既有唯一合成目录 429a1a72 启动。受限工具核对 seed／job／synthetic_qa 后安装固定 SQLite ABORT trigger。原生编辑第一句为“异常退出草稿验收 20261028：必须恢复这一段原文。”，等待自动保存失败，AX 明确显示“保存失败，草稿已保留”，数据库原文仍是 seed 值。
+
+强制终止前再次核对准确 PID、lstart、可执行路径及 lsof 中打开的合成数据库，仅向该 QA PID 发 SIGKILL；原启动句柄返回 -9。确认旧 PID 不存在才以同数据目录重启。原生打开任务后完整恢复上述原文，故障尚在时再次提示失败且输入保留。准确移除原 trigger 后点击“保存文字”成功，当前句及依赖第三句显示待重译；正常 Cmd+Q，第二启动句柄返回 0，无 QA 残留。
+
+只读核对十段 cue ID／顺序／时间／译文及其他九段原文不变；第一句 source_edited／translation_stale 为真，第三句来源的 translation_dependency_stale 为真，integrity_check=ok、foreign_key_check 空，故障 trigger 已移除。第一次数据库断言误把第三句的上下文过期当作 segments.translation_stale，查明应检查 provenance.translation_dependency_stale 后完成准确核对，此为验收脚本判断修正，没有产品修改。
+
+证据在 local-artifacts/editor-abrupt-draft-20261028/：失败／重启／保存 AX、两次启动身份与日志、kill 前检查、包摘要、最终数据库核对和文件 manifest。范围仅覆盖“原文保存真实 ABORT、草稿已保留后主进程 SIGKILL、同库重开与显式重试”；不证明输入后立即断电持久性、WebContent 单独崩溃、满卷合并强杀或全部恢复冲突。正式 App 与正式数据均未操作；没有新增安装包或数据库备份。
