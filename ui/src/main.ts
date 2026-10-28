@@ -1,3 +1,4 @@
+import { mountEditorRepairControls } from "./editor-repair-controls";
 import { mountPlaybackLoopView, type LoopAction, type LoopMessage } from "./playback-loop-view";
 import { mountEditorControls } from "./editor-controls";
 import { mountPlaybackShortcutView } from "./playback-shortcut-view";
@@ -577,8 +578,6 @@ const retranscriptionStartInput = document.querySelector<HTMLInputElement>("#ret
 const retranscriptionEndInput = document.querySelector<HTMLInputElement>("#retranscription-end");
 const retranscriptionProvider = document.querySelector<HTMLSelectElement>("#retranscription-provider");
 const authorizeGeminiUpload = document.querySelector<HTMLInputElement>("#authorize-gemini-upload");
-const retranscriptionUseWindowButton = document.querySelector<HTMLButtonElement>("#retranscription-use-window");
-const retranscriptionExpandSegmentsButton = document.querySelector<HTMLButtonElement>("#retranscription-expand-segments");
 const previewRetranscriptionButton = document.querySelector<HTMLButtonElement>("#preview-retranscription");
 const retranscriptionMessage = document.querySelector<HTMLParagraphElement>("#retranscription-message");
 const mediaPath = document.querySelector<HTMLInputElement>("#media-path");
@@ -1109,7 +1108,6 @@ const editorProcessing = createEditorProcessing({
   comparisonStatus: message => { if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = message; },
   time: formatTime,
 });
-retranscriptionDialog?.addEventListener("cancel", event => { if (editorProcessing.adopting) event.preventDefault(); });
 const candidateTool = mountToolDialog(retranscriptionDialog!, () => {}, () => !editorProcessing.adopting);
 retranscriptionDialog?.classList.add("editor-candidate-dialog");
 const candidateHistory = mountCandidateHistory(editorRepairDialog.querySelector<HTMLElement>(".retranscription-range")!, {
@@ -1193,6 +1191,16 @@ const editorControls = mountEditorControls(editorRoot, {
   },
 });
 
+const editorRepairControls = mountEditorRepairControls(editorRepairDialog, retranscriptionDialog!, {
+  useCurrent: () => usePlayheadSubtitleForRetranscription(),
+  useWindow: useVisibleWindowForRetranscription,
+  expand: expandRetranscriptionRangeToSegments,
+  preview: () => { void previewSelectedRange(); },
+  closeCandidate: () => candidateTool.close(),
+  confirm: () => { void confirmSelectedRangeReplacement(); },
+  adopting: () => editorProcessing.adopting,
+});
+
 window.addEventListener("pagehide", () => {
   actionConfirmation.dispose();
   editorBlockActions.dispose();
@@ -1207,6 +1215,7 @@ window.addEventListener("pagehide", () => {
   desktopStartup.dispose();
   imageThemes?.dispose();
   editorControls.dispose();
+  editorRepairControls.dispose();
   playbackShortcutView.dispose();
   playbackLoopView.dispose();
   editorStructureActions.dispose();
@@ -4454,19 +4463,6 @@ listeningPlaybackRateSelect?.addEventListener("change", () => {
   if (listeningPlaybackRateSelect) mediaPlayer.setRate(Number(listeningPlaybackRateSelect.value));
 });
 syncKaraokeZoomLabel();
-editorRepairDialog.querySelector("#retranscription-use-current")?.addEventListener("click", () => usePlayheadSubtitleForRetranscription());
-retranscriptionUseWindowButton?.addEventListener("click", useVisibleWindowForRetranscription);
-retranscriptionExpandSegmentsButton?.addEventListener("click", expandRetranscriptionRangeToSegments);
-retranscriptionProvider?.addEventListener("change", () => {
-  const cloud = retranscriptionProvider.value === "gemini-transcribe";
-  editorRepairDialog.querySelector<HTMLElement>("#gemini-upload-consent")?.classList.toggle("hidden", !cloud);
-  if (!cloud && authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
-});
-
-previewRetranscriptionButton?.addEventListener("click", () => void previewSelectedRange());
-retranscriptionDialog?.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => candidateTool.close());
-retranscriptionDialog?.querySelector<HTMLButtonElement>("#cancel-retranscription")?.addEventListener("click", () => candidateTool.close());
-confirmRetranscriptionButton?.addEventListener("click", () => void confirmSelectedRangeReplacement());
 
 document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());
 workspaceView.querySelector<HTMLButtonElement>("#manage-workspace-glossary")?.addEventListener("click", () => void openGlossaryManager(workspaceGlossary?.value));
@@ -4656,10 +4652,6 @@ function addOfflineTools(): void {
       if (learningMessage) learningMessage.textContent = String(error);
     }
   };
-  for (const input of [retranscriptionStartInput, retranscriptionEndInput])
-    input?.addEventListener("input", () => {
-      if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
-    });
 
 }
 addOfflineTools();

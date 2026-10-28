@@ -885,3 +885,12 @@ appearance 由等待 setup 完成改为 mountImageThemes 立即返回 ready／di
 前端全量仍为 344 passed，类型／生产构建通过。media-player、follow、editor-controls、compact、task-progress 五组既有 WebKit 通过；包括真实媒体回退、播放恢复、IME／草稿保护、控件清理、折叠与大字号。根目录／Tauri fmt、diff、测试／构建／六组 WebKit 与源码摘要在 `local-artifacts/playback-loop-view-20261027/`。
 
 未更新原生 QA／正式 App，当前 QA 7849794 不含本提交。本轮不推导原生播放器、长期内存或滚动 P95 通过；复核范围等其余监听仍待收敛，其他非编辑区域的追加式 UI 不在本次提交中改写。
+
+
+## 2026-10-27：重新识别范围与候选控件生命期
+
+新增 editor-repair-controls 收敛当前句／可视窗口／范围扩展、预览／关闭／确认候选按钮，以及 provider 呈现、手动范围修改清授权和采用中 cancel 保护；main 注入原用例，pagehide dispose 释放监听。程序填入范围仍由原用例清授权，task-tools 继续管理节点／焦点与关闭门闩，不修改请求、revision、采用事务或上传授权校验。
+
+新增合成 WebKit repair-controls 通过实际编辑工具验证本地／云端切换、两类范围输入及三个范围动作的授权清理与范围值；真实 DOM 独立实例覆盖全部按钮恰好一次、采用／空闲 cancel、dispose 后保留节点无响应及重新挂载无重复。四组既有 WebKit processing、review-tools、structure-timing、editor-controls 通过，包含候选冲突、采用锁、跨任务迟到结果、停放节点、草稿／时间保护和连续撤销。没有实际上传音频或调用识别模型。
+
+前端全量 344 passed，类型检查与生产构建、根目录／Tauri fmt、diff 通过。日志及源码摘要在 local-artifacts/editor-repair-controls-20261027；未重建原生包，独立 QA 仍为 7849794，正式仍为 1020e05，不将浏览器回归视为原生或性能门禁通过。下一步核对剩余编辑监听并补原生集成／性能验收。
