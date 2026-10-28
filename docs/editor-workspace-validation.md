@@ -952,3 +952,10 @@ complete＋qa release 离线构建成功，源包与固定 QA 均通过 deep str
 确认 TypeScript noUnusedLocals／noUnusedParameters 早已开启，当前额外显式检查同样通过，本次未重复修改配置。继续 ADR 0059，将质量信号／人工决定／修复尝试六方法从 local_db.rs 抽到同级 asr_review.rs；签名和方法体逐字校验一致，移出父模块不再使用的类型 import。共 178 行方法代码移动，SQL、事务、连接池、公共调用路径、DTO 与 schema 不变。
 
 共享库全量 183 passed／5 环境依赖 ignored，包含 stores_quality_reviews_and_repair_attempts_as_run_metadata 的 SQLite 原生读写及最新决定排序；Tauri cargo check --offline 通过，两套 fmt／diff 通过。没有为纯移动新增镜像测试，没有改前端或重新运行 346 项／WebKit；未构建 App，独立 QA 仍为 c8afa5f、正式仍为 1020e05。完整日志与逐字等价摘要在 local-artifacts/asr-review-repository-20261027；既有原生／性能／平台门禁保留，下一步继续按完整用例边界整理剩余 repository 并补性能证据。
+
+
+## 2026-10-27：原生十轮工具往返与采样身份
+
+使用现有 c8afa5f QA、原合成目录执行十轮任务／识别／候选对照／关闭／返回，共 70 次 CUA 动作，按每步新的 AX 状态选择按钮；未调用识别、采用或编辑数据。同步 90 秒／31 样本采集四个进程 RSS，加入启动时间核对以拒绝同路径 PID 重启，详情与局限见[性能记录](editor-performance-validation.md#2026-10-27原生-webcontent-短时归属与-pid-身份补强)。
+
+launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内核归属；受控启动前无 WebKit、启动后唯一新增组且退出后全部消失，作为本次关联证据。正常退出 0，五张表逐字段不变，revision 56／integrity ok。两项 Python 身份回归及语法检查、两套 fmt／diff 通过；首次测试 import 失败修正后重跑通过。本轮仅改采集脚本／测试，未重复前端或 Rust 全量／构建 App，不把短时 RSS 上升当作泄漏结论。证据目录 local-artifacts/editor-process-attribution-20261027，原生长期内存／滚动及 Windows 门禁保留。

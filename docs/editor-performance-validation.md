@@ -210,3 +210,16 @@ QA 正常退出后 20 表行数及排序内容摘要全部一致，integrity_che
 进程采样通过本 Node 子进程树捕获 Playwright 宿主及启动 shell，宿主树 RSS 范围约 116.4–127.7 MiB；macOS XPC WebContent 不在该树内，故不能作为渲染内存或总内存趋势，也不能将其与之前原生 RSS 对照。此三分钟测试补充操作与 DOM／请求边界证据，不关闭长期内存、真实三小时媒体解码、原生 P95 或 Windows 门禁。四组专项／既有 WebKit（waveform-follow-boundaries、follow、timeline、gestures）通过，前端 346 项、类型／生产构建、两套 fmt／diff、两脚本语法检查通过；未更新原生 App。
 
 复现设置既有 Playwright module／browser 路径、ATOGAKI_EDITOR_URL 指向生产 preview，ATOGAKI_EDITOR_QA_OUTPUT 为新目录，ATOGAKI_SOAK_SECONDS=180、ATOGAKI_CUE_COUNT=10000 后运行 node scripts/measure-editor-mixed-load.cjs。默认 600 秒；已有 samples.jsonl 或 summary.json 会拒绝覆盖。预跑、逐轮 JSONL、聚合计数、进程身份、日志、构建与来源 checksum 在 local-artifacts/editor-mixed-load-20261027/。
+
+
+## 2026-10-27：原生 WebContent 短时归属与 PID 身份补强
+
+改进 sample-editor-rss.py：原脚本只比较 PID／command，相同程序路径重启并复用 PID 可能被误记为内存降低；现同时保存／比较 ps lstart，变化就记录 reused_pids 并退出。秒级启动时间仍有精度限制，不等于内核级不可复用身份；旧证据不补造该字段。抽出解析与身份判断以做故障回归，不改变 RSS 口径或覆盖保护。两项 Python 回归覆盖同路径 PID 重启／普通 RSS 变化、带空格路径和日期空格。首次因脚本文件名含连字符导致测试 import 失败，改用显式文件 import 后通过；原失败日志保留。
+
+使用现有独立 QA c8afa5f 与已有十段合成目录。启动前 ps 没有 WebKit XPC，启动后新增 QA 16014、GPU 16016、WebContent 16017、Networking 16018；记录全部命令与启动时间。launchctl procinfo 需要 root，未取得直接 responsible PID，未提权或修改系统保护。footprint 仅针对 QA／新 WebContent 成功读取分类，没有提供直接归属字段。因此本轮归属依据为受控启动、唯一新增组及退出对照；若日后已有其他 WebKit 进程，不能直接复用这些 PID 或只凭名称认领。
+
+每 3 秒采样，90.01 秒共 31 样本；期间通过 CUA 执行十轮打开任务→识别工具→历史→候选对照→Escape→Escape→返回任务，共 70 个有界面证据的动作。没有播放、编辑、采用或模型请求，十段任务不是多规模压力负载；每步 AX 读取也是负载的一部分。进程命令／启动时间全程一致。RSS 首→尾：主进程 108.6→116.7 MiB、GPU 45.1→73.8、WebContent 70.0→95.1、Networking 9.3→18.1。footprint 的不同口径显示 WebContent 约 74→95 MB，WebKit Malloc dirty 约 22→46 MB；分类不足以区分首次缓存、可回收对象和泄漏，不将短时上升判定为泄漏或稳定。
+
+正常退出 QA 后原始句柄退出 0，ps 中该 QA 与全部 WebKit XPC 均消失，关联证据闭合；此前五张任务／字幕／来源／依赖／采用表逐字段未变，revision 56、integrity_check=ok。未更新 App。长期混合操作、持续播放／输入／滚动、跨任务、heap 保留对象和 P95 门禁仍未通过；下一步使用该启动身份检查，先稳定预热，再固定可复现的更长原生混合负载，并把采集成本单列。
+
+源码／Python 日志、31 个 JSONL 样本、70 次原生界面状态、前后进程身份、footprint JSON／分类、五表 snapshot 与 summary 在 local-artifacts/editor-process-attribution-20261027。不得将本轮结果与未同负载重测的历史版本作性能改善对照。
