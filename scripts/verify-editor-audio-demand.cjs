@@ -13,7 +13,12 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright'),asse
   assert.equal(await audio().getAttribute('preload'),'none');assert.equal(requests.length,0,'opening editor must not fetch audio');
   await page.locator('[data-editor-action="follow"]').click();await page.locator('#editor-search').fill('第 3 句');
   await page.locator('[data-cue-id="cue-2"]').click();assert.equal(requests.length,0,'selecting text and following must not load media');
-  await page.locator('#editor-search').fill('');await page.locator('#karaoke-step-forward').click();
+  await page.locator('#editor-search').fill('');
+  await page.locator('.editor-menu > summary').click();await page.locator('#karaoke-insert-block').click();
+  await page.locator('#insert-subtitle-block-dialog [name="start"]').waitFor();
+  assert.equal(requests.length,0,'opening insertion form uses waveform duration without audio preload');
+  await page.locator('#insert-subtitle-block-dialog [data-close]').click();
+  await page.locator('#karaoke-step-forward').click();
   await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio').readyState>=1&&document.querySelector('#karaoke-media-host audio').currentTime>=.099);
   assert.ok(requests.length>0);assert.equal(await audio().evaluate(a=>a.paused),true,'paused seek must stay paused');
   await page.locator('[data-cue-id="cue-2"] [data-cue-time]').click();
