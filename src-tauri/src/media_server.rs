@@ -10,7 +10,10 @@ use std::{
     collections::{HashMap, VecDeque},
     io,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
@@ -18,6 +21,7 @@ use tokio::{
 };
 
 const READ_SIZE: usize = 64 * 1024;
+static NEXT_DIAGNOSTIC_ID: AtomicU64 = AtomicU64::new(1);
 
 struct RegistryInner {
     files: Mutex<HashMap<String, PathBuf>>,
@@ -110,10 +114,13 @@ async fn serve(
     RoutePath(token): RoutePath<String>,
     request: Request<Body>,
 ) -> Response<Body> {
-    if std::env::var_os("ATOGAKI_MEDIA_DIAGNOSTICS").is_some() {
+    let diagnostic_id = std::env::var_os("ATOGAKI_MEDIA_DIAGNOSTICS")
+        .is_some()
+        .then(|| NEXT_DIAGNOSTIC_ID.fetch_add(1, Ordering::Relaxed));
+    if let Some(id) = diagnostic_id {
         // Deliberately omit the URL token, path and media contents.
         eprintln!(
-            "[media] method={} range={:?} origin={:?}",
+            "[media] request={id} method={} range={:?} origin={:?}",
             request.method(),
             request.headers().get(header::RANGE),
             request.headers().get(header::ORIGIN)
@@ -145,8 +152,8 @@ async fn serve(
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
     };
     let length = metadata.len();
-    if std::env::var_os("ATOGAKI_MEDIA_DIAGNOSTICS").is_some() {
-        eprintln!("[media] opened bytes={length}");
+    if let Some(id) = diagnostic_id {
+        eprintln!("[media] request={id} opened bytes={length}");
     }
 
     let content_type = media_content_type(&path);
@@ -228,27 +235,104 @@ async fn serve(
     }
     response
         .header(header::CONTENT_LENGTH, output_length)
-        .body(stream_file(file, pieces))
+        .body(stream_file(
+            file,
+            pieces,
+            diagnostic_id.map(|id| TransferDiagnostics::new(id, output_length)),
+        ))
         .unwrap()
 }
 enum Piece {
     Bytes(Bytes),
     File(u64, u64),
 }
-fn stream_file(file: tokio::fs::File, pieces: VecDeque<Piece>) -> Body {
+#[derive(Clone, Debug)]
+struct TransferSummary {
+    request_id: u64,
+    expected: u64,
+    file_read: u64,
+    yielded: u64,
+    outcome: &'static str,
+}
+struct TransferDiagnostics {
+    summary: TransferSummary,
+    #[cfg(test)]
+    report: Option<std::sync::mpsc::Sender<TransferSummary>>,
+}
+impl TransferDiagnostics {
+    fn new(request_id: u64, expected: u64) -> Self {
+        Self {
+            summary: TransferSummary {
+                request_id,
+                expected,
+                file_read: 0,
+                yielded: 0,
+                outcome: "dropped",
+            },
+            #[cfg(test)]
+            report: None,
+        }
+    }
+}
+impl Drop for TransferDiagnostics {
+    fn drop(&mut self) {
+        let s = &self.summary;
+        // Yielded means handed to the HTTP body, not acknowledged by the client.
+        // Dropped may follow the final yielded chunk without an EOF poll.
+        eprintln!(
+            "[media] request={} expected={} file_read={} body_yielded={} outcome={}",
+            s.request_id, s.expected, s.file_read, s.yielded, s.outcome
+        );
+        #[cfg(test)]
+        if let Some(report) = &self.report {
+            let _ = report.send(s.clone());
+        }
+    }
+}
+fn stream_file(
+    file: tokio::fs::File,
+    pieces: VecDeque<Piece>,
+    diagnostics: Option<TransferDiagnostics>,
+) -> Body {
     Body::from_stream(futures_util::stream::try_unfold(
-        (file, pieces),
-        |(mut file, mut pieces)| async move {
+        (file, pieces, diagnostics),
+        |(mut file, mut pieces, mut diagnostics)| async move {
             loop {
                 match pieces.pop_front() {
-                    None => return Ok::<_, io::Error>(None),
-                    Some(Piece::Bytes(bytes)) => return Ok(Some((bytes, (file, pieces)))),
+                    None => {
+                        if let Some(d) = &mut diagnostics {
+                            d.summary.outcome = "complete";
+                        }
+                        return Ok::<_, io::Error>(None);
+                    }
+                    Some(Piece::Bytes(bytes)) => {
+                        if let Some(d) = &mut diagnostics {
+                            d.summary.yielded += bytes.len() as u64;
+                        }
+                        return Ok(Some((bytes, (file, pieces, diagnostics))));
+                    }
                     Some(Piece::File(_, 0)) => continue,
                     Some(Piece::File(start, left)) => {
-                        file.seek(io::SeekFrom::Start(start)).await?;
+                        file.seek(io::SeekFrom::Start(start))
+                            .await
+                            .inspect_err(|_| {
+                                if let Some(d) = &mut diagnostics {
+                                    d.summary.outcome = "error";
+                                }
+                            })?;
                         let mut bytes = vec![0; left.min(READ_SIZE as u64) as usize];
-                        let count = file.read(&mut bytes).await?;
+                        let count = file.read(&mut bytes).await.inspect_err(|_| {
+                            if let Some(d) = &mut diagnostics {
+                                d.summary.outcome = "error";
+                            }
+                        })?;
+                        if let Some(d) = &mut diagnostics {
+                            d.summary.file_read += count as u64;
+                        }
                         if count == 0 {
+                            if let Some(d) = &mut diagnostics {
+                                d.summary.outcome = "error";
+                            }
                             return Err(io::Error::new(
                                 io::ErrorKind::UnexpectedEof,
                                 "media changed during playback",
@@ -259,7 +343,10 @@ fn stream_file(file: tokio::fs::File, pieces: VecDeque<Piece>) -> Body {
                             pieces
                                 .push_front(Piece::File(start + count as u64, left - count as u64));
                         }
-                        return Ok(Some((Bytes::from(bytes), (file, pieces))));
+                        if let Some(d) = &mut diagnostics {
+                            d.summary.yielded += count as u64;
+                        }
+                        return Ok(Some((Bytes::from(bytes), (file, pieces, diagnostics))));
                     }
                 }
             }
@@ -461,7 +548,7 @@ mod tests {
         // Directly exercise back-pressure: one poll reads at most 64 KiB,
         // regardless of the full-file length. No transport buffering inference.
         let f = tokio::fs::File::open(&path).await.unwrap();
-        let body = stream_file(f, VecDeque::from([Piece::File(0, length)]));
+        let body = stream_file(f, VecDeque::from([Piece::File(0, length)]), None);
         let mut stream = body.into_data_stream();
         assert_eq!(stream.next().await.unwrap().unwrap().len(), READ_SIZE);
         drop(stream);
@@ -478,6 +565,65 @@ mod tests {
         })
         .await
         .unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+    #[tokio::test]
+    async fn diagnostics_distinguish_consumed_bytes_from_advertised_length() {
+        let data = vec![7; READ_SIZE * 2];
+        let (_registry, _url, path) = fixture(&data).await;
+        // Zero polls, multipart prefix only, one file chunk, and full EOF.
+        for polls in [0, 1, 2, 4] {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let expected = data.len() as u64 + 3;
+            let mut diagnostics = TransferDiagnostics::new(42, expected);
+            diagnostics.report = Some(sender);
+            let file = tokio::fs::File::open(&path).await.unwrap();
+            let mut body = stream_file(
+                file,
+                VecDeque::from([
+                    Piece::Bytes(Bytes::from_static(b"pre")),
+                    Piece::File(0, data.len() as u64),
+                ]),
+                Some(diagnostics),
+            )
+            .into_data_stream();
+            let mut yielded = 0;
+            for _ in 0..polls {
+                if let Some(bytes) = body.next().await {
+                    yielded += bytes.unwrap().len() as u64;
+                }
+            }
+            drop(body);
+            let report = receiver.recv().unwrap();
+            assert_eq!(report.expected, expected);
+            assert_eq!(report.yielded, yielded);
+            assert_eq!(report.file_read, yielded.saturating_sub(3));
+            assert_eq!(
+                report.outcome,
+                if polls == 4 { "complete" } else { "dropped" }
+            );
+            if polls == 2 {
+                assert_eq!(report.file_read, READ_SIZE as u64);
+                assert!(report.yielded < report.expected);
+            }
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut diagnostics = TransferDiagnostics::new(43, 1);
+        diagnostics.report = Some(sender);
+        let file = tokio::fs::File::open(&path).await.unwrap();
+        let mut body = stream_file(
+            file,
+            VecDeque::from([Piece::File(data.len() as u64, 1)]),
+            Some(diagnostics),
+        )
+        .into_data_stream();
+        assert!(body.next().await.unwrap().is_err());
+        drop(body);
+        let report = receiver.recv().unwrap();
+        assert_eq!(
+            (report.file_read, report.yielded, report.outcome),
+            (0, 0, "error")
+        );
         std::fs::remove_file(path).unwrap();
     }
     #[tokio::test]
@@ -504,7 +650,7 @@ mod tests {
             416
         );
         let f = tokio::fs::File::open(&path).await.unwrap();
-        let body = stream_file(f, VecDeque::from([Piece::File(0, 10)]));
+        let body = stream_file(f, VecDeque::from([Piece::File(0, 10)]), None);
         assert!(body.into_data_stream().next().await.unwrap().is_err());
         std::fs::remove_file(path).unwrap();
         assert!(parse_byte_ranges(&format!("bytes={}", vec!["0-1"; 17].join(",")), 10).is_err());

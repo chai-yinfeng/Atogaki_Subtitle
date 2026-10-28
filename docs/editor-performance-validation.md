@@ -297,3 +297,11 @@ WebContent RSS 分钟中位数（MiB）为 347.09、343.77、344.50、356.78、3
 实际数据库逐段核对 13,300 段原文／时间／ASR run 与 timed unit 对应，三段译文分别成功保存 3／4／3 次，translation revision 与十次写入一致，其余译文未变。20 表中仅字幕、来源 revision、任务 revision 三表预期变化，17 表内容摘要一致；空闲及退出期间没有新增变化，integrity=ok、foreign key 空。只读核对曾误用不存在的表名，查询失败后读取 sqlite_master 改正，没有写数据。
 
 证据 `local-artifacts/editor-native-mixed-20261028/` 保留包清单、启动前进程、原始样本／身份／操作／阶段时间、数据库前后摘要、逐字段验证脚本和结果、分析脚本／analysis.json、SHA manifest；README 记录操作步骤与测量边界。正式 App、正式数据库、公开发行及模型／云端均未涉及。
+
+## 2026-10-28：三小时音轨请求基线与可选传输量诊断
+
+沿用已核验 QA 9fc1efe，以 `ATOGAKI_MEDIA_DIAGNOSTICS=1` 打开万段三小时稀疏 WAV；保持暂停，仅加载 metadata 时原生日志出现 `bytes=0-1`、`bytes=0-345600043`、尾部 `bytes=345571328-345600043`，后段定位播放再出现中间和尾部范围。正常退出 0，证据 `local-artifacts/editor-native-media-requests-20261028/app.log` 与 metadata／tail AX。这仅证明 WebKit 请求了覆盖全文件的范围，原有 opened bytes 是文件长度，不能证明完成传输或解释 Networking RSS。
+
+补强现有默认关闭的媒体诊断：本次访问生成无路径／token 的请求编号，流结束或释放时记录 expected、file_read、body_yielded、outcome。file_read 是已完成 Rust 文件读取返回的字节，不是底层磁盘 IO／取消中的后台读；body_yielded 是交给 HTTP body 的字节，不是客户端确认接收量或缓存占用。outcome=complete 表示读到流结束，error 表示读取失败，dropped 只表示未观察到结束；最后一块已经交出但消费者未再 poll 也可能显示 dropped，不能一律解释为取消。头部和响应语义、64 KiB 流式读取边界不变，不按猜测截断 Range 或更改缓存策略。
+
+专项验证未 poll／只消费 multipart 前缀／一块文件／完整结束／EOF 错误时的计数，原有 HTTP Range、HEAD、多段、访问边界、9.2 GB 稀疏文件和断开测试保持通过。媒体专项 4 项、完整 Tauri 36 项通过／4 项显式忽略，两套 fmt／diff 通过。可选日志尚未用于新版原生包，传输与暂态内存结论待后继实测；正式 App 不变。
