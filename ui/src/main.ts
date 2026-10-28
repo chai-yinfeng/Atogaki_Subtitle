@@ -1088,6 +1088,11 @@ const insertBlockView = mountInsertSubtitleBlock(shell!, {
   },
 });
 const taskTools = mountTaskTools(workspaceView, editorRoot, closeEditorTools);
+const glossaryCorrectionEvents = new AbortController();
+const glossaryCorrectionTool = mountToolDialog(glossaryCorrectionDialog!, () => {
+  pendingGlossaryCorrection = null;
+  if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
+});
 const cleanupConfirmation = mountCandidateCleanupConfirmation(shell!);
 const repairTool = mountToolDialog(editorRepairDialog, () => { reviewSignals.clear(); candidateHistory.clear(); }, () => !cleanupConfirmation.open);
 const processingBackend = createProcessingBackend(invoke);
@@ -1220,6 +1225,8 @@ const editorRepairControls = mountEditorRepairControls(editorRepairDialog, retra
 });
 
 window.addEventListener("pagehide", () => {
+  glossaryCorrectionEvents.abort();
+  glossaryCorrectionTool.dispose();
   actionConfirmation.dispose();
   editorBlockActions.dispose();
   editorStructureHistory.dispose();
@@ -2322,6 +2329,7 @@ async function stopActivePlayback(): Promise<void> {
   candidateTool.close();
   cleanupConfirmation.cancel();
   repairTool.close();
+  glossaryCorrectionTool.close();
   editorProcessing.reset();
   if (workspaceView?.classList.contains("editor-task-tools")) closeEditorTools();
   playbackLoop = null; loopStartMs = null;
@@ -4188,7 +4196,8 @@ function captureGlossaryCorrection(
   if (glossaryCorrectionSource) glossaryCorrectionSource.value = segment.source_text;
   if (glossaryCorrectionTarget) glossaryCorrectionTarget.value = sourceInput.value.trim();
   if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
-  glossaryCorrectionDialog?.showModal();
+  if (currentArea === "karaoke") editorRoot.querySelector<HTMLElement>(".editor-menu > summary")?.focus();
+  glossaryCorrectionTool.open();
   glossaryCorrectionSource?.focus();
   glossaryCorrectionSource?.select();
 }
@@ -4234,7 +4243,7 @@ async function saveGlossaryCorrection(): Promise<void> {
     if (terms.some((term) => term.sourceText === sourceText && term.targetText === targetText)) {
       setWorkspaceAction("这条修正规则已经存在于词表中。", true);
       state.textContent = "这条修正规则已经存在";
-      glossaryCorrectionDialog?.close();
+      glossaryCorrectionTool.close();
       return;
     }
     terms.push({ sourceText, targetText, promptScope: "correction_only", contentGroup: null });
@@ -4253,7 +4262,7 @@ async function saveGlossaryCorrection(): Promise<void> {
     setWorkspaceAction(`已把“${sourceText} → ${targetText}”加入 ${saved.glossary.name}。字幕修改仍需单独保存。`);
     state.textContent = "修正规则已加入词表；字幕修改需单独保存";
     state.classList.remove("warning");
-    glossaryCorrectionDialog?.close();
+    glossaryCorrectionTool.close();
   } catch (error) {
     if (!current()) return;
     state.textContent = `加入词表失败：${String(error)}`;
@@ -4523,14 +4532,10 @@ renameJobDialog?.addEventListener("close", () => {
 glossaryCorrectionForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveGlossaryCorrection();
-});
-document.querySelector<HTMLButtonElement>("#cancel-glossary-correction")?.addEventListener("click", () => {
-  glossaryCorrectionDialog?.close();
-});
-glossaryCorrectionDialog?.addEventListener("close", () => {
-  pendingGlossaryCorrection = null;
-  if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
-});
+}, { signal: glossaryCorrectionEvents.signal });
+glossaryCorrectionDialog?.querySelector<HTMLButtonElement>("#cancel-glossary-correction")?.addEventListener("click", () => {
+  glossaryCorrectionTool.close();
+}, { signal: glossaryCorrectionEvents.signal });
 
 const playbackShortcutView = mountPlaybackShortcutView(document, {
   enabled: () => !!activeDetail && !!mediaPlayer.media,

@@ -1065,3 +1065,12 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 ## 2026-10-28：用户确认本机紧凑面板与跟随交互
 
 向用户明确核对已安装 e8d9a8d 的“紧凑布局、上下原译文和跟随／锁段交互”，并说明后续词表竞态修复尚未装入正式 App。用户直接回答“目前正常”。据此将这组本机手动复测记为通过；不扩展为未提问的所有结构／导出、后继源码、性能、Windows 或整体最终验收。正式 App 继续保留该版本供日常使用。
+
+
+## 2026-10-28：词表修正弹窗的 WKWebView 可访问性缺口与源码修复
+
+离线构建 complete＋qa 的 21a010e，源包／安装包 deep strict codesign 及 27 文件摘要核对通过，确认旧 QA 无进程后原位更新，没有新增 App 备份或触碰正式 App。使用合成库选择 Yorushika，返回当前句的“加入词表修正”。原 HTML showModal 弹窗肉眼可见且输入框获焦，但 macOS AX 树仅剩 HTML content／value indicator，输入和按钮全部被过滤，记录 modal-before.ax.txt 和实际截图观察。Escape 可关闭；正常 Cmd+Q，原句柄退出 0，20 表前后摘要完全相同。词表菜单一次点击仅选中，Return 随后返回编辑；没有把未核对选值当作成功，后继修正弹窗确已打开。
+
+修正弹窗改用既有 mountToolDialog：具名 region、背景 inert、Tab／Escape 边界、关闭停放与焦点返回，沿用唯一表单与前一提交的保存访问保护。表单／取消监听使用 AbortController，pagehide dispose；离开任务显式关闭。停放节点的取消绑定改为从持有的 dialog 查询，避免全局 querySelector 找不到节点。补非模态浮层固定位置／最大高度／遮罩，与已有编辑工具相同。
+
+前端 346 passed、类型／生产构建与两套 fmt／diff 通过。新 correction WebKit 加验具名区域、背景 inert、初始输入焦点、正反 Tab 回环、Escape 取消与返回摘要焦点、关闭释放 DOM，同时保留旧读取取消、旧写入隔离、重复提交和失败重试；既有 selection 与 follow 通过。本段只记录源码／浏览器结果，修复后原生 AX 与重开验证待下一步完成。证据 local-artifacts/editor-correction-native-20261028/，正式 e8d9a8d 保持用户已验收版本。

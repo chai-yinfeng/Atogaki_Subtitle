@@ -143,6 +143,7 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; background: #eceff3; }
 .editor-cleanup-dialog h2 { font: 600 17px/1.4 system-ui, sans-serif; margin: 0 0 12px; }
 .editor-cleanup-dialog button { font: 13px system-ui, sans-serif; padding: 6px 10px; }
 .editor-insert-dialog[open] { position: fixed; inset: 6dvh 0 auto; z-index: 40; width: min(520px,95vw); max-height: 88dvh; overflow: auto; padding: 14px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 0 0 100vmax #0008; font: 13px/1.4 system-ui, sans-serif; }
+.glossary-correction-dialog[open] { position: fixed; inset: 12dvh 0 auto; z-index: 50; max-height: 84dvh; overflow: auto; box-shadow: 0 0 0 100vmax #0008; }
 .editor-insert-dialog form, .editor-insert-dialog fieldset { display: grid; gap: 8px; min-width: 0; margin: 0; }
 .editor-insert-dialog fieldset { padding: 0; border: 0; }
 .editor-insert-dialog h2 { margin: 0; font: 600 17px/1.4 system-ui, sans-serif; }

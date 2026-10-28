@@ -25,11 +25,18 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright'),asse
   const open=async(target)=>{
    if(!await page.locator('.editor-menu').evaluate(x=>x.open))await page.locator('.editor-menu > summary').click();
    await page.locator('[data-editor-action="glossary"]').click();await dialog.waitFor({state:'visible'});
+   assert.equal(await dialog.getAttribute('role'),'region');
+   assert.equal(await page.locator('#karaoke-view').evaluate(node=>node.inert),true);
+   assert.equal(await page.evaluate(()=>document.activeElement.id),'glossary-correction-source');
    await page.locator('#glossary-correction-source').fill('误识别');await page.locator('#glossary-correction-target').fill(target);
   };
   // Cancelling during the preparatory read must not start a write or close a new dialog.
-  await open('旧请求');await page.evaluate(()=>window.__test.holdCorrectionRead=true);await submit.click();
-  await page.waitForFunction(()=>window.__test.correctionReads.length===1);await page.locator('#cancel-glossary-correction').click();await open('新输入');
+  await open('旧请求');
+  await submit.focus();await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),'cancel-glossary-correction');
+  await page.keyboard.press('Shift+Tab');assert.equal(await page.evaluate(()=>document.activeElement.closest('form')?.id),'glossary-correction-form');assert.equal(await submit.evaluate(node=>node===document.activeElement),true);
+  await page.evaluate(()=>window.__test.holdCorrectionRead=true);await submit.click();
+  await page.waitForFunction(()=>window.__test.correctionReads.length===1);await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(()=>document.activeElement.matches('.editor-menu > summary')),true);await open('新输入');
   await page.evaluate(()=>window.__test.correctionReads[0].resolve());await page.waitForTimeout(70);
   assert.equal(await page.evaluate(()=>window.__test.correctionWrites.length),0,'cancelled read must not write glossary');
   assert.equal(await dialog.isVisible(),true);assert.equal(await page.locator('#glossary-correction-target').inputValue(),'新输入');
@@ -47,7 +54,9 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright'),asse
   await page.evaluate(()=>window.__test.correctionWrites[1].reject(Error('test save failure')));
   await page.waitForFunction(()=>document.querySelector('#glossary-correction-message').textContent.includes('test save failure'));
   assert.equal(await submit.isDisabled(),false);assert.equal(await page.locator('#glossary-correction-target').inputValue(),'保留这个新输入');
-  await page.evaluate(()=>window.__test.holdCorrectionWrite=false);await submit.click();await page.waitForFunction(()=>!document.querySelector('#glossary-correction-dialog').open);
+  await page.evaluate(()=>window.__test.holdCorrectionWrite=false);await submit.click();await page.waitForFunction(()=>!document.querySelector('#glossary-correction-dialog')?.open);
+  assert.equal(await page.locator('#glossary-correction-dialog').count(),0);
+  assert.equal(await page.locator('#karaoke-view').evaluate(node=>node.inert),false);
   assert.equal(await page.evaluate(()=>window.__test.correctionWrites.length),3);assert.deepEqual(errors,[]);
   console.log('PASS: cancelled correction read, old write isolation, duplicate submit, failure retry and normal save');
  }finally{await browser.close();}
