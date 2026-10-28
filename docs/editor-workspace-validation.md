@@ -959,3 +959,10 @@ complete＋qa release 离线构建成功，源包与固定 QA 均通过 deep str
 使用现有 c8afa5f QA、原合成目录执行十轮任务／识别／候选对照／关闭／返回，共 70 次 CUA 动作，按每步新的 AX 状态选择按钮；未调用识别、采用或编辑数据。同步 90 秒／31 样本采集四个进程 RSS，加入启动时间核对以拒绝同路径 PID 重启，详情与局限见[性能记录](editor-performance-validation.md#2026-10-27原生-webcontent-短时归属与-pid-身份补强)。
 
 launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内核归属；受控启动前无 WebKit、启动后唯一新增组且退出后全部消失，作为本次关联证据。正常退出 0，五张表逐字段不变，revision 56／integrity ok。两项 Python 身份回归及语法检查、两套 fmt／diff 通过；首次测试 import 失败修正后重跑通过。本轮仅改采集脚本／测试，未重复前端或 Rust 全量／构建 App，不把短时 RSS 上升当作泄漏结论。证据目录 local-artifacts/editor-process-attribution-20261027，原生长期内存／滚动及 Windows 门禁保留。
+
+
+## 2026-10-27：ASR run repository 边界
+
+将 run 元数据记录／更新／列表、中断恢复、采用／来源保护读取五方法抽到 asr_runs.rs，父模块仅注册子模块并移除旧 AsrRun import；方法签名与完整实现逐字相同。继续原 pool／返回类型／错误，候选采用事务、台账、来源和文件服务保持各自原边界，无 schema／IPC／前端变更。
+
+共享库 183 passed／5 环境依赖 ignored，含 indexes_asr_run_lifecycle_and_recovers_interrupted_runs、候选重开、采用中途回滚与 recorded 撤销后采用证据保护；Tauri check --offline、两套 fmt／diff 通过。没有为纯抽取新增镜像测试，没有重复前端或原生安装。日志与等价 checksum 在 local-artifacts/asr-run-repository-20261027；独立 QA c8afa5f、正式 1020e05 未变，性能／原生剩余门禁保留。

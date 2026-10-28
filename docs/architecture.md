@@ -240,3 +240,6 @@ pagehide dispose 通过 AbortController 释放监听，保留节点再挂载不�
 ### ASR 审查记录 repository
 
 `infrastructure/local_db/asr_review.rs` 持有质量信号替换／列表、人工决定追加、修复尝试记录／状态更新／列表六个数据库方法。实现继续借用 LocalDatabase 的现有 pool，返回类型、错误、排序及同任务校验不变；信号替换事务始终在同一个方法内完成。来源采用、结构撤销、ASR run 生命周期与共享类型仍由各自既有边界持有，不将审查写入拆成第二个存储层。
+
+
+`infrastructure/local_db/asr_runs.rs` 集中 run 元数据记录、状态更新、列表、中断恢复和采用／来源保护读取五方法；与 asr_review 共用原 LocalDatabase，不增加 run 缓存或连接池。实际候选文件保留／清理与采用事务仍由现有服务及发布模块负责，保护读取的调用方与顺序保持。

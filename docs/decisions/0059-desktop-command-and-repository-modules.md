@@ -55,3 +55,10 @@ main 的 generate_handler 使用显式模块路径，保持可审阅的完整注
 `local_db/asr_review.rs` 接管六个方法：替换／读取质量信号、记录人工决定、记录／批量更新／读取修复尝试。继续借用同一个 LocalDatabase.pool 与父模块的 to_i64；返回记录类型保持原路径。信号替换仍由原方法包住完整 delete／insert／commit，人工决定追加、同任务修复校验、upsert 与排序 SQL 原样保留，不拆事务或增加服务缓存。
 
 六个签名与方法体逐字一致，父模块只移除不再使用的类型 import。共享库全量 183 passed／5 环境依赖 ignored，包含真实隔离 SQLite 的信号／最新决定同时间排序／修复记录回归；桌面 cargo check、两套 fmt／diff 通过。未改前端、命令注册或 schema，未重新打包，不把方法抽取视为新的识别准确率、原生调用或性能验收。
+
+
+## ASR run 元数据 repository
+
+`local_db/asr_runs.rs` 接管记录／更新／列出 run、中断恢复及证据保护读取五方法。方法签名与完整方法体逐字一致，继续借用同一 pool、父模块返回记录和数值转换；保护读取仍同时查采用台账与当前来源。artifact 文件读写和候选采用事务不迁入该模块，保护查询不等于清理授权。
+
+共享库 183 passed／5 环境依赖 ignored，覆盖 run 恢复、候选重开、采用回滚与撤销后保护；Tauri check、两套 fmt／diff 通过。未更改 schema／IPC，也未重新打包或把本次移动计为新原生／性能结果。
