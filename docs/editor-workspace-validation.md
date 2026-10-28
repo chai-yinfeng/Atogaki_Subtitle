@@ -945,3 +945,10 @@ complete＋qa release 离线构建成功，源包与固定 QA 均通过 deep str
 正常 Cmd+Q 后原始进程句柄退出 0，ps 确认无 QA 残留，不再次观察退出窗口。前后任务、字幕、来源、翻译依赖、采用台账五表逐字段一致，revision 56，integrity_check=ok。构建含类型／生产检查，两套 fmt／diff 通过；346 项与五组 WebKit 对应 c8afa5f，本次文档提交不重复跑。完整日志／新旧 checksum／五表快照／verification／AX／截图在 local-artifacts/candidate-dialog-native-c8afa5f；正式仍为 1020e05，滚动 P95、长期内存、原生拖动及 Windows 门禁保持。
 
 同步修正 desktop-testing 核心清单中的旧双编辑器导航、默认翻译页、结构草稿／token 和编辑快捷键约定；保留后面的历史打包现场，不把清单要求列为已验收。
+
+
+## 2026-10-27：ASR 审查 repository 六方法抽取
+
+确认 TypeScript noUnusedLocals／noUnusedParameters 早已开启，当前额外显式检查同样通过，本次未重复修改配置。继续 ADR 0059，将质量信号／人工决定／修复尝试六方法从 local_db.rs 抽到同级 asr_review.rs；签名和方法体逐字校验一致，移出父模块不再使用的类型 import。共 178 行方法代码移动，SQL、事务、连接池、公共调用路径、DTO 与 schema 不变。
+
+共享库全量 183 passed／5 环境依赖 ignored，包含 stores_quality_reviews_and_repair_attempts_as_run_metadata 的 SQLite 原生读写及最新决定排序；Tauri cargo check --offline 通过，两套 fmt／diff 通过。没有为纯移动新增镜像测试，没有改前端或重新运行 346 项／WebKit；未构建 App，独立 QA 仍为 c8afa5f、正式仍为 1020e05。完整日志与逐字等价摘要在 local-artifacts/asr-review-repository-20261027；既有原生／性能／平台门禁保留，下一步继续按完整用例边界整理剩余 repository 并补性能证据。

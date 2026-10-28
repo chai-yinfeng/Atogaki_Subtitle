@@ -235,3 +235,8 @@ pagehide dispose 通过 AbortController 释放监听，保留节点再挂载不�
 ### 候选对照呈现
 
 `candidate-comparison-view.ts` 持有原字幕／候选摘要行、运行参数差异和重新对照按钮；show 替换本模块生成的节点，以根节点事件委托接入原 processing.refresh。文字以 textContent 写入，差异与配置沿用转义规则；禁用或脱离根节点的按钮不触发刷新。dispose 释放监听并清空生成内容，之后 show 不再打开工具或写入 DOM。候选任务身份／请求代次、revision 与采用事务仍由 editor-processing 负责，task-tools 继续管理弹窗节点及焦点。弹窗固定标题／操作栏，摘要、列表、差异、替换说明与错误状态放入可聚焦的独立滚动内容区；列表仍独立滚动，避免 sticky 操作栏覆盖说明。
+
+
+### ASR 审查记录 repository
+
+`infrastructure/local_db/asr_review.rs` 持有质量信号替换／列表、人工决定追加、修复尝试记录／状态更新／列表六个数据库方法。实现继续借用 LocalDatabase 的现有 pool，返回类型、错误、排序及同任务校验不变；信号替换事务始终在同一个方法内完成。来源采用、结构撤销、ASR run 生命周期与共享类型仍由各自既有边界持有，不将审查写入拆成第二个存储层。
