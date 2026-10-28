@@ -9,3 +9,10 @@
 新 verify-editor-wave-follow.cjs 在修复前通过真实 WebKit 点击复现状态变为暂停；修复后覆盖普通定位、实际播放越过两秒视窗、只选字幕、播放头拖动期间视窗稳定、实际平移暂停、独立恢复及锁段／时间草稿保留。gestures、timeline、follow、time-navigation、waveform-follow-boundaries 五组既有回归通过，前端 346 项／类型／生产构建、两套 fmt／diff 通过。首次类型检查发现 querySelector 返回 Element 不含 title，明确按钮类型后生产构建通过。
 
 日志在 local-artifacts/wave-follow-fix-20261028。此记录先对应源码与浏览器验证，原生包更新与验收另记；不涉及 ASR、译文、数据库 schema 或既有字幕修改。
+
+
+## 原生与本机更新
+
+e8d9a8d 已构建独立 QA 与正式 complete release，两包签名通过。新合成 seed 的原生窗口中，将滑块以 Tab 聚焦后 Home 调为两秒；普通点击波形定位到 0.999 秒，波形按钮仍为 on，继续播放到约 14.6 秒时截图显示视窗 13.038–15.038 秒，证明确实跨窗移动。滑块直接 AX click／setValue 未改变值，未算成功；原生播放头拖动仍不由本次截图证明。QA 正常退出，全部 cue 字段与 revision 30 未变。
+
+发现正式 App 已退出后，按既有本机更新授权原子替换 /Applications/Atogaki.app 至 e8d9a8d；系统入口启动显示正常任务页，未在正式数据上执行写入测试。13 个完成任务／6,887 段、20 表内容摘要前后完全一致，integrity ok、foreign key 空。恢复点 SHA 与上一份一致，使用相对链接复用；保留 0cf72c0 上一版与稳定版，校验后删除被取代的 1020e05 App 副本。源码修复已交付用户复验，整体性能和平台门禁不因本次修复而关闭。

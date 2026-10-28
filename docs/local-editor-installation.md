@@ -93,3 +93,12 @@
 核对新包、上一版和稳定版签名，以及旧回退的完整文件摘要后，只删除被取代的 05b2e07 回退 `/Applications/.Atogaki.previous.20261025-time-guards`，约 101,221,445 字节逻辑内容；APFS 实际回收量不作推断。当前保留 `/Applications/.Atogaki.previous.20261027-unified`（1020e05）及 `/Applications/.Atogaki.previous-20261020T210406Z`（稳定 0.1.1），没有持续追加 App 副本。数据库恢复点、模型和采用证据未清理。
 
 新旧包／恢复点／20 表摘要、构建／测试／签名、回退轮换、AX／截图与 verification 在 local-artifacts/install-backups/20261027-unified。剩余原生滚动 P95、长期混合负载内存、拖动工具、其他 IO／异常终止及 Windows 等门禁仍保留；本机交付给用户试用不等于四阶段总体完成。
+
+
+## 2026-10-28：波形定位跟随修复（e8d9a8d）
+
+0cf72c0 用户反馈普通波形定位后视窗停止跟随，已按[缺陷记录](editor-waveform-follow-interaction-bug.md)修复并经六组 WebKit、346 项前端、类型／构建及独立 QA 实际跨窗播放验证。旧正式 App 已退出，13 任务均 done，核对旧包完整清单后，以暂存／签名／原子重命名更新 /Applications/Atogaki.app。当前源码与本机 e8d9a8d 同步，版本号仍为 0.1.2，本次不更新公开发行。
+
+一致性恢复点 SHA 与 20261027-unified 相同，使用相对符号链接复用，没有新增数据库副本。安装前和系统入口打开后的 20 表内容摘要一致，13 任务／6,887 段保留，integrity ok、foreign key 空；正式只启动任务页供用户继续验收，没有进行字幕写入、故障或模型请求。
+
+保留 /Applications/.Atogaki.previous.20261028-wave-follow（0cf72c0）和稳定 .Atogaki.previous-20261020T210406Z。核对新包、两份回退签名与旧回退完整 checksum 后，清理被取代的 .Atogaki.previous.20261027-unified（1020e05），逻辑 101,233,557 字节；其他数据／恢复点／模型／采用证据保留。日志、签名／27 文件、恢复点链接、20 表摘要、QA 原生截图与 rotation／verification 在 local-artifacts/wave-follow-fix-20261028。用户复验和其余性能／平台门禁不由本次安装代替。

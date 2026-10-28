@@ -124,3 +124,8 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 正式 `/Applications/Atogaki.app` 更新为 0cf72c0（仍为 0.1.2 本机候选）。已核对新包、上一版和稳定版签名／旧清单，只清理被取代的 `/Applications/.Atogaki.previous.20261025-time-guards`（05b2e07），逻辑 101,221,445 字节；保留 `/Applications/.Atogaki.previous.20261027-unified`（1020e05）及 `.Atogaki.previous-20261020T210406Z`（稳定 0.1.1）。暂存包通过重命名成为正式包，不遗留额外发行副本。
 
 一致性数据库恢复点与旧 SHA-256 不同，保留新快照及旧恢复点；未把模型、媒体、数据库、采用证据或来源不明文件作为此次清理对象。完整路径／checksum／逻辑大小／回退轮换与数据验证在 local-artifacts/install-backups/20261027-unified，交付现场见[安装记录](local-editor-installation.md#2026-10-27统一编辑器与完整来源撤销候选0cf72c0)。
+
+
+## 2026-10-28：波形跟随修复候选轮换
+
+本机更新为 e8d9a8d；一致性数据库快照与上一 SHA 相同，链接复用 20261027-unified，未新增副本。App 保留 0cf72c0 上一版 `.Atogaki.previous.20261028-wave-follow` 与稳定 `.Atogaki.previous-20261020T210406Z`；完整核对后清理被取代的 1020e05 `.Atogaki.previous.20261027-unified`，逻辑 101,233,557 字节。路径／checksum／用途与操作记录在 local-artifacts/wave-follow-fix-20261028/rotation.json；正式数据库、模型、媒体及采用证据不参与清理。

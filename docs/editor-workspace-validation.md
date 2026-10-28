@@ -996,3 +996,12 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 0cf72c0 用户截图显示视窗已暂停。审计复现为 pointerdown／背景 click 无条件停止跟随，普通定位及播放头拖动均受影响。现仅在真实平移或改变字幕时间等操作时暂停，捕获手势中只阻止自动居中、不破坏跟随意图；波形状态新增独立恢复开关，保留锁定编辑和时间草稿。
 
 新增真实 WebKit wave-follow 修复前失败于普通定位后变为暂停，修复后通过：实际播放越过两秒窗产生新视窗、普通定位／选段／播放头保留跟随、捕获期间不换窗、平移暂停、独立恢复而不切段／提交时间。五组既有 gestures／timeline／follow／time-navigation／waveform-follow-boundaries 通过。前端 346 passed、类型／构建、两套 fmt／diff 通过；首次类型检查 Element.title 错误已改明确按钮类型并经构建验证。证据目录 local-artifacts/wave-follow-fix-20261028，详情见[缺陷记录](editor-waveform-follow-interaction-bug.md)。本段先对应源码／浏览器，安装与原生证据另补。
+
+
+## 2026-10-28：e8d9a8d 波形跟随原生复验与本机更新
+
+独立 QA 和正式 complete release 均离线构建／签名通过。QA 使用新合成 seed、无故障 trigger。原生两秒窗中普通点击定位到 0.999 秒，视窗跟随仍 on；实际播放到约 14.6 秒时视窗已移至 13.038–15.038，截图为 qa-seek／qa-moving。直接 AX 滑块操作未改变值，改为 Tab 聚焦后 Home 成功；未尝试重报原生 drag 通过。正常退出 0，cue 字段逐项与 seed 一致，revision 30、integrity ok。
+
+确认旧正式 App 已退出、无进行中任务，核对原包 checksum，SQLite backup 的 SHA 与上一恢复点相同，因此链接复用。暂存与签名后原子安装 e8d9a8d，系统入口启动显示正式目录与 13 任务；只启动任务页，没有正式字幕写入。前后全部 20 表摘要一致，6,887 段／integrity ok／foreign key 空。当前回退为 0cf72c0 与稳定 0.1.1，完整核对后移除被取代的 1020e05，约 101,233,557 字节逻辑内容；不推断 APFS 实际回收量。
+
+证据在 local-artifacts/wave-follow-fix-20261028，六组 WebKit／346 前端与类型／构建、两套 fmt／diff 已在源码提交通过；不重复报为新的 Rust 业务测试。用户可直接在本机新版复验普通定位跟随与独立恢复按钮；剩余原生性能、长期内存与平台门禁保持。
