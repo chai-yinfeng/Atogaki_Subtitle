@@ -1016,3 +1016,14 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 只读核对十段 cue ID／顺序／时间／译文及其他九段原文不变；第一句 source_edited／translation_stale 为真，第三句来源的 translation_dependency_stale 为真，integrity_check=ok、foreign_key_check 空，故障 trigger 已移除。第一次数据库断言误把第三句的上下文过期当作 segments.translation_stale，查明应检查 provenance.translation_dependency_stale 后完成准确核对，此为验收脚本判断修正，没有产品修改。
 
 证据在 local-artifacts/editor-abrupt-draft-20261028/：失败／重启／保存 AX、两次启动身份与日志、kill 前检查、包摘要、最终数据库核对和文件 manifest。范围仅覆盖“原文保存真实 ABORT、草稿已保留后主进程 SIGKILL、同库重开与显式重试”；不证明输入后立即断电持久性、WebContent 单独崩溃、满卷合并强杀或全部恢复冲突。正式 App 与正式数据均未操作；没有新增安装包或数据库备份。
+
+
+## 2026-10-28：词表选择与工具重开的迟到读取
+
+剩余编辑工具边界审计发现：预览读取期间词表选择仍可变化，clearGlossaryPreview 只清 DOM／值而不使旧请求失效；旧 A 预览返回后会重新显示“确认应用”，尽管选择已是 B。新增真实 WebKit 合成 IPC 专项首先失败于 A 请求→选择 B→释放 A 后旧预览可见，失败日志保留。规则说明读取也缺少任务／选择／代次保护；任务冻结快照读取同样缺少重开访问保护。
+
+现在词表预览在请求开始与清除时更新代次，返回同时核对页面生命期、任务、navigation、所选 glossary ID；确认应用再次核对预览上下文与当前选择。修正规则和任务快照各有独立读取代次，成功／错误均先核对当前访问，仍使用原 invoke／词表应用后端，没有第二套草稿、保存或数据库事务。
+
+新增 verify-editor-glossary-selection 通过 A→B、A→B→A、旧预览错误、规则乱序／旧错误、当前预览正常确认应用，以及同任务工具重开后旧快照错误不能覆盖较新快照。没有实际修改用户词表、字幕或调用模型。前端 346 passed，最终类型／生产构建、两套 fmt／diff 与脚本语法通过；既有 follow、review-tools WebKit 通过。follow 首次误用默认 1420 而本轮 Vite 为 1430，连接失败日志保留，明确设置实际地址后通过，没有把未连接执行算通过。
+
+证据在 local-artifacts/editor-glossary-selection-20261028/。本次未重新编译原生包或替换正式 App，已安装的 e8d9a8d 尚不包含这条词表修复；下一次候选更新时补原生集成。本项不改变原生滚动／长期内存／Windows 和最终手动验收状态。

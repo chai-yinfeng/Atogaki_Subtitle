@@ -731,6 +731,10 @@ let glossaries: Glossary[] = [];
 let glossaryReadGeneration = 0;
 let editingGlossaryId: string | null = null;
 let pendingGlossaryPreview: GlossaryPreview | null = null;
+let glossaryPreviewGeneration = 0;
+let workspaceGlossaryInspectionGeneration = 0;
+let jobGlossarySnapshotGeneration = 0;
+let glossaryPreviewContext: { jobId: string; navigation: number; glossaryId: string } | null = null;
 let renamingJob: LocalJob | null = null;
 let pendingGlossaryCorrection: {
   glossaryId: string;
@@ -1727,6 +1731,10 @@ function renderGlossaryOptions(): void {
 
 async function renderWorkspaceGlossaryInspection(): Promise<void> {
   const glossaryId = workspaceGlossary?.value;
+  const request = ++workspaceGlossaryInspectionGeneration;
+  const navigation = navigationRequestId, jobId = activeDetail?.job.job_id;
+  const current = () => desktopStartup.active && request === workspaceGlossaryInspectionGeneration &&
+    navigation === navigationRequestId && jobId === activeDetail?.job.job_id && glossaryId === workspaceGlossary?.value;
   if (!workspaceGlossaryMappings) return;
   if (!glossaryId) {
     workspaceGlossaryMappings.classList.add("muted");
@@ -1737,12 +1745,14 @@ async function renderWorkspaceGlossaryInspection(): Promise<void> {
   workspaceGlossaryMappings.textContent = "正在读取修正规则…";
   try {
     const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
+    if (!current()) return;
     const mappings = detail.terms.filter((term) => term.target_text?.trim());
     workspaceGlossaryMappings.classList.toggle("muted", mappings.length === 0);
     workspaceGlossaryMappings.innerHTML = mappings.length
       ? mappings.map((term) => `<div><span>${escapeHtml(term.source_text)}</span><b aria-hidden="true">→</b><span>${escapeHtml(term.target_text ?? "")}</span></div>`).join("")
       : "这个词表没有识别后修正规则，只会作为新任务的 Whisper 提示词。";
   } catch (error) {
+    if (!current()) return;
     workspaceGlossaryMappings.classList.add("muted");
     workspaceGlossaryMappings.textContent = `读取失败：${String(error)}`;
   }
@@ -1750,11 +1760,16 @@ async function renderWorkspaceGlossaryInspection(): Promise<void> {
 
 async function renderJobGlossarySnapshot(jobId: string): Promise<void> {
   if (!jobGlossarySnapshot) return;
+  const request = ++jobGlossarySnapshotGeneration, navigation = navigationRequestId;
+  const current = () => desktopStartup.active && request === jobGlossarySnapshotGeneration &&
+    navigation === navigationRequestId && jobId === activeDetail?.job.job_id;
   jobGlossarySnapshot.textContent = "正在读取任务快照…";
   try {
     const snapshot = await invoke<string | null>("get_job_glossary_snapshot", { jobId });
+    if (!current()) return;
     jobGlossarySnapshot.textContent = snapshot?.trim() || "当前任务没有词表快照。";
   } catch (error) {
+    if (!current()) return;
     jobGlossarySnapshot.textContent = `快照读取失败：${String(error)}`;
   }
 }
@@ -4227,7 +4242,9 @@ async function saveGlossaryCorrection(): Promise<void> {
 }
 
 function clearGlossaryPreview(): void {
+  glossaryPreviewGeneration++;
   pendingGlossaryPreview = null;
+  glossaryPreviewContext = null;
   glossaryPreviewHost?.classList.add("hidden");
   if (glossaryPreviewHost) glossaryPreviewHost.replaceChildren();
 }
@@ -4238,13 +4255,22 @@ async function previewGlossaryApplication(): Promise<void> {
     setWorkspaceAction("请先保存字幕修改，再预览词表修正。", true);
     return;
   }
+  clearGlossaryPreview();
+  const request = glossaryPreviewGeneration;
+  const context = { jobId: activeDetail.job.job_id, navigation: navigationRequestId, glossaryId: workspaceGlossary.value };
+  const current = () => desktopStartup.active && request === glossaryPreviewGeneration &&
+    context.navigation === navigationRequestId && context.jobId === activeDetail?.job.job_id &&
+    context.glossaryId === workspaceGlossary?.value;
   setWorkspaceBusy(true);
   setWorkspaceAction("正在比较词表与 原文字幕…");
   try {
-    pendingGlossaryPreview = await invoke<GlossaryPreview>("preview_glossary_application", {
-      jobId: activeDetail.job.job_id,
-      glossaryId: workspaceGlossary.value,
+    const preview = await invoke<GlossaryPreview>("preview_glossary_application", {
+      jobId: context.jobId,
+      glossaryId: context.glossaryId,
     });
+    if (!current() || preview.glossary_id !== context.glossaryId) return;
+    pendingGlossaryPreview = preview;
+    glossaryPreviewContext = context;
     renderGlossaryPreview(pendingGlossaryPreview);
     setWorkspaceAction(
       pendingGlossaryPreview.changes.length
@@ -4252,6 +4278,7 @@ async function previewGlossaryApplication(): Promise<void> {
         : "词表预览完成，没有需要修正的字幕。",
     );
   } catch (error) {
+    if (!current()) return;
     clearGlossaryPreview();
     setWorkspaceAction(`词表预览失败：${String(error)}`, true);
   } finally {
@@ -4276,7 +4303,13 @@ function renderGlossaryPreview(preview: GlossaryPreview): void {
 }
 
 async function applyPreviewedGlossary(): Promise<void> {
-  if (!activeDetail || !pendingGlossaryPreview || workspaceActionBusy) return;
+  if (!activeDetail || !pendingGlossaryPreview || !glossaryPreviewContext || workspaceActionBusy) return;
+  const context = glossaryPreviewContext;
+  if (context.jobId !== activeDetail.job.job_id || context.navigation !== navigationRequestId ||
+      context.glossaryId !== workspaceGlossary?.value || context.glossaryId !== pendingGlossaryPreview.glossary_id) {
+    clearGlossaryPreview();
+    return;
+  }
   setWorkspaceBusy(true);
   setWorkspaceAction("正在把词表修正写入本地…");
   try {
