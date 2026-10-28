@@ -4,6 +4,8 @@ _最后更新：2026-10-27_
 
 本页只保留当前交付状态、下一步和未完成门禁。逐次提交与旧测试计数已完整迁入 [2026-10-25 快照](roadmap-history-2026-10-25.md)，更早历史见 [2026-10-22 快照](roadmap-history-2026-10-22.md)。归档不改变验收结论，原证据仍在原路径。
 
+逐项要求及证据边界见[统一编辑器验收清单](unified-editor-acceptance.md)，整体尚未验收完成。
+
 产品范围以[产品方向](product-direction.md)、[稳定能力矩阵](app-capability-matrix.md)与有效 ADR 为准；实验晋升继续遵循 [0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。规范、研究和验收的分类见[文档索引](README.md)。SQLite、稳定 cue ID、唯一播放器／草稿、revision 与候选采用事务继续保留；字幕 schema、导出格式和源／译对应关系未改变。
 
 ## 统一字幕编辑器：当前状态
