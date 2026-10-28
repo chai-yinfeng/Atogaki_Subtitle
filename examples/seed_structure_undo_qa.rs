@@ -1,5 +1,6 @@
 //! Create a persistent, unique temporary QA data directory. No existing data is opened.
 //! Optional argument: trusted local ffmpeg executable to generate synthetic video.
+//! `--performance` instead creates three scale fixtures sharing sparse 3-hour silence.
 use anyhow::{Result, ensure};
 use atogaki_subtitle::{
     application::{
@@ -13,10 +14,16 @@ use atogaki_subtitle::{
         local_db::{LocalDatabase, LocalMachineTranslation, LocalTranslationDependency},
     },
 };
-use std::{fs, path::Path, process::Command};
+use std::{fs, io::Write, path::Path, process::Command};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--performance")
+    {
+        return seed_performance().await;
+    }
     let root = std::env::temp_dir().join(format!("atogaki-token-qa-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root)?;
     eprintln!("synthetic fixture: {}", root.display());
@@ -158,6 +165,117 @@ async fn main() -> Result<()> {
     let report = serde_json::json!({"data_dir":root,"database":database_path,"job_id":job.id(),
         "original_run_id":original.id,"candidate_run_id":candidate.id,"workspace_revision":revision,
         "segments":db.list_segments(&job.id()).await?,"provenance":provenance});
+    fs::write(root.join("seed.json"), serde_json::to_vec_pretty(&report)?)?;
+    db.close().await;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+async fn seed_performance() -> Result<()> {
+    const DURATION_MS: u64 = 10_800_000;
+    const SAMPLES: u32 = 16_000 * 10_800;
+    let root =
+        std::env::temp_dir().join(format!("atogaki-performance-qa-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root)?;
+    let shared_audio = root.join("synthetic-3h.wav");
+    let mut wav = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&shared_audio)?;
+    // Sparse zeros are valid PCM samples. No large allocation or user media copy.
+    wav.write_all(b"RIFF")?;
+    wav.write_all(&(36 + SAMPLES * 2).to_le_bytes())?;
+    wav.write_all(b"WAVEfmt ")?;
+    wav.write_all(&16_u32.to_le_bytes())?;
+    wav.write_all(&1_u16.to_le_bytes())?;
+    wav.write_all(&1_u16.to_le_bytes())?;
+    wav.write_all(&16_000_u32.to_le_bytes())?;
+    wav.write_all(&32_000_u32.to_le_bytes())?;
+    wav.write_all(&2_u16.to_le_bytes())?;
+    wav.write_all(&16_u16.to_le_bytes())?;
+    wav.write_all(b"data")?;
+    wav.write_all(&(SAMPLES * 2).to_le_bytes())?;
+    wav.set_len(44 + u64::from(SAMPLES) * 2)?;
+    drop(wav);
+    let database_path = root.join("atogaki.sqlite");
+    let db = LocalDatabase::open(&database_path).await?;
+    let mut tasks = Vec::new();
+    for count in [300_u64, 3_000, 10_000] {
+        let job = Job::create_in(&root.join("jobs"))?;
+        fs::hard_link(&shared_audio, &job.audio_wav)?;
+        let interval = DURATION_MS / count;
+        let segments = (0..count)
+            .map(|index| {
+                let mut cue = TranscriptSegment::new(
+                    index * interval,
+                    index * interval + interval * 3 / 4,
+                    format!("原生性能合成字幕第 {} 句：定位、播放与校对。", index + 1),
+                );
+                cue.set_translation(Some(format!(
+                    "Synthetic performance translation {}.",
+                    index + 1
+                )));
+                cue
+            })
+            .collect::<Vec<_>>();
+        let mut manifest =
+            JobManifest::new(&job, Some(job.audio_wav.clone()), None, Default::default());
+        manifest.mark(JobStatus::Done);
+        job.write_segments(&segments)?;
+        job.write_manifest(&manifest)?;
+        db.sync_snapshot(&JobSnapshot {
+            manifest,
+            segments: segments.clone(),
+        })
+        .await?;
+        db.rename_job(
+            &job.id(),
+            Some(format!("原生性能 · {count} 段 · 三小时合成音频")),
+        )
+        .await?;
+        let original = evidence(&db, &job, &segments, "synthetic-performance", false).await?;
+        let before = db.list_segments(&job.id()).await?;
+        let cues = AsrRunArtifacts::open(&job, &original.id)?.read_candidate_cues()?;
+        db.replace_segment_range(
+            &job.id(),
+            0,
+            i64::try_from(DURATION_MS)?,
+            &before,
+            &segments,
+            Some((&original.id, &cues)),
+        )
+        .await?;
+        let adopted = db.list_segments(&job.id()).await?;
+        db.apply_machine_translations(
+            &job.id(),
+            &adopted
+                .iter()
+                .enumerate()
+                .map(|(index, cue)| LocalMachineTranslation {
+                    segment_id: cue.id.clone(),
+                    source_text: cue.source_text.clone(),
+                    expected_translated_text: cue.translated_text.clone(),
+                    expected_translation_edited: false,
+                    expected_source_revision: None,
+                    expected_translation_revision: None,
+                    translated_text: format!("Synthetic performance translation {}.", index + 1),
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+        let current = db.list_segments(&job.id()).await?;
+        ensure!(
+            current.len() == count as usize,
+            "performance fixture count mismatch"
+        );
+        tasks.push(
+            serde_json::json!({"job_id":job.id(),"cue_count":count,"original_run_id":original.id,
+            "first":current.first(),"last":current.last(),"audio":job.audio_wav}),
+        );
+    }
+    let report = serde_json::json!({"data_dir":root,"database":database_path,"shared_audio":shared_audio,
+        "duration_ms":DURATION_MS,"synthetic_qa":true,"audio_storage":"one sparse file, hard linked into three job directories",
+        "tasks":tasks});
     fs::write(root.join("seed.json"), serde_json::to_vec_pretty(&report)?)?;
     db.close().await;
     println!("{}", serde_json::to_string_pretty(&report)?);

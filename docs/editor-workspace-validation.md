@@ -1083,3 +1083,11 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 原生 Shift+Tab 从误识别框到取消，再 Shift+Tab 回到加入按钮，Tab 回取消，未离开弹窗。规范写法输入临时“QA 取消重开测试，不提交”并在 AX 核对后，取消／Escape 均关闭且焦点返回已折叠的“更多编辑”摘要；再次打开规范写法恢复当前字幕原文，没有沿用取消输入。未激活加入按钮或提交真实词表；延迟保存竞态与失败重试仍由三组 WebKit 对应证据覆盖，未冒充这次原生已注入延迟。
 
 正常 Cmd+Q，原启动句柄退出 0；合成库全部 20 表的行数／排序内容 SHA 与修复前基线相同，integrity=ok、foreign key 空。证据仍在 local-artifacts/editor-correction-native-20261028/，包括前后包／进程、AX／截图、构建、三组 WebKit、346 前端、数据库摘要和最终 manifest。根目录／Tauri fmt、diff 通过。正式 App e8d9a8d 未改；独立 QA 当前为 9fc1efe，已包含此前词表请求隔离和弹窗可访问性修复。
+
+## 2026-10-28：原生三档性能样本准备
+
+`cargo run --offline --example seed_structure_undo_qa -- --performance` 新建唯一临时目录，生成 300／3,000／10,000 段三个任务；不读取正式数据库或媒体。每段经现有候选采用路径建立来源并写入合成译文，三个任务 hard link 同一个真实三小时、16 kHz 单声道 PCM16 WAV。稀疏零样本的逻辑大小 345,600,044 bytes，当前实际分配 4 KiB，避免重复占用媒体空间。默认十段撤销样本模式不变。
+
+实际生成后检查段数、译文、来源覆盖、时间范围／无重叠、SQLite integrity 与 foreign key；ffprobe 确认 10,800 秒音轨，四个 hard link 指向同一 inode。默认模式另行回归，得到 10 段、3 条翻译依赖、2 个 ASR run，完整性正常。root／Tauri fmt 与 diff 检查通过。证据在 `local-artifacts/editor-native-scale-20261028/`，包含最终生成日志、两次修正前编译失败、数据报告与 SHA manifest。
+
+旧 `atogaki-modules-native-790957e/long-task-data` 临时目录的 SQLite 主文件已不存在，不将残留 shm／jobs 当作可用基线。这次只完成新样本及生成工具验证，尚未开始原生三档采样，不能推导首次可交互、滚动 P95 或内存门禁通过；合成静音也不能替代真实视频解码负载。正式 App 未替换。
