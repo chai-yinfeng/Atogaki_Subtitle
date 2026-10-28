@@ -25,7 +25,7 @@ const assert=require('node:assert/strict');
  await p.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await p.locator('.job-open').first().click();
  const audio=p.locator('#karaoke-media-host audio');await audio.waitFor();
  await audio.evaluate(async a=>{
-  if(a.readyState<1)await new Promise(r=>a.addEventListener('loadedmetadata',r,{once:true}));
+  if(a.readyState<1) await new Promise(r=>{a.addEventListener('loadedmetadata',r,{once:true});a.load();});
   await new Promise(r=>{a.addEventListener('seeked',r,{once:true});a.currentTime=7;});a.muted=true;a.volume=.3;a.playbackRate=1.5;window.__originalMedia=a;
  });
  await p.locator('#karaoke-toggle-playback').click();
@@ -41,6 +41,7 @@ const assert=require('node:assert/strict');
  await audio.evaluate(async a=>{await new Promise(r=>{a.addEventListener('seeked',r,{once:true});a.currentTime=18;});});
  await p.locator('[data-editor-action="back"]').click();assert.equal(await p.locator('#karaoke-media-host audio').count(),0);
  await p.locator('.job-open').first().click();
+ await require('./load-editor-test-media.cjs')(p);
  await p.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.currentTime>=17.9);
  assert.ok(await p.locator('#editor-cue-list').evaluate(e=>e.scrollTop>0));
  assert.equal(await p.locator('[data-cue-id="cue-6"]').getAttribute('aria-current'),'true');
@@ -55,6 +56,7 @@ const assert=require('node:assert/strict');
  assert.equal(await p.evaluate(()=>window.__test.resumeMs),9000);
  // Both invalid sources stop after one fallback instead of recreating players forever.
  await p.evaluate(()=>window.__test.mode='broken');await p.locator('.job-open').first().click();
+ await audio.waitFor();await p.locator('#karaoke-toggle-playback').click();
  await p.waitForFunction(()=>document.querySelector('#karaoke-media-message').textContent.includes('媒体加载失败'));
  assert.equal(await p.locator('#karaoke-media-host video').count(),0);assert.equal(await audio.count(),1);
  assert.equal(await audio.evaluate(a=>a.paused),true);

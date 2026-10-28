@@ -42,7 +42,7 @@ const assert=require('node:assert/strict');
  await p.waitForTimeout(100);
  const requests=await p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').length);
  await p.locator('#karaoke-media-host audio').evaluate(async audio=>{
-  if(audio.readyState<1)await new Promise(r=>audio.addEventListener('loadedmetadata',r,{once:true}));
+  if(audio.readyState<1) await new Promise(r=>{audio.addEventListener('loadedmetadata',r,{once:true});audio.load();});
   await new Promise(r=>{audio.addEventListener('seeked',r,{once:true});audio.currentTime=19;});audio.dispatchEvent(new Event('timeupdate'));
  });
  await p.waitForTimeout(100);

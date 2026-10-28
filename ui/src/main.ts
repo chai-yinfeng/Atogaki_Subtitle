@@ -832,7 +832,7 @@ const subtitleStyleView = mountSubtitleStyleView(shell ?? document.body, {
   fileUrl: convertFileSrc, time: formatTime,
 });
 const subtitleStyles = createSubtitleStyleSession({
-  context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId, timestampMs: (mediaPlayer.media?.currentTime ?? 0) * 1000 } : null,
+  context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId, timestampMs: mediaPlayer.positionMs } : null,
   available: () => !workspaceActionBusy,
   backend: createSubtitleStyleBackend(invoke),
   later: (callback, delay) => { const timer = window.setTimeout(callback, delay); return () => window.clearTimeout(timer); },
@@ -851,14 +851,14 @@ const subtitleTranslation = createSubtitleTranslation<JobDetail>({
   acceptSegment: cue => {
     replaceActiveSegment(cue);
     if (activeDetail) renderSubtitleListPreservingView(activeDetail.segments, cue.id);
-    updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+    updateActiveSubtitle(mediaPlayer.positionMs);
   },
   acceptSegments: cues => {
     if (!activeDetail) return;
     editorStructureHistory.invalidate(activeDetail.job.job_id);
     editorContextStatus.invalidate();
     activeDetail.segments = cues; renderSubtitleListPreservingView(cues);
-    updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+    updateActiveSubtitle(mediaPlayer.positionMs);
   },
   acceptDetail: detail => {
     if (!activeDetail) return;
@@ -868,7 +868,7 @@ const subtitleTranslation = createSubtitleTranslation<JobDetail>({
     activeDetail.translation_runs = detail.translation_runs;
     activeDetail.translation_context_stale_ids = detail.translation_context_stale_ids;
     renderSubtitleListPreservingView(activeDetail.segments); updateTranslationControls();
-    updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+    updateActiveSubtitle(mediaPlayer.positionMs);
   },
   status: setWorkspaceAction, changed: updateTranslationControls, time: formatTime, elapsed: formatElapsed,
   clock: { now: Date.now, repeat: tick => { const timer = window.setInterval(tick, 1_000); return () => window.clearInterval(timer); } },
@@ -964,7 +964,7 @@ const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
     karaokeFollowPlayhead = true;
     syncTimelineFollowState();
     editorTimeFingerprint = "";
-    updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+    updateKaraokePosition(mediaPlayer.positionMs);
     currentCueEditor.sync(karaokeDraftSegment(), true);
     editorCueList.reveal(editorSession.playbackCueId);
   },
@@ -972,7 +972,7 @@ const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
 const timelineGestures = mountTimelineGestures<SubtitleSegment>(karaokeWaveform!, karaokeZoomInput!, editorRoot, {
   snapshot: () => activeDetail && editorWaveform.window && currentArea === "karaoke" ? {
     jobId: activeDetail.job.job_id, cues: activeDetail.segments, waveform: editorWaveform.window,
-    currentMs: (mediaPlayer.media?.currentTime ?? 0) * 1_000, viewStartMs: editorWaveform.startMs, durationMs: karaokeWindowDurationMs(),
+    currentMs: mediaPlayer.positionMs, viewStartMs: editorWaveform.startMs, durationMs: karaokeWindowDurationMs(),
   } : null,
   select: id => {
     if (editorTimingDirty()) { setSubtitleEditAction("请先保存时间，或在时间输入框按 Escape 恢复，再调整字幕块。", true); return false; }
@@ -1019,7 +1019,7 @@ function selectEditorCue(id: string): boolean {
   editorStart.value = formatPreciseTime(cue.start_ms); editorEnd.value = formatPreciseTime(cue.end_ms);
   currentCueEditor.sync(cue, true);
   editorCueList.mark(id, editorSession.playbackCueId);
-  updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+  updateKaraokePosition(mediaPlayer.positionMs);
   renderEditorList();
   return true;
 }
@@ -1206,7 +1206,7 @@ const editorControls = mountEditorControls(editorRoot, {
     else if (action === "follow-waveform") {
       karaokeFollowPlayhead = !karaokeFollowPlayhead;
       syncTimelineFollowState();
-      updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+      updateKaraokePosition(mediaPlayer.positionMs);
     }
     else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void subtitleTranslation.single(cue); }
     else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
@@ -3029,7 +3029,7 @@ function setRetranscriptionMessage(message: string, isError = false): void {
 }
 
 function usePlayheadSubtitleForRetranscription(reportGap = true): void {
-  const position = (mediaPlayer.media?.currentTime ?? 0) * 1_000;
+  const position = mediaPlayer.positionMs;
   const segment = activeDetail?.segments.find(cue => cue.start_ms <= position && position < cue.end_ms);
   if (!segment) {
     if (reportGap) setRetranscriptionMessage("播放头位于字幕空白处。请移动到字幕段，或手动选择要补识别的范围。", true);
@@ -3149,7 +3149,7 @@ function renderKaraokeTimeline(): void {
     waveform, cues: [...positions].sort((a,b) => a-b).map(i => all[i]),
     selectedCueId: editorSession.selectedCueId, playbackCueId: editorSession.playbackCueId,
     draggedCueId: drag ? all[drag.segmentIndex]?.id ?? null : null,
-    gain: karaokeWaveformGain, currentMs: Math.round((mediaPlayer.media?.currentTime ?? 0) * 1_000),
+    gain: karaokeWaveformGain, currentMs: Math.round(mediaPlayer.positionMs),
     emptyMessage: activeDetail ? "正在准备波形…" : "选择一个字幕任务",
   });
 }
@@ -3200,7 +3200,7 @@ async function commitKaraokeTimingDrag(drag: TimingGesture<SubtitleSegment>): Pr
     currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList();
     updateStructureUndoButton();
     syncKaraokeWaveformStatus();
-    updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+    updateKaraokePosition(mediaPlayer.positionMs);
     renderKaraokeTimeline();
     setSubtitleEditAction(`第 ${segment.segment_index + 1} 段已保存为 ${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)}；相邻空白保持不变。${notice}`);
   } catch (error) {
@@ -3235,7 +3235,7 @@ async function undoKaraokeTextSave(): Promise<void> {
     replaceActiveSegment(restored);
     if (editorSession.selectedCueId === restored.id) currentCueEditor.sync(restored, true);
     updateStructureUndoButton();
-    updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+    updateKaraokePosition(mediaPlayer.positionMs);
     setSubtitleEditAction("已撤销当前字幕上一次文字保存；历史仅保留在本次 App 会话。");
   } catch (error) {
     if (karaokeUndoTextButton) karaokeUndoTextButton.disabled = false;
@@ -3332,7 +3332,8 @@ async function openInsertSubtitleBlock(): Promise<void> {
   if (!activeDetail || workspaceActionBusy || !await flushEditorStructureDrafts()) return;
   if (currentCueEditor.dirty) { setSubtitleEditAction("插入前请先保存或放弃文字修改。", true); return; }
   const media = mediaPlayer.media;
-  const range = media ? suggestSubtitleInsertionRange(activeDetail.segments, media.currentTime * 1_000, Math.round(media.duration * 1_000)) : null;
+  const durationMs = media && Number.isFinite(media.duration) ? media.duration * 1_000 : editorWaveform.window?.duration_ms ?? 0;
+  const range = media ? suggestSubtitleInsertionRange(activeDetail.segments, mediaPlayer.positionMs, Math.round(durationMs)) : null;
   if (!media || !range) { setSubtitleEditAction("媒体时间尚未就绪，请等待加载或重新定位媒体。", true); return; }
   media.pause();
   insertBlockView.open(range);
@@ -3346,7 +3347,7 @@ const editorStructureActions = createEditorStructureActions({
   } : null,
   available: () => !workspaceActionBusy, dirty: () => currentCueEditor.dirty,
   flush: flushEditorStructureDrafts, lock: lockEditorCue,
-  positionMs: () => (mediaPlayer.media?.currentTime ?? 0) * 1_000, time: formatPreciseTime,
+  positionMs: () => mediaPlayer.positionMs, time: formatPreciseTime,
   busy: setEditorMutationBusy, status: setSubtitleEditAction,
   remember: rememberStructureEdit, apply: applyStructureResult, backend: structureBackend,
 });
@@ -3489,7 +3490,7 @@ function mountMedia(
 ): void {
   if (!host || !message || !activeDetail) return;
   mediaPlayer.mount({ jobId: activeDetail.job.job_id, inputPath: activeDetail.job.input_path,
-    primaryPath, fallbackPath, host, message, resumeMs, playbackRate: Number(activePlaybackRateSelect()?.value || "1") });
+    primaryPath, fallbackPath, host, message, resumeMs, deferAudioLoad: currentArea === "karaoke", playbackRate: Number(activePlaybackRateSelect()?.value || "1") });
 }
 
 function cloneSubtitleSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
@@ -3563,7 +3564,7 @@ function applySubtitleStructure(segments: SubtitleSegment[], expandedSegmentId?:
     syncKaraokeWaveformStatus();
     renderKaraokeTimeline();
   }
-  updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+  updateActiveSubtitle(mediaPlayer.positionMs);
   lastSubtitleOverlayKey = "";
   updateStructureUndoButton();
 }
@@ -3604,7 +3605,7 @@ function updateSubtitleDraftUI(draft: Draft<SubtitleSegment>, before?: SubtitleS
     setSubtitleEditAction(status, !!draft.error);
   }
   if (before) { updateTranslationControls(); editorContextStatus.refresh(saved.job_id); }
-  if (before) { updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000); updateStructureUndoButton(); }
+  if (before) { updateActiveSubtitle(mediaPlayer.positionMs); updateStructureUndoButton(); }
 }
 
 function renderSubtitleList(segments: SubtitleSegment[], _expandedSegmentId?: string): void {
@@ -3762,7 +3763,7 @@ function updatePlaybackControls(): void {
   if (karaokeTogglePlaybackButton) karaokeTogglePlaybackButton.textContent = mediaPlayer.media && !mediaPlayer.media.paused ? "暂停" : "播放";
   if (mediaPlayer.media) for (const select of [playbackRateSelect, listeningPlaybackRateSelect, karaokePlaybackRateSelect]) if (select) select.value = String(mediaPlayer.media.playbackRate);
   mediaPlayer.refreshAnimation();
-  if (subtitleOverlayVisible) syncSubtitleOverlay(subtitleAt((mediaPlayer.media?.currentTime ?? 0) * 1_000));
+  if (subtitleOverlayVisible) syncSubtitleOverlay(subtitleAt(mediaPlayer.positionMs));
 }
 
 function togglePlayback(): void {
@@ -3863,7 +3864,7 @@ async function openSubtitleOverlay(): Promise<void> {
   subtitleOverlayVisible = true;
   lastSubtitleOverlayKey = "";
   renderSubtitleOverlayButton();
-  const segment = subtitleAt((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+  const segment = subtitleAt(mediaPlayer.positionMs);
   try {
     await invoke("open_subtitle_overlay", { payload: subtitleOverlayPayload(segment) });
     syncSubtitleOverlay(segment);
@@ -4358,7 +4359,7 @@ async function applyPreviewedGlossary(): Promise<void> {
     editorContextStatus.refresh(activeDetail.job.job_id);
     clearGlossaryPreview();
     renderSubtitleListPreservingView(activeDetail.segments);
-    updateActiveSubtitle((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+    updateActiveSubtitle(mediaPlayer.positionMs);
     setWorkspaceAction(
       `已修正 ${applied.changed_segments} 段并保存到本地；${applied.stale_translations} 段译文需要重译。`,
     );

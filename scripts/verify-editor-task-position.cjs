@@ -6,7 +6,7 @@ const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
   const page=await browser.newPage({viewport:{width:1180,height:760}}),errors=[];
   page.on('pageerror',error=>errors.push(String(error)));
   await installProcessingFixture(page);await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
-  const open=async index=>{await page.locator('.job-open').nth(index).click();await page.locator('#karaoke-media-host audio').waitFor();await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1,{},{polling:50,timeout:10000})};
+  const open=async index=>{await page.locator('.job-open').nth(index).click();await page.locator('#karaoke-media-host audio').waitFor();await require('./load-editor-test-media.cjs')(page);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1,{},{polling:50,timeout:10000})};
   const back=()=>page.locator('[data-editor-action="back"]').click();
   const seek=async time=>{await page.locator('#karaoke-media-host audio').evaluate((a,time)=>{a.pause();a.currentTime=time},time);await page.waitForFunction(time=>Math.abs(document.querySelector('#karaoke-media-host audio').currentTime-time)<.1,time,{polling:50,timeout:10000})};
   await open(0);await seek(12);await back();await open(1);

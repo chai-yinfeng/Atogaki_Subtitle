@@ -7,7 +7,7 @@ const assert=require('node:assert/strict');
   page.on('pageerror',e=>errors.push(String(e)));
   await require('./editor-ui-fixture.cjs').installEditorFixture(page,30);
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
-  await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1);
+  await require('./load-editor-test-media.cjs')(page);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1);
   await page.locator('[data-editor-action="repair"]').click();
   const provider=page.locator('#retranscription-provider'),auth=page.locator('#authorize-gemini-upload');
   const local=await provider.inputValue();

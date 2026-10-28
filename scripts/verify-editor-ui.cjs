@@ -92,7 +92,7 @@ await page.setViewportSize({width:960,height:640});await page.screenshot({path:p
 assert.ok(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight));
 console.log('small layout',await page.evaluate(()=>({height:document.documentElement.scrollHeight,view:document.querySelector('#karaoke-view').getBoundingClientRect().toJSON(),listHeight:document.querySelector('#editor-cue-list').clientHeight})));
 // Playback must never replace the selected editor, and folding cannot remount media.
-await page.locator('#karaoke-media-host audio').evaluate(async audio=>{ if(audio.readyState<1)await new Promise(resolve=>audio.addEventListener('loadedmetadata',resolve,{once:true}));await new Promise(resolve=>{audio.addEventListener('seeked',resolve,{once:true});audio.currentTime=7;}); audio.dispatchEvent(new Event('timeupdate')); });
+await page.locator('#karaoke-media-host audio').evaluate(async audio=>{ if(audio.readyState<1) await new Promise(resolve=>{audio.addEventListener('loadedmetadata',resolve,{once:true});audio.load();});await new Promise(resolve=>{audio.addEventListener('seeked',resolve,{once:true});audio.currentTime=7;}); audio.dispatchEvent(new Event('timeupdate')); });
 assert.equal(await page.locator('#karaoke-current-source').inputValue(),'第二段修改');
 console.log('playback', await page.evaluate(()=>({time:document.querySelector('#karaoke-media-host audio').currentTime,clock:document.querySelector('#karaoke-current-time').textContent,playing:[...document.querySelectorAll('.playing')].map(e=>e.dataset.cueId),errors:document.querySelector('#karaoke-timing-message').textContent})));
 assert.match(await page.locator('[data-cue-id="cue-2"]').getAttribute('class'),/playing/);

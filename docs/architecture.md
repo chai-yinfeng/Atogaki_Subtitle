@@ -83,7 +83,7 @@ Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有
 
 `editor-structure-backend.ts` 集中全部结构 IPC，`editor-backend.ts` 保留文字保存／恢复及波形读取。Cut／Join 在草稿 flush 后持有前端 busy，按需获取同一事务读取的字幕与 workspace revision，核对当前字幕／选择／访问后才提交 expectedRevision；两次读取间的后台变更由 repository revision 拒绝。该读取只发生于打开任务及结构准备，不轮询原始证据。编辑提交返回同一收据内的字幕／revision／上下文过期 ID、预算淘汰结果与提交后 warning；超大项明确显示已保存但无法撤销。桌面注册表已移除旧数组恢复及旧结构写入命令，底层 legacy 服务仍供既有非 UI 调用者兼容。
 
-完整来源撤销按 [0061](decisions/0061-transactional-structure-undo-metadata.md) 迁移中。`local_db/subtitle_structure_undo.rs` 已提供插入／删除、Cut／Join、时间调整和候选采用的 opt-in 事务收据，均共用原事务内 helper 并捕获 cue／provenance／依赖／revision。候选替换、ASR 来源赋值及永久采用保护台账在同一事务，采用完成后才捕获 after；沿用旧 ID 时保留新 ASR 来源，撤销恢复旧来源且不删除采用台账。收据和恢复结果不支持反序列化，外部只能读取 token／任务／字幕及同一状态的 revision／上下文过期 ID。recorded 路径保护正向修订、手动来源与机器消费者过期，恢复严格比较完整 after 状态并重映射有效依赖，连续撤销验证收据边界及恢复身份。共享应用服务、有界会话、IPC 与前端 token 迁移已进入当前源码；实际安装包尚未更新，新原生链路仍待验收。
+完整来源撤销按 [0061](decisions/0061-transactional-structure-undo-metadata.md) 迁移中。`local_db/subtitle_structure_undo.rs` 已提供插入／删除、Cut／Join、时间调整和候选采用的 opt-in 事务收据，均共用原事务内 helper 并捕获 cue／provenance／依赖／revision。候选替换、ASR 来源赋值及永久采用保护台账在同一事务，采用完成后才捕获 after；沿用旧 ID 时保留新 ASR 来源，撤销恢复旧来源且不删除采用台账。收据和恢复结果不支持反序列化，外部只能读取 token／任务／字幕及同一状态的 revision／上下文过期 ID。recorded 路径保护正向修订、手动来源与机器消费者过期，恢复严格比较完整 after 状态并重映射有效依赖，连续撤销验证收据边界及恢复身份。共享应用服务、有界会话、IPC 与前端 token 迁移已完成，原生元数据恢复与即时上下文回填主要路径已有证据；当前安装包版本与剩余恢复组合以[路线图](roadmap.md)及[验收清单](unified-editor-acceptance.md)为准。
 
 `editor-context-status.ts` 管理成功文字保存后的轻量上下文状态读取，read 通过 editor-backend 的 get_translation_context_state 接入。后端在一个读取事务返回 revision／过期 cue ID，不带字幕文本或证据；前端同一时刻仅一份读取，连续请求合并为最新待决项，任务／navigation／代次校验阻止旧返回覆盖新 detail／翻译／结构状态。仅对变更 ID 的可见行更新标记，过期筛选时重算同一虚拟列表；不改草稿或完整编辑框。状态读取失败独立呈现，不改变已保存结果；dispose 释放待决工作，无 timer 或轮询。
 
@@ -246,3 +246,5 @@ pagehide dispose 通过 AbortController 释放监听，保留节点再挂载不�
 
 
 `infrastructure/local_db/subtitle_translations.rs` 持有机器翻译应用、原子分组回填与翻译运行记录写入。分组事务核对输入和 revision，写译文／依赖／过期状态后统一提交；运行记录保留原独立写入合同。翻译分组和请求组装仍属于应用／provider 层，repository 拆分不改变上下文长度、缓存身份或 API 消耗。
+
+编辑页音频依 [0062](decisions/0062-editor-audio-demand-loading.md) 采用按需加载，唯一 media-player 在未加载时继续通过 positionMs 暴露恢复／排队定位意图。视图与处理工具不从尚未就绪的 currentTime 反推零位置；首次定位显式加载，播放及回退复用既有媒体事件。视频预览、收听加载和波形窗口服务各保留既有边界。

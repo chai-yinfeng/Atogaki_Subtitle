@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
  await page.locator('.job-open').first().click();
  const source=page.locator('#karaoke-current-source'), follow=page.locator('[data-editor-action="follow"]');
  const seek=async time=>page.locator('#karaoke-media-host audio').evaluate(async (audio,time)=>{
-  if(audio.readyState<1) await new Promise(resolve=>audio.addEventListener('loadedmetadata',resolve,{once:true}));
+  if(audio.readyState<1) await new Promise(resolve=>{audio.addEventListener('loadedmetadata',resolve,{once:true});audio.load();});
   if(audio.currentTime!==time) await new Promise(resolve=>{audio.addEventListener('seeked',resolve,{once:true});audio.currentTime=time;});
   audio.dispatchEvent(new Event('timeupdate'));
  },time);

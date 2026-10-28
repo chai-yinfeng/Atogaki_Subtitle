@@ -7,7 +7,7 @@ const assert=require('node:assert/strict');
    const page=await browser.newPage({viewport:{width:1180,height:760}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
    await require('./editor-ui-fixture.cjs').installEditorFixture(page,30,duration);
    await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
-   await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1);
+   await require('./load-editor-test-media.cjs')(page);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1);
    await page.waitForTimeout(200);
    const requests=()=>page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').length);
    const before=await requests();await page.locator('#karaoke-toggle-playback').click();await page.waitForTimeout(1100);

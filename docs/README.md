@@ -30,6 +30,7 @@ _更新：2026-10-27_
 | [0059 Rust 模块边界](decisions/0059-desktop-command-and-repository-modules.md) | IPC 与 repository 渐进拆分，保留方法、SQL、revision 与事务合同 |
 | [0060 音频块接缝](decisions/0060-overlap-alignment-before-acoustic-selection.md) | 重叠区先对齐后选择，无法可靠匹配时保留两侧观测并进入复核 |
 | [0061 完整结构撤销](decisions/0061-transactional-structure-undo-metadata.md) | 已确认的来源／依赖恢复、单调修订与后端收据；token／UI 已接入，原生元数据恢复与即时上下文回填主要路径通过；剩余门禁见路线图 |
+| [0062 音频按需加载](decisions/0062-editor-audio-demand-loading.md) | 编辑页音轨首次播放／定位才加载，保留唯一位置边界、视频预览和原生传输证据范围 |
 
 ## 验收证据与运行记录
 

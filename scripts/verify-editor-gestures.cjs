@@ -7,7 +7,7 @@ const assert=require('node:assert/strict');
  const url=process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420';
  const open=async()=>{
   await p.goto(url);await p.locator('.job-open').first().click();await p.locator('.editor-cue-row').first().waitFor();
-  await p.locator('#karaoke-media-host audio').evaluate(async a=>{if(a.readyState<1)await new Promise(r=>a.addEventListener('loadedmetadata',r,{once:true}));});
+  await p.locator('#karaoke-media-host audio').evaluate(async a=>{if(a.readyState<1) await new Promise(r=>{a.addEventListener('loadedmetadata',r,{once:true});a.load();});});
   await p.waitForFunction(()=>window.__test.calls.some(c=>c.cmd==='get_waveform_window'));
   await p.locator('#karaoke-waveform').evaluate(c=>c.addEventListener('pointerdown',e=>window.__gesturePointer=e.pointerId));
  };

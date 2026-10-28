@@ -7,6 +7,7 @@ type Source = {
   message: HTMLElement;
   resumeMs: number;
   playbackRate: number;
+  deferAudioLoad?: boolean;
 };
 type Options = {
   currentJob(jobId: string): boolean;
@@ -58,7 +59,7 @@ export function createMediaPlayer(options: Options, environment: Environment = {
     frame = environment.requestFrame(() => {
       frame = null;
       if (disposed || media !== element || generation !== request || element.paused || !options.frameEnabled() || !currentGuard()) return;
-      options.position(element.currentTime * 1_000);
+      options.position(position());
       refreshAnimation();
     });
   };
@@ -71,15 +72,17 @@ export function createMediaPlayer(options: Options, environment: Environment = {
     if (!firstPath) { source.message.textContent = "没有找到可播放的本地媒体；任务可能仍在处理或源文件已移动。"; return; }
     const loadPath = (path: string, fallback: boolean, positionMs = source.resumeMs, autoplay = false, volume = 1, muted = false, rate = source.playbackRate): void => {
       release(take(false));
-      const element = environment.create(fallback || options.isAudio(source.inputPath ?? path) ? "audio" : "video");
+      const audio = fallback || options.isAudio(source.inputPath ?? path);
+      const deferred = Boolean(source.deferAudioLoad && audio && !autoplay);
+      const element = environment.create(audio ? "audio" : "video");
       const abort = new AbortController(); events = abort;
       const current = () => !disposed && media === element && generation === request && options.currentJob(source.jobId);
       const on = (name: string, callback: EventListener) => element.addEventListener(name, callback, { signal: abort.signal });
-      let shouldPlay = autoplay, metadataLoaded = false;
+      let shouldPlay = autoplay, metadataLoaded = false, loadRequested = !deferred;
       // WebKit can settle overlapping native seeks out of order. Keep one in
       // flight and retain only the latest requested destination.
       let pendingSeek: number | null = null, seekingTarget: number | null = null;
-      const intendedPosition = () => pendingSeek ?? seekingTarget ?? element.currentTime * 1_000;
+      const intendedPosition = () => pendingSeek ?? seekingTarget ?? (!metadataLoaded && deferred ? Math.max(0, positionMs) : element.currentTime * 1_000);
       const flushSeek = () => {
         if (!current() || !metadataLoaded || pendingSeek === null || seekingTarget !== null || element.seeking) return;
         const duration = Number.isFinite(element.duration) ? element.duration * 1_000 : pendingSeek;
@@ -92,17 +95,25 @@ export function createMediaPlayer(options: Options, environment: Environment = {
       const seek = (milliseconds: number) => {
         if (!current() || !Number.isFinite(milliseconds)) return;
         const duration = metadataLoaded && Number.isFinite(element.duration) ? element.duration * 1_000 : Infinity;
-        pendingSeek = Math.max(0, Math.min(milliseconds, duration)); flushSeek();
+        pendingSeek = Math.max(0, Math.min(milliseconds, duration));
+        if (!loadRequested && !metadataLoaded) {
+          loadRequested = true;
+          element.preload = "metadata";
+          // Native play() changes paused synchronously. Do not abort an already
+          // pending native play request with a second load().
+          if (element.paused) element.load();
+        }
+        flushSeek();
       };
       const fallbackMessage = "原素材播放失败，已自动使用任务音频。";
-      element.controls = true; element.preload = "metadata";
-      on("timeupdate", () => { if (current() && pendingSeek === null && seekingTarget === null) { options.position(element.currentTime * 1_000); options.progress(); } });
+      element.controls = true; element.preload = deferred ? "none" : "metadata";
+      on("timeupdate", () => { if (current() && metadataLoaded && pendingSeek === null && seekingTarget === null) { options.position(element.currentTime * 1_000); options.progress(); } });
       on("seeked", () => {
         if (!current()) return;
         seekingTarget = null; flushSeek();
         if (pendingSeek === null && seekingTarget === null) options.position(element.currentTime * 1_000);
       });
-      on("play", () => { if (current()) { shouldPlay = true; options.changed(); refreshAnimation(); } });
+      on("play", () => { if (current()) { loadRequested = true; shouldPlay = true; options.changed(); refreshAnimation(); } });
       on("pause", () => {
         if (!current()) return;
         if (!element.error) shouldPlay = false;

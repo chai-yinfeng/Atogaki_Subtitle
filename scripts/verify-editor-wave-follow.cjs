@@ -4,7 +4,7 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright'),asse
  try{
   const p=await browser.newPage({viewport:{width:1180,height:760}}),errors=[];p.on('pageerror',e=>errors.push(String(e)));
   await require('./editor-ui-fixture.cjs').installEditorFixture(p,300);
-  const open=async()=>{await p.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await p.locator('.job-open').first().click();await p.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1);await p.locator('#karaoke-zoom').fill('0');await p.locator('#karaoke-zoom').dispatchEvent('input');await p.locator('[data-editor-action="follow"]').click();await p.waitForFunction(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1)?.args.request.endMs===2000);};
+  const open=async()=>{await p.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await p.locator('.job-open').first().click();await require('./load-editor-test-media.cjs')(p);await p.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1);await p.locator('#karaoke-zoom').fill('0');await p.locator('#karaoke-zoom').dispatchEvent('input');await p.locator('[data-editor-action="follow"]').click();await p.waitForFunction(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1)?.args.request.endMs===2000);};
   const wave=p.locator('#karaoke-waveform'),state=p.locator('#editor-wave-follow-state');
   const request=()=>p.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1).args.request);
   await open();let box=await wave.boundingBox();

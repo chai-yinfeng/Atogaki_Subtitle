@@ -60,7 +60,7 @@ const fs=require('node:fs'), path=require('node:path');
  assert.equal(await wave.getAttribute('aria-valuenow'),'34');
  // Late playback reveals only viewport rows, then manual scrolling pauses scrolling alone.
  const seek=async time=>p.locator('#karaoke-media-host audio').evaluate(async(a,time)=>{
-  if(a.readyState<1)await new Promise(r=>a.addEventListener('loadedmetadata',r,{once:true}));
+  if(a.readyState<1) await new Promise(r=>{a.addEventListener('loadedmetadata',r,{once:true});a.load();});
   await new Promise(r=>{a.addEventListener('seeked',r,{once:true});a.currentTime=time});a.dispatchEvent(new Event('timeupdate'));
  },time);
  await seek(18);assert.ok(Number(await p.locator('#editor-cue-list').evaluate(e=>e.scrollTop))>200000);

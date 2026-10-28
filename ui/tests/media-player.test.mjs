@@ -83,3 +83,22 @@ test('native-control seeks queue app seeks; obsolete elements cannot drain into 
  h.player.seek(9000);assert.equal(old.currentTime,0);old.seeking=false;old.emit('seeked');assert.equal(old.currentTime,9);
  h.player.seek(18000);h.player.mount({...h.source,primaryPath:'/next.mp4'});const next=h.player.media;next.emit('loadedmetadata');old.emit('seeked');assert.equal(next.currentTime,0);h.player.dispose();
 });
+test('deferred audio preserves unopened resume and explicitly seeks once on demand',async()=>{
+ const h=harness();h.source.inputPath='/audio.wav';h.source.primaryPath='/audio.wav';h.source.deferAudioLoad=true;
+ h.player.mount(h.source);const audio=h.player.media;assert.equal(audio.preload,'none');assert.equal(audio.loads,0);assert.equal(h.player.positionMs,70000);
+ audio.emit('timeupdate');assert.equal(h.positions.length,0);
+ await h.player.stop(async (_element,position)=>assert.equal(position,70000));
+ h.player.mount(h.source);const next=h.player.media;h.player.seek(4000);h.player.seek(9000);assert.equal(next.loads,1);assert.equal(next.preload,'metadata');assert.equal(h.player.positionMs,9000);
+ next.emit('loadedmetadata');assert.equal(next.currentTime,9);next.emit('seeked');assert.equal(h.player.positionMs,9000);h.player.dispose();
+});
+test('native play of deferred audio retains resume until metadata without reloading pending play',async()=>{
+ const h=harness();h.source.inputPath='/audio.wav';h.source.primaryPath='/audio.wav';h.source.deferAudioLoad=true;
+ h.player.mount(h.source);const audio=h.player.media;await audio.play();h.tick();assert.equal(h.positions.at(-1),70000);
+ h.player.seek(42000);assert.equal(audio.loads,0);audio.emit('loadedmetadata');assert.equal(audio.currentTime,42);assert.equal(audio.paused,false);audio.emit('seeked');h.player.dispose();
+});
+test('editor video keeps metadata preview while a paused fallback audio can defer and old requests are isolated',async()=>{
+ const h=harness();h.source.deferAudioLoad=true;h.player.mount(h.source);const video=h.player.media;
+ assert.equal(video.preload,'metadata');video.emit('error');const audio=h.player.media;assert.equal(audio.preload,'none');assert.equal(h.player.positionMs,70000);
+ h.player.seek(30000);h.player.mount({...h.source,inputPath:'/next.wav',primaryPath:'/next.wav',resumeMs:5000});const next=h.player.media;
+ audio.emit('loadedmetadata');audio.emit('seeked');assert.equal(next.loads,0);assert.equal(h.player.positionMs,5000);next.emit('loadedmetadata');assert.equal(next.currentTime,5);h.player.dispose();
+});

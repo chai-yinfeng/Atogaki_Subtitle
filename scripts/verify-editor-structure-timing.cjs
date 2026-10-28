@@ -34,7 +34,7 @@ const assert=require('node:assert/strict');
   const start=page.locator('#editor-cue-start'),notice=page.locator('#karaoke-timing-message');
   const open=async()=>{
    await page.goto(url);await page.locator('.job-open').first().click();
-   await page.locator('#karaoke-media-host audio').evaluate(async a=>{if(a.readyState<1)await new Promise(r=>a.addEventListener('loadedmetadata',r,{once:true}));await new Promise(r=>{a.addEventListener('seeked',r,{once:true});a.currentTime=1;});a.dispatchEvent(new Event('timeupdate'));});
+   await page.locator('#karaoke-media-host audio').evaluate(async a=>{if(a.readyState<1) await new Promise(r=>{a.addEventListener('loadedmetadata',r,{once:true});a.load();});await new Promise(r=>{a.addEventListener('seeked',r,{once:true});a.currentTime=1;});a.dispatchEvent(new Event('timeupdate'));});
   };
   const action=async name=>{
    if(name==='undo'){await page.getByRole('button',{name:'撤销打轴',exact:true}).click();return;}
