@@ -1191,6 +1191,11 @@ const editorControls = mountEditorControls(editorRoot, {
     else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id && selectEditorCue(id)) editorCueList.reveal(id); }
     else if (action === "reveal-playing") { editorSession.listAutoScroll = true; editorCueList.reveal(editorSession.playbackCueId); syncEditorFollow(); }
     else if (action === "follow") void resumeEditorFollow();
+    else if (action === "follow-waveform") {
+      karaokeFollowPlayhead = !karaokeFollowPlayhead;
+      syncTimelineFollowState();
+      updateKaraokePosition((mediaPlayer.media?.currentTime ?? 0) * 1_000);
+    }
     else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void subtitleTranslation.single(cue); }
     else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
     else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
@@ -3258,7 +3263,7 @@ function updateKaraokePosition(milliseconds: number): void {
       : "连接相接的下一字幕块";
   }
   const waveform = editorWaveform.window;
-  if (karaokeFollowPlayhead && waveform && !editorWaveform.loading && !editorRoot.classList.contains("editor-waveform-hidden")) {
+  if (karaokeFollowPlayhead && waveform && !timelineGestures.active && !editorWaveform.loading && !editorRoot.classList.contains("editor-waveform-hidden")) {
     const anchor = waveformFollowAnchor(milliseconds, waveform, karaokeWindowDurationMs());
     if (anchor !== null) {
       void loadKaraokeWaveform(anchor);
@@ -3269,8 +3274,12 @@ function updateKaraokePosition(milliseconds: number): void {
 }
 
 function syncTimelineFollowState(): void {
-  const state = document.querySelector("#editor-wave-follow-state");
-  if (state) state.textContent = karaokeFollowPlayhead ? "视窗跟随中" : "视窗已暂停 · 点击跟随播放恢复";
+  const state = document.querySelector<HTMLButtonElement>("#editor-wave-follow-state");
+  if (state) {
+    state.textContent = karaokeFollowPlayhead ? "视窗跟随中" : "恢复视窗跟随";
+    state.setAttribute("aria-pressed", String(karaokeFollowPlayhead));
+    state.title = karaokeFollowPlayhead ? "暂停波形视窗跟随" : "只恢复波形视窗跟随，不切换当前编辑段";
+  }
 }
 
 function seekKaraokeBy(milliseconds: number): void {

@@ -20,7 +20,7 @@ export function editorTemplate(primaryShortcutModifier: string): string {
             </div></section><div class="editor-splitter editor-column-splitter" tabindex="0" role="separator" aria-orientation="vertical" aria-label="视频与右侧工作区比例" aria-valuemin="25" aria-valuemax="65" data-editor-resize="videoRatio"></div>
         <div class="editor-right"><section id="editor-wave-panel" class="editor-wave-panel" aria-label="声音与时间轴">          <section class="waveform-panel" aria-labelledby="waveform-heading">
             <div class="panel-heading compact">
-              <h3 id="waveform-heading">波形与时间轴</h3><span id="editor-wave-follow-state" role="status">视窗跟随中</span>
+              <h3 id="waveform-heading">波形与时间轴</h3><button id="editor-wave-follow-state" type="button" class="secondary" data-editor-action="follow-waveform" aria-pressed="true" title="暂停波形视窗跟随">视窗跟随中</button>
               <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销打轴</button></div>
             </div>
             <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。拖动字幕块可移动，拖动左右边缘可单独修剪；空白合法，同轨不能重叠。</div>

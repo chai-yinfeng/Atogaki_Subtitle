@@ -86,7 +86,7 @@ export function mountTimelineGestures<T extends Cue>(canvas: HTMLCanvasElement, 
       pan = { pointerId: event.pointerId, jobId: state.jobId, x: event.clientX, width: b.width,
         start: state.viewStartMs, duration: state.durationMs, moved: false };
     }
-    options.stopFollowing(); canvas.setPointerCapture(event.pointerId); event.preventDefault();
+    canvas.setPointerCapture(event.pointerId); event.preventDefault();
   }, { signal: events.signal });
   canvas.addEventListener("pointermove", event => {
     const state = options.snapshot(); if (!state) { if (active()) cancel(); return; }
@@ -97,9 +97,16 @@ export function mountTimelineGestures<T extends Cue>(canvas: HTMLCanvasElement, 
     }
     if (active()?.jobId !== state.jobId) { cancel(); return; }
     if (playhead?.pointerId === event.pointerId) seekHead(event.clientX);
-    if (timing?.pointerId === event.pointerId) { updateTimingPreview(timing, event.clientX, state.waveform.duration_ms); options.preview(timing); }
+    if (timing?.pointerId === event.pointerId) {
+      const moved = timing.moved;
+      updateTimingPreview(timing, event.clientX, state.waveform.duration_ms);
+      if (!moved && timing.moved) options.stopFollowing();
+      options.preview(timing);
+    }
     if (pan?.pointerId === event.pointerId) {
-      const delta = event.clientX - pan.x; pan.moved ||= Math.abs(delta) >= 3;
+      const delta = event.clientX - pan.x, moved = pan.moved;
+      pan.moved ||= Math.abs(delta) >= 3;
+      if (!moved && pan.moved) options.stopFollowing();
       if (pan.moved) { canvas.style.cursor = "grabbing"; options.pan(boundedPan(pan.start - delta / pan.width * pan.duration, state)); }
     }
     event.preventDefault();
@@ -153,7 +160,6 @@ export function mountTimelineGestures<T extends Cue>(canvas: HTMLCanvasElement, 
     if (suppressClick) { suppressClick = false; return; }
     const state = options.snapshot(); if (!state) return;
     const b = canvas.getBoundingClientRect(); if (b.width <= 0) return;
-    options.stopFollowing();
     options.seek(timelineTimeAtX(event.clientX - b.left, b.width, state.waveform.start_ms, state.waveform.end_ms));
   }, { signal: events.signal });
   zoomInput.addEventListener("input", () => {
@@ -165,5 +171,5 @@ export function mountTimelineGestures<T extends Cue>(canvas: HTMLCanvasElement, 
   }, { signal: events.signal });
   root.querySelector("#karaoke-window-back")?.addEventListener("click", () => moveWindow(-1), { signal: events.signal });
   root.querySelector("#karaoke-window-forward")?.addEventListener("click", () => moveWindow(1), { signal: events.signal });
-  return { get timing() { return timing; }, reset, dispose() { events.abort(); reset(); } };
+  return { get timing() { return timing; }, get active() { return !!active(); }, reset, dispose() { events.abort(); reset(); } };
 }

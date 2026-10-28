@@ -989,3 +989,10 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 实际合成 SQLite 检查通过：错误 job marker 拒绝且没有记录／数据变化；临时目录外路径拒绝；合法安装后 UPDATE 触发真实 ABORT，任务／字幕／来源／依赖／采用五表逐字段不变；准确移除后 trigger 不存在、integrity ok。另将测试 trigger 改写，清理被拒绝且改写版本保留，再由本次测试恢复原定义后准确清除，未留下故障。源码语法可直接执行、两套 fmt／diff 通过，没有修改产品逻辑或重复前端／Rust 业务测试。
 
 准备日志、seed 和安全回归在 local-artifacts/editor-abrupt-draft-20261027/。这只是测试工具／样本准备，原生强杀与重启草稿恢复仍未验证，不从已有正常退出恢复外推；用户问题待描述，正式 App 0cf72c0 保持供手动验收。
+
+
+## 2026-10-28：用户反馈波形不跟随的交互修复
+
+0cf72c0 用户截图显示视窗已暂停。审计复现为 pointerdown／背景 click 无条件停止跟随，普通定位及播放头拖动均受影响。现仅在真实平移或改变字幕时间等操作时暂停，捕获手势中只阻止自动居中、不破坏跟随意图；波形状态新增独立恢复开关，保留锁定编辑和时间草稿。
+
+新增真实 WebKit wave-follow 修复前失败于普通定位后变为暂停，修复后通过：实际播放越过两秒窗产生新视窗、普通定位／选段／播放头保留跟随、捕获期间不换窗、平移暂停、独立恢复而不切段／提交时间。五组既有 gestures／timeline／follow／time-navigation／waveform-follow-boundaries 通过。前端 346 passed、类型／构建、两套 fmt／diff 通过；首次类型检查 Element.title 错误已改明确按钮类型并经构建验证。证据目录 local-artifacts/wave-follow-fix-20261028，详情见[缺陷记录](editor-waveform-follow-interaction-bug.md)。本段先对应源码／浏览器，安装与原生证据另补。

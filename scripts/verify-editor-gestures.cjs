@@ -34,7 +34,7 @@ const assert=require('node:assert/strict');
  // Dragging the audio background pans but never edits timing.
  await p.mouse.move(box.x+box.width*.6,box.y+35);await p.mouse.down();await p.mouse.move(box.x+box.width*.6-45,box.y+35,{steps:3});await p.mouse.up();
  await p.waitForFunction(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1).args.request.startMs>0);
- assert.equal(await calls(),savedWrites);assert.match(await p.locator('#editor-wave-follow-state').innerText(),/已暂停/);
+ assert.equal(await calls(),savedWrites);assert.match(await p.locator('#editor-wave-follow-state').innerText(),/恢复视窗跟随/);
  const zoomBefore=Number(await p.locator('#karaoke-zoom').inputValue());
  await p.mouse.move(box.x+box.width*.5,box.y+35);await p.keyboard.down('Control');await p.mouse.wheel(0,-120);await p.keyboard.up('Control');
  assert.ok(Number(await p.locator('#karaoke-zoom').inputValue())<zoomBefore);
