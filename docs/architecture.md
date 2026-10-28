@@ -243,3 +243,6 @@ pagehide dispose 通过 AbortController 释放监听，保留节点再挂载不�
 
 
 `infrastructure/local_db/asr_runs.rs` 集中 run 元数据记录、状态更新、列表、中断恢复和采用／来源保护读取五方法；与 asr_review 共用原 LocalDatabase，不增加 run 缓存或连接池。实际候选文件保留／清理与采用事务仍由现有服务及发布模块负责，保护读取的调用方与顺序保持。
+
+
+`infrastructure/local_db/subtitle_translations.rs` 持有机器翻译应用、原子分组回填与翻译运行记录写入。分组事务核对输入和 revision，写译文／依赖／过期状态后统一提交；运行记录保留原独立写入合同。翻译分组和请求组装仍属于应用／provider 层，repository 拆分不改变上下文长度、缓存身份或 API 消耗。

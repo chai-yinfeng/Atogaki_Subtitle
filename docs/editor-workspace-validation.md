@@ -973,3 +973,10 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 正式 identifier 的 complete release 经 346 项前端、35／4 ignored 桌面测试、类型／构建／签名及两套 fmt／diff 后，按用户既有授权原子替换本机 App。保留 1020e05 上一版及稳定版，校验后清理被取代的 05b2e07；创建校验和不同的新一致性数据库恢复点，未复制媒体／模型。系统入口启动并只读打开 405 段英语任务，定位、短暂播放、暂停与恢复跟随确认画面／波形／双语一致，停在第 2 句 13.572 秒供用户验收。
 
 正式目录 13 个完成任务／6,887 段，替换前后／打开后 20 表内容摘要一致，integrity ok、foreign key 空；没有进行正式字幕写入、采用或故障注入。独立 QA 仍为 c8afa5f。完整过程和局限见[安装记录](local-editor-installation.md#2026-10-27统一编辑器与完整来源撤销候选0cf72c0)，证据在 local-artifacts/install-backups/20261027-unified；用户手动验收、原生 P95、长期内存和其他平台门禁继续保留。
+
+
+## 2026-10-27：翻译回填 repository 三方法抽取
+
+将机器翻译兼容入口、分组应用和翻译运行写入抽到 subtitle_translations.rs，签名与完整方法体逐字一致。继续原连接池／类型／SQL：源／译 revision 和预期文字校验、译文、依赖替换、过期状态与任务时间戳保持同一分组事务；运行记录仍为原独立调用。没有更改分组、上下文、prompt、缓存或 API 观测，不宣称翻译质量／费用得到改善。
+
+共享库 183 passed／5 环境依赖 ignored，含 machine_translations_are_atomic_and_survive_snapshot_refresh、identical_retranslation_replaces_context_and_preserves_conflict_guard、cue_revisions_mark_context_dependent_translations_stale；Tauri check --offline、两套 fmt／diff 通过。纯移动没有新增镜像测试、未重复前端或构建 App。日志和逐字等价摘要在 local-artifacts/translation-repository-20261027；本机正式 App 仍为已交付 0cf72c0，供用户手动验收，不对正在使用的正式数据做测试。QA c8afa5f、原生性能／平台门禁保留。
