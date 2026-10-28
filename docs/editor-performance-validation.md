@@ -234,3 +234,12 @@ QA 正常退出后 20 表行数及排序内容摘要全部一致，integrity_che
 录制达到时间限制后收尾仍膨胀，观察到临时约 6.2 GiB；向已核对的本次 recorder PID 发 SIGINT 后成功保存并退出 0，整体墙钟 57.407 秒。最终 trace 逻辑大小 120,584,552 字节，481 文件逐一 SHA-256 保留；未删除旧证据或创建 App／数据库备份。QA 正常 Cmd+Q、原启动句柄退出 0，正式 App 未操作。
 
 目录 local-artifacts/editor-native-frame-map-20261028/ 保留包／启动身份、确切命令、recorder 结果、TOC、四张导出表、mapping-summary 与完整 trace 清单。本次确认下一次应附加宿主，而非重复只附加 WebContent；在显示流缺失和收尾成本得到控制前，不扩大 Animation Hitches 长时录制。原生滚动门禁仍未通过。
+
+
+## 2026-10-28：混合负载 WebKit XPC 关联采样准备
+
+measure-editor-mixed-load 新增可选 ATOGAKI_CAPTURE_WEBKIT_XPC=1。在浏览器启动前后读取 PID／comm／lstart，要求差集中恰好各一个 WebContent、GPU、Networking，且均位于该 Playwright WebKit runtime 的真实目录；允许此 runtime 实际使用的 .Development 可执行名。每轮对准确 PID 再核对命令和启动时间，缺失／重用立即失败。browser.close 后十秒内确认三个关联进程均退出，独立 xpc-exit.json 才闭合启动关联。这是受控启动差集、稳定身份和共同退出的证据，不能冒称 OS responsibility／父子链证明；宿主树 RSS 与 XPC RSS 分列，均非 retained JavaScript heap 或 Tauri 原生 App 内存。
+
+两项辅助工具回归覆盖预存进程排除、带空格命令解析、同名 PID 重用、缺失进程拒绝和正常 RSS 更新。首次十秒预检准确捕获三进程，但分类只接受无 .Development 名，主动拒绝并正常关闭；修正分类及 runtime 范围后，第二次生产 bundle 预检实际 12.103 秒／四轮双万段混合操作通过，三进程共同退出确认。证据分别在 local-artifacts/editor-mixed-xpc-preflight-20261028/ 与 editor-mixed-xpc-preflight2-20261028/。使用生产 preview，未将 Vite dev 当成生产测量；前端构建、脚本语法、两套 fmt／diff 通过。
+
+随后已启动 600 秒双万段混合负载，输出到 local-artifacts/editor-mixed-xpc-soak-20261028/；本段只交付采集工具与短预检，长时结果需在原进程完成并检查 xpc-exit 后单独记录。输入包括真实浏览器播放／滚轮、搜索、文字保存、两个任务往返、识别和翻译工具开关；后端为合成 IPC、音频只有二十秒，声明的三小时时间轴不等于三小时媒体解码。没有正式数据、模型／云端请求或 App 安装变更。

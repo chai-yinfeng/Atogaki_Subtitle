@@ -2,8 +2,10 @@
 const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
+const attribution=require('./webkit-process-attribution.cjs');
 const output=process.env.ATOGAKI_EDITOR_QA_OUTPUT||'/tmp/atogaki-editor-mixed-load';
 const seconds=Number(process.env.ATOGAKI_SOAK_SECONDS||600),count=Number(process.env.ATOGAKI_CUE_COUNT||10000);
+const captureXpc=process.env.ATOGAKI_CAPTURE_WEBKIT_XPC==='1';
 if(!Number.isFinite(seconds)||seconds<10||!Number.isInteger(count)||count<30)throw Error('Invalid measurement duration or cue count');
 const rss=()=>{
  const rows=execFileSync('/bin/ps',['-axo','pid=,ppid=,rss=,comm='],{encoding:'utf8'}).trim().split('\n').map(line=>{const match=line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);return match?{pid:+match[1],ppid:+match[2],rssKiB:+match[3],command:match[4]}:null;}).filter(Boolean);
@@ -13,7 +15,8 @@ const rss=()=>{
 };
 (async()=>{
  fs.mkdirSync(output,{recursive:true});const log=path.join(output,'samples.jsonl');fs.writeFileSync(log,'',{flag:'wx'});
- const browser=await webkit.launch({headless:true});const errors=[],samples=[],started=Date.now();let cycles=0;
+ const beforeLaunch=captureXpc?attribution.snapshot():[];
+ const browser=await webkit.launch({headless:true});const errors=[],samples=[],started=Date.now();let cycles=0,xpc=[];
  try{
   const page=await browser.newPage({viewport:{width:1180,height:760}});page.on('pageerror',error=>errors.push(String(error)));
   await require('./editor-ui-fixture.cjs').installEditorFixture(page,count,10800000);
@@ -33,6 +36,12 @@ const rss=()=>{
    };
   });
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
+  if(captureXpc){
+   const afterLaunch=attribution.snapshot();xpc=attribution.newWebKitProcesses(beforeLaunch,afterLaunch);
+   fs.writeFileSync(path.join(output,'xpc-launch.json'),JSON.stringify({beforeLaunch,afterLaunch,associated:xpc,scope:'Controlled-launch difference; ownership is provisional until all candidates exit with browser.'},null,2),{flag:'wx'});
+   const runtimeRoot=fs.realpathSync(path.dirname(webkit.executablePath()))+path.sep;
+   if(xpc.length!==3||!xpc.every(p=>p.command.startsWith(runtimeRoot))||!['WebContent','GPU','Networking'].every(kind=>xpc.filter(p=>new RegExp('/com\\.apple\\.WebKit\\.'+kind+'(?:\\.Development)?$').test(p.command)).length===1))throw Error('Ambiguous WebKit launch difference; refusing renderer memory attribution');
+  }
   const source=page.locator('#karaoke-current-source'),search=page.locator('#editor-search');
   while(Date.now()-started<seconds*1000){
    const cycle=++cycles;
@@ -55,10 +64,19 @@ const rss=()=>{
    await page.locator('[data-editor-action="back"]').click();await page.locator('.job-open').first().waitFor();await page.waitForTimeout(200);
    const left=await page.evaluate(()=>({rows:document.querySelectorAll('.editor-cue-row').length,media:document.querySelectorAll('#karaoke-media-host audio,#karaoke-media-host video').length,elements:document.querySelectorAll('*').length}));
    assert.equal(left.rows,0,'list released on leave');assert.equal(left.media,0,'player released on leave');assert.deepEqual(errors,[]);
-   const sample={cycle,elapsedSeconds:(Date.now()-started)/1000,active,left,...rss()};samples.push(sample);fs.appendFileSync(log,JSON.stringify(sample)+'\n');console.log(JSON.stringify({cycle,elapsedSeconds:sample.elapsedSeconds,rssMiB:sample.browserHostTreeRssMiB,rows:active.rows,elements:active.elements,leftElements:left.elements}));
+   const associated=captureXpc?attribution.sampleIdentities(xpc,attribution.snapshot()):[];
+   const sample={cycle,elapsedSeconds:(Date.now()-started)/1000,active,left,...rss(),associatedXpc:associated,associatedXpcRssMiB:associated.reduce((sum,p)=>sum+p.rssKiB,0)/1024};samples.push(sample);fs.appendFileSync(log,JSON.stringify(sample)+'\n');console.log(JSON.stringify({cycle,elapsedSeconds:sample.elapsedSeconds,rssMiB:sample.browserHostTreeRssMiB,xpcRssMiB:captureXpc?sample.associatedXpcRssMiB:null,rows:active.rows,elements:active.elements,leftElements:left.elements}));
   }
   const last=samples.at(-1);assert.equal(last.active.commands.get_job_detail,cycles,'full detail only on explicit opens');assert.equal(last.active.commands.update_subtitle,cycles,'one text save per cycle');assert.ok(last.active.commands.get_waveform_window<=cycles*10,'no per-frame boundary reload');
-  const sourceFiles=['ui/src/main.ts','ui/src/editor-cue-list.ts','ui/src/media-player.ts','ui/src/task-tools.ts','ui/src/candidate-comparison-view.ts'];
-  fs.writeFileSync(path.join(output,'summary.json'),JSON.stringify({engine:'Playwright WebKit',browserVersion:browser.version(),platform:process.platform,arch:process.arch,headless:true,productionBundle:true,syntheticAudioSeconds:20,declaredTimelineMs:10800000,cuesPerTask:count,requestedSeconds:seconds,elapsedSeconds:(Date.now()-started)/1000,cycles,errors,samples,sourceSha256:Object.fromEntries(sourceFiles.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')])),limitations:['Synthetic IPC lives in renderer; two cue arrays included in RSS.','Only descendants are attributed; macOS XPC WebContent is excluded. Host-tree RSS is not renderer or total memory; no heap/native Tauri proof.','20 second silence is not three-hour media decoding.','No before/after baseline; do not infer scrolling improvement.']},null,2)+'\n',{flag:'wx'});
- }finally{await browser.close();}
+  const sourceFiles=['ui/src/main.ts','ui/src/editor-cue-list.ts','ui/src/media-player.ts','ui/src/task-tools.ts','ui/src/candidate-comparison-view.ts','scripts/measure-editor-mixed-load.cjs','scripts/webkit-process-attribution.cjs'];
+  fs.writeFileSync(path.join(output,'summary.json'),JSON.stringify({engine:'Playwright WebKit',browserVersion:browser.version(),platform:process.platform,arch:process.arch,headless:true,productionBundle:true,syntheticAudioSeconds:20,declaredTimelineMs:10800000,cuesPerTask:count,requestedSeconds:seconds,elapsedSeconds:(Date.now()-started)/1000,cycles,errors,samples,sourceSha256:Object.fromEntries(sourceFiles.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')])),limitations:['Synthetic IPC lives in renderer; two cue arrays included in RSS.',captureXpc?'XPC RSS associated by unique runtime-confined launch difference and identity; joint exit must be confirmed in xpc-exit.json. RSS is not retained heap or native Tauri memory.':'Only descendants are attributed; macOS XPC WebContent is excluded. Host-tree RSS is not renderer or total memory; no heap/native Tauri proof.','20 second silence is not three-hour media decoding.','No before/after baseline; do not infer scrolling improvement.']},null,2)+'\n',{flag:'wx'});
+ }finally{
+  await browser.close();
+  if(captureXpc&&xpc.length){
+   let remaining=[];const deadline=Date.now()+10000;
+   do{const now=attribution.snapshot();remaining=xpc.filter(identity=>now.some(row=>attribution.sameIdentity(identity,row)));if(!remaining.length)break;await new Promise(resolve=>setTimeout(resolve,200));}while(Date.now()<deadline);
+   fs.writeFileSync(path.join(output,'xpc-exit.json'),JSON.stringify({associated:xpc,remaining,allExited:remaining.length===0,scope:'Association by unique launch difference plus unchanged identity and joint exit; not direct OS responsibility or retained JS heap.'},null,2),{flag:'wx'});
+   if(remaining.length)throw Error('Associated XPC processes remain after browser close; association unverified');
+  }
+ }
 })().catch(error=>{console.error(error);process.exitCode=1;});
