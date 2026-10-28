@@ -78,3 +78,18 @@
 现只保留 `/Applications/.Atogaki.previous.20261025-time-guards`（05b2e07）和 `/Applications/.Atogaki.previous-20261020T210406Z`（稳定 0.1.1）。核对新包、两份保留回退签名及旧回退全文件摘要后，删除被取代的 `.Atogaki.previous.20261023-candidate`（86c46c8），清理 101,227,093 字节、约 96.5 MiB 逻辑副本内容；不等同于 APFS 实际空闲增量。
 
 安装／快照链接／27 文件／20 表／轮换／调用栈和 AX／截图清单保存在忽略目录 `local-artifacts/install-backups/20261025-time-guards/`；QA 证据在 `local-artifacts/editor-time-native-1020e05/`。原生帧 P95、持续多操作内存、偶发锁定、首次启动空白、文件面板及 Windows 门禁仍保留，本机可试用不等于整体计划验收完成。
+
+
+## 2026-10-27：统一编辑器与完整来源撤销候选（0cf72c0）
+
+按用户此前“覆盖本地 App 手动测试”的授权，将干净 0cf72c0 构建为正式 identifier 的 complete 四 sidecar release。候选包含紧凑上下双语布局、默认跟随／手动锁段、后端 token 来源／依赖撤销、上下文即时状态、近期生命周期拆分、波形首尾重复读取和候选说明遮挡修复。后两项界面及近期工具已在独立 QA c8afa5f 等节点验证；之后两次 repository 纯抽取已逐字核对并通过共享库回归。公开 macOS v0.1.2 资产未变，本机版本号仍为 0.1.2。
+
+安装前重跑前端 346 passed、桌面 Rust 35 passed／4 环境依赖 ignored；正式 release 内含类型／生产构建，两套 fmt／diff 通过，源／暂存／安装包 deep strict codesign 与完整 27 文件一致。共享库 183／5 ignored 对应 0cf72c0 之前的本轮实现检查，没有在文档提交重复运行。首次进程预检误匹配自身命令文本而停止，改成 comm 可执行路径精确匹配后确认正式 App 无进程；此时未替换文件或数据。
+
+正式目录 13 个任务均 done，6,887 段。SQLite backup API 创建本次一致性恢复点，SHA-256 与旧快照不同，因此保留一份新快照，没有复制媒体、模型或整个数据目录。替换前再核对旧 1020e05 包与原安装清单一致、20 表摘要没有变化；源包暂存校验后原子重命名安装，旧包保留为上一版回退。恢复点、hash 与核验脚本见 local-artifacts/install-backups/20261027-unified，不将数据库放入 Git。
+
+经系统应用入口启动后直接显示 13 任务和正式数据路径；只读打开 Daily English Podcast（405 段），时间码定位首句后短暂播放、暂停并恢复跟随。最终停在第 2 段 00:00:13.572，视频画面／波形／播放行／上下双语一致，窗口保持打开供用户手动验收。没有修改正式文字、时间、结构、采用或触发模型。安装前／替换前／打开后全部 20 表逐表内容摘要一致，integrity_check=ok、foreign_key_check 为空；这个读写边界不等于将正式数据用于故障测试。
+
+核对新包、上一版和稳定版签名，以及旧回退的完整文件摘要后，只删除被取代的 05b2e07 回退 `/Applications/.Atogaki.previous.20261025-time-guards`，约 101,221,445 字节逻辑内容；APFS 实际回收量不作推断。当前保留 `/Applications/.Atogaki.previous.20261027-unified`（1020e05）及 `/Applications/.Atogaki.previous-20261020T210406Z`（稳定 0.1.1），没有持续追加 App 副本。数据库恢复点、模型和采用证据未清理。
+
+新旧包／恢复点／20 表摘要、构建／测试／签名、回退轮换、AX／截图与 verification 在 local-artifacts/install-backups/20261027-unified。剩余原生滚动 P95、长期混合负载内存、拖动工具、其他 IO／异常终止及 Windows 等门禁仍保留；本机交付给用户试用不等于四阶段总体完成。

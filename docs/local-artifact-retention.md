@@ -117,3 +117,10 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 固定 `/tmp/atogaki-editor-token-qa/Atogaki QA.app` 从 2a82da1 更新为 7849794；旧包 27 文件清单匹配、无运行进程，新源包与更新后的包均签名通过后完成核对。没有增加 QA App 备份；共享 release bundle 是构建产物，固定路径用于实际窗口验收。旧包 manifest 与新 checksum 保留在 `local-artifacts/editor-native-integration-20261027/`，固定 build.json 更新到新版本。
 
 新增唯一 integration 合成 SQLite 副本，复用原合成媒体与证据；插入／撤销后保留阶段 JSON、AX、截图及核验摘要。原合成库未变，QA 正常退出。没有新增正式数据库备份，正式 App、恢复点、模型／真实媒体／采用证据不在本轮清理范围。初始误建的 src-tauri/local-artifacts 测试日志空目录已用 rmdir 清理；没有删除未知内容。
+
+
+## 2026-10-27：本机统一编辑器候选轮换
+
+正式 `/Applications/Atogaki.app` 更新为 0cf72c0（仍为 0.1.2 本机候选）。已核对新包、上一版和稳定版签名／旧清单，只清理被取代的 `/Applications/.Atogaki.previous.20261025-time-guards`（05b2e07），逻辑 101,221,445 字节；保留 `/Applications/.Atogaki.previous.20261027-unified`（1020e05）及 `.Atogaki.previous-20261020T210406Z`（稳定 0.1.1）。暂存包通过重命名成为正式包，不遗留额外发行副本。
+
+一致性数据库恢复点与旧 SHA-256 不同，保留新快照及旧恢复点；未把模型、媒体、数据库、采用证据或来源不明文件作为此次清理对象。完整路径／checksum／逻辑大小／回退轮换与数据验证在 local-artifacts/install-backups/20261027-unified，交付现场见[安装记录](local-editor-installation.md#2026-10-27统一编辑器与完整来源撤销候选0cf72c0)。

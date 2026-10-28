@@ -966,3 +966,10 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 将 run 元数据记录／更新／列表、中断恢复、采用／来源保护读取五方法抽到 asr_runs.rs，父模块仅注册子模块并移除旧 AsrRun import；方法签名与完整实现逐字相同。继续原 pool／返回类型／错误，候选采用事务、台账、来源和文件服务保持各自原边界，无 schema／IPC／前端变更。
 
 共享库 183 passed／5 环境依赖 ignored，含 indexes_asr_run_lifecycle_and_recovers_interrupted_runs、候选重开、采用中途回滚与 recorded 撤销后采用证据保护；Tauri check --offline、两套 fmt／diff 通过。没有为纯抽取新增镜像测试，没有重复前端或原生安装。日志与等价 checksum 在 local-artifacts/asr-run-repository-20261027；独立 QA c8afa5f、正式 1020e05 未变，性能／原生剩余门禁保留。
+
+
+## 2026-10-27：0cf72c0 本机手动验收候选交付
+
+正式 identifier 的 complete release 经 346 项前端、35／4 ignored 桌面测试、类型／构建／签名及两套 fmt／diff 后，按用户既有授权原子替换本机 App。保留 1020e05 上一版及稳定版，校验后清理被取代的 05b2e07；创建校验和不同的新一致性数据库恢复点，未复制媒体／模型。系统入口启动并只读打开 405 段英语任务，定位、短暂播放、暂停与恢复跟随确认画面／波形／双语一致，停在第 2 句 13.572 秒供用户验收。
+
+正式目录 13 个完成任务／6,887 段，替换前后／打开后 20 表内容摘要一致，integrity ok、foreign key 空；没有进行正式字幕写入、采用或故障注入。独立 QA 仍为 c8afa5f。完整过程和局限见[安装记录](local-editor-installation.md#2026-10-27统一编辑器与完整来源撤销候选0cf72c0)，证据在 local-artifacts/install-backups/20261027-unified；用户手动验收、原生 P95、长期内存和其他平台门禁继续保留。
