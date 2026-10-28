@@ -1,3 +1,4 @@
+import { mountCandidateComparisonView } from "./candidate-comparison-view";
 import { mountEditorRepairControls } from "./editor-repair-controls";
 import { mountPlaybackLoopView, type LoopAction, type LoopMessage } from "./playback-loop-view";
 import { mountEditorControls } from "./editor-controls";
@@ -77,7 +78,7 @@ import { mountReviewSignals } from "./editor-review-signals";
 import { mountCandidateHistory } from "./editor-candidate-history";
 import { createEditorProcessing } from "./editor-processing";
 import { createProcessingBackend } from "./editor-processing-backend";
-import type { RetranscriptionCandidate, RetranscriptionPreview, AsrQualitySignal } from "./editor-processing-types";
+import type { AsrQualitySignal } from "./editor-processing-types";
 import { createEditorWaveform } from "./editor-waveform";
 import { createMediaPlayer } from "./media-player";
 import type { TimingGesture } from "./timeline-timing";
@@ -106,7 +107,7 @@ import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
 import { applyTheme, readTheme, candidateLabel } from "./themes";
 applyTheme(readTheme());
-import { matchesQuery, highlightSaved, candidateTextDiff } from "./offline-tools";
+import { matchesQuery, highlightSaved } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
 let playbackLoop: {startMs:number;endMs:number;repeat:boolean} | null = null;
 let loopStartMs: number | null = null;
@@ -664,9 +665,6 @@ const renameJobInput = document.querySelector<HTMLInputElement>("#rename-job-inp
 const renameJobMessage = document.querySelector<HTMLSpanElement>("#rename-job-message");
 const confirmationDialog = document.querySelector<HTMLDialogElement>("#confirmation-dialog");
 const retranscriptionDialog = document.querySelector<HTMLDialogElement>("#retranscription-dialog");
-const retranscriptionPreviewSummary = document.querySelector<HTMLParagraphElement>("#retranscription-preview-summary");
-const retranscriptionOriginalList = document.querySelector<HTMLDivElement>("#retranscription-original-list");
-const retranscriptionCandidateList = document.querySelector<HTMLDivElement>("#retranscription-candidate-list");
 const retranscriptionConfirmMessage = document.querySelector<HTMLParagraphElement>("#retranscription-confirm-message");
 const confirmRetranscriptionButton = document.querySelector<HTMLButtonElement>("#confirm-retranscription");
 const undoSubtitleStructureButton = document.querySelector<HTMLButtonElement>("#undo-subtitle-structure");
@@ -1095,7 +1093,7 @@ const editorProcessing = createEditorProcessing({
     retranscriptionDialog?.querySelectorAll<HTMLButtonElement>("#close-retranscription-preview, #cancel-retranscription").forEach(button => button.disabled = phase === "adopt");
   },
   mutationLock: setEditorMutationBusy,
-  previewed: showRetranscriptionPreview,
+  previewed: preview => candidateComparisonView.show(preview),
   adopted: (result, preview, signalId) => {
     const notice = rememberStructureEdit(result, preview.job_id);
     applyStructureResult(result, preview.candidate_segments[0]?.id);
@@ -1110,6 +1108,11 @@ const editorProcessing = createEditorProcessing({
 });
 const candidateTool = mountToolDialog(retranscriptionDialog!, () => {}, () => !editorProcessing.adopting);
 retranscriptionDialog?.classList.add("editor-candidate-dialog");
+const candidateComparisonView = mountCandidateComparisonView(retranscriptionDialog!, {
+  time: formatPreciseTime, escape: escapeHtml,
+  refresh: () => { void editorProcessing.refresh(); },
+  open: () => candidateTool.open(),
+});
 const candidateHistory = mountCandidateHistory(editorRepairDialog.querySelector<HTMLElement>(".retranscription-range")!, {
   context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId } : null,
   visible: () => editorRepairDialog.open,
@@ -1216,6 +1219,7 @@ window.addEventListener("pagehide", () => {
   imageThemes?.dispose();
   editorControls.dispose();
   editorRepairControls.dispose();
+  candidateComparisonView.dispose();
   playbackShortcutView.dispose();
   playbackLoopView.dispose();
   editorStructureActions.dispose();
@@ -3042,50 +3046,6 @@ function expandRetranscriptionRangeToSegments(): void {
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
   setRetranscriptionMessage(`已明确扩展到 ${intersecting.length} 个完整字幕块；不会再切穿它们。`);
-}
-
-function renderRetranscriptionItems(
-  host: HTMLDivElement | null,
-  items: Array<SubtitleSegment | RetranscriptionCandidate>,
-): void {
-  if (!host) return;
-  host.replaceChildren();
-  if (items.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "这个范围没有字幕。";
-    host.append(empty);
-    return;
-  }
-  for (const item of items) {
-    const row = document.createElement("article");
-    const time = document.createElement("span");
-    const text = document.createElement("p");
-    time.textContent = `${formatPreciseTime(item.start_ms)} → ${formatPreciseTime(item.end_ms)}`;
-    text.textContent = item.source_text;
-    row.append(time, text);
-    host.append(row);
-  }
-}
-
-function showRetranscriptionPreview(preview: RetranscriptionPreview): void {
-  if (retranscriptionPreviewSummary) {
-    retranscriptionPreviewSummary.textContent = `${formatPreciseTime(preview.start_ms)} → ${formatPreciseTime(preview.end_ms)} · 当前 ${preview.original_segments.length} 段 · 候选 ${preview.candidate_segments.length} 段 · ${preview.provider_name ?? "识别候选"} · ${preview.model_identity ?? ""} · ${preview.context_mode === "isolated" ? "前文文字已隔离" : "独立识别候选"}`;
-  }
-  renderRetranscriptionItems(retranscriptionOriginalList, preview.original_segments);
-  renderRetranscriptionItems(retranscriptionCandidateList, preview.candidate_segments);
-  if (retranscriptionConfirmMessage) retranscriptionConfirmMessage.textContent = "";
-  if(retranscriptionDialog) {
-    retranscriptionDialog.querySelector(".candidate-diff")?.remove();
-    retranscriptionDialog.querySelector(".refresh-comparison")?.remove();
-    const refresh=document.createElement("button");refresh.type="button";refresh.className="secondary refresh-comparison";refresh.textContent="以当前字幕重新对照（不重跑识别）";
-    refresh.onclick=()=>void editorProcessing.refresh();
-    retranscriptionDialog.querySelector(".retranscription-comparison")?.before(refresh);
-    const diff=document.createElement("details");diff.className="candidate-diff";
-    diff.innerHTML=`<summary>文本差异与运行参数</summary><p>${candidateTextDiff(preview.original_segments.map(s=>s.source_text).join("\n"),preview.candidate_segments.map(s=>s.source_text).join("\n"))}</p><p>时间证据：${escapeHtml(preview.timing_granularities?.join(" / ")||"未知")} · 工作区版本：${preview.workspace_revision ?? "历史候选，采用前需重新对照"}</p><pre>${escapeHtml(JSON.stringify(preview.configuration??{},null,2))}</pre>`;
-    retranscriptionDialog.querySelector(".retranscription-comparison")?.after(diff);
-  }
-  candidateTool.open();
 }
 
 async function previewSelectedRange(): Promise<void> {

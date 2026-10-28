@@ -894,3 +894,12 @@ appearance 由等待 setup 完成改为 mountImageThemes 立即返回 ready／di
 新增合成 WebKit repair-controls 通过实际编辑工具验证本地／云端切换、两类范围输入及三个范围动作的授权清理与范围值；真实 DOM 独立实例覆盖全部按钮恰好一次、采用／空闲 cancel、dispose 后保留节点无响应及重新挂载无重复。四组既有 WebKit processing、review-tools、structure-timing、editor-controls 通过，包含候选冲突、采用锁、跨任务迟到结果、停放节点、草稿／时间保护和连续撤销。没有实际上传音频或调用识别模型。
 
 前端全量 344 passed，类型检查与生产构建、根目录／Tauri fmt、diff 通过。日志及源码摘要在 local-artifacts/editor-repair-controls-20261027；未重建原生包，独立 QA 仍为 7849794，正式仍为 1020e05，不将浏览器回归视为原生或性能门禁通过。下一步核对剩余编辑监听并补原生集成／性能验收。
+
+
+## 2026-10-27：候选对照视图与旧按钮释放
+
+将原／候选列表、摘要、文本差异、时间证据与配置呈现移入 candidate-comparison-view。重新对照按钮改为根节点唯一委托，重复 show 替换旧节点，disabled 和脱离根节点的旧按钮不能刷新；dispose 释放监听／生成内容并拒绝后续 show。main 仍调用唯一 editor-processing 与 candidateTool，不修改预览、revision 冲突或采用事务。
+
+新增实际 DOM 的合成 WebKit candidate-comparison-view：含 HTML 字符的原文／候选／provider／时间证据／配置保持纯文本，无 img／script 注入；空列表、旧候选提示、旧错误清除、重复呈现节点数、禁用与脱离按钮、dispose 后 show 静默及 remount 单次回调均通过。processing、review-tools、repair-controls、structure-timing 四组既有回归亦通过，包含真实页面的候选刷新／冲突／采用锁／迟到任务隔离及连续结构撤销。
+
+前端 344 passed，类型／生产构建、根目录与 Tauri fmt、diff 通过。最初类型检查发现新文件的 SubtitleSegment import 路径错误，修正为既有 editor-types 后重查通过；未涉及运行时数据。日志与 manifest 在 local-artifacts/candidate-comparison-view-20261027；未构建原生 QA，QA 7849794 与正式 1020e05 保持，性能／原生／Windows 门禁继续保留。

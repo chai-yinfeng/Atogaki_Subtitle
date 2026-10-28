@@ -230,3 +230,8 @@ appearance 的 mountImageThemes 同步返回 ready／dispose，主入口立即�
 `editor-repair-controls.ts` 以已有范围工具和候选弹窗节点为边界，持有当前句／可视窗口／范围扩展、预览／关闭／采用按钮、provider 呈现、手动范围输入的授权清理，以及采用中的 cancel 保护监听。main 注入原用例和 adopting 读取；节点仍由 task-tools 挂载／停放，视图不另建请求、候选状态或保存路径。
 
 pagehide dispose 通过 AbortController 释放监听，保留节点再挂载不会重复触发。程序填写范围时仍由原用例清理授权；实际上传授权、revision／任务代次、采用锁和 SQLite 事务继续由现有处理服务校验，视图销毁不取消已提交的采用。
+
+
+### 候选对照呈现
+
+`candidate-comparison-view.ts` 持有原字幕／候选摘要行、运行参数差异和重新对照按钮；show 替换本模块生成的节点，以根节点事件委托接入原 processing.refresh。文字以 textContent 写入，差异与配置沿用转义规则；禁用或脱离根节点的按钮不触发刷新。dispose 释放监听并清空生成内容，之后 show 不再打开工具或写入 DOM。候选任务身份／请求代次、revision 与采用事务仍由 editor-processing 负责，task-tools 继续管理弹窗节点及焦点。
