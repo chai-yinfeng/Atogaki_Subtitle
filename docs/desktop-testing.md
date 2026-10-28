@@ -28,6 +28,12 @@ ATOGAKI_DATA_DIR=/var/folders/wt/jqp2qg3x1rlgwhy_rrp_2bm80000gn/T/atogaki-token-
 
 SQL 故障注入脚本必须验证数据库位于种子临时目录、seed 标记与唯一任务匹配；只在该库添加有记录的 QA trigger，并在测试后校验定义、移除。真实 SQLite ABORT 的回滚／草稿／重试结果不等于磁盘满或 IO 故障通过。若原生拖动接口报 noWindowsAvailable，而窗口读取／点击正常，保留原生拖动门禁，不能用时间输入框或合成 browser gesture 替代。
 
+### 可复用的合成保存故障脚本
+
+`scripts/guarded-editor-save-fault.py install --seed <seed.json> --record <new-record.json>` 只接受 seed_structure_undo_qa 产生的 UUID 临时目录、匹配 marker、唯一任务及 synthetic_qa ASR run。它安装固定的原文更新 ABORT trigger，不接受任意 SQL，也不启动／停止 App。record 使用独占新文件，存在则拒绝，事务回滚。
+
+`remove` 使用相同参数，必须同时匹配数据库、名称、记录 SQL 和脚本固定 SQL，才移除 trigger；发生其他修改时保留现场并拒绝。不要自行把正式数据复制后伪造成测试 marker，也不要用此工具作为生产修复入口。原生进程强制退出必须另行核对独立 QA 身份／隔离目录；脚本安全回归不等于强杀／恢复已通过。
+
 ## 构建回归
 
 首次拉取或前端依赖变化后：

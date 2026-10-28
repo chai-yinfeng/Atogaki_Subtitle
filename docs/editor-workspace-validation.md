@@ -980,3 +980,12 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 将机器翻译兼容入口、分组应用和翻译运行写入抽到 subtitle_translations.rs，签名与完整方法体逐字一致。继续原连接池／类型／SQL：源／译 revision 和预期文字校验、译文、依赖替换、过期状态与任务时间戳保持同一分组事务；运行记录仍为原独立调用。没有更改分组、上下文、prompt、缓存或 API 观测，不宣称翻译质量／费用得到改善。
 
 共享库 183 passed／5 环境依赖 ignored，含 machine_translations_are_atomic_and_survive_snapshot_refresh、identical_retranslation_replaces_context_and_preserves_conflict_guard、cue_revisions_mark_context_dependent_translations_stale；Tauri check --offline、两套 fmt／diff 通过。纯移动没有新增镜像测试、未重复前端或构建 App。日志和逐字等价摘要在 local-artifacts/translation-repository-20261027；本机正式 App 仍为已交付 0cf72c0，供用户手动验收，不对正在使用的正式数据做测试。QA c8afa5f、原生性能／平台门禁保留。
+
+
+## 2026-10-27：异常终止回归的受限故障工具准备
+
+用户反馈本机候选存在问题、具体描述待补充；本轮不接管其正式窗口。使用 seed_structure_undo_qa 新建唯一 UUID 临时目录，未启动 QA 或实施进程终止。新增 guarded-editor-save-fault.py，只允许临时 seed marker／唯一任务／合成 run，固定 SQL 原文更新故障，记录文件独占创建；清理要求固定 SQL 与记录、实际 trigger 完全一致，不提供任意 SQL／App 控制入口。
+
+实际合成 SQLite 检查通过：错误 job marker 拒绝且没有记录／数据变化；临时目录外路径拒绝；合法安装后 UPDATE 触发真实 ABORT，任务／字幕／来源／依赖／采用五表逐字段不变；准确移除后 trigger 不存在、integrity ok。另将测试 trigger 改写，清理被拒绝且改写版本保留，再由本次测试恢复原定义后准确清除，未留下故障。源码语法可直接执行、两套 fmt／diff 通过，没有修改产品逻辑或重复前端／Rust 业务测试。
+
+准备日志、seed 和安全回归在 local-artifacts/editor-abrupt-draft-20261027/。这只是测试工具／样本准备，原生强杀与重启草稿恢复仍未验证，不从已有正常退出恢复外推；用户问题待描述，正式 App 0cf72c0 保持供手动验收。
