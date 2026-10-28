@@ -39,7 +39,7 @@
 | selectedCueId／playbackCueId／processingRange／timelineViewport 分离 | editor-session；请求任务身份／代次；后端 revision 约束 | 有源码和多组迟到返回／冲突回归；不把某一组当成所有异步路径全覆盖 |
 | 布局偏好独立版本化，不写字幕产物 | editor-layout v3 本机偏好；跨任务／折叠恢复回归 | 有证据 |
 | 同机原生滚动改善、帧耗时 P95、长任务 | wheel 冗余工作减少，原生 Instruments 有效性审计保留失败导出 | 部分诊断：宿主 PID／surface／swap 精确桥接已建立，显示流完整性与高收尾成本未解决；滚动 P95 仍为空，不宣称改善 |
-| 持续内存无增长、WebContent 初段抬升归因 | 十分钟固定循环 RSS；三分钟浏览器混合 DOM；90 秒原生十轮工具／进程启动身份 | 待验证：非同一负载，短时 WebContent 70→95 MiB 未区分缓存／保留；无长期混合 heap 证明 |
+| 持续内存无增长、WebContent 初段抬升归因 | 十分钟固定循环 RSS；三分钟混合 DOM；90 秒原生工具；新增十分钟／207 轮双万段生产 WebKit XPC 启动／身份／共同退出 | 未通过：新增混合 WebKit 的 WebContent 分钟 RSS 中位数约 297→414 MiB；节点有界但增长未归因，无 retained heap／原生长期混合证明 |
 
 ## 三、模块与历史设计
 
