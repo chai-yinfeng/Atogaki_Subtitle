@@ -934,3 +934,14 @@ complete＋qa release 离线构建成功，源包与固定 QA 均通过 deep str
 新 WebKit candidate-dialog-layout 覆盖 1180×760、960×640 及 20 px 大字号，包含二十段长原文／候选、长配置和长错误提示：完整说明／状态可滚到按钮上方，根节点无水平溢出，展开差异后按钮仍在窗口内，内容区 End 键滚动、原文列表独立滚动、Tab 末尾回到关闭按钮、Escape 停放节点均通过。保存三张截图，并实际查看大字号场景；区域边缘的滚动内容裁切不影响可滚到完整文本，固定按钮不会覆盖说明。
 
 前端 346 passed，类型／生产构建、两套 fmt／diff、脚本语法检查通过。processing、review-tools、candidate-comparison-view、repair-controls 四组既有 WebKit 通过；增加内容区 Tab stop 后重跑布局与 processing 亦通过。日志、修复前失败、几何输出、截图及 manifest 在 local-artifacts/candidate-dialog-layout-20261027。此次未更新原生 QA，35181fb 尚含旧弹窗布局，正式仍为 1020e05；下一次独立 QA 更新补原生截图，不能以本轮浏览器结果宣称原生裁切已复验通过，性能／平台门禁继续保留。
+
+
+## 2026-10-27：c8afa5f 候选弹窗原生复验
+
+离线 complete＋qa release 构建成功，源包／固定包 deep strict codesign 均通过；确认旧包文件一致、QA 无进程后原位更新至 c8afa5f，不增加 App 备份。继续显式绑定既有合成目录，窗口核对路径／唯一任务后打开历史 synthetic-candidate，没有生成识别、上传、采用或文字修改。
+
+1180×760 逻辑窗口的原生截图确认默认说明全文可见、与操作栏之间有间隔；展开差异后固定头尾仍在窗口内。从差异摘要反向 Tab 到命名内容区，End 键实际滚到底部，时间证据、synthetic_qa 配置与完整替换说明显示在操作栏上方；正反 Tab 在最后采用按钮与关闭按钮之间回环，未激活采用。Escape 返回识别历史，焦点回原对照按钮。原生截图为 default／expanded／scrolled-bottom，均已实际观察；小窗口与大字号结果仍为上一提交的 WebKit 证据，此轮不外推原生覆盖。
+
+正常 Cmd+Q 后原始进程句柄退出 0，ps 确认无 QA 残留，不再次观察退出窗口。前后任务、字幕、来源、翻译依赖、采用台账五表逐字段一致，revision 56，integrity_check=ok。构建含类型／生产检查，两套 fmt／diff 通过；346 项与五组 WebKit 对应 c8afa5f，本次文档提交不重复跑。完整日志／新旧 checksum／五表快照／verification／AX／截图在 local-artifacts/candidate-dialog-native-c8afa5f；正式仍为 1020e05，滚动 P95、长期内存、原生拖动及 Windows 门禁保持。
+
+同步修正 desktop-testing 核心清单中的旧双编辑器导航、默认翻译页、结构草稿／token 和编辑快捷键约定；保留后面的历史打包现场，不把清单要求列为已验收。
