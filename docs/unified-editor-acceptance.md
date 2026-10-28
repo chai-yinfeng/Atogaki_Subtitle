@@ -10,7 +10,7 @@
 
 | 要求 | 实现／证据 | 审计状态与剩余范围 |
 |---|---|---|
-| 四区、工作区约束在窗口内、面板滚动、紧凑间距 | editor-template／editor.css／editor-layout；[窗口记录](editor-workspace-validation.md)与 0cf72c0 本机截图 | 有浏览器和默认原生窗口证据；最终视觉体验待用户反馈 |
+| 四区、工作区约束在窗口内、面板滚动、紧凑间距 | editor-template／editor.css／editor-layout；[窗口记录](editor-workspace-validation.md)与 0cf72c0 本机截图 | 有浏览器和默认原生窗口证据；2026-10-28 用户确认本机 e8d9a8d 紧凑布局／上下原译文“目前正常” |
 | 三处分隔线、鼠标／键盘、比例记忆／重置、最小尺寸 | editor-layout；verify-editor-ui／compact；1180×760、960×640、大字号 | 部分：浏览器覆盖；原生 drag 接口 noWindowsAvailable，不能算鼠标拖动实机已过 |
 | 视频／波形独立折叠，音频与编辑选择保留 | media-player／editor-layout；窗口与 timeline 回归 | 有证据；Windows 另验 |
 | 完整识别（含无译文）直达编辑，处理中／部分结果只读 | task-navigation／editor-navigation／task-progress；对应 navigation／progress 回归 | 有合成状态与原生任务打开证据；不能把一个真实 done 任务外推全部状态 |
@@ -64,7 +64,7 @@
 | 不改字幕 schema、导出格式、源译关系、框架和桌面技术 | 无迁移／依赖清单差异，现有序列化与导出回归、SQLite／Tauri／TypeScript 保持 | 有相应源码／回归证据；不把“无迁移”当作导出全部场景证明 |
 | 小提交、适用测试、fmt／diff、里程碑推送 | Git 日志、对应验收段与 local-artifacts 日志 | 有已交付提交证据；183／5 ignored 共享库为最新 Rust，346 前端／35／4 ignored 桌面对应安装候选；版本不可混称 |
 | 独立真实窗口、Windows 结果单列 | 独立 QA identifier／临时目录，macOS 原生截图／数据核对 | 部分：Windows 最新编辑器实机未验，本机 macOS 不能代替 |
-| 用户先验收面板，再推进性能／模块；正式 App 手动试用 | 用户已确认继续性能／第三阶段；0cf72c0 已覆盖本机并保留回退 | 用户反馈的波形定位跟随已在 e8d9a8d 修复／安装，待用户复验；最终验收未确认 |
+| 用户先验收面板，再推进性能／模块；正式 App 手动试用 | 用户已确认继续性能／第三阶段；0cf72c0 已覆盖本机并保留回退 | 用户于 2026-10-28 确认 e8d9a8d 紧凑布局、上下原译文及跟随／锁段“目前正常”；这组面板手动验收通过，整体性能／后继源码未据此通过 |
 
 ## 合并排查范围
 
