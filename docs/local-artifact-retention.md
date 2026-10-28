@@ -129,3 +129,8 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ## 2026-10-28：波形跟随修复候选轮换
 
 本机更新为 e8d9a8d；一致性数据库快照与上一 SHA 相同，链接复用 20261027-unified，未新增副本。App 保留 0cf72c0 上一版 `.Atogaki.previous.20261028-wave-follow` 与稳定 `.Atogaki.previous-20261020T210406Z`；完整核对后清理被取代的 1020e05 `.Atogaki.previous.20261027-unified`，逻辑 101,233,557 字节。路径／checksum／用途与操作记录在 local-artifacts/wave-follow-fix-20261028/rotation.json；正式数据库、模型、媒体及采用证据不参与清理。
+
+
+### 2026-10-28：宿主帧归属短时诊断（保留）
+
+`local-artifacts/editor-native-frame-map-20261028/host.trace` 为独立 QA e8d9a8d 的五秒 Animation Hitches 诊断，481 文件、逻辑 120,584,552 字节；路径／逐文件 SHA-256 见同目录 trace-files.json。保留源 trace、TOC、更新／swap／显示／queue 导出与采集成本记录，未进行清理。收尾暂态曾达约 6.2 GiB，准确中断 recorder 后保存完成；不作为 App 内存指标。没有新增 App 回退或数据库副本。

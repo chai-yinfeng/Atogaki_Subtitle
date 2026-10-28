@@ -223,3 +223,14 @@ QA 正常退出后 20 表行数及排序内容摘要全部一致，integrity_che
 正常退出 QA 后原始句柄退出 0，ps 中该 QA 与全部 WebKit XPC 均消失，关联证据闭合；此前五张任务／字幕／来源／依赖／采用表逐字段未变，revision 56、integrity_check=ok。未更新 App。长期混合操作、持续播放／输入／滚动、跨任务、heap 保留对象和 P95 门禁仍未通过；下一步使用该启动身份检查，先稳定预热，再固定可复现的更长原生混合负载，并把采集成本单列。
 
 源码／Python 日志、31 个 JSONL 样本、70 次原生界面状态、前后进程身份、footprint JSON／分类、五表 snapshot 与 summary 在 local-artifacts/editor-process-attribution-20261027。不得将本轮结果与未同负载重测的历史版本作性能改善对照。
+
+
+## 2026-10-28：宿主进程帧映射的短时诊断
+
+此前 7eadbef 附加 WebContent 得不到 hitches-updates。此次核验现有独立 QA e8d9a8d 的 27 文件摘要与合成目录，启动唯一 QA 主进程 34383，播放十段合成音频后改为附加宿主 PID，Animation Hitches 请求录制 5 秒。TOC 确认目标 PID，实际记录 6.971519 秒；主进程更新表含 394 行，全部明确归属该 PID，surface 为 283／95。58 条 display-surface-swap 中有 56 条的 surface-id 与 swap-id 二元组精确匹配该主进程更新，另有 57 条 displayed-surfaces-interval。宿主附加因此补出了此前缺失的归属桥接。
+
+但更新表末尾为 7.004665416 秒，swap／displayed 记录分别只到 4.120848208／4.104181708 秒，不能把不完整显示流的相邻导出时间当成完整帧间隔。presentation_interval_p95_ms 继续为 null；本次也没有滚动负载或前后对照，不作为编辑器帧率／滚动改善证据。
+
+录制达到时间限制后收尾仍膨胀，观察到临时约 6.2 GiB；向已核对的本次 recorder PID 发 SIGINT 后成功保存并退出 0，整体墙钟 57.407 秒。最终 trace 逻辑大小 120,584,552 字节，481 文件逐一 SHA-256 保留；未删除旧证据或创建 App／数据库备份。QA 正常 Cmd+Q、原启动句柄退出 0，正式 App 未操作。
+
+目录 local-artifacts/editor-native-frame-map-20261028/ 保留包／启动身份、确切命令、recorder 结果、TOC、四张导出表、mapping-summary 与完整 trace 清单。本次确认下一次应附加宿主，而非重复只附加 WebContent；在显示流缺失和收尾成本得到控制前，不扩大 Animation Hitches 长时录制。原生滚动门禁仍未通过。
