@@ -1,3 +1,5 @@
+import { mountEditorControls } from "./editor-controls";
+import { mountPlaybackShortcutView } from "./playback-shortcut-view";
 import { createDesktopStartup } from "./desktop-startup";
 import { suggestSubtitleInsertionRange } from "./subtitle-insertion-range";
 import { createDesktopRuntime } from "./desktop-runtime";
@@ -86,7 +88,7 @@ import { mountImageThemes } from "./appearance";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SubtitleDrafts, cueKey, type Draft } from "./subtitle-drafts";
 import { listen } from "@tauri-apps/api/event";
-import { playbackActionForKey, type PlaybackAction } from "./playback-shortcuts";
+import type { PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
 import "./editor.css";
 import { editorTemplate } from "./editor-template";
@@ -562,8 +564,6 @@ const karaokeTogglePlaybackButton = document.querySelector<HTMLButtonElement>("#
 const karaokePlaybackRateSelect = document.querySelector<HTMLSelectElement>("#karaoke-playback-rate");
 const karaokeZoomInput = document.querySelector<HTMLInputElement>("#karaoke-zoom");
 const karaokeZoomLabel = document.querySelector<HTMLOutputElement>("#karaoke-zoom-label");
-const karaokeWaveformGainInput = document.querySelector<HTMLInputElement>("#karaoke-waveform-gain");
-const karaokeWaveformGainLabel = document.querySelector<HTMLOutputElement>("#karaoke-waveform-gain-label");
 const karaokeWaveformStatus = document.querySelector<HTMLDivElement>("#karaoke-waveform-status");
 const karaokeWaveform = document.querySelector<HTMLCanvasElement>("#karaoke-waveform");
 const karaokeSegmentTime = document.querySelector<HTMLSpanElement>("#karaoke-segment-time");
@@ -1166,23 +1166,30 @@ function closeEditorTools(): void {
   taskTools.unmount();
   currentCueEditor.sync(karaokeDraftSegment(), true); renderEditorList();
 }
-editorSearch.addEventListener("input", () => { editorSession.query = editorSearch.value; renderEditorList(); });
-editorFilter.addEventListener("change", () => { editorSession.filter = editorFilter.value as CueFilter; renderEditorList(); });
-editorRoot.addEventListener("click", event => {
-  const button = (event.target as HTMLElement).closest<HTMLElement>("[data-editor-action]");
-  if (!button) return;
-  const action = button.dataset.editorAction;
-  if (action === "back") void showTopLevelArea("workbench").catch(error => setSubtitleEditAction(String(error), true));
-  else if (action === "export") void showEditorTools("export");
-  else if (action === "repair") openEditorRepair();
-  else if (action === "close-repair") repairTool.close();
-  else if (action === "save-time") void saveEditorCueTime();
-  else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id && selectEditorCue(id)) editorCueList.reveal(id); }
-  else if (action === "reveal-playing") { editorSession.listAutoScroll = true; editorCueList.reveal(editorSession.playbackCueId); syncEditorFollow(); }
-  else if (action === "follow") void resumeEditorFollow();
-  else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void subtitleTranslation.single(cue); }
-  else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
-  else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
+const editorControls = mountEditorControls(editorRoot, {
+  query: value => { editorSession.query = value; renderEditorList(); },
+  filter: value => { editorSession.filter = value; renderEditorList(); },
+  togglePlayback, rate: value => mediaPlayer.setRate(value), step: seekKaraokeBy,
+  gain: value => { karaokeWaveformGain = value; renderKaraokeTimeline(); },
+  cut: () => { void cutKaraokeSegmentAtPlayhead(); },
+  join: () => { void joinKaraokeSegmentWithNext(); },
+  insert: () => { void openInsertSubtitleBlock(); },
+  remove: () => { void deleteCurrentSubtitleBlock(); },
+  undo: () => { void undoSubtitleStructure(); },
+  tools: () => { void showEditorTools("translation"); },
+  action: action => {
+    if (action === "back") void showTopLevelArea("workbench").catch(error => setSubtitleEditAction(String(error), true));
+    else if (action === "export") void showEditorTools("export");
+    else if (action === "repair") openEditorRepair();
+    else if (action === "close-repair") repairTool.close();
+    else if (action === "save-time") void saveEditorCueTime();
+    else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id && selectEditorCue(id)) editorCueList.reveal(id); }
+    else if (action === "reveal-playing") { editorSession.listAutoScroll = true; editorCueList.reveal(editorSession.playbackCueId); syncEditorFollow(); }
+    else if (action === "follow") void resumeEditorFollow();
+    else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void subtitleTranslation.single(cue); }
+    else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
+    else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
+  },
 });
 
 window.addEventListener("pagehide", () => {
@@ -1198,6 +1205,8 @@ window.addEventListener("pagehide", () => {
   desktopRuntime.dispose();
   desktopStartup.dispose();
   imageThemes?.dispose();
+  editorControls.dispose();
+  playbackShortcutView.dispose();
   editorStructureActions.dispose();
   insertBlockView.dispose();
   mediaRelinkView.dispose();
@@ -4443,21 +4452,6 @@ listeningPlaybackRateSelect?.addEventListener("change", () => {
   if (listeningPlaybackRateSelect) mediaPlayer.setRate(Number(listeningPlaybackRateSelect.value));
 });
 syncKaraokeZoomLabel();
-karaokeTogglePlaybackButton?.addEventListener("click", togglePlayback);
-karaokePlaybackRateSelect?.addEventListener("change", () => {
-  if (karaokePlaybackRateSelect) mediaPlayer.setRate(Number(karaokePlaybackRateSelect.value));
-});
-document.querySelector<HTMLButtonElement>("#karaoke-step-back-small")?.addEventListener("click", () => seekKaraokeBy(-10));
-document.querySelector<HTMLButtonElement>("#karaoke-step-back")?.addEventListener("click", () => seekKaraokeBy(-100));
-document.querySelector<HTMLButtonElement>("#karaoke-step-forward")?.addEventListener("click", () => seekKaraokeBy(100));
-document.querySelector<HTMLButtonElement>("#karaoke-step-forward-small")?.addEventListener("click", () => seekKaraokeBy(10));
-karaokeWaveformGainInput?.addEventListener("input", () => {
-  karaokeWaveformGain = Number(karaokeWaveformGainInput.value);
-  if (karaokeWaveformGainLabel) karaokeWaveformGainLabel.value = `${karaokeWaveformGain.toFixed(karaokeWaveformGain % 1 ? 2 : 0)}×`;
-  renderKaraokeTimeline();
-});
-karaokeCutSegmentButton?.addEventListener("click", () => void cutKaraokeSegmentAtPlayhead());
-karaokeJoinSegmentButton?.addEventListener("click", () => void joinKaraokeSegmentWithNext());
 editorRepairDialog.querySelector("#retranscription-use-current")?.addEventListener("click", () => usePlayheadSubtitleForRetranscription());
 retranscriptionUseWindowButton?.addEventListener("click", useVisibleWindowForRetranscription);
 retranscriptionExpandSegmentsButton?.addEventListener("click", expandRetranscriptionRangeToSegments);
@@ -4471,7 +4465,6 @@ previewRetranscriptionButton?.addEventListener("click", () => void previewSelect
 retranscriptionDialog?.querySelector<HTMLButtonElement>("#close-retranscription-preview")?.addEventListener("click", () => candidateTool.close());
 retranscriptionDialog?.querySelector<HTMLButtonElement>("#cancel-retranscription")?.addEventListener("click", () => candidateTool.close());
 confirmRetranscriptionButton?.addEventListener("click", () => void confirmSelectedRangeReplacement());
-karaokeOpenWorkspaceButton?.addEventListener("click", () => void showEditorTools("translation"));
 
 document.querySelector<HTMLButtonElement>("#manage-glossaries")?.addEventListener("click", () => void openGlossaryManager());
 workspaceView.querySelector<HTMLButtonElement>("#manage-workspace-glossary")?.addEventListener("click", () => void openGlossaryManager(workspaceGlossary?.value));
@@ -4498,7 +4491,6 @@ renameJobDialog?.addEventListener("close", () => {
   renamingJob = null;
   if (renameJobMessage) renameJobMessage.textContent = "";
 });
-undoSubtitleStructureButton?.addEventListener("click", () => void undoSubtitleStructure());
 glossaryCorrectionForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveGlossaryCorrection();
@@ -4511,32 +4503,13 @@ glossaryCorrectionDialog?.addEventListener("close", () => {
   if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
 });
 
-function isTextEntryTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement
-    || target instanceof HTMLTextAreaElement
-    || target instanceof HTMLSelectElement
-    || target instanceof HTMLButtonElement
-    || (target instanceof HTMLElement && (target.isContentEditable || target.getAttribute("role") === "separator"));
-}
-
-document.addEventListener("keydown", (event) => {
-  if (!activeDetail || !mediaPlayer.media || event.altKey || isTextEntryTarget(event.target)) return;
-  if (document.querySelector("dialog[open]") || workspaceView?.classList.contains("editor-task-tools")) return;
-  if (currentArea === "karaoke" && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
-    void cutKaraokeSegmentAtPlayhead();
-    event.preventDefault();
-    return;
-  }
-  if (event.metaKey || event.ctrlKey) return;
-  if (currentArea === "karaoke" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-    seekKaraokeBy((event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 100));
-    event.preventDefault();
-    return;
-  }
-  const action = playbackActionForKey(event);
-  if (!action || (event.repeat && (action === "toggle-playback" || action === "toggle-overlay"))) return;
-  executePlaybackAction(action);
-  event.preventDefault();
+const playbackShortcutView = mountPlaybackShortcutView(document, {
+  enabled: () => !!activeDetail && !!mediaPlayer.media,
+  editor: () => currentArea === "karaoke",
+  blocked: () => workspaceView?.classList.contains("editor-task-tools") ?? false,
+  cut: () => { void cutKaraokeSegmentAtPlayhead(); },
+  step: seekKaraokeBy,
+  playback: executePlaybackAction,
 });
 
 const taskFilePicker = createTaskFilePickerSession({
@@ -4838,8 +4811,6 @@ for(const input of [modelPath,document.querySelector<HTMLSelectElement>("#task-t
 updateTaskPipelineSummary();
 
 
-document.querySelector("#karaoke-insert-block")?.addEventListener("click",openInsertSubtitleBlock);
-document.querySelector("#karaoke-delete-block")?.addEventListener("click",()=>void deleteCurrentSubtitleBlock());
 
 const appearanceHost = document.querySelector<HTMLElement>(".appearance-settings");
 let imageThemes: ReturnType<typeof mountImageThemes> | null = null;

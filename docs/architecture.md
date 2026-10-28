@@ -209,3 +209,10 @@ settingsLoad、taskProvider 等已有服务继续持有自己的请求代次和 
 appearance 的 mountImageThemes 同步返回 ready／dispose，主入口立即持有控制器，不必等待图片读取才具备清理能力。窗口／内置主题按钮／字段监听由 AbortController 释放，销毁移除本模块的编辑区与署名节点、属性事件处理器，清空分析图片 src 并 revoke 所有在途 object URL；不删除导入文件或写回偏好。
 
 主题应用、预览与导入／重新提色分别校验代次、配置身份和 disposed。内置主题选择使旧应用失效；初始化恢复另外核对用户后续应用意图，旧初始化错误不能 clear 新主题。use／render 的迟到错误也按代次丢弃。已发出的 Tauri 请求不重放或取消，保存格式、调色算法、角色选择及编辑页中性色隔离保持不变。
+
+
+### 编辑控件与共享快捷键视图
+
+`editor-controls.ts` 持有搜索／筛选、data-editor-action 委托、播放／倍速／微调／波形强度、Cut／Join／插入／删除／撤销及任务工具入口的事件绑定，使用同一 AbortController；main 注入已有服务用例和呈现回调。没有新增字幕、播放或保存状态。波形增益标签由控件视图更新，真正绘制继续由原时间轴服务负责。
+
+`playback-shortcut-view.ts` 持有唯一文档 keydown 监听，读取是否有媒体、当前编辑区域及工具阻断状态；保留输入／contenteditable／按钮／分隔线、dialog、修饰键和重复切换键的原保护，以及编辑 100／10 ms 微调、Cut 与共享播放动作映射。pagehide 分别 dispose，两模块不取消已进入的后端操作；循环工具、复核等其余监听仍待逐用例收敛。

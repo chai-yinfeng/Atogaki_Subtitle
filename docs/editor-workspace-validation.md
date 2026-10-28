@@ -863,3 +863,14 @@ appearance 由等待 setup 完成改为 mountImageThemes 立即返回 ready／di
 前端全量仍为 344 passed（未新增 Node DOM 镜像测试），类型与生产构建通过。settings-view、desktop-startup、desktop-runtime、editor-compact 四组既有 WebKit 也通过，包括紧凑布局、主题隔离和大字号检查。全部使用独立浏览器上下文、模拟 IPC 与合成图片，不读取用户图片或正式数据。源图在后端已导入时不会因前端销毁而删除。
 
 根目录／Tauri fmt、diff、测试／构建／五组 WebKit、复现日志及源码摘要在 `local-artifacts/image-theme-lifecycle-20261027/`。未更新原生 QA／正式 App；当前 7849794 QA 不含本提交。这里验证浏览器生命期与主题竞态，不推导原生图片面板、长期内存、滚动 P95 或 Windows 通过；其余主入口 DOM 监听仍待逐用例整理。
+
+
+## 2026-10-27：主要编辑控件与文档快捷键监听生命周期
+
+新增 editor-controls，收敛搜索筛选、委托动作、播放／倍速、四个时间微调按钮、波形强度、Cut／Join／插入／删除／撤销及任务工具入口绑定；新增 playback-shortcut-view，接管文档 keydown。main 继续注入原有领域操作和状态，没有第二套播放器／草稿／保存；pagehide AbortController 释放监听。键位、修饰键、输入／contenteditable／button／separator 及 dialog／任务工具保护保持不变。
+
+新合成 WebKit editor-controls 先在实际编辑页验证倍速、100 ms 按钮及波形强度标签，然后用真实 DOM 挂载视图核对搜索筛选／嵌套按钮／各动作仅一次、四种微调值、销毁后控件和呈现静默、重新挂载不追加旧回调。文档键盘验证 100／10 ms、Cmd／Ctrl+B、播放／重复键抑制、输入类目标、可编辑嵌套节点、分隔线、dialog／工具／Alt／修饰键／无媒体阻断、收听键位及销毁后默认行为。没有新增快捷键范围或改变现有键位。
+
+前端全量仍为 344 passed，类型检查与生产构建通过；follow、insert、structure-timing、time-navigation、compact 五组既有 WebKit 通过，保留 IME、失败草稿、候选冲突、连续撤销、大字号和布局隔离检查。根目录／Tauri fmt、diff、测试／构建／六组 WebKit 与源码摘要在 `local-artifacts/editor-controls-20261027/`。
+
+未更新原生 QA／正式 App，当前 QA 7849794 不含本提交；浏览器键盘／DOM 生命周期不外推原生系统快捷键或性能通过。循环工具、复核等其余监听仍留在后续范围；不将本次事件抽取宣称为全部 main.ts 清理完成。
