@@ -14,7 +14,7 @@
 | 三处分隔线、鼠标／键盘、比例记忆／重置、最小尺寸 | editor-layout；verify-editor-ui／compact；1180×760、960×640、大字号 | 部分：浏览器覆盖；原生 drag 接口 noWindowsAvailable，不能算鼠标拖动实机已过 |
 | 视频／波形独立折叠，音频与编辑选择保留 | media-player／editor-layout；窗口与 timeline 回归 | 有证据；Windows 另验 |
 | 完整识别（含无译文）直达编辑，处理中／部分结果只读 | task-navigation／editor-navigation／task-progress；对应 navigation／progress 回归 | 有合成状态与原生任务打开证据；不能把一个真实 done 任务外推全部状态 |
-| 翻译、词表、识别、候选、导出按需挂载，返回原位置 | task-tools、处理工具；processing／review-tools 回归；c8afa5f／35181fb 原生往返 | 有证据；系统文件面板／成品覆盖专项仍保留 |
+| 翻译、词表、识别、候选、导出按需挂载，返回原位置 | task-tools、处理工具；processing／review-tools 回归；c8afa5f／35181fb 原生往返 | 有证据；词表修正弹窗另经 9fc1efe 原生输入／按钮／Tab／取消重开验证；系统文件面板／成品覆盖专项仍保留 |
 | 固定摘要行、只为当前段创建完整原译输入 | editor-cue-list／current-cue-editor；万段混合负载最大行数受视口限制 | 有浏览器证据，实际完整文本留在编辑框 |
 | 搜索、未翻译／过期／待复核筛选与命中数、筛选后导航 | editor-session／editor-controls；ui／follow／context-status 回归 | 有证据；隐藏当前段时保留输入并提示 |
 | 单击锁定、双击／时间码定位、播放与编辑独立标记 | editor-session／editor-follow；follow 回归及本机定位 | 有证据；同轨空白处不沿用旧字幕 |

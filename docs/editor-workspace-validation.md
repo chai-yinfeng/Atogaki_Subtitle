@@ -1074,3 +1074,12 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 修正弹窗改用既有 mountToolDialog：具名 region、背景 inert、Tab／Escape 边界、关闭停放与焦点返回，沿用唯一表单与前一提交的保存访问保护。表单／取消监听使用 AbortController，pagehide dispose；离开任务显式关闭。停放节点的取消绑定改为从持有的 dialog 查询，避免全局 querySelector 找不到节点。补非模态浮层固定位置／最大高度／遮罩，与已有编辑工具相同。
 
 前端 346 passed、类型／生产构建与两套 fmt／diff 通过。新 correction WebKit 加验具名区域、背景 inert、初始输入焦点、正反 Tab 回环、Escape 取消与返回摘要焦点、关闭释放 DOM，同时保留旧读取取消、旧写入隔离、重复提交和失败重试；既有 selection 与 follow 通过。本段只记录源码／浏览器结果，修复后原生 AX 与重开验证待下一步完成。证据 local-artifacts/editor-correction-native-20261028/，正式 e8d9a8d 保持用户已验收版本。
+
+
+## 2026-10-28：词表修正可访问性修复的原生复验
+
+从干净 9fc1efe 离线构建 complete＋qa，源／安装 deep strict codesign、27 文件 SHA 均通过。确认 21a010e QA 已退出且摘要准确后在固定路径原位更新，没有新增 App 恢复点。仍用相同合成库与 Yorushika 选择，原生“修正加入词表”现有完整命名区、误识别／规范写法输入、取消及加入按钮，初始输入选中；保存 dialog-fixed.ax.txt／png 并实际观察截图。
+
+原生 Shift+Tab 从误识别框到取消，再 Shift+Tab 回到加入按钮，Tab 回取消，未离开弹窗。规范写法输入临时“QA 取消重开测试，不提交”并在 AX 核对后，取消／Escape 均关闭且焦点返回已折叠的“更多编辑”摘要；再次打开规范写法恢复当前字幕原文，没有沿用取消输入。未激活加入按钮或提交真实词表；延迟保存竞态与失败重试仍由三组 WebKit 对应证据覆盖，未冒充这次原生已注入延迟。
+
+正常 Cmd+Q，原启动句柄退出 0；合成库全部 20 表的行数／排序内容 SHA 与修复前基线相同，integrity=ok、foreign key 空。证据仍在 local-artifacts/editor-correction-native-20261028/，包括前后包／进程、AX／截图、构建、三组 WebKit、346 前端、数据库摘要和最终 manifest。根目录／Tauri fmt、diff 通过。正式 App e8d9a8d 未改；独立 QA 当前为 9fc1efe，已包含此前词表请求隔离和弹窗可访问性修复。
