@@ -903,3 +903,12 @@ appearance 由等待 setup 完成改为 mountImageThemes 立即返回 ready／di
 新增实际 DOM 的合成 WebKit candidate-comparison-view：含 HTML 字符的原文／候选／provider／时间证据／配置保持纯文本，无 img／script 注入；空列表、旧候选提示、旧错误清除、重复呈现节点数、禁用与脱离按钮、dispose 后 show 静默及 remount 单次回调均通过。processing、review-tools、repair-controls、structure-timing 四组既有回归亦通过，包含真实页面的候选刷新／冲突／采用锁／迟到任务隔离及连续结构撤销。
 
 前端 344 passed，类型／生产构建、根目录与 Tauri fmt、diff 通过。最初类型检查发现新文件的 SubtitleSegment import 路径错误，修正为既有 editor-types 后重查通过；未涉及运行时数据。日志与 manifest 在 local-artifacts/candidate-comparison-view-20261027；未构建原生 QA，QA 7849794 与正式 1020e05 保持，性能／原生／Windows 门禁继续保留。
+
+
+## 2026-10-27：波形首尾居中边界与混合操作
+
+生产 WebKit 合成预跑复现波形边界逐帧请求：首轮约三秒 183 次。新增 waveform-follow 纯函数，在原 12% 边缘判断后核对限制／舍入后的视窗起点，不能移动时继续绘制、不重复请求。正常居中、显式 resize、平移、缩放与旧响应代次保护保持。两项单元覆盖首尾、短素材、内部、可移动边缘和视窗外跳转。
+
+前端 346 passed，类型与生产构建、两套 fmt／diff、两新增脚本语法检查通过。新 WebKit waveform-follow-boundaries 通过实际 audio 的短素材首尾与长声明时间轴起点；既有 follow／timeline／gestures 通过。生产构建三分钟混合负载 62 轮，两个各万段任务的播放／滚动／搜索／保存／工具开关／跟随／离页全通过，波形 124 次、可见行恒 14、离页媒体与行归零，无 pageerror；详见[性能记录](editor-performance-validation.md#2026-10-27混合负载发现并修复波形边界重复请求)。
+
+短时测试不能证明长期内存；当前进程树采样未涵盖 XPC WebContent，明确不计为渲染内存证据。日志与 manifest 在 local-artifacts/editor-mixed-load-20261027；QA 7849794 与正式 1020e05 均未更新，原生性能／Windows 等门禁保留。

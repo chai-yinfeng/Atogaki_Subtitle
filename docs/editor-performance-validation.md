@@ -197,3 +197,16 @@ QA 正常退出后 20 表行数及排序内容摘要全部一致，integrity_che
 有界三组清空后的管理器统计均为零条／零任务／零核算字节；七项测试覆盖全局最老队首淘汰、连续撤销重绑定、外部修改重置旧链、超大项只释放本任务、失败重试、错误 token、任务及会话释放。索引按现有队首维护，没有无限增长的失效 token 队列。清空计数与 Rust 所有权证明收据释放，不代表进程 RSS 立即下降，也不能替代原生多操作长期内存／泄漏验收。
 
 初次沙箱运行子程序完成，但 time 读取 kern.clockrate 被拒而未取得完整 RSS；保留 300-sandbox 日志，按权限流程重跑后完成三组双模式测量。原始 JSON、time 资源统计和源码／二进制 checksum 位于 `local-artifacts/editor-undo-budget-20261026/`。全部为 debug 合成基准，数值不用于证明原生滚动 P95、首次交互、媒体解码或 Windows 改善；正式 App 与 QA 未变。
+
+
+## 2026-10-27：混合负载发现并修复波形边界重复请求
+
+新增 measure-editor-mixed-load.cjs，以生产 bundle／Vite preview（无 HMR）、Playwright WebKit 26.5、1180×760 和合成 IPC 运行。两任务各 10,000 段，声明三小时时间轴，实际音频为 20 秒静音；轮流打开、播放、8 次 trusted wheel、搜索后部字幕、选中／保存文字、识别工具开关、翻译工具 Escape、恢复跟随并离页。fixture 的调用调试数组每次消费清空、统计按命令聚合，避免测量自身无限保留调用日志；两份 cue 数组仍存在渲染进程，不等于实际 SQLite 后端的内存结构。
+
+短时预跑第一轮约三秒 get_waveform_window 为 183 次，四轮累计 730 次。原因是素材边界无法再居中，播放头每帧仍命中边缘判断并重复读取同窗，见[缺陷记录](editor-waveform-boundary-reload-bug.md)。waveform-follow 先比较限制后的新起点与当前起点，不动则继续绘制；显式 resize／缩放／平移读取仍保留。修复后同样前四轮累计 2／4／6／8 次。
+
+修复后 181.409 秒完成 62 轮，全部通过，无 pageerror：波形 124 次，详情／structure state／文字保存／上下文状态各 62 次。详情数等于显式打开数，没有周期性完整详情读取；本场景反复离页，仍有轻量摘要读取，未将其列为异常。编辑区始终 14 行、文档 710 个元素，离页始终零字幕行／零媒体节点、626 个元素，工具关闭后节点停放。节点数量不随轮数增长，但不证明脱离文档的对象或监听不存在泄漏。
+
+进程采样通过本 Node 子进程树捕获 Playwright 宿主及启动 shell，宿主树 RSS 范围约 116.4–127.7 MiB；macOS XPC WebContent 不在该树内，故不能作为渲染内存或总内存趋势，也不能将其与之前原生 RSS 对照。此三分钟测试补充操作与 DOM／请求边界证据，不关闭长期内存、真实三小时媒体解码、原生 P95 或 Windows 门禁。四组专项／既有 WebKit（waveform-follow-boundaries、follow、timeline、gestures）通过，前端 346 项、类型／生产构建、两套 fmt／diff、两脚本语法检查通过；未更新原生 App。
+
+复现设置既有 Playwright module／browser 路径、ATOGAKI_EDITOR_URL 指向生产 preview，ATOGAKI_EDITOR_QA_OUTPUT 为新目录，ATOGAKI_SOAK_SECONDS=180、ATOGAKI_CUE_COUNT=10000 后运行 node scripts/measure-editor-mixed-load.cjs。默认 600 秒；已有 samples.jsonl 或 summary.json 会拒绝覆盖。预跑、逐轮 JSONL、聚合计数、进程身份、日志、构建与来源 checksum 在 local-artifacts/editor-mixed-load-20261027/。

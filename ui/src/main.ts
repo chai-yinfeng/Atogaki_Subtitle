@@ -1,3 +1,4 @@
+import { waveformFollowAnchor } from "./waveform-follow";
 import { mountCandidateComparisonView } from "./candidate-comparison-view";
 import { mountEditorRepairControls } from "./editor-repair-controls";
 import { mountPlaybackLoopView, type LoopAction, type LoopMessage } from "./playback-loop-view";
@@ -3256,9 +3257,9 @@ function updateKaraokePosition(milliseconds: number): void {
   }
   const waveform = editorWaveform.window;
   if (karaokeFollowPlayhead && waveform && !editorWaveform.loading && !editorRoot.classList.contains("editor-waveform-hidden")) {
-    const margin = (waveform.end_ms - waveform.start_ms) * 0.12;
-    if (milliseconds < waveform.start_ms + margin || milliseconds > waveform.end_ms - margin) {
-      void loadKaraokeWaveform(milliseconds);
+    const anchor = waveformFollowAnchor(milliseconds, waveform, karaokeWindowDurationMs());
+    if (anchor !== null) {
+      void loadKaraokeWaveform(anchor);
       return;
     }
   }
