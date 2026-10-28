@@ -125,7 +125,19 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; background: #eceff3; }
 #karaoke-timing-message.warning { color: var(--accent); }
 
 /* Match the accessible processing region while isolating nested focus/background. */
-.editor-candidate-dialog[open] { position: fixed; inset: 10dvh 0 auto; z-index: 40; max-height: 80dvh; box-shadow: 0 0 0 100vmax #0008; }
+.editor-candidate-dialog[open] { position: fixed; inset: 16px 0 auto; z-index: 40; display: flex; flex-direction: column; width: min(980px,calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: hidden; padding: 12px; gap: 10px; font: 13px/1.5 system-ui,sans-serif; box-shadow: 0 0 0 100vmax #0008; }
+.editor-candidate-dialog .dialog-heading { flex-shrink: 0; align-items: center; gap: 10px; }
+.editor-candidate-dialog .dialog-heading h2 { margin: 0; font: 600 17px/1.4 system-ui,sans-serif; }
+.editor-candidate-dialog .eyebrow { display: none; }
+.editor-candidate-dialog .candidate-comparison-body { min-height: 0; overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.editor-candidate-dialog p { margin: 0 0 10px; }
+.editor-candidate-dialog button { padding: 5px 9px; font: inherit; }
+.editor-candidate-dialog .confirmation-actions { position: static; flex-shrink: 0; flex-wrap: wrap; padding: 0; }
+.editor-candidate-dialog .retranscription-comparison { gap: 10px; margin-bottom: 10px; }
+.editor-candidate-dialog .retranscription-comparison > section { padding: 8px; }
+.editor-candidate-dialog .retranscription-list { max-height: 32dvh; }
+.editor-candidate-dialog .candidate-diff { margin-bottom: 10px; }
+.editor-candidate-dialog #retranscription-confirm-message:empty { display: none; }
 
 .editor-cleanup-dialog[open] { position: fixed; inset: 30dvh 0 auto; z-index: 50; width: min(520px,95vw); max-height: 65dvh; overflow: auto; padding: 18px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 0 0 100vmax #0008; font: 13px/1.5 system-ui, sans-serif; }
 .editor-cleanup-dialog h2 { font: 600 17px/1.4 system-ui, sans-serif; margin: 0 0 12px; }

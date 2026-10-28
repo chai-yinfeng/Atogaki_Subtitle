@@ -521,14 +521,16 @@ ${taskToolsTemplate(fileManagerLabel)}
         <div><p class="eyebrow">ASR CANDIDATE PREVIEW</p><h2>识别候选对照</h2></div>
         <button id="close-retranscription-preview" type="button" class="secondary">关闭</button>
       </div>
+      <div class="candidate-comparison-body" tabindex="0" role="region" aria-label="候选对照内容">
       <p id="retranscription-preview-summary" class="dialog-help"></p>
       <div class="retranscription-comparison">
         <section><h3>当前字幕</h3><div id="retranscription-original-list" class="retranscription-list"></div></section>
         <section><h3>新识别候选</h3><div id="retranscription-candidate-list" class="retranscription-list"></div></section>
       </div>
       <p>确认后只替换所示范围；新字幕没有译文，需要重新翻译。范围外字幕和人工修改保持不变。</p>
-      <div class="confirmation-actions"><button id="cancel-retranscription" type="button" class="secondary">保留当前字幕</button><button id="confirm-retranscription" type="button">用候选替换</button></div>
       <p id="retranscription-confirm-message" role="status"></p>
+      </div>
+      <div class="confirmation-actions"><button id="cancel-retranscription" type="button" class="secondary">保留当前字幕</button><button id="confirm-retranscription" type="button">用候选替换</button></div>
     </dialog>
     <dialog id="glossary-correction-dialog" class="rename-job-dialog glossary-correction-dialog">
       <form id="glossary-correction-form">

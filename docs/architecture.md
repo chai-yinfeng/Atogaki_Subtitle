@@ -234,4 +234,4 @@ pagehide dispose 通过 AbortController 释放监听，保留节点再挂载不�
 
 ### 候选对照呈现
 
-`candidate-comparison-view.ts` 持有原字幕／候选摘要行、运行参数差异和重新对照按钮；show 替换本模块生成的节点，以根节点事件委托接入原 processing.refresh。文字以 textContent 写入，差异与配置沿用转义规则；禁用或脱离根节点的按钮不触发刷新。dispose 释放监听并清空生成内容，之后 show 不再打开工具或写入 DOM。候选任务身份／请求代次、revision 与采用事务仍由 editor-processing 负责，task-tools 继续管理弹窗节点及焦点。
+`candidate-comparison-view.ts` 持有原字幕／候选摘要行、运行参数差异和重新对照按钮；show 替换本模块生成的节点，以根节点事件委托接入原 processing.refresh。文字以 textContent 写入，差异与配置沿用转义规则；禁用或脱离根节点的按钮不触发刷新。dispose 释放监听并清空生成内容，之后 show 不再打开工具或写入 DOM。候选任务身份／请求代次、revision 与采用事务仍由 editor-processing 负责，task-tools 继续管理弹窗节点及焦点。弹窗固定标题／操作栏，摘要、列表、差异、替换说明与错误状态放入可聚焦的独立滚动内容区；列表仍独立滚动，避免 sticky 操作栏覆盖说明。
