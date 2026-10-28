@@ -912,3 +912,16 @@ appearance 由等待 setup 完成改为 mountImageThemes 立即返回 ready／di
 前端 346 passed，类型与生产构建、两套 fmt／diff、两新增脚本语法检查通过。新 WebKit waveform-follow-boundaries 通过实际 audio 的短素材首尾与长声明时间轴起点；既有 follow／timeline／gestures 通过。生产构建三分钟混合负载 62 轮，两个各万段任务的播放／滚动／搜索／保存／工具开关／跟随／离页全通过，波形 124 次、可见行恒 14、离页媒体与行归零，无 pageerror；详见[性能记录](editor-performance-validation.md#2026-10-27混合负载发现并修复波形边界重复请求)。
 
 短时测试不能证明长期内存；当前进程树采样未涵盖 XPC WebContent，明确不计为渲染内存证据。日志与 manifest 在 local-artifacts/editor-mixed-load-20261027；QA 7849794 与正式 1020e05 均未更新，原生性能／Windows 等门禁保留。
+
+
+## 2026-10-27：35181fb 独立 QA 原生集成
+
+complete＋qa release 离线构建成功，源包与固定 QA 均通过 deep strict codesign。先核对旧 7849794 包 27 文件 checksum、一致且无 QA 进程，再原位更新 `/tmp/atogaki-editor-token-qa/Atogaki QA.app` 至 35181fb，无新增 App 备份；独立编译标识保持 com.chai-yinfeng.atogaki.qa，正式 1020e05 未替换。构建首次因日志目录相对路径错误在启动前结束，清掉本次空目录、改绝对路径后完成；没有重复下载依赖。
+
+显式绑定已保留合成目录 atogaki-token-qa-integration-24e9f4d6，窗口核对实际规范路径／唯一任务后测试。原生 screenshot 确认左侧媒体、右侧波形与上下双语、底部表格；当前句循环提示与播放生效，关闭循环、时间码定位第三句、暂停后保持第三句锁定。最初 AX 点击仅激活后台窗口，Raise 后动作可见；未将首次无变化算成业务成功。
+
+识别工具实际填写可视波形范围、选择云端只呈现授权，未发起识别或上传；勾选授权后编辑结束范围并对齐至第三句 6.000–7.000，授权变为未勾选，切回本地隐藏授权。历史 synthetic-candidate 对照显示当前十段／候选一段，重新对照成功，展开差异显示 provider_segment、workspace revision 56 及 synthetic_qa 配置。刷新会重建节点，一次立即使用旧 AX index 的展开操作报 elementHasNoFrame，刷新状态后使用新节点成功；期间一次外部窗口变化提示后重新读取状态再继续。Escape 逐层返回识别工具／编辑页，原第三句保留；翻译工具往返亦保留。显式恢复跟随后在 13.290 秒空白处清空编辑框，符合当前没有字幕语义。
+
+发现待修视觉问题：候选弹窗底部的替换范围说明在原生截图被裁切，按钮仍可见；不能据此宣称候选布局已全部验收。后续先修该弹窗的内容／滚动分配并用小窗口和展开差异回归。
+
+只读前后核对 local_jobs、字幕、来源、翻译依赖、采用台账五张表逐字段完全一致，workspace revision 56、十段／一条依赖、integrity_check=ok；没有执行采用、文字／结构保存、清理或模型请求。正常 Cmd+Q 原始句柄退出码 0，进程检查无 QA 残留，不再观察已关闭 App。共享库全量 183 passed／5 环境依赖 ignored，release 构建含前端类型／生产检查，两套 fmt／diff 通过；346 项与四组 WebKit 对应前一源码提交，本轮未重复运行。新旧包清单、启动／构建／签名、五表 snapshot、AX 和截图在 local-artifacts/editor-native-35181fb。此次仅确认近期模块拆分的基础原生集成，不证明波形请求数、滚动 P95、长期内存、拖动或 Windows 门禁。
