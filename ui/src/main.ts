@@ -739,6 +739,9 @@ let renamingJob: LocalJob | null = null;
 let pendingGlossaryCorrection: {
   glossaryId: string;
   state: HTMLElement;
+  jobId: string;
+  navigation: number;
+  saving: boolean;
 } | null = null;
 let taskGlossaryConfigurationId: string | null = null;
 let selectedTaskContentGroups = new Set<string>();
@@ -4180,7 +4183,8 @@ function captureGlossaryCorrection(
     setWorkspaceAction("请先在工作区选择一个词表。", true);
     return;
   }
-  pendingGlossaryCorrection = { glossaryId, state };
+  pendingGlossaryCorrection = { glossaryId, state, jobId: segment.job_id, navigation: navigationRequestId, saving: false };
+  setGlossaryCorrectionSaving(false);
   if (glossaryCorrectionSource) glossaryCorrectionSource.value = segment.source_text;
   if (glossaryCorrectionTarget) glossaryCorrectionTarget.value = sourceInput.value.trim();
   if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
@@ -4189,9 +4193,20 @@ function captureGlossaryCorrection(
   glossaryCorrectionSource?.select();
 }
 
+function setGlossaryCorrectionSaving(saving: boolean): void {
+  if (glossaryCorrectionSource) glossaryCorrectionSource.disabled = saving;
+  if (glossaryCorrectionTarget) glossaryCorrectionTarget.disabled = saving;
+  const submit = glossaryCorrectionForm?.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submit) submit.disabled = saving;
+}
+
 async function saveGlossaryCorrection(): Promise<void> {
-  if (!pendingGlossaryCorrection || !glossaryCorrectionSource || !glossaryCorrectionTarget) return;
-  const { glossaryId, state } = pendingGlossaryCorrection;
+  if (!pendingGlossaryCorrection || pendingGlossaryCorrection.saving || !glossaryCorrectionSource || !glossaryCorrectionTarget) return;
+  const context = pendingGlossaryCorrection;
+  const current = () => desktopStartup.active && pendingGlossaryCorrection === context &&
+    !!glossaryCorrectionDialog?.open && context.navigation === navigationRequestId && context.jobId === activeDetail?.job.job_id;
+  if (!current()) return;
+  const { glossaryId, state } = context;
   const sourceText = glossaryCorrectionSource.value.trim();
   const targetText = glossaryCorrectionTarget.value.trim();
   if (!sourceText || !targetText) {
@@ -4203,10 +4218,13 @@ async function saveGlossaryCorrection(): Promise<void> {
     return;
   }
 
+  context.saving = true;
+  setGlossaryCorrectionSaving(true);
   state.textContent = "正在加入识别词表…";
   if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "正在保存…";
   try {
     const detail = await invoke<GlossaryDetail>("get_glossary", { glossaryId });
+    if (!current()) return;
     const terms = detail.terms.map((term) => ({
       sourceText: term.source_text,
       targetText: term.target_text,
@@ -4228,16 +4246,24 @@ async function saveGlossaryCorrection(): Promise<void> {
         terms,
       },
     });
-    await refreshGlossaries();
+    if (!current()) return;
+    await refreshGlossaries(current);
+    if (!current()) return;
     if (workspaceGlossary) workspaceGlossary.value = saved.glossary.id;
     setWorkspaceAction(`已把“${sourceText} → ${targetText}”加入 ${saved.glossary.name}。字幕修改仍需单独保存。`);
     state.textContent = "修正规则已加入词表；字幕修改需单独保存";
     state.classList.remove("warning");
     glossaryCorrectionDialog?.close();
   } catch (error) {
+    if (!current()) return;
     state.textContent = `加入词表失败：${String(error)}`;
     state.classList.add("warning");
     if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = `保存失败：${String(error)}`;
+  } finally {
+    if (current()) {
+      context.saving = false;
+      setGlossaryCorrectionSaving(false);
+    }
   }
 }
 
