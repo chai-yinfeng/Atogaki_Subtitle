@@ -134,3 +134,7 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ### 2026-10-28：宿主帧归属短时诊断（保留）
 
 `local-artifacts/editor-native-frame-map-20261028/host.trace` 为独立 QA e8d9a8d 的五秒 Animation Hitches 诊断，481 文件、逻辑 120,584,552 字节；路径／逐文件 SHA-256 见同目录 trace-files.json。保留源 trace、TOC、更新／swap／显示／queue 导出与采集成本记录，未进行清理。收尾暂态曾达约 6.2 GiB，准确中断 recorder 后保存完成；不作为 App 内存指标。没有新增 App 回退或数据库副本。
+
+## 2026-10-29：按需音轨候选的有界轮换
+
+正式 App 已更新至 28e2909。新一致性快照与 20261027-unified 字节 SHA 相同，安装恢复路径为相对链接，不新增数据库副本。新包与正式 20 表核验后，按旧 27 文件清单准确核对并移除 0cf72c0 `.Atogaki.previous.20261028-wave-follow`，逻辑 101,571,957 bytes；保留 e8d9a8d 上一版 `.Atogaki.previous.20261029-audio-demand` 及稳定 0.1.1 `.Atogaki.previous-20261020T210406Z`，二者均验证签名。源 bundle 是本次构建产物，不另复制为发行下载材料。路径／用途／全清单与轮换结果见 `local-artifacts/install-backups/20261029-audio-demand/`；模型、媒体、独立恢复点、来源与采用证据不参与本轮清理。

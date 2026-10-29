@@ -2,6 +2,8 @@
 
 日期：2026-10-21。用户明确授权覆盖本地 App，并清理过早的安装备份；不发布新版公开资产。
 
+当前安装为 2026-10-29 的 `28e2909`，见[最新交付](#2026-10-29按需音频与词表修复候选28e2909)；以下按日期保留历史记录。
+
 ## 安装结果
 
 源码 `ed48fc2`，正式 identifier `com.chai-yinfeng.atogaki`，release 包包含 ffmpeg、ffprobe、whisper-cli、llama-server。暂存包核验后原子替换 `/Applications/Atogaki.app`，深度签名有效，主程序及四个 sidecar 的 SHA-256 与构建产物一致。版本号仍为 0.1.2，属于本机试装，不代表公开 v0.1.2 资产发生变化。
@@ -102,3 +104,15 @@
 一致性恢复点 SHA 与 20261027-unified 相同，使用相对符号链接复用，没有新增数据库副本。安装前和系统入口打开后的 20 表内容摘要一致，13 任务／6,887 段保留，integrity ok、foreign key 空；正式只启动任务页供用户继续验收，没有进行字幕写入、故障或模型请求。
 
 保留 /Applications/.Atogaki.previous.20261028-wave-follow（0cf72c0）和稳定 .Atogaki.previous-20261020T210406Z。核对新包、两份回退签名与旧回退完整 checksum 后，清理被取代的 .Atogaki.previous.20261027-unified（1020e05），逻辑 101,233,557 字节；其他数据／恢复点／模型／采用证据保留。日志、签名／27 文件、恢复点链接、20 表摘要、QA 原生截图与 rotation／verification 在 local-artifacts/wave-follow-fix-20261028。用户复验和其余性能／平台门禁不由本次安装代替。
+
+## 2026-10-29：按需音频与词表修复候选（28e2909）
+
+按既有覆盖本机 App 授权，从干净 28e2909 构建正式 identifier 的 complete 四 sidecar release；产品代码对应已通过原生 QA 的 778d936，后继仅为测试与验收记录。包含编辑页音频按需加载／恢复意图保护、词表迟到返回及修正弹窗访问／单次保存修复，保留已手动验收的紧凑布局与跟随。前端 349、按需专项及十四组受影响 WebKit、Tauri 36／4 ignored 对应源码已通过；本次正式包再次运行类型与生产构建、两套 fmt／diff，不重复冒称新一轮全量测试。公开 macOS v0.1.2 资产未改，本机版本号仍为 0.1.2。
+
+精确 comm 核对正式 App 无进程，13 个任务均 done。SQLite backup API 一致性快照与 20261027-unified 的 SHA 完全相同，改为相对链接复用，没有新增数据库副本或复制模型／媒体。核对原 e8d9a8d 完整清单及正式库 20 表不变后，源／暂存／安装包 deep strict 签名和 27 文件摘要通过，四个 sidecar 与 QA 相同；原子重命名更新 `/Applications/Atogaki.app`。
+
+系统应用入口启动后显示 13 任务；只读打开 405 段英语视频，初始 0 秒画面为黑色，定位首句短暂播放后显示视频画面，继而暂停到 00:00:16.379／第 3 段，恢复跟随。视频／波形／当前上下原译文及列表一致，窗口保留供用户试用；没有执行文字、时间、结构、词表应用、ASR 或翻译写入。前后 20 表内容摘要完全一致，13 任务／6,887 段保留，integrity=ok、foreign key 空。首次黑色画面不单独作为首帧解码已完成的证明；媒体播放由实际后续帧验证。
+
+新包／两份回退签名及旧回退全清单核验后，只删除被替代的 0cf72c0 `/Applications/.Atogaki.previous.20261028-wave-follow`，逻辑 101,571,957 bytes；APFS 实际回收不作推断。保留上一版 e8d9a8d `/Applications/.Atogaki.previous.20261029-audio-demand` 与稳定 0.1.1 `.Atogaki.previous-20261020T210406Z`，未持续增加 App 回退。其他数据库恢复点、模型、媒体和采用证据保留。
+
+私有清单、构建／安装脚本、恢复点复用、签名／27 文件、20 表与轮换、AX／实际查看截图、verification／manifest 位于 `local-artifacts/install-backups/20261029-audio-demand/`。本机试装通过不关闭原生 P95、TTI、首次实际加载暂态、其他 IO／原生拖动和 Windows 等门禁；新版本人工反馈待收集。
