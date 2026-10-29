@@ -31,14 +31,14 @@
 
 | 要求 | 已有证据 | 未闭合部分 |
 |---|---|---|
-| 改造前基线、同机约 300／3,000／10,000 段 trace | [性能记录](editor-performance-validation.md)保留多规模前后 WebKit 数据与来源 checksum | 部分：不同 workload／提交不能串成一次统一前后结论 |
+| 改造前基线、同机约 300／3,000／10,000 段 trace | [性能记录](editor-performance-validation.md)保留多规模前后 WebKit 数据与来源 checksum | 已新增同一生产 WebKit 的六案例／18 事件窗口对照；合成 IPC／20 秒音频，不代替原生三小时数据 |
 | 首次打开、滚动、输入、搜索、跳转和三小时后段 | WebKit 多规模；原生三小时静音／万段后段保存与定位 | 部分：原生同素材全指标对照、TTI／长任务／解码暂态未闭合 |
 | 虚拟列表、搜索复用、按 cue ID 局部保存、隐藏旧列表不占 DOM | cue-list／current-cue-editor／task-tools；保存节点保留、万段 DOM、三分钟 62 轮生产 WebKit | 有对应功能／DOM 证据，不能据此证明整体无泄漏 |
 | 时间索引、波形静态层、独立播放头、resize 合并／旧请求保护 | subtitle-timeline／editor-timeline-view／editor-waveform；gestures／timeline／waveform 边界回归 | 有证据；修复素材首尾逐帧同窗请求，未在原生量化 IPC |
 | 完成任务编辑时不周期读取全详情／原始证据，摘要轻量 | task summary 接口、task-progress；62 轮显式打开 62 次详情 | 有对应调用边界证据；恢复／采用仍保留完整校验 |
 | selectedCueId／playbackCueId／processingRange／timelineViewport 分离 | editor-session；请求任务身份／代次；后端 revision 约束 | 有源码和多组迟到返回／冲突回归；不把某一组当成所有异步路径全覆盖 |
 | 布局偏好独立版本化，不写字幕产物 | editor-layout v3 本机偏好；跨任务／折叠恢复回归 | 有证据 |
-| 同机原生滚动改善、帧耗时 P95、长任务 | wheel 冗余工作减少，原生 Instruments 有效性审计保留失败导出 | 部分诊断：宿主 PID／surface／swap 精确桥接已建立，显示流完整性与高收尾成本未解决；滚动 P95 仍为空，不宣称改善 |
+| 同机原生滚动改善、帧耗时 P95、长任务 | [生产 WebKit 对照](editor-version-comparison-2026-10-29.md)有大列表事件窗口改善；原生已获短时关联与操作覆盖 | 原生匹配基线仍受 CUA 输入限制；浏览器 rAF 不作原生呈现／严格 TTI，Long Tasks API unsupported；采集成本仍高 |
 | 持续内存无增长、WebContent 初段抬升归因 | 十分钟固定循环 RSS；三分钟混合 DOM；90 秒原生工具；新增十分钟／207 轮双万段生产 WebKit XPC 启动／身份／共同退出 | 部分证据，整体仍未通过：原样本 RSS 约 297→414 MiB；后继 202 轮加两分钟空闲的跟踪数组／行／媒体均可回收，RSS 自然回落后 GC 反升，不能等同 retained heap；新增原生 616 秒／53 轮三档混合加 127 秒空闲，WebContent 后半段中位约 221–233 MiB、空闲后 151 MiB，十次实际写入正确；该负载未见逐轮持续增长，全部保留对象及真实视频负载未归因 |
 
 ## 三、模块与历史设计
