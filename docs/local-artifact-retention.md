@@ -138,3 +138,7 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ## 2026-10-29：按需音轨候选的有界轮换
 
 正式 App 已更新至 28e2909。新一致性快照与 20261027-unified 字节 SHA 相同，安装恢复路径为相对链接，不新增数据库副本。新包与正式 20 表核验后，按旧 27 文件清单准确核对并移除 0cf72c0 `.Atogaki.previous.20261028-wave-follow`，逻辑 101,571,957 bytes；保留 e8d9a8d 上一版 `.Atogaki.previous.20261029-audio-demand` 及稳定 0.1.1 `.Atogaki.previous-20261020T210406Z`，二者均验证签名。源 bundle 是本次构建产物，不另复制为发行下载材料。路径／用途／全清单与轮换结果见 `local-artifacts/install-backups/20261029-audio-demand/`；模型、媒体、独立恢复点、来源与采用证据不参与本轮清理。
+
+## 2026-10-29：性能基线材料
+
+`editor-perf-baseline/Atogaki_Sub` 为 df5aa24 detached managed checkout，仅用于尚未完成的性能对照；node_modules 链接复用，sidecar 为 APFS clone，原 tracked 源码未修改。独立 `Atogaki Baseline QA.app` 位于共享 target/bundle，27 文件／签名及用途在 `local-artifacts/editor-baseline-comparison-20261029/`；不是新增正式 App 回退或发行副本，正式回退仍保持两份。新三档合成库／三小时 sparse WAV 为对照数据，两版共用，未复制正式数据库。失败滚动录制明确标注并保留原 trace／checksum，不作为性能通过证据。完成对照后再归档此 checkout，当前保留供后续浏览器／原生测量复用。

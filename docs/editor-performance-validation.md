@@ -337,3 +337,17 @@ complete＋qa release 778d936 已核验签名并原位替换固定 QA，包前�
 限定在各次操作窗口内、且不跨操作拼接间隔：150 个精确关联呈现间隔的 nearest-rank P95 为 16.671458 ms；157 个目标 Hitches Updates 区间的 P95 为 5.908666 ms。前者包含硬件刷新节奏，后者不是全部 WebKit JavaScript／layout 成本；不能互换，也不能用全局 vsync 替代应用呈现。完整帧生命周期及 hitch 表一并导出；全 workload／前后比较字段仍为 null，因为四次有观察开销的短滚动不等于连续固定输入，更没有同素材基线。此结果只推进原生关联与覆盖，不宣布滚动改善、TTI 或整体性能门禁通过。
 
 QA 正常退出 0，准确 PID 消失，27 包文件及前后 20 表摘要不变、完整性正常。证据 `local-artifacts/editor-native-frame-minimal-20261029/` 包含失败／预检／滚动三份 trace 和逐文件 SHA、有限环境启动、准确进程与 recorder、命令／资源结果、AX／操作墙钟、TOC 与所需表导出、分析脚本及 JSON、数据核验与 manifest；正式窗口和数据未操作。先保留本轮原始证据，后续应在可控制成本的采样方法上建立同负载基线，而非反复扩大 Hitches 时长。
+
+## 2026-10-29：指定基线构建与同库暂停资源对照
+
+从计划指定 df5aa24 新建独立 managed checkout，原 tracked 源码不改；数据库迁移、Tauri Cargo 清单／lock、UI package／lock 与当前没有差异。复用相同 node_modules，四 sidecar 用 APFS clone 准备，独立 identifier `com.chai-yinfeng.atogaki.baseline.qa` 由外置 JSON 提供。release 成功、27 文件和 deep strict 签名核验；主工作区已重新附回 3d0a，历史 checkout 为后续对照保留，未合并实验代码。首次 clean 断言因历史 gitignore 未忽略 node_modules 链接停止，确认仅该已知 untracked 链接后继续；没有改变历史源码使之通过。
+
+新生成同一组三小时 sparse WAV 与 300／3,000／10,000 段数据库，两版先后共用该实际路径及完整来源／译文，WAV SHA 与先前合成音轨相同。旧版默认进入任务工具，需再进“字幕校对”；300 段可观察输入列表，AX 标注 showing 0-100 of 303 items，只是工具子项范围，不当作 DOM 总数。3,000 段首次 AX 只见列表容器，10,000 段首次只见窗口外壳；同进程后续截图显示万段界面，AX 列表仍无法取得 frame。宿主始终存活，没有因观察超时重启。旧版整份列表的逐 cue 输入构建另有源码证据；本次不从 AX 空缺推断页面崩溃或给出精确 TTI。
+
+先停在旧版万段页面，无播放、无文字操作；约 10.62 秒内不调用 AX、不录帧，每秒读取准确 PID／lstart／comm 的累计 CPU time 和 RSS。宿主 CPU 0.52 秒，WebContent CPU 6.22 秒（约 0.59 个核心）；WebContent RSS 从 1,418.14 到 1,436.06 MiB。此前三秒栈采样含 RenderLayerCompositor／GraphicsLayerCA 更新热点，不能据此断言具体 CSS、AX、JS 或某种泄漏就是原因。
+
+随后旧版正常退出 0，当前 QA 778d936 在同库按相同三档顺序打开万段，初始 AX 各 14 行。同一测量脚本约 10.58 秒、无 AX／录帧窗口：宿主累计 CPU 为读数分辨率内 0，WebContent 0.02 秒，RSS 从 167.58 到 167.44 MiB；当前万段 AX 表格滚动操作可执行，返回 20 行。两个短窗说明这次暂停原生工作面的资源差异，不采用小分母百分比推导一般性能；默认布局／主题、媒体预加载、进程年龄及此前 AX 历史均不同，未做随机顺序重复，也未隔离某个优化的因果。
+
+预定的旧版四次坐标滚动被 CUA `noWindowsAvailable` 在第一次就拒绝；确认原进程 live 并重绑定后坐标预检仍失败，AX 列表操作另报 `elementHasNoFrame`。录制虽退出 0（约 16.33 秒、观察 trace 峰值约 48.6 MB），没有成功交付受控滚动输入，因此明确标为无效滚动基线，P95 对照字段保持 null。不会把旧版高 idle CPU 或失败 AX 操作替代滚动改善证明；后续可使用已构建的基线做可控浏览器对照，或解决原生输入／观察边界。
+
+旧版首次启动仅初始化内置词表两表；当前退出后全部 20 表与旧版退出一致，integrity=ok、foreign key 空。两宿主和六个受控关联 XPC 均退出，两个包 27 文件仍一致。正式 App／数据未操作。证据 `local-artifacts/editor-baseline-comparison-20261029/` 保留包／构建／素材、AX／实际查看截图、栈、原始 ps 样本／身份、测量脚本、idle-comparison、滚动失败声明／原 trace 清单、数据库核验及 SHA manifest；方法与限制另见同目录 README。
