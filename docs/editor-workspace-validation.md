@@ -1129,3 +1129,12 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 再次核对首次导出的 SHA 后，仅将那三个输出写成可恢复 sentinel。真实目录选择、三文件覆盖提示和“覆盖字幕”完成，UI 返回已导出 3 个文件；实际输出三份全部与上一轮逐字段验证的原始字节及 SHA 相同。本次是实际 native overwrite，不由测试脚本代写恢复。返回编辑器仍第 1 段／00:00:00.000／跟随开启，正常 Cmd+Q，原启动句柄退出 0。全部 20 表与启动前一致、integrity=ok／foreign key 空，包 27 文件不变。
 
 Tauri 36 passed／4 环境依赖 ignored；release 构建含前端类型／生产构建，根目录及 Tauri fmt／diff 通过。视频保存面板使用同一父窗口设置，但本轮音频任务不覆盖视频输出选择／烧录覆盖，Windows 仍待实机验证。证据 `local-artifacts/editor-export-parent-20261029/` 包含确切候选 patch、构建日志、包 SHA、AX／截图、三份原始输出、覆盖后校验与数据库摘要。正式 App 保持用户已确认的 28e2909。
+
+
+## 2026-10-29：目录面板输出位置对照
+
+复用上一节显式父窗口候选及同一十段合成库，原生系统面板初始任务临时目录的 Open 禁用。通过 Cmd+Shift+G 的系统 Go to Folder 输入工作区现存可写目录 `local-artifacts/editor-export-location-20261029/output/`，AX 确认 Where 为 output；Open／New Folder 仍禁用，Raise 后亦未恢复，实际截图确认按钮灰显。此次复现不限于初始临时输出目录，不能只以 `/var/folders` 路径解释。未点击禁用按钮、改系统权限、强制激活按钮或绕过选择器。
+
+只读检查同期 Open and Save Panel Service 的 error／fault 日志，含 CoreUI 资源、缺失路径和 ViewBridge 取消信息，尚不足以归因；没有据此修改 rfd 或系统配置。已向用户请求在已安装正式 App 中手动尝试选择任意可写文件夹，不要求实际覆盖文件，以区分日常操作和隔离自动化现象，回复尚待接收。
+
+正常取消并 Cmd+Q，原启动句柄退出 0。全部 20 表内容与行数摘要相同、integrity=ok／foreign key 空，候选包 27 文件不变，输出目录无文件。证据 `local-artifacts/editor-export-location-20261029/`，包含初始／工作区／Raise 后 AX、实际截图、前后数据库与包核验。此次无产品源码或正式 App 变更；面板问题继续保留，三文件取消／确认覆盖的既有成功证据不因此失效。
