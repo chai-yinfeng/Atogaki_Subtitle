@@ -1118,3 +1118,14 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 取消目录面板后正常返回编辑器，仍为 00:00:00.000／第 1 段且跟随开启。随后仅将上述三个具名测试输出恢复为首次导出的原始字节并核对 SHA；这属于测试现场恢复，不充当原生确认覆盖成功。正常 Cmd+Q，原启动句柄退出 0，精确 PID 82433 消失。以启动初始化完成后的 before-export 为基线，全部 20 表内容／行数摘要前后相同，integrity=ok、foreign key 空；QA 包 27 文件不变。
 
 证据在 `local-artifacts/editor-native-batch-export-20261029/`：选择／成功／取消／禁用面板 AX 与截图、原始输出及 SHA、内容验证脚本和数据库前后摘要。音频样本不覆盖烧录视频；目录面板故障、三文件确认覆盖及 Windows 继续保留门禁。正式 App 与数据未动，本轮无产品源码变更。
+
+
+## 2026-10-29：导出面板父窗口边界及三文件确认覆盖
+
+字幕目录与视频输出命令接收 Tauri 注入的 WebviewWindow，并通过现有 dialog builder 的 set_parent 显式绑定发起窗口；不新增前端参数、窗口、文件写入路径或保存逻辑。此前未指定父窗口，rfd 0.16.0 的 ModalFuture 会自行选择 mainWindow／首个窗口。改动消除父窗口推断，但不能证明它是 Open 禁用的根因。未升级／修改依赖。
+
+基于 5b80aa0 加本段父窗口修改离线构建 complete＋qa，将 27 文件和 deep strict 签名核对后的候选放入独立 `/tmp/atogaki-export-parent-qa/Atogaki QA.app`，不替换固定 QA 或正式 App。同一合成十段库、同一组三个具名输出，Open 初次仍禁用，Raise 后恢复。因此保留系统面板故障，不将本次改动命名为禁用修复；前一轮重新选择目录未恢复的证据仍有效。
+
+再次核对首次导出的 SHA 后，仅将那三个输出写成可恢复 sentinel。真实目录选择、三文件覆盖提示和“覆盖字幕”完成，UI 返回已导出 3 个文件；实际输出三份全部与上一轮逐字段验证的原始字节及 SHA 相同。本次是实际 native overwrite，不由测试脚本代写恢复。返回编辑器仍第 1 段／00:00:00.000／跟随开启，正常 Cmd+Q，原启动句柄退出 0。全部 20 表与启动前一致、integrity=ok／foreign key 空，包 27 文件不变。
+
+Tauri 36 passed／4 环境依赖 ignored；release 构建含前端类型／生产构建，根目录及 Tauri fmt／diff 通过。视频保存面板使用同一父窗口设置，但本轮音频任务不覆盖视频输出选择／烧录覆盖，Windows 仍待实机验证。证据 `local-artifacts/editor-export-parent-20261029/` 包含确切候选 patch、构建日志、包 SHA、AX／截图、三份原始输出、覆盖后校验与数据库摘要。正式 App 保持用户已确认的 28e2909。

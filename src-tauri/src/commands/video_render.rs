@@ -95,6 +95,7 @@ pub(crate) async fn cancel_video_render(
 #[tauri::command]
 pub(crate) async fn pick_video_output_file(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     initial_directory: Option<String>,
     suggested_name: String,
 ) -> Result<Option<VideoOutputSelection>, String> {
@@ -102,6 +103,7 @@ pub(crate) async fn pick_video_output_file(
     let mut picker = app
         .dialog()
         .file()
+        .set_parent(&window)
         .set_title("导出带字幕视频")
         .add_filter("MP4 视频", &["mp4"])
         .set_file_name(suggested_name);

@@ -61,10 +61,15 @@ pub(crate) async fn preview_workspace_subtitle_export(
 #[tauri::command]
 pub(crate) async fn pick_subtitle_export_directory(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     initial_directory: Option<String>,
 ) -> Result<Option<String>, String> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    let mut picker = app.dialog().file().set_title("选择字幕导出目录");
+    let mut picker = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("选择字幕导出目录");
     let initial_directory = initial_directory
         .map(PathBuf::from)
         .filter(|path| path.is_dir())
