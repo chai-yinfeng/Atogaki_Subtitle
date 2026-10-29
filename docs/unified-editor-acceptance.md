@@ -22,7 +22,7 @@
 | 650 ms 自动保存、IME、切段草稿、失败重试 | SubtitleDrafts／current-cue-editor；ui／follow／time-navigation | 部分：异步输入／IME 为浏览器回归；真实 SQLite ABORT、ENOSPC、正常退出恢复已验；e8d9a8d 原生 ABORT 后 SIGKILL／同库草稿恢复及显式重试已验，立即终止／满卷组合／其他冲突仍待验 |
 | 结构操作先 flush，失败阻止且保留输入 | editor-structure-actions／editor-block-actions；structure-timing／insert | 有合成竞态、故障及部分原生结构操作证据；真实全部故障组合未穷尽 |
 | 文字撤回与打轴撤销分别保留；插入／删除／Cut／Join | 唯一 token 历史；[0061](decisions/0061-transactional-structure-undo-metadata.md)及 SQLite／原生核对 | 有主要路径证据，包含来源／依赖恢复、单调 revision、重开／重启 token、冲突／回滚；学习沿用既有快照规则 |
-| 候选采用冲突、完整来源保护及导出一致性 | recorded 事务、adoption／scope 测试、原生采用／撤销、既有导出验证 | 部分：采用主路径已验；1f61307 QA 直接选初始目录已验原文 SRT 单文件取消／确认覆盖与十段逐字段一致；目录导航后 Open 禁用、含译文／批量／烧录覆盖仍待验 |
+| 候选采用冲突、完整来源保护及导出一致性 | recorded 事务、adoption／scope 测试、原生采用／撤销、既有导出验证 | 部分：采用主路径已验；1f61307 QA 直接选初始目录已验原文 SRT 单文件取消／确认覆盖与十段逐字段一致；778d936 QA 补译文／双语 SRT／ASS 三文件首次导出、十段内容一致与批量取消；Open 持续禁用导致批量确认、目录面板及烧录覆盖仍待验 |
 | 候选说明可读，长差异／错误可滚动，焦点边界 | candidate-comparison-view；candidate-dialog-layout；c8afa5f 原生截图／End／Tab | 有小窗口／20 px 浏览器与默认尺寸原生证据；未冒充原生小窗口／大字号全覆盖 |
 
 多选、批量平移、频谱、逐帧和复杂 ASS 按原确认留待后续，不作为缺失实现补入本轮。
