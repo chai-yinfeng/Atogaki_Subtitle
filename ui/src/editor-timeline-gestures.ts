@@ -86,6 +86,7 @@ export function mountTimelineGestures<T extends Cue>(canvas: HTMLCanvasElement, 
       pan = { pointerId: event.pointerId, jobId: state.jobId, x: event.clientX, width: b.width,
         start: state.viewStartMs, duration: state.durationMs, moved: false };
     }
+    canvas.focus({ preventScroll: true });
     canvas.setPointerCapture(event.pointerId); event.preventDefault();
   }, { signal: events.signal });
   canvas.addEventListener("pointermove", event => {

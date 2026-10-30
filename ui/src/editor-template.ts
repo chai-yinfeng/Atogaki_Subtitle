@@ -21,10 +21,10 @@ export function editorTemplate(primaryShortcutModifier: string): string {
         <div class="editor-right"><section id="editor-wave-panel" class="editor-wave-panel" aria-label="声音与时间轴">          <section class="waveform-panel" aria-labelledby="waveform-heading">
             <div class="panel-heading compact">
               <h3 id="waveform-heading">波形与时间轴</h3><button id="editor-wave-follow-state" type="button" class="secondary" data-editor-action="follow-waveform" aria-pressed="true" title="暂停波形视窗跟随">视窗跟随中</button>
-              <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button><button id="undo-subtitle-structure" type="button" class="secondary" disabled>撤销打轴</button></div>
+              <div class="waveform-navigation"><button id="karaoke-window-back" type="button" class="secondary">← 前一屏</button><button id="karaoke-window-forward" type="button" class="secondary">后一屏 →</button><button id="undo-subtitle-structure" aria-keyshortcuts="Control+Z Meta+Z" type="button" class="secondary" disabled>撤销打轴</button></div>
             </div>
             <div id="karaoke-waveform-status" class="waveform-status">选择任务后生成本地波形缓存。拖动字幕块可移动，拖动左右边缘可单独修剪；空白合法，同轨不能重叠。</div>
-            <canvas id="karaoke-waveform" class="karaoke-waveform" width="1200" height="260" aria-label="声音波形与字幕时间轴：拖动顶部播放头定位，拖动波形背景平移"></canvas>
+            <canvas id="karaoke-waveform" class="karaoke-waveform" tabindex="0" width="1200" height="260" aria-label="声音波形与字幕时间轴：拖动顶部播放头定位，拖动波形背景平移"></canvas>
             <div class="editor-wave-controls">                <label>时间缩放<input id="karaoke-zoom" type="range" min="0" max="100" value="66" aria-label="时间轴缩放"><output id="karaoke-zoom-label">30 秒</output></label>
                 <label>波形强度<input id="karaoke-waveform-gain" type="range" min="1" max="8" step="0.25" value="1" aria-label="波形显示强度"><output id="karaoke-waveform-gain-label">1×</output></label></div>
           </section></section>

@@ -3594,7 +3594,7 @@ function updateStructureUndoButton(): void {
   const state = editorStructureHistory.presentation();
   undoSubtitleStructureButton.disabled = !state.available;
   undoSubtitleStructureButton.title = state.available
-    ? `撤销${state.label}` : "当前会话还没有可撤销的打轴或结构修改";
+    ? `撤销${state.label}（Ctrl+Z / ⌘Z，文字输入框外）` : "当前会话还没有可撤销的打轴或结构修改（Ctrl+Z / ⌘Z）";
 }
 function rememberStructureEdit(result: StructureEditResult, jobId: string): string {
   editorStructureHistory.remember(result, jobId);
@@ -4599,6 +4599,7 @@ const playbackShortcutView = mountPlaybackShortcutView(document, {
   editor: () => currentArea === "karaoke",
   blocked: () => workspaceView?.classList.contains("editor-task-tools") ?? false,
   cut: () => { void cutKaraokeSegmentAtPlayhead(); },
+  undo: () => { void undoSubtitleStructure(); },
   step: seekKaraokeBy,
   playback: executePlaybackAction,
 });

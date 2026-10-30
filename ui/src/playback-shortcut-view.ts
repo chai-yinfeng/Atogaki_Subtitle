@@ -4,6 +4,7 @@ type Options = {
   editor(): boolean;
   blocked(): boolean;
   cut(): void;
+  undo(): void;
   step(milliseconds: number): void;
   playback(action: PlaybackAction): void;
 };
@@ -15,8 +16,23 @@ const textEntry = (target: EventTarget | null) => target instanceof HTMLInputEle
 export function mountPlaybackShortcutView(root: Document, options: Options) {
   const events = new AbortController();
   root.addEventListener("keydown", event => {
-    if (!options.enabled() || event.altKey || textEntry(event.target)) return;
+    if (event.defaultPrevented || event.isComposing || event.altKey) return;
     if (root.querySelector("dialog[open]") || options.blocked()) return;
+    if (options.editor() && !event.shiftKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      const target = event.target;
+      const editable = target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement && ["text", "search", "email", "url", "tel", "password", "number"].includes(target.type)
+        || target instanceof HTMLElement && target.isContentEditable;
+      if (editable) {
+        // macOS uses Command+Z natively; alias Control+Z to the same DOM history.
+        if (event.ctrlKey && !event.metaKey && !((target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) && (target.readOnly || target.disabled))) {
+          root.execCommand("undo"); event.preventDefault();
+        }
+      } else if (!(target instanceof HTMLSelectElement || target instanceof HTMLInputElement)) {
+        options.undo(); event.preventDefault();
+      }
+      return;
+    }
+    if (!options.enabled() || textEntry(event.target)) return;
     if (options.editor() && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
       options.cut(); event.preventDefault(); return;
     }
