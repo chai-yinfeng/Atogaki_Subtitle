@@ -166,3 +166,8 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 核对完整 27 文件 SHA 和精确可执行路径无运行进程后，删除 `/tmp/atogaki-editor-inspector-qa/Atogaki Inspector QA.app` 及共享 target/bundle 中的 `Atogaki Inspector QA.app`、`Atogaki Baseline QA.app` 三份编译包，共 304,149,377 bytes 逻辑内容，不推断 APFS 实际回收量。旧基线 managed worktree 已可恢复归档；归档前 tracked 源码无修改，唯一 untracked 为既有 ui/node_modules 链接。冻结前端产物和无法由保留 QA 原字节恢复的旧 sidecar／说明另存，未复制依赖目录。
 
 清理路径、用途、逐文件 checksum、退出核对和归档证明在 `local-artifacts/editor-lab-retirement-20261030/`；原始 trace、报告、合成数据库／媒体及人工评审全部保留。正式 ac321b8、上一版／稳定版两份回退和固定隔离 QA 未改，没有新增数据库备份。此为产物收尾，不是新一轮测试，也不把未验证的性能指标记为通过。
+
+
+### 2026-10-30：收听布局本机候选轮换
+
+正式 App 已为 e103c85；上一版 ac321b8 保留在 `/Applications/.Atogaki.previous.20261030-listening`，稳定 0.1.1 回退不变。清单／签名核对后移除已替代的 28e2909 `.Atogaki.previous.20261030-render-output`（101,578,133 bytes 逻辑内容），回退仍只有两份。本轮纯布局更新没有创建数据库备份，也没有新增 QA App 副本；截图、包清单、正式库只读摘要及验证在 `local-artifacts/listening-layout-20261030/`。原数据库、媒体、模型、恢复点和采用证据未清理。
