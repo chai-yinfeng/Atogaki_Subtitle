@@ -204,3 +204,10 @@
 从干净 0d4cc61 构建 complete App，正常退出无待保存字幕的旧 App 后替换并打开收听，实际 AX 已见新视频高度分隔线及继承的全文比例。后续原生取图超时、CUA kernel 重置，未据此重启 App，不将其记为布局失败或原生截图通过；实际手感仍由用户验收。源／暂存／安装包 27 文件、四 sidecar 和签名核对通过，版本仍 0.1.2。
 
 安装前／替换前 20 表摘要一致；打开后仅 local_settings 变化，其他 19 表一致，13 任务／6,887 段保留，不新增数据库备份。保留上一版 829cbbe `/Applications/.Atogaki.previous.20261030-video-space` 和稳定 0.1.1，清单核对后移除被取代的 416dabc 回退（101,635,317 bytes 逻辑内容）。记录与隔离截图在 `local-artifacts/listening-video-space-20261030/`；代码推送开发分支，Release 未发布。
+
+
+## 2026-10-30：正式 v0.1.3（9a187f7）
+
+用户确认本机功能正常并授权合并／发行后，从干净 `9a187f79085a6d4e26fec668cc05eef6962efa6b` 构建最终 0.1.3 complete App 和非 CI DMG。由只读挂载的最终 DMG 复制安装，源／暂存／安装 27 文件一致、四 sidecar 与 deep／strict 签名通过；实际打开任务、统一编辑器与共享复核，再返回收听，恢复 6:11 并播放到约 6:16 后暂停。用户数据未作编辑、识别、翻译或清理测试；19 表完全一致，只有 local_settings 随播放位置变化，13 任务／6,887 段、integrity=ok、foreign key 空，不新增数据库备份。
+
+保留上一版 0d4cc61 `/Applications/.Atogaki.previous.20261030-v0.1.3` 与稳定 0.1.1；清单核对后删除被取代的 829cbbe 回退。权威发行资产和原始校验／窗口证据在 `local-artifacts/release-v0.1.3/`，重复下载和源码解包检查副本已核对后清理；安装盘已卸载。本机与 [v0.1.3 Release](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.3) 为同一签名 App，未更换已公开资产。

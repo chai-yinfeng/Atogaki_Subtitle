@@ -93,3 +93,14 @@ DMG 为 45,697,660 字节，SHA-256 `fc7c1082354603b5d280df287a6b11a5b5075d32b38
 最终 DMG 为 45,876,757 字节，SHA-256 `db313f4ae10def142cbe009526279f459220ecb38f83a8d39424b37e6f54014c`；对应源码为 81,923,880 字节，SHA-256 `1ccc7daa28b29ecdb343668b4d4f05349d99487909a90a68cc34a3c7cdaf72cc`。完整 App 和四个 sidecar 通过 ad-hoc deep/strict 签名核对，未公证。最终 App 原生窗口及 DMG 的实际 Finder 左右图标布局通过；模型不在包内。
 
 英文 32 字符切分问题已记入发行限制，留到下一轮；本次没有改变语言分段参数或合并现有字幕。正式《教父》翻译仍在运行，发布过程只运行隔离测试窗口，未再次覆盖正在使用的 Application。
+
+
+## 2026-10-30：v0.1.3 macOS 稳定发行
+
+已公开 [v0.1.3](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.3)，annotated tag 固定到 `9a187f79085a6d4e26fec668cc05eef6962efa6b`，该提交已快进合入 main；已合并的 codex/listening-layout 本地／远端引用已删除，工作目录和忽略证据保留。Release 非草稿、非 prerelease，已确认 latest；仅 macOS arm64 DMG、对应源码包及各自 SHA-256 四项资产，无 Windows 包。主线触发的 Windows compile baseline 41134427344 已按用户排除范围取消并确认 completed／cancelled。
+
+DMG 为 46,362,384 字节，SHA-256 `9c97879d2d6dac65cda58e131d609d085fc1003f4c8f1dc4e16466ee7c505e3b`；对应源码为 81,923,868 字节，SHA-256 `b3b40a294f98f76d0cfa0ff8d3d9294e544bdf6cd2dffe72f0189271d816eda0`。八份固定上游源码、清单和许可证核对通过；草稿四项资产重新下载逐字节一致，公开后 GitHub asset digest 亦一致，未替换旧 tag／公开资产。
+
+356 项前端测试、类型／生产构建、两套 fmt／diff 和许可证生成通过；已验收行为不重复执行压力／异常组合。最终非 CI DMG 经 hdiutil verify、只读挂载及 App 27 文件一致性核对，四 sidecar／许可证齐全，deep／strict ad-hoc 签名通过。正常挂载入口打开 Finder 后，实际确认 660×400 逻辑窗口中 App 左、Applications 右；此前窗口工具直接连接无窗口失败的尝试不算通过证据。最终 DMG 的 App 已安装本机并验证统一编辑器、共享复核工具、返回及收听，播放从 6:11 恢复并实际播放后暂停；没有编辑正式字幕或调用识别／翻译／清理 API。此前用户已确认该版本功能行为整体正常，版本准备仅改版本号、发行材料和依赖声明。
+
+最终构建、包清单、校验、Finder／App 实际截图和发布记录在忽略目录 `local-artifacts/release-v0.1.3/`；权威四项资产保留，重复下载和源码检查解包副本验证后已删除。严格原生性能指标、真实模型质量与综合复核脚本末尾间歇导航超时继续按既有记录说明，不冒称通过。

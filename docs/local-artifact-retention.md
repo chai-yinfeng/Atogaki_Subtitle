@@ -176,3 +176,8 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ### 2026-10-30：收听操作精简候选
 
 本机为 0e699e6，前一版 e103c85 位于 `/Applications/.Atogaki.previous.20261030-listening-controls`，稳定 0.1.1 保留。移除已替代且清单匹配的 ac321b8 `.Atogaki.previous.20261030-listening`（101,635,317 bytes 逻辑内容），仍只保留两份回退。本轮未新增数据库备份或 QA App；验证与安装记录在 `local-artifacts/listening-controls-20261030/`。尚未发布新 Release。
+
+
+## 2026-10-30：v0.1.3 正式发行保留
+
+`local-artifacts/release-v0.1.3/assets/` 的 DMG、对应源码包及两份 SHA-256 是本机权威发行材料，连同包清单、发布 API 摘要、校验和原生截图保留。重新下载的四资产逐字节一致、源码解包正文与归档一致后删除临时副本；macOS tar 的 AppleDouble 元数据由系统解包时消费，不当作缺失源码。旧 829cbbe App 回退经完整摘要核对后删除，保留已验收 0d4cc61 与稳定 0.1.1 两份回退；不新增 SQLite 快照，不清理模型、媒体、采用证据、未知数据或其余共享缓存。
