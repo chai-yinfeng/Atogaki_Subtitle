@@ -33,12 +33,18 @@ const path = require('node:path');
         const list = document.querySelector('#listening-subtitle-list'), box = list.getBoundingClientRect();
         return { viewport: [innerWidth, innerHeight], pageHeight: document.scrollingElement.scrollHeight, pageWidth: document.scrollingElement.scrollWidth, listTop: box.top, listBottom: box.bottom, listHeight: list.clientHeight, rows: list.children.length, libraryHeight: document.querySelector('#listening-job-list').clientHeight };
       });
-      const layout = await measure();
+      const videoSize = () => page.locator('#listening-media-host video').evaluate(el => {
+        const r=el.getBoundingClientRect(),caption=document.querySelector('.listening-playback .current-caption').getBoundingClientRect(),controls=document.querySelector('.listening-playback .playback-tools').getBoundingClientRect();
+        return {height:r.height,width:r.width,fitHeight:Math.min(r.height,r.width*el.videoHeight/el.videoWidth),bottom:r.bottom,captionTop:caption.top,captionBottom:caption.bottom,controlsBottom:controls.bottom};
+      });
+      const layout = await measure(), initialVideo = await videoSize();
+      assert.ok(initialVideo.height > viewport.height*.24, 'video must use available height beyond the old 24vh cap');
+      assert.ok(initialVideo.captionTop >= initialVideo.bottom-1 && initialVideo.captionBottom <= viewport.height && initialVideo.controlsBottom <= viewport.height);
       assert.ok(layout.pageHeight <= viewport.height + 1, JSON.stringify(layout));
       assert.ok(layout.pageWidth <= viewport.width + 1, JSON.stringify(layout));
       assert.ok(layout.listHeight >= 300 && layout.listBottom <= viewport.height, JSON.stringify(layout));
       assert.equal(layout.rows, 149);
-      assert.ok(await page.locator('.listening-text').first().evaluate(element => element.clientWidth >= 220), 'subtitle text must retain a readable column beside the timecode');
+      assert.ok(await page.locator('.listening-text').first().evaluate(element => element.clientWidth >= 160), 'subtitle text must retain a readable column beside the timecode');
       const list = page.locator('#listening-subtitle-list');
       await list.hover(); await page.mouse.wheel(0, 400);
       await page.waitForFunction(() => document.querySelector('#listening-subtitle-list').scrollTop > 0);
@@ -52,22 +58,45 @@ const path = require('node:path');
       const media = await page.locator('#listening-media-host video').evaluate(el => { el.dataset.layoutIdentity = 'retained'; return el.dataset.layoutIdentity; });
       const split = page.locator('.listening-splitter');
       await split.focus(); await page.keyboard.press('ArrowRight');
-      assert.equal(await split.getAttribute('aria-valuenow'), '45');
+      assert.equal(await split.getAttribute('aria-valuenow'), '62');
+      await page.locator('.listening-playback-info summary').click();
       await page.locator('#listening-layout-placement').selectOption('bottom');
       await page.waitForFunction(() => document.querySelector('.listening-session').dataset.placement === 'bottom');
       const bottom = await measure();
-      assert.ok(bottom.listHeight >= 120 && bottom.listBottom <= viewport.height, JSON.stringify(bottom));
+      assert.ok(bottom.listHeight >= 100 && bottom.listBottom <= viewport.height, JSON.stringify(bottom));
+      const bottomVideo = await videoSize();
+      assert.ok(bottomVideo.captionTop >= bottomVideo.bottom-1 && bottomVideo.controlsBottom <= viewport.height,'bottom transcript must keep caption below video and controls visible');
       await split.focus(); await page.keyboard.press('ArrowDown');
-      assert.equal(await split.getAttribute('aria-valuenow'), '54');
+      assert.equal(await split.getAttribute('aria-valuenow'), '74');
       await page.locator('#listening-layout-placement').selectOption('hidden');
       assert.equal(await page.locator('.listening-reading').isVisible(), false);
+      const hiddenVideo = await videoSize();
+      assert.ok(hiddenVideo.fitHeight > initialVideo.fitHeight+5, JSON.stringify({initialVideo,hiddenVideo}));
+      const videoHandle=page.locator('.listening-video-splitter'),handleBox=await videoHandle.boundingBox();
+      await page.mouse.move(handleBox.x+handleBox.width/2,handleBox.y+handleBox.height/2);await page.mouse.down();
+      await page.mouse.move(handleBox.x+handleBox.width/2,handleBox.y+handleBox.height/2-70,{steps:6});await page.mouse.up();
+      const smaller=await videoSize();assert.ok(smaller.height < hiddenVideo.height-10);
+      assert.ok(smaller.captionTop >= smaller.bottom-1 && smaller.controlsBottom<=viewport.height);
+      const savedVideo=JSON.parse(await page.evaluate(()=>localStorage.getItem('atogaki.listeningLayout.v2'))).video;
+      await videoHandle.focus();await page.keyboard.press('Home');
+      assert.equal(await videoHandle.getAttribute('aria-valuenow'),'85');
+      assert.ok(savedVideo<85);
       await page.locator('#listening-layout-placement').selectOption('right');
-      assert.equal(await split.getAttribute('aria-valuenow'), '45');
+      assert.equal(await split.getAttribute('aria-valuenow'), '62');
       assert.equal(await page.locator('#listening-media-host video').getAttribute('data-layout-identity'), media);
-      assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('atogaki.listeningLayout.v1'))), { version: 1, placement: 'right', right: 45, bottom: 54 });
+      assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('atogaki.listeningLayout.v2'))), { version: 2, placement: 'right', right: 62, bottom: 74, video: 85 });
+      if (process.env.ATOGAKI_SCREENSHOTS_DIR) {
+        for(const placement of ['right','bottom','hidden']){
+          await page.locator('#listening-layout-placement').selectOption(placement);
+          await page.screenshot({path:path.join(process.env.ATOGAKI_SCREENSHOTS_DIR,`listening-${placement}-${viewport.width}.png`)});
+        }
+      }
+      await page.reload();await page.locator('#show-listening').click();await page.locator('[data-listen-job]').first().click();
+      assert.equal(await page.locator('#listening-layout-placement').inputValue(),process.env.ATOGAKI_SCREENSHOTS_DIR?'hidden':'right');
+      assert.equal(await videoHandle.getAttribute('aria-valuenow'),'85');
       assert.deepEqual(errors, []);
       console.log(JSON.stringify(layout)); await page.close();
     }
-    console.log('PASS: video, controls and independently scrolling subtitles fit default and minimum desktop windows');
+    console.log('PASS: video grows when transcript is hidden; captions stay below video in every layout; video height drag, keyboard reset, persistence and unique player remain correct');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

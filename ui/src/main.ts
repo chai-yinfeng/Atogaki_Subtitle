@@ -423,6 +423,11 @@ app.innerHTML = `
           <div class="listening-session">
           <div class="listening-playback" aria-label="播放与当前句">
           <div id="listening-media-host" class="media-host"></div>
+          <div class="listening-video-splitter" title="拖动调整视频高度；方向键微调，Home 恢复默认" tabindex="0" role="separator" aria-label="调整视频与当前字幕高度" aria-orientation="horizontal" aria-valuemin="25" aria-valuemax="90"></div>
+          <div class="current-caption" aria-live="polite">
+            <p id="listening-current-source">原文字幕</p>
+            <p id="listening-current-translation">简体中文翻译</p>
+          </div>
           <div class="playback-tools" aria-label="收听快捷操作">
             <button id="listening-previous-subtitle" type="button" class="secondary">上一句</button>
             <button id="listening-rewind-media" type="button" class="secondary">−5 秒</button>
@@ -435,10 +440,6 @@ app.innerHTML = `
           <p class="shortcut-help">快捷键：空格/K 播放暂停 · ←/J 与 →/L 跳 5 秒 · [ ] 切换字幕 · , . 调整速度 · O 开关悬浮字幕</p>
           <p id="listening-media-message" class="media-message">从左侧选择一个已翻译任务。</p>
           </details>
-          <div class="current-caption" aria-live="polite">
-            <p id="listening-current-source">原文字幕</p>
-            <p id="listening-current-translation">简体中文翻译</p>
-          </div>
           </div>
           <div class="listening-splitter" tabindex="0" role="separator" aria-label="调整播放与全文比例" aria-valuemin="25" aria-valuemax="75"></div>
           <div class="listening-reading" aria-label="全文阅读与收藏">
