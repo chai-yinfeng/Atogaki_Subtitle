@@ -21,4 +21,3 @@ export function updateTimingPreview<T extends Cue>(drag: TimingGesture<T>, clien
   }
   drag.moved = cue.start_ms !== original.start_ms || cue.end_ms !== original.end_ms;
 }
-

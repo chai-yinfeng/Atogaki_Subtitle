@@ -33,4 +33,3 @@ export type SubtitleStylePreview = {
   font_report: SubtitleFontReport;
   font_events: string[];
 };
-

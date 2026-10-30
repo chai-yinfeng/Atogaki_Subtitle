@@ -40,4 +40,3 @@ export type VideoOutputSelection = {
   path: string;
   alreadyExists: boolean;
 };
-
