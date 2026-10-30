@@ -31,7 +31,7 @@ module.exports.installProcessingFixture = async page => {
    if(cmd==='asr_candidate_progress')return defer('progress',args.jobId,{phase:'transcribing',completed_ms:1000,duration_ms:2800});
    if(cmd==='list_asr_quality_signals')return defer('signals',args.jobId,structuredClone(test.signals??result));
    if(cmd==='save_asr_review_decision'&&test.signals){const signal=test.signals.find(s=>s.id===args.request.signalId);if(signal)signal.latest_decision=args.request.decision;return null;}
-   if(cmd==='release_asr_candidate'){await defer('release',args.jobId,null);test.released.push(args.runId);return 1234;}
+   if(cmd==='release_asr_candidate'){if(test.failCleanup)throw Error('fixture permission denied');await defer('release',args.jobId,null);test.released.push(args.runId);return 1234;}
    if(cmd==='list_asr_runs')return defer('history',args.jobId,structuredClone(test.historyRows??Object.values(test.previews).filter(p=>p.job_id===args.jobId).map(p=>({id:p.preview_id,provider_name:'测试',model_identity:'test-model',scope_start_ms:0,scope_end_ms:2800,created_at_unix:1,is_candidate:true,status:'succeeded',reopenable:!test.released.includes(p.preview_id),released:test.released.includes(p.preview_id),adopted:test.adopted.includes(p.preview_id),cleanable:!test.released.includes(p.preview_id)&&!test.adopted.includes(p.preview_id)}))));
    return result;
   };

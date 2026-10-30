@@ -39,3 +39,21 @@ test('committed adoption invalidates old reads and immediately removes cleanup p
 test('adoption during a pending cleanup confirmation prevents release',async()=>{
  const h=harness();await ready(h);const cleanup=h.history.release('r');h.history.markAdopted('r');h.calls[1].resolve(true);await cleanup;assert.equal(h.calls.some(c=>c.kind==='release'),false);
 });
+
+test('completed cleanup disappears, partial cleanup remains retryable, and source records stay visible',async()=>{
+ const h=harness(),read=h.history.refresh();
+ const partial={...run('partial'),released:true,cleanup_pending:true};
+ const adopted={...run('adopted'),adopted:true,cleanable:false};
+ const original={...run('original'),is_candidate:false,cleanable:false};
+ h.calls[0].resolve([{...run('done'),released:true},partial,adopted,original]);await read;
+ assert.deepEqual(h.events.at(-1),['rows',[partial,adopted,original]]);
+});
+test('failed cleanup keeps its reason and retry removes the row immediately on success',async()=>{
+ const h=harness();await ready(h);
+ const failed=h.history.release('r');h.calls[1].resolve(true);await tick();h.calls[2].reject(Error('permission denied'));await failed;
+ const row=h.events.filter(e=>e[0]==='rows').at(-1)[1][0];assert.match(row.cleanupError,/permission denied/);assert.equal(row.cleanable,true);
+ const retry=h.history.release('r');h.calls[3].resolve(true);await tick();h.calls[4].resolve(0);await tick();
+ assert.deepEqual(h.events.filter(e=>e[0]==='rows').at(-1),['rows',[]]);
+ h.calls[5].resolve([{...run('r'),released:true,cleanable:false}]);await retry;
+ assert.deepEqual(h.events.filter(e=>e[0]==='rows').at(-1),['rows',[]]);
+});

@@ -36,8 +36,22 @@ const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
   await page.keyboard.press('Escape');assert.equal(await page.locator('#candidate-cleanup-dialog').count(),0);
   assert.equal(await page.locator('#confirmation-dialog[open]').count(),0);
 
-  await page.locator('[data-release-run]').click();await page.locator('[data-accept-cleanup]').click();await page.waitForFunction(()=>document.querySelector('.candidate-history')?.textContent.includes('产物已清理'));
+  await page.evaluate(()=>window.__test.failCleanup=true);
+  await page.locator('[data-release-run]').click();await page.locator('[data-accept-cleanup]').click();
+  await page.waitForFunction(()=>document.querySelector('.candidate-history')?.textContent.includes('清理失败：Error: fixture permission denied'));
+  assert.equal(await page.locator('[data-release-run]').textContent(),'重试清理');
+  await page.evaluate(()=>window.__test.failCleanup=false);
+  await page.locator('[data-release-run]').click();await page.locator('[data-accept-cleanup]').click();await page.waitForFunction(()=>document.querySelectorAll('.candidate-history-row').length===0);
   assert.equal(await page.locator('[data-release-run]').count(),0);assert.match(await page.locator('#retranscription-message').textContent(),/1 KiB/);
+  // Existing released metadata stays hidden; genuine partial cleanup stays retryable.
+  await page.evaluate(()=>{const base={provider_name:'test',model_identity:'test',scope_start_ms:0,scope_end_ms:2800,created_at_unix:1,status:'succeeded',is_candidate:true};window.__test.historyRows=[{...base,id:'done',released:true,cleanable:false},{...base,id:'partial',released:true,cleanup_pending:true,cleanable:true},{...base,id:'source',is_candidate:false,cleanable:false},{...base,id:'adopted',adopted:true,cleanable:false}];});
+  await page.locator('[data-candidate-history]').click();await page.locator('[data-release-run="partial"]').waitFor();
+  assert.equal(await page.locator('.candidate-history-row').count(),3);
+  assert.equal(await page.locator('[data-release-run="partial"]').textContent(),'重试清理');
+  assert.equal(await page.locator('[data-release-run="done"]').count(),0);
+  assert.match(await page.locator('.candidate-history').textContent(),/原始识别，保留来源/);
+  assert.match(await page.locator('.candidate-history').textContent(),/已采用，保留来源/);
+  await page.evaluate(()=>window.__test.historyRows=null);
   // Adoption refreshes an already-requested history and protects its row immediately.
   await page.locator('#preview-retranscription').click();await page.locator('#retranscription-dialog[open]').waitFor();await page.locator('#close-retranscription-preview').click();
   await page.locator('[data-candidate-history]').click();await page.locator('[data-release-run]').waitFor();

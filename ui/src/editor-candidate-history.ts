@@ -1,7 +1,7 @@
 import type { CandidateLabelInput } from "./themes";
 
 export type CandidateRun = CandidateLabelInput & {
-  status: string; reopenable?: boolean; released?: boolean; cleanable?: boolean; adopted?: boolean;
+  status: string; reopenable?: boolean; released?: boolean; cleanable?: boolean; adopted?: boolean; cleanup_pending?: boolean; cleanupError?: string;
 };
 type Context = { jobId: string; navigation: number };
 type HistoryOptions = {
@@ -36,7 +36,12 @@ export function createCandidateHistory(options: HistoryOptions) {
     try {
       const runs = await options.list(context.jobId);
       if (!matches(context, generation) || revision !== request) return;
-      rows = runs; publishRows();
+      rows = runs.filter(run => !run.released || run.cleanup_pending || run.adopted || run.is_candidate === false)
+        .map(run => {
+          const error = run.cleanable && rows.find(old => old.id === run.id)?.cleanupError;
+          return error ? { ...run, cleanupError: error } : run;
+        });
+      publishRows();
     } catch (error) { if (matches(context, generation) && revision === request) options.failed(error); }
   };
   const reset = () => {
@@ -49,7 +54,7 @@ export function createCandidateHistory(options: HistoryOptions) {
       // Invalidate older reads before exposing the committed adoption locally.
       request++;
       if (!rows.some(run => run.id === runId)) return;
-      rows = rows.map(run => run.id === runId ? { ...run, adopted: true, cleanable: false } : run);
+      rows = rows.map(run => run.id === runId ? { ...run, adopted: true, cleanable: false, cleanupError: undefined } : run);
       publishRows();
     },
     async release(runId: string) {
@@ -57,14 +62,22 @@ export function createCandidateHistory(options: HistoryOptions) {
       if (!context || !matches(context, generation) || pending.has(runId) || !rows.some(run => run.id === runId && run.cleanable)) return;
       const ticket = {}; pending.set(runId, ticket);
       const current = () => pending.get(runId) === ticket && matches(context, generation);
+      let releasing = false;
       try {
         if (!await options.confirmRelease() || !current() || !rows.some(run => run.id === runId && run.cleanable)) return;
         options.busy(runId, true);
+        releasing = true;
         const bytes = await options.release(context.jobId, runId);
         if (!current()) return;
+        request++; rows = rows.filter(run => run.id !== runId); publishRows();
         options.released(runId, bytes);
         await refresh();
-      } catch (error) { if (current()) options.failed(error); }
+      } catch (error) {
+        if (current()) {
+          if (releasing) { rows = rows.map(run => run.id === runId ? { ...run, cleanupError: String(error) } : run); publishRows(); }
+          options.failed(error);
+        }
+      }
       finally {
         if (pending.get(runId) === ticket) {
           pending.delete(runId);
@@ -101,16 +114,16 @@ export function mountCandidateHistory(root: HTMLElement, options: ViewOptions) {
         const row = document.createElement("article"), info = document.createElement("div"), title = document.createElement("strong"), status = document.createElement("span");
         row.className = "candidate-history-row";
         title.textContent = options.label(run);
-        status.textContent = run.released ? "产物已清理" : run.adopted ? "已采用，保留来源" : run.is_candidate === false ? "原始识别，保留来源" : ({ succeeded: "可对照", failed: "运行失败", running: "识别中", queued: "排队中" } as Record<string,string>)[run.status] ?? run.status;
+        status.textContent = run.cleanupError ? `清理失败：${run.cleanupError}` : run.cleanup_pending ? "上次清理未完成，请重试" : run.adopted ? "已采用，保留来源" : run.is_candidate === false ? "原始识别，保留来源" : ({ succeeded: "可对照", failed: "运行失败", running: "识别中", queued: "排队中" } as Record<string,string>)[run.status] ?? run.status;
         info.append(title, status); row.append(info);
         const button = (key: string, text: string) => {
           const control = document.createElement("button"); control.type = "button"; control.className = "secondary"; control.dataset[key] = run.id; control.textContent = text; row.append(control);
         };
         if (run.status === "succeeded" && run.reopenable) button("reopenRun", "对照");
-        if (run.cleanable) button("releaseRun", run.released ? "再次清理残留" : "清理产物");
+        if (run.cleanable) button("releaseRun", run.cleanup_pending || run.cleanupError ? "重试清理" : "清理产物");
         host.append(row);
       }
-      if (!runs.length) host.textContent = "还没有成功候选。";
+      if (!runs.length) host.textContent = "暂无历史候选。";
       if (focused) {
         const replacement = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => (button.dataset.reopenRun ?? button.dataset.releaseRun) === focused);
         (replacement ?? toolbar.querySelector<HTMLButtonElement>("[data-candidate-history]"))?.focus();

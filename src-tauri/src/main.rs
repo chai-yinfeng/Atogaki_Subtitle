@@ -606,12 +606,22 @@ async fn list_asr_runs(
                 && artifacts.as_ref().is_some_and(|a| {
                     a.dir.join("preview.json").is_file() || a.candidate_cues_json.is_file()
                 });
-            let cleanable =
-                candidate && !adopted && !matches!(run.status.as_str(), "running" | "queued");
+            let cleanup_pending = released
+                && artifacts
+                    .as_ref()
+                    .map(|a| a.has_releasable_payload())
+                    .transpose()
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or(false);
+            let cleanable = candidate
+                && !adopted
+                && (!released || cleanup_pending)
+                && !matches!(run.status.as_str(), "running" | "queued");
             let mut output = serde_json::to_value(run).map_err(|e| e.to_string())?;
             output["checkpoint_progress"] = progress.unwrap_or(serde_json::Value::Null);
             output["reopenable"] = reopenable.into();
             output["released"] = released.into();
+            output["cleanup_pending"] = cleanup_pending.into();
             output["adopted"] = adopted.into();
             output["is_candidate"] = candidate.into();
             output["cleanable"] = cleanable.into();

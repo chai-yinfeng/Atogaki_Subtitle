@@ -44,6 +44,20 @@ impl AsrRunArtifacts {
         Ok(artifacts)
     }
 
+    /// Release keeps only these metadata files; any other entry still needs cleanup.
+    pub fn has_releasable_payload(&self) -> Result<bool> {
+        for entry in fs::read_dir(&self.dir)? {
+            let entry = entry?;
+            if !matches!(
+                entry.file_name().to_str(),
+                Some("run.json" | "released.json" | "checkpoint-root.json")
+            ) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn write_run(&self, run: &AsrRun) -> Result<()> {
         write_json(&self.run_json, run)
     }
@@ -147,9 +161,17 @@ mod tests {
             })
             .unwrap();
 
-        assert!(artifacts.run_json.is_file());
         assert!(artifacts.timed_units_json.is_file());
         assert!(artifacts.candidate_cues_json.is_file());
+        assert!(artifacts.has_releasable_payload().unwrap());
+        fs::remove_file(&artifacts.timed_units_json).unwrap();
+        fs::remove_file(&artifacts.candidate_cues_json).unwrap();
+        fs::write(artifacts.dir.join("released.json"), "true").unwrap();
+        fs::write(artifacts.dir.join("checkpoint-root.json"), "null").unwrap();
+        assert!(!artifacts.has_releasable_payload().unwrap());
+        fs::write(artifacts.dir.join("leftover.tmp"), "partial cleanup").unwrap();
+        assert!(artifacts.has_releasable_payload().unwrap());
+        assert!(artifacts.run_json.is_file());
         assert_eq!(
             AsrRunArtifacts::open(&job, &run.id).unwrap().dir,
             artifacts.dir

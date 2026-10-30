@@ -7,7 +7,7 @@ export function mountCandidateCleanupConfirmation(root: HTMLElement) {
   const dialog = document.createElement("dialog");
   dialog.id = "candidate-cleanup-dialog";
   dialog.className = "editor-cleanup-dialog";
-  dialog.innerHTML = '<h2>清理这个未采用候选？</h2><p>释放候选的音频缓存和识别产物，保留运行摘要。清理后无法再打开该候选；当前字幕不变。</p><div class="confirmation-actions"><button type="button" class="secondary" data-cancel-cleanup>取消</button><button type="button" class="danger" data-accept-cleanup>清理产物</button></div>';
+  dialog.innerHTML = '<h2>清理这个未采用候选？</h2><p>释放候选的音频缓存和识别产物，后台保留运行摘要。清理成功后从历史候选列表移除，无法再打开；当前字幕不变。</p><div class="confirmation-actions"><button type="button" class="secondary" data-cancel-cleanup>取消</button><button type="button" class="danger" data-accept-cleanup>清理产物</button></div>';
   root.append(dialog);
   const events = new AbortController();
   let disposed = false;
