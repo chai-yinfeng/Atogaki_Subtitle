@@ -12,11 +12,11 @@ export function videoRenderTemplate(platform: string): string { return `<dialog 
             <option value="source">仅原文</option>
           </select>
         </label>
-        <label>导出质量
+        <label>视频码率档位
           <select id="video-render-quality">
-            <option value="balanced">均衡（推荐，源码率约 120%）</option>
-            <option value="compact">省空间（源码率约 75%）</option>
-            <option value="high">高质量（源码率约 180%）</option>
+            <option value="balanced">标准码率</option>
+            <option value="compact">较低码率（文件较小）</option>
+            <option value="high">较高码率（文件较大）</option>
           </select>
         </label>
         <div id="video-render-estimate" class="video-render-estimate">正在读取源视频规格…</div>
@@ -24,7 +24,8 @@ export function videoRenderTemplate(platform: string): string { return `<dialog 
           <input id="video-output-path" placeholder="选择 MP4 保存位置，或粘贴完整路径" />
         </label>
         <button id="choose-video-output" type="button" class="secondary">选择位置</button>
-        <p>${platform === "macos" ? "优先使用 VideoToolbox，失败时回退" : "使用"}内置 LGPL MPEG-4 软件编码。三档质量保持原始分辨率，明确调整目标视频码率；预计大小包含音频和约 2% 封装余量，实际结果会随画面复杂度与编码器浮动。</p>
+        <p>烧录会重新编码视频，可能进一步损失画质；提高码率也无法恢复源视频已丢失的细节。建议优先导出 SRT/ASS，搭配原视频播放。</p>
+        <p>${platform === "macos" ? "优先使用 VideoToolbox，失败时回退" : "使用"}内置 LGPL MPEG-4 软件编码。保持原分辨率；源视频码率可用时，三档目标约为其 75%／120%／180%，否则按分辨率估算。码率不保证画质，预计大小包含音频与封装余量。</p>
       </div>
       <div class="video-render-footer">
         <span id="video-render-message" role="status"></span>

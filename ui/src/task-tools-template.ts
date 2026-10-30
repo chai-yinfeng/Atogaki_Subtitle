@@ -116,11 +116,11 @@ export function taskToolsTemplate(fileManagerLabel: string): string {
             <div class="export-card-actions"><button id="edit-subtitle-styles" type="button">设置并预览…</button></div>
           </article>
           <article class="export-card">
-            <div><span class="module-number">02</span><h3>字幕文件</h3><p>按需要选择原文、译文或双语 SRT/ASS；SRT 只保留文字和时间，ASS 保留完整样式。</p></div>
+            <div><span class="module-number">02</span><h3>字幕文件</h3><p>推荐搭配原视频播放，保留原视频画质。按需要导出原文、译文或双语字幕；SRT 保留文字和时间，ASS 还保留字幕样式。</p></div>
             <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 ${fileManagerLabel} 中显示</button></div>
           </article>
           <article class="export-card">
-            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>把当前字幕和已保存样式冻结为一次独立烧录任务；提交后仍可返回字幕编辑继续工作。</p></div>
+            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>需要将字幕固定到画面时使用；重新编码可能损失画质。烧录使用提交时已保存的字幕和样式，提交后可继续编辑。</p></div>
             <div class="export-card-actions"><button id="render-video" type="button">导出带字幕视频…</button></div>
           </article>
         </div>
