@@ -94,6 +94,7 @@ import { SubtitleDrafts, cueKey, type Draft } from "./subtitle-drafts";
 import { listen } from "@tauri-apps/api/event";
 import type { PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
+import "./listening.css";
 import "./editor.css";
 import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
@@ -415,6 +416,8 @@ app.innerHTML = `
             <div><p class="eyebrow">NOW PLAYING</p><h3 id="listening-job-title">选择一个节目开始收听</h3></div>
             <button id="open-subtitle-overlay" type="button" class="secondary">打开悬浮字幕</button>
           </div>
+          <div class="listening-session">
+          <div class="listening-playback" aria-label="播放与当前句">
           <div id="listening-media-host" class="media-host"></div>
           <div class="playback-tools" aria-label="收听快捷操作">
             <button id="listening-previous-subtitle" type="button" class="secondary">上一句</button>
@@ -424,12 +427,16 @@ app.innerHTML = `
             <button id="listening-next-subtitle" type="button" class="secondary">下一句</button>
             <label>速度<select id="listening-playback-rate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
           </div>
+          <details class="listening-playback-info"><summary>播放信息与快捷键</summary>
           <p class="shortcut-help">快捷键：空格/K 播放暂停 · ←/J 与 →/L 跳 5 秒 · [ ] 切换字幕 · , . 调整速度 · O 开关悬浮字幕</p>
           <p id="listening-media-message" class="media-message">从左侧选择一个已翻译任务。</p>
+          </details>
           <div class="current-caption" aria-live="polite">
             <p id="listening-current-source">原文字幕</p>
             <p id="listening-current-translation">简体中文翻译</p>
           </div>
+          </div>
+          <div class="listening-reading" aria-label="全文阅读与收藏">
           <div id="listening-subtitle-list" class="listening-subtitle-list" aria-label="节目全文"></div>
           <div id="listening-selection-menu" class="selection-menu hidden" role="dialog" aria-label="收藏所选原文">
             <div><span>已选择</span><strong id="listening-selection-text"></strong></div>
@@ -439,6 +446,8 @@ app.innerHTML = `
               <button id="save-learning-sentence" type="button" class="secondary">收藏整句</button>
               <button id="close-learning-selection" type="button" class="secondary">取消</button>
             </div>
+          </div>
+          </div>
           </div>
         </section>
       </div>

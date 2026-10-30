@@ -1,0 +1,52 @@
+/* Keep the themed listening surface, with reading space independent of media. */
+body:has(#listening-view:not(.hidden)) { overflow: hidden; }
+.shell:has(#listening-view:not(.hidden)) {
+  height: calc(100dvh - 16px); min-height: 0; margin: 8px auto;
+  width: calc(100% - 24px); padding: 12px 16px;
+  display: flex; flex-direction: column;
+}
+.shell:has(#listening-view:not(.hidden)) > header { flex: none; padding-bottom: 8px; }
+.shell:has(#listening-view:not(.hidden)) > header h1 { font-size: 28px; }
+.shell:has(#listening-view:not(.hidden)) > .image-theme-credit { flex: none; margin: 4px 0 0; }
+#listening-view { flex: 1; min-height: 0; margin-top: 10px; display: flex; flex-direction: column; }
+#listening-view .listening-heading { flex: none; margin: 0 0 10px; }
+#listening-view .listening-heading h2 { margin: 0 0 3px; font-size: 22px; }
+#listening-view .listening-heading p { font-size: 12px; }
+#listening-view .listening-layout {
+  flex: 1; min-height: 0; gap: 12px; align-items: stretch;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+}
+#listening-view .listening-library,
+#listening-view .listening-player { min-height: 0; padding: 10px; overflow: hidden; }
+#listening-view .listening-library { position: static; display: flex; flex-direction: column; }
+#listening-view .listening-library .section-heading { flex: none; }
+#listening-view .listening-library h3 { margin: 0; }
+#listening-view .listening-job-list { min-height: 0; overflow-y: auto; align-content: start; }
+#listening-view .listening-job { padding: 9px; }
+#listening-view .listening-player { display: flex; flex-direction: column; }
+#listening-view .panel-heading { flex: none; align-items: center; margin-bottom: 8px; }
+#listening-job-title { overflow-wrap: anywhere; }
+.listening-session { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(230px, .85fr) minmax(0, 1.15fr); gap: 12px; }
+.listening-playback { min-width: 0; min-height: 0; overflow-y: auto; }
+#listening-media-host { min-height: 0; }
+#listening-media-host video { max-height: 24dvh; object-fit: contain; }
+#listening-media-host audio { margin: 12px; }
+.listening-playback .playback-tools { flex-wrap: wrap; padding-top: 8px; gap: 5px; }
+.listening-playback .loop-tools { gap: 5px; margin: 8px 0; padding-bottom: 8px; }
+.listening-playback .loop-tools button { padding: 6px 8px; font-size: 11px; }
+.listening-playback .current-caption { min-height: 0; padding: 10px 4px; font-size: 13px; }
+.listening-playback-info { font-size: 11px; }
+.listening-playback-info summary { cursor: pointer; color: var(--muted); padding: 5px 0; }
+.listening-playback-info .media-message { margin-bottom: 8px; }
+.listening-reading { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+#listening-subtitle-list { flex: 1; min-height: 0; max-height: none; margin-top: 0; align-content: start; }
+#listening-view .listening-subtitle { grid-template-columns: 56px minmax(0, 1fr); gap: 8px; padding: 10px 8px; }
+#listening-view .listening-time { grid-column: 1; grid-row: 1; align-self: start; }
+#listening-view .listening-text { grid-column: 2; grid-row: 1; }
+#listening-view .collect-learning-sentence { grid-column: 1; grid-row: 1; align-self: end; justify-self: start; padding: 3px 4px; font-size: 9px; }
+#listening-selection-menu { flex: none; position: static; max-height: 45%; overflow-y: auto; margin: 6px 0 0; padding: 8px; }
+@media (max-width: 800px) {
+  #listening-view .listening-layout { grid-template-columns: minmax(140px, 180px) minmax(0, 1fr); }
+  .listening-session { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .listening-playback { max-height: 28dvh; }
+}
