@@ -1152,3 +1152,10 @@ Tauri 36 passed／4 环境依赖 ignored；release 构建含前端类型／生�
 命令：`ATOGAKI_FFMPEG='/tmp/atogaki-editor-token-qa/Atogaki QA.app/Contents/MacOS/ffmpeg' cargo test --offline local_render_service::tests -- --include-ignored`，3 passed／0 ignored；含需显式启用的真实 sidecar 测试。根目录与 Tauri `cargo fmt --check`、`git diff --check` 通过。本轮只扩展后端回归，不改运行逻辑，也未重新安装 App。
 
 该证据证明服务层的拒绝与确认覆盖、成品可解码和源文件保留；不证明原生保存面板、覆盖确认交互、运行失败／取消时旧文件保留、崩溃窗口或 Windows 已验收。上述边界继续分别保留。
+
+
+## 2026-10-30：覆盖任务的失败与排队取消保护
+
+在同一独立 SQLite／合成视频回归中，以明确的队列记录进入实际 worker，避免通过提交后抢改冻结文件制造时序竞态。新增三种路径：冻结 ASS 不存在（渲染前校验失败）、ASS 文件存在但内容非法（实际内置 FFmpeg/libass 烧录失败）、入队时已取消（不启动编码）。分别核对 failed／failed／cancelled 终态；失败记录有错误说明，已有目标视频的 sentinel 与源视频字节均保持不变，partial／previous 不存在，worker 取消标记集合清空。未修改运行时服务、数据库合同或正式数据。
+
+同一 sidecar 环境运行 `cargo test --offline local_render_service::tests -- --include-ignored`，3 passed／0 ignored；根目录与 Tauri fmt、diff 检查通过。缺失 ASS 路径不能当作 FFmpeg 运行失败证据，非法 ASS 路径才会进入实际编码调用；排队取消不能替代运行中取消。原生保存面板、运行中取消已有目标时的保护、替换文件系统故障与进程崩溃恢复仍分别待验。

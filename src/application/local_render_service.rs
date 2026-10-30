@@ -703,6 +703,72 @@ mod tests {
             String::from_utf8_lossy(&decoded.stderr)
         );
 
+        // Enter the worker with explicit queue records so invalid frozen ASS
+        // and queued cancellation are deterministic, without racing submit.
+        for (suffix, cancelled, expected_status) in [
+            ("missing-ass", false, "failed"),
+            ("invalid-ass", false, "failed"),
+            ("cancelled", true, "cancelled"),
+        ] {
+            let id = format!("render-{suffix}");
+            fs::write(&output, sentinel).unwrap();
+            let frozen_ass = root.join(format!("{suffix}.ass"));
+            if suffix == "invalid-ass" {
+                fs::write(&frozen_ass, b"not a valid ASS subtitle file").unwrap();
+            }
+            let record = database
+                .create_render_job(crate::infrastructure::local_db::NewLocalRenderJob {
+                    id: id.clone(),
+                    source_job_id: manifest.job_id.clone(),
+                    input_path: input.display().to_string(),
+                    subtitle_path: frozen_ass.display().to_string(),
+                    output_path: output.display().to_string(),
+                    subtitle_track: "bilingual".to_string(),
+                })
+                .await
+                .unwrap();
+            let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(cancelled));
+            let cancellations =
+                std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::from([
+                    (id.clone(), flag.clone()),
+                ])));
+            let (sender, receiver) = tokio::sync::mpsc::channel(1);
+            sender
+                .send(super::QueuedRender {
+                    record,
+                    duration_ms: 1000,
+                    target_video_bitrate_bps: 1_000_000,
+                    overwrite_existing: true,
+                    cancelled: flag,
+                })
+                .await
+                .unwrap();
+            drop(sender);
+            super::run_render_worker(
+                desktop_ffmpeg_path(),
+                database.clone(),
+                receiver,
+                cancellations.clone(),
+            )
+            .await;
+            let records = service.list(&manifest.job_id).await.unwrap();
+            let terminal = records.iter().find(|record| record.id == id).unwrap();
+            assert_eq!(terminal.status, expected_status);
+            if !cancelled {
+                assert!(
+                    terminal
+                        .error_message
+                        .as_deref()
+                        .is_some_and(|error| !error.is_empty())
+                );
+            }
+            assert_eq!(fs::read(&output).unwrap(), sentinel);
+            assert_eq!(fs::read(&input).unwrap(), source_bytes);
+            assert!(!temporary_output_path(&output, &id).exists());
+            assert!(!root.join(format!(".atogaki-{id}.previous.mp4")).exists());
+            assert!(cancellations.lock().await.is_empty());
+        }
+
         drop(service);
         database.close().await;
         drop(database);
