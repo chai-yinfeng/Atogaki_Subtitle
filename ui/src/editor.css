@@ -175,7 +175,9 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; background: #eceff3; }
 .repair-range-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
 .repair-range-stage { position: relative; height: clamp(140px, 24dvh, 220px); touch-action: none; }
 .repair-range-selection { position: absolute; inset: 0 auto 0; background: #245c9928; border-inline: 2px solid var(--accent); pointer-events: none; }
-.editor-repair-dialog .repair-range-handle { position: absolute; top: 0; bottom: 0; width: 18px; padding: 0; margin: 0; transform: translateX(-50%); cursor: ew-resize; color: white; background: #245c99bb; border: 1px solid #245c99; touch-action: none; }
+#karaoke-view .editor-repair-dialog .repair-range-handle { position: absolute; top: 0; bottom: 0; height: 100%; width: 18px; padding: 0; margin: 0; transform: translateX(-50%); align-self: stretch; display: flex; align-items: center; justify-content: center; cursor: ew-resize; color: white; background: linear-gradient(to right, transparent 8px, #245c99 8px, #245c99 10px, transparent 10px); border: 0; touch-action: none; }
+#karaoke-view .editor-repair-dialog .repair-range-handle[hidden] { display: none; }
+.repair-range-handle span { background: #245c99; padding: 1px 2px; border-radius: 2px; pointer-events: none; }
 #repair-range-summary { font-size: 12px; margin: 6px 0; }
 #repair-range-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 86px; overflow-y: auto; font: 12px/1.5 system-ui; background: var(--surface-soft); padding: 6px; margin: 0; }
 #repair-wave-status { font-size: 11px; margin: 4px 0; }

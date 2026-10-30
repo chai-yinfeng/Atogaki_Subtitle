@@ -22,13 +22,28 @@ const { webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE), assert = requ
    const canvas=page.locator('#karaoke-waveform'),box=await canvas.boundingBox();
    assert.ok(box.height>=140 && box.width>600);
    const oldStart=await start.inputValue(),oldEnd=await end.inputValue();
+   assert.ok((await page.locator('[data-range-edge="end"]').boundingBox()).height >= box.height-1, 'edge hot area must cover the entire vertical line');
    const handle=await page.locator('[data-range-edge="end"]').boundingBox();
-   await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
-   await page.mouse.move(handle.x+handle.width/2+16,handle.y+handle.height/2,{steps:5});await page.mouse.up();
+   await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height-6);await page.mouse.down();
+   await page.mouse.move(handle.x+handle.width/2+16,handle.y+handle.height-6,{steps:5});await page.mouse.up();
    assert.equal(await start.inputValue(),oldStart);assert.notEqual(await end.inputValue(),oldEnd);
    const heldEnd=await end.inputValue();
    await page.locator('[data-range-edge="start"]').focus();await page.keyboard.press('ArrowRight');
    assert.equal(await end.inputValue(),heldEnd);assert.equal(await start.inputValue(),'00:00:00.010');
+   const firstEdge=await page.locator('[data-range-edge="start"]').boundingBox();
+   await page.mouse.move(firstEdge.x+firstEdge.width/2,firstEdge.y+5);await page.mouse.down();
+   await page.mouse.move(firstEdge.x+firstEdge.width/2+10,firstEdge.y+5,{steps:3});await page.mouse.up();
+   assert.equal(await end.inputValue(),heldEnd);assert.notEqual(await start.inputValue(),'00:00:00.010');
+   // Waveform drags replace the whole old selection, in either direction.
+   const ms=value=>value.split(':').reduce((n,v)=>n*60+Number(v),0)*1000;
+   await page.mouse.move(box.x+box.width*.4,box.y+50);await page.mouse.down();
+   await page.mouse.move(box.x+box.width*.6,box.y+50,{steps:6});await page.mouse.up();
+   const replacedStart=ms(await start.inputValue()),replacedEnd=ms(await end.inputValue());
+   assert.ok(replacedStart>5000 && replacedEnd>replacedStart);
+   await page.mouse.move(box.x+box.width*.85,box.y+60);await page.mouse.down();
+   await page.mouse.move(box.x+box.width*.7,box.y+60,{steps:6});await page.mouse.up();
+   assert.ok(ms(await start.inputValue())>replacedEnd && ms(await end.inputValue())>ms(await start.inputValue()));
+   await end.fill(heldEnd);
    await start.fill('incomplete');assert.equal(await end.inputValue(),heldEnd);
    await start.fill('00:00:05.000');await end.fill('00:00:02.000');
    await page.locator('#preview-retranscription').click();
@@ -41,7 +56,6 @@ const { webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE), assert = requ
    const gainAfter=await page.locator('#karaoke-waveform-gain').inputValue();
    await page.locator('#retranscription-use-window').click();
    const viewport=await page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1).args.request);
-   const ms=value=>value.split(':').reduce((n,v)=>n*60+Number(v),0)*1000;
    assert.ok(Math.abs(ms(await end.inputValue())-ms(await start.inputValue())-(viewport.endMs-viewport.startMs))<2);
    const b=await canvas.boundingBox();
    await page.mouse.click(b.x+b.width*.12,b.y+10);
