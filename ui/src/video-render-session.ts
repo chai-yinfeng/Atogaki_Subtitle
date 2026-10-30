@@ -14,7 +14,7 @@ type Options = {
 export function createVideoRenderSession(options: Options) {
   let visit: Context | null = null, generation = 0, disposed = false, submitting = false, picking = false;
   let capabilities: MediaCapabilities | null = null, estimates: VideoRenderEstimate[] = [], renders: VideoRender[] = [];
-  let existingPath: string | null = null, stopPoll: (() => void) | null = null;
+  let outputRevision = 0, stopPoll: (() => void) | null = null;
   let historyRequest: { ticket: number; promise: Promise<void> } | null = null;
   const cancelling = new Set<string>();
   const current = (ticket: number) => {
@@ -46,7 +46,7 @@ export function createVideoRenderSession(options: Options) {
   };
   const close = () => {
     if (disposed) return;
-    generation++; visit = null; submitting = false; picking = false; existingPath = null; cancelling.clear();
+    generation++; visit = null; submitting = false; picking = false; outputRevision++; cancelling.clear();
     stopPoll?.(); stopPoll = null; historyRequest = null; busy(); options.view.close();
   };
   return {
@@ -56,7 +56,7 @@ export function createVideoRenderSession(options: Options) {
     async open() {
       if (disposed || visit || !guard()) return;
       visit = { ...options.context()! }; const ticket = ++generation, jobId = visit.jobId;
-      capabilities = null; estimates = []; renders = []; existingPath = null;
+      capabilities = null; estimates = []; renders = []; outputRevision++;
       options.view.output(""); options.view.message(""); options.view.open();
       options.view.capabilities(); options.view.estimates(); options.view.history(); busy();
       stopPoll = options.repeat(() => { if (current(ticket) && renders.some(r => r.status === "queued" || r.status === "running")) void refresh(); });
@@ -66,7 +66,7 @@ export function createVideoRenderSession(options: Options) {
         refresh(),
       ]);
     },
-    outputChanged() { existingPath = null; },
+    outputChanged() { outputRevision++; },
     async chooseOutput() {
       const ticket = generation; if (!current(ticket) || submitting || picking) return;
       const path = visit!.inputPath, separator = path ? Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) : -1;
@@ -75,7 +75,7 @@ export function createVideoRenderSession(options: Options) {
         const selection = await options.backend.pick(path && separator > 0 ? path.slice(0, separator) : null, options.suggestedName());
         if (!current(ticket)) return;
         if (!selection) { options.view.message("已取消选择。"); return; }
-        options.view.output(selection.path); existingPath = selection.alreadyExists ? selection.path : null;
+        options.view.output(selection.path); outputRevision++;
         options.view.message(selection.alreadyExists ? "目标文件已经存在，开始前会再次确认覆盖。" : "已选择输出位置。");
       } catch (error) { if (current(ticket)) options.view.message(`无法选择输出位置：${String(error)}`); }
       finally { if (current(ticket)) { picking = false; busy(); } }
@@ -83,23 +83,31 @@ export function createVideoRenderSession(options: Options) {
     async submit() {
       const ticket = generation; if (!canSubmit() || cancelling.size || !guard()) return;
       const draft = { ...options.view.read() }; draft.outputPath = draft.outputPath.trim();
+      const revision = outputRevision;
+      const unchanged = () => {
+        const latest = options.view.read();
+        return revision === outputRevision && latest.outputPath.trim() === draft.outputPath && latest.track === draft.track && latest.quality === draft.quality;
+      };
       if (!draft.outputPath.toLowerCase().endsWith(".mp4")) { options.view.message("输出路径必须以 .mp4 结尾。"); return; }
       submitting = true; busy();
       try {
         let overwriteExisting = false;
-        if (existingPath === draft.outputPath) {
+        const exists = await options.backend.outputExists(draft.outputPath);
+        if (!current(ticket)) return;
+        if (!unchanged()) { options.view.message("输出或烧录选项已变化，请重新确认后开始。"); return; }
+        if (!guard()) return;
+        if (exists) {
           overwriteExisting = await options.confirm({ title: "覆盖已有视频？", message: "目标视频已经存在。只有新视频烧录成功后，Atogaki 才会安全替换它。", confirmLabel: "烧录并替换", danger: true });
           if (!current(ticket)) return;
           if (!overwriteExisting) { options.view.message("已取消，现有视频不会被修改。"); return; }
         }
         if (!current(ticket) || !guard()) return;
-        const latest = options.view.read();
-        if (latest.outputPath.trim() !== draft.outputPath || latest.track !== draft.track || latest.quality !== draft.quality) { options.view.message("输出或烧录选项已变化，请重新确认后开始。"); return; }
+        if (!unchanged()) { options.view.message("输出或烧录选项已变化，请重新确认后开始。"); return; }
         options.view.message("正在准备字幕并创建烧录任务…");
         await options.backend.submit({ sourceJobId: visit!.jobId, outputPath: draft.outputPath, subtitleTrack: draft.track, quality: draft.quality, overwriteExisting });
         if (!current(ticket)) return;
-        existingPath = null; options.view.message("烧录任务已提交，可关闭窗口继续校对。"); await refresh();
-      } catch (error) { if (current(ticket)) options.view.message(`提交失败：${String(error)}`); }
+        options.view.message("烧录任务已提交，可关闭窗口继续校对。"); await refresh();
+      } catch (error) { if (current(ticket)) options.view.message(unchanged() ? `提交失败：${String(error)}` : "输出或烧录选项已变化，请重新确认后开始。"); }
       finally { if (current(ticket)) { submitting = false; busy(); } }
     },
     async cancel(renderId: string) {

@@ -2228,6 +2228,7 @@ fn main() {
             pick_hy_mt2_model_file,
             commands::subtitle_export::pick_subtitle_export_directory,
             commands::video_render::pick_video_output_file,
+            commands::video_render::video_output_exists,
             pick_vad_model_file,
             apply_glossary_to_workspace,
             current_subtitle_overlay,

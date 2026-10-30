@@ -1159,3 +1159,14 @@ Tauri 36 passed／4 环境依赖 ignored；release 构建含前端类型／生�
 在同一独立 SQLite／合成视频回归中，以明确的队列记录进入实际 worker，避免通过提交后抢改冻结文件制造时序竞态。新增三种路径：冻结 ASS 不存在（渲染前校验失败）、ASS 文件存在但内容非法（实际内置 FFmpeg/libass 烧录失败）、入队时已取消（不启动编码）。分别核对 failed／failed／cancelled 终态；失败记录有错误说明，已有目标视频的 sentinel 与源视频字节均保持不变，partial／previous 不存在，worker 取消标记集合清空。未修改运行时服务、数据库合同或正式数据。
 
 同一 sidecar 环境运行 `cargo test --offline local_render_service::tests -- --include-ignored`，3 passed／0 ignored；根目录与 Tauri fmt、diff 检查通过。缺失 ASS 路径不能当作 FFmpeg 运行失败证据，非法 ASS 路径才会进入实际编码调用；排队取消不能替代运行中取消。原生保存面板、运行中取消已有目标时的保护、替换文件系统故障与进程崩溃恢复仍分别待验。
+
+
+## 2026-10-30：粘贴视频输出路径的覆盖缺口与原生修复回归
+
+从既有合成 QA 库克隆出独立约 1.6 MB 数据，重定位副本内路径，生成 30 秒 640×360 纯色视频；首次启动前 integrity=ok、foreign key 空。正式 App／数据库不参与。原 `778d936` QA 的原生 Save 面板持续禁用，Raise、正常键盘输入、展开并选择已有输出均未恢复，故正常取消；粘贴完整既有 MP4 路径后只返回 `video render output already exists`，没有覆盖确认，烧录记录仍为 0。退出后全部 20 表、输出 sentinel、源视频和包文件不变。复现中一次使用过期 AX 编号误触播放，已暂停；不把该操作算作覆盖验证。
+
+原因是前端只记住文件选择器的 `alreadyExists`，粘贴路径及同一路径成功烧录后的下一次提交均缺少实时存在性检查。新增只读 `video_output_exists`，由集中 video-render-backend 适配；每次提交先查询，再进入同一覆盖确认。查询与确认后均核对任务访问、路径／轨道／码率与输入版本，包含改回原值的 ABA；后端提交与完成替换时的既有校验继续有效，不从错误字符串推断覆盖权限。没有增加第二套 worker 或改写事务。
+
+独立 release 候选位于 `/tmp/atogaki-render-overwrite-qa/Atogaki QA.app`，27 文件清单与签名核对通过，构建基于 `eb0fcb5` 加证据目录内 candidate.patch。实际 Tauri 窗口粘贴既有路径后出现“覆盖已有视频？”，取消后 sentinel SHA 不变、数据库 0 条烧录。再次开始并“烧录并替换”后，真实 VideoToolbox 烧录 done／progress=1，成品经 FFmpeg 完整解码通过，源视频逐字节不变，partial／previous 均不存在；重复点击开始仍出现覆盖提示，再次取消。回编辑器仍第 1 段／00:00:00.000／暂停／跟随。正常 Cmd+Q，原启动句柄退出 0，精确 PID 消失。最终仅 local_render_jobs 新增一条，其他 19 表内容／行数摘要相同，integrity=ok、foreign key 空，候选包 27 文件不变。新画质说明也已在候选原生窗口显示，正式 App 未更新。
+
+351 项前端测试、类型／生产构建、Tauri 36 passed／4 环境依赖 ignored；生产构建 WebKit 烧录工具专项通过（合成 IPC，覆盖按需挂载、覆盖取消、错误重试、进度／取消、关窗轮询释放与重开）；两套 fmt／diff 检查通过。证据 `local-artifacts/editor-native-render-overwrite-20261030/` 包括克隆／生成脚本、前后数据库摘要、修复前后 AX／截图、包 SHA、实际成品探测与校验。该回归闭合粘贴路径的原生取消／确认覆盖和重复确认，不证明系统 Save 面板恢复、运行中取消已有目标、替换崩溃窗口或 Windows。

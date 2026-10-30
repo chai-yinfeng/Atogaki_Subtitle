@@ -78,8 +78,8 @@ export function mountVideoRenderView(root: HTMLElement, options: {
     else if (button.dataset.revealRender) void session.reveal(button.dataset.revealRender);
   }, { signal: events.signal });
   path.addEventListener("input", () => session?.outputChanged(), { signal: events.signal });
-  track.addEventListener("change", () => { if (!path.value) path.placeholder = suggestedName(); }, { signal: events.signal });
-  quality.addEventListener("change", () => renderEstimate(), { signal: events.signal });
+  track.addEventListener("change", () => { session?.outputChanged(); if (!path.value) path.placeholder = suggestedName(); }, { signal: events.signal });
+  quality.addEventListener("change", () => { session?.outputChanged(); renderEstimate(); }, { signal: events.signal });
   confirm.querySelector("[data-cancel-render-confirmation]")!.addEventListener("click", () => settle(false), { signal: events.signal });
   confirm.querySelector("[data-accept-render-confirmation]")!.addEventListener("click", () => settle(true), { signal: events.signal });
   return {

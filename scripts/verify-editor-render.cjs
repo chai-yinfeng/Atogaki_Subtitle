@@ -5,11 +5,12 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright');cons
   const invoke=window.__TAURI_INTERNALS__.invoke;window.__render={history:[],fail:false};window.__test.job.input_path='/qa/input.mp4';for(const c of window.__test.cues)c.translation_stale=false;
   window.__TAURI_INTERNALS__.invoke=async(cmd,args={})=>{
    if(cmd==='get_job_detail'){const detail=structuredClone(await invoke(cmd,args));if(location.search.includes('context-stale'))detail.translation_context_stale_ids=['cue-0'];return detail;}
-   if(!['media_capabilities','video_render_estimates','list_video_renders','pick_video_output_file','submit_video_render','cancel_video_render','reveal_rendered_video'].includes(cmd))return structuredClone(await invoke(cmd,args));
+   if(!['media_capabilities','video_render_estimates','list_video_renders','pick_video_output_file','video_output_exists','submit_video_render','cancel_video_render','reveal_rendered_video'].includes(cmd))return structuredClone(await invoke(cmd,args));
    window.__test.calls.push({cmd,args});
    if(cmd==='media_capabilities')return {binary_path:'/qa/ffmpeg',version:'fixture ffmpeg',ass_filter:true,videotoolbox_encoder:false,mpeg4_encoder:true,ready_for_hard_subtitles:true};
    if(cmd==='video_render_estimates')return ['compact','balanced','high'].map((quality,i)=>({quality,width:1280,height:720,duration_ms:90000,target_video_bitrate_bps:(i+1)*1000000,estimated_audio_bitrate_bps:128000,estimated_size_bytes:20000000*(i+1),bitrate_source:'source_bitrate'}));
    if(cmd==='list_video_renders')return structuredClone(window.__render.history);
+   if(cmd==='video_output_exists')return true;
    if(cmd==='pick_video_output_file')return {path:'/qa/output.mp4',alreadyExists:true};
    if(cmd==='submit_video_render'){
     if(window.__render.fail)throw Error('fixture revision conflict');

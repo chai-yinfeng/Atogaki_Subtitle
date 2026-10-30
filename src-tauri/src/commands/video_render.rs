@@ -134,6 +134,13 @@ pub(crate) async fn pick_video_output_file(
 }
 
 #[tauri::command]
+pub(crate) async fn video_output_exists(path: String) -> Result<bool, String> {
+    tokio::fs::try_exists(path)
+        .await
+        .map_err(|error| format!("无法检查视频输出路径：{error}"))
+}
+
+#[tauri::command]
 pub(crate) fn reveal_rendered_video(path: String) -> Result<(), String> {
     reveal_in_file_manager(path, "烧录视频")
 }
