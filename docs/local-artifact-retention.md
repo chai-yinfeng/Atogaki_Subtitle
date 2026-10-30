@@ -141,12 +141,12 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 
 ## 2026-10-29：性能基线材料
 
-`editor-perf-baseline/Atogaki_Sub` 为 df5aa24 detached managed checkout，仅用于尚未完成的性能对照；node_modules 链接复用，sidecar 为 APFS clone，原 tracked 源码未修改。独立 `Atogaki Baseline QA.app` 位于共享 target/bundle，27 文件／签名及用途在 `local-artifacts/editor-baseline-comparison-20261029/`；不是新增正式 App 回退或发行副本，正式回退仍保持两份。新三档合成库／三小时 sparse WAV 为对照数据，两版共用，未复制正式数据库。失败滚动录制明确标注并保留原 trace／checksum，不作为性能通过证据。完成对照后再归档此 checkout，当前保留供后续浏览器／原生测量复用。
+`editor-perf-baseline/Atogaki_Sub` 为 df5aa24 detached managed checkout，仅用于尚未完成的性能对照；node_modules 链接复用，sidecar 为 APFS clone，原 tracked 源码未修改。独立 `Atogaki Baseline QA.app` 位于共享 target/bundle，27 文件／签名及用途在 `local-artifacts/editor-baseline-comparison-20261029/`；不是新增正式 App 回退或发行副本，正式回退仍保持两份。新三档合成库／三小时 sparse WAV 为对照数据，两版共用，未复制正式数据库。失败滚动录制明确标注并保留原 trace／checksum，不作为性能通过证据。2026-10-30 按用户收缩测试范围的要求，已归档该 managed checkout 并确认附件为 archived_worktree、原 checkout 消失；这不表示性能对照已全部通过。冻结 ui/dist 与旧版差异 sidecar 已保存于 `local-artifacts/editor-lab-retirement-20261030/`，其余相同 sidecar 可由保留 QA 恢复，生成 schema 可重建。
 
 
 ## 原生 Inspector 诊断材料轮换
 
-`/tmp/atogaki-editor-inspector-qa/Atogaki Inspector QA.app` 为 451e8ac 加构建参数 `tauri/devtools` 的独立 release 诊断包；不改业务源码，生产前端 SHA 不变，27 文件／签名及用途在 `local-artifacts/editor-native-inspector-20261029/`。仅用既有合成库，临时保留供原生页面对照；不是正式回退或新的数据库备份。
+`/tmp/atogaki-editor-inspector-qa/Atogaki Inspector QA.app` 为 451e8ac 加构建参数 `tauri/devtools` 的独立 release 诊断包；不改业务源码，生产前端 SHA 不变，27 文件／签名及用途在 `local-artifacts/editor-native-inspector-20261029/`。仅用既有合成库；2026-10-30 已停止继续对照采集，并核对清单／退出后清理临时诊断 App 及共享 bundle 副本。原始时间线、rAF 数据与构建输入保留；不是正式回退或新的数据库备份。
 
 用途完成的 `/tmp/atogaki-export-parent-qa/Atogaki QA.app`（cff9b0a 对应父窗口／批量覆盖 QA）核对无进程及全部 27 文件后移除，逻辑 101,605,358 bytes；原始全清单、源码／用途和实际移除结果保留于同目录 old-qa-cleanup.json。只减少本会话自建临时包，不处理共享构建缓存、固定 QA、正式两份回退、模型、数据库、媒体或来源不明文件。原生时间线与回调数组继续保留，采集范围和限制见[预检报告](editor-native-webkit-inspector-2026-10-29.md)。
 
@@ -159,3 +159,10 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ### 2026-10-30：本机安装与回退轮换
 
 正式 `/Applications/Atogaki.app` 已为 ac321b8，上一版 28e2909 留在 `/Applications/.Atogaki.previous.20261030-render-output`，稳定 0.1.1 仍在 `.Atogaki.previous-20261020T210406Z`。已核对完整清单后移除被替代的 e8d9a8d `.Atogaki.previous.20261029-audio-demand`（101,572,213 bytes 逻辑内容）；App 回退仍为两份。当前正式库仅设置表相较上次安装变化，一致性快照 checksum 不同，保留 34,852,864 bytes 新恢复点；没有复制模型／媒体。安装与轮换清单、checksum 在 `local-artifacts/install-backups/20261030-render-output/`，不将数据库纳入 Git，也不将 APFS 逻辑内容当作实际回收量。
+
+
+### 2026-10-30：停止扩测后的性能实验产物收尾
+
+核对完整 27 文件 SHA 和精确可执行路径无运行进程后，删除 `/tmp/atogaki-editor-inspector-qa/Atogaki Inspector QA.app` 及共享 target/bundle 中的 `Atogaki Inspector QA.app`、`Atogaki Baseline QA.app` 三份编译包，共 304,149,377 bytes 逻辑内容，不推断 APFS 实际回收量。旧基线 managed worktree 已可恢复归档；归档前 tracked 源码无修改，唯一 untracked 为既有 ui/node_modules 链接。冻结前端产物和无法由保留 QA 原字节恢复的旧 sidecar／说明另存，未复制依赖目录。
+
+清理路径、用途、逐文件 checksum、退出核对和归档证明在 `local-artifacts/editor-lab-retirement-20261030/`；原始 trace、报告、合成数据库／媒体及人工评审全部保留。正式 ac321b8、上一版／稳定版两份回退和固定隔离 QA 未改，没有新增数据库备份。此为产物收尾，不是新一轮测试，也不把未验证的性能指标记为通过。
