@@ -382,3 +382,8 @@ Cmd+Q 后首次原启动句柄仍运行，继续轮询同一 handle，第二次�
 current-3000-polling：trace 8.493 秒，输入在 +0.544–0.582 秒，就绪至发键约 46 ms，截图第 1 行移到第 5 行。导出表的 hitches-updates **0 行**；虽有全局 swap 20、displayed 19、vsync 484 行，以及明确属于宿主 PID 90094 的 CA context 201／layer 444 行，但后两表没有 surface／swap 的归属桥接。当前版旧分析器在空集合 min() 处停止，保留失败，不填 0 或沿用历史版 surface。analysis-unavailable.json 明确将 presentation_interval_p95_ms 保持 null，不能据此比较前后 P95，也不能把全局显示或 60 Hz 硬件节拍当作应用性能。下一步先建立当前窗口的显示归属，不追加相同参数的大量录制。
 
 有效基线录制墙钟 21.87 秒／trace 观察峰值 642,452,800 bytes，体积保护发送 SIGINT 后正常保存；当前版墙钟 16.07 秒／75,322,144 bytes，无中断。所有录制退出 0、未 SIGKILL；两个最终宿主原启动句柄正常退出 0，精确宿主及 recorder PID 均消失。全部 20 表内容／行数和 27 文件 SHA 不变，integrity=ok／foreign key 空。原始脚本、信号、时间、AX／截图、TOC、表导出、失败／不可用报告、包／库摘要与 SHA manifest 均在 `local-artifacts/editor-native-keyboard-frames-20261029/`。本轮无产品源码变更，前端／后端既有测试未重复运行，根目录／Tauri fmt 和 diff 检查通过。
+
+
+## 后继：原生 Web Inspector 采集预检
+
+[独立报告](editor-native-webkit-inspector-2026-10-29.md)记录真实 WKWebView 的三份时间线导出及可信 PageDown 触发的两秒原始 rAF 样本。当前单样本回调间隔 P95 18 ms，Rendering Frame 实际记录仍为 0；时间线与 performance 时钟未逐事件对应，不作为渲染／呈现 P95 或前后改善通过。下一步先补标记／request ID 对齐，再做同诊断配置的历史版和三档重复。正式 App 未改。

@@ -142,3 +142,10 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ## 2026-10-29：性能基线材料
 
 `editor-perf-baseline/Atogaki_Sub` 为 df5aa24 detached managed checkout，仅用于尚未完成的性能对照；node_modules 链接复用，sidecar 为 APFS clone，原 tracked 源码未修改。独立 `Atogaki Baseline QA.app` 位于共享 target/bundle，27 文件／签名及用途在 `local-artifacts/editor-baseline-comparison-20261029/`；不是新增正式 App 回退或发行副本，正式回退仍保持两份。新三档合成库／三小时 sparse WAV 为对照数据，两版共用，未复制正式数据库。失败滚动录制明确标注并保留原 trace／checksum，不作为性能通过证据。完成对照后再归档此 checkout，当前保留供后续浏览器／原生测量复用。
+
+
+## 原生 Inspector 诊断材料轮换
+
+`/tmp/atogaki-editor-inspector-qa/Atogaki Inspector QA.app` 为 451e8ac 加构建参数 `tauri/devtools` 的独立 release 诊断包；不改业务源码，生产前端 SHA 不变，27 文件／签名及用途在 `local-artifacts/editor-native-inspector-20261029/`。仅用既有合成库，临时保留供原生页面对照；不是正式回退或新的数据库备份。
+
+用途完成的 `/tmp/atogaki-export-parent-qa/Atogaki QA.app`（cff9b0a 对应父窗口／批量覆盖 QA）核对无进程及全部 27 文件后移除，逻辑 101,605,358 bytes；原始全清单、源码／用途和实际移除结果保留于同目录 old-qa-cleanup.json。只减少本会话自建临时包，不处理共享构建缓存、固定 QA、正式两份回退、模型、数据库、媒体或来源不明文件。原生时间线与回调数组继续保留，采集范围和限制见[预检报告](editor-native-webkit-inspector-2026-10-29.md)。

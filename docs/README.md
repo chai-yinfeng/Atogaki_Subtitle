@@ -37,6 +37,7 @@ _更新：2026-10-29_
 这些文件按提交和测试环境描述观察结果；阅读时同时看限制和待验证项。
 
 - [2026-10-29 三档生产 WebKit 对照](editor-version-comparison-2026-10-29.md)：指定基线、协议审查和成对前端指标；合成 IPC 与原生性能分别记录。
+- [原生 WKWebView 时间线预检](editor-native-webkit-inspector-2026-10-29.md)：实际页面时间线、原始回调采样与帧事件缺失；不替代成对性能验收。
 
 - [编辑窗口与交互](editor-workspace-validation.md)、[性能与接口](editor-performance-validation.md)、[本机安装与备份轮换](local-editor-installation.md)。
 - [原文保存后的上下文过期显示缺口](editor-context-stale-display-bug.md)：c360cc9 原生复现与修复边界，后台传播已生效，轻量回填及 2a82da1 原生复验通过，保留修复前后证据。
