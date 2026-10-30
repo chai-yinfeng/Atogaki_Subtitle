@@ -129,3 +129,6 @@
 核对新包和两份回退签名、旧包全清单后，仅移除被取代的 e8d9a8d `.Atogaki.previous.20261029-audio-demand`（101,572,213 bytes 逻辑内容）及本轮已正常退出的 `/tmp/atogaki-render-overwrite-qa/Atogaki QA.app`（101,635,326 bytes）；不推断 APFS 实际回收量。保留上一版 28e2909 `.Atogaki.previous.20261030-render-output` 和稳定 0.1.1 `.Atogaki.previous-20261020T210406Z`。其他 QA、恢复点、模型、媒体、采用证据与未知文件保留。
 
 私有安装／恢复脚本、27 文件 checksum、数据库摘要、实际窗口 AX／截图与轮换清单位于 `local-artifacts/install-backups/20261030-render-output/`；修复前后隔离证据在 `local-artifacts/editor-native-render-overwrite-20261030/`。本机更新不代表原生性能、异常恢复组合、系统 Save 面板或 Windows 门禁全部完成；新版人工反馈待收集。
+
+
+用户随后对 ac321b8 的“粘贴已有 MP4 路径 → 开始烧录 → 取消覆盖”回答“正常”，该新增交互的人工复验通过；不外推系统保存面板、确认覆盖、运行中取消或其他未验边界。

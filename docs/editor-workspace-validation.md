@@ -1170,3 +1170,16 @@ Tauri 36 passed／4 环境依赖 ignored；release 构建含前端类型／生�
 独立 release 候选位于 `/tmp/atogaki-render-overwrite-qa/Atogaki QA.app`，27 文件清单与签名核对通过，构建基于 `eb0fcb5` 加证据目录内 candidate.patch。实际 Tauri 窗口粘贴既有路径后出现“覆盖已有视频？”，取消后 sentinel SHA 不变、数据库 0 条烧录。再次开始并“烧录并替换”后，真实 VideoToolbox 烧录 done／progress=1，成品经 FFmpeg 完整解码通过，源视频逐字节不变，partial／previous 均不存在；重复点击开始仍出现覆盖提示，再次取消。回编辑器仍第 1 段／00:00:00.000／暂停／跟随。正常 Cmd+Q，原启动句柄退出 0，精确 PID 消失。最终仅 local_render_jobs 新增一条，其他 19 表内容／行数摘要相同，integrity=ok、foreign key 空，候选包 27 文件不变。新画质说明也已在候选原生窗口显示，正式 App 未更新。
 
 351 项前端测试、类型／生产构建、Tauri 36 passed／4 环境依赖 ignored；生产构建 WebKit 烧录工具专项通过（合成 IPC，覆盖按需挂载、覆盖取消、错误重试、进度／取消、关窗轮询释放与重开）；两套 fmt／diff 检查通过。证据 `local-artifacts/editor-native-render-overwrite-20261030/` 包括克隆／生成脚本、前后数据库摘要、修复前后 AX／截图、包 SHA、实际成品探测与校验。该回归闭合粘贴路径的原生取消／确认覆盖和重复确认，不证明系统 Save 面板恢复、运行中取消已有目标、替换崩溃窗口或 Windows。
+
+
+## 2026-10-30：本机覆盖取消人工反馈与原生布局键盘／记忆
+
+用户对已安装 ac321b8 的“粘贴已有 MP4 路径 → 开始烧录 → 取消覆盖，确认出现提示且旧文件保留”明确回答“正常”。记录这一手动路径通过，不外推实际确认覆盖、系统 Save 面板或全部文件故障。
+
+原生布局补验复用保留的 778d936 QA；核对 27 文件清单，并确认 editor-layout.ts／editor-template.ts／editor.css 与当前 5258c14 没有 diff。使用上轮独立合成视频库，不访问正式数据；没有新编译或复制 App。初始 AX 比例为视频 44／波形 34／上方 67，截图为 2360×1520 pixels。鼠标拖动接口从截图左右分隔线 [1040,600] 到 [1200,600] 立即报 `Computer Use server error -10005: noWindowsAvailable`，没有据此宣称拖动通过。首次 AX 点击 splitter 后 Right 无比例变化，未证明该方式建立了键盘焦点，不将其单独判成产品键盘故障。
+
+改走实际 Tab 焦点：点击字幕搜索，Shift+Tab 后短按 Down，上方比例 67→69；点击当前段开始时间，Shift+Tab 三次后短按 Down，波形比例 34→36；从该焦点再 Shift+Tab 六次，短按 Right，视频比例 44→46。具体 Tab 次数只适用于该合成任务与当前控件状态，不视为通用导航合同。时间输入及字幕保持原值；原生 AX 明确返回三条新比例。
+
+折叠视频与波形后当前段仍为第 1 段；正常 Cmd+Q，原启动句柄退出 0。重开同一 QA／测试库后两个折叠入口仍为“展开”，上方比例仍为 69；展开后另外两项仍为 46／36。点击“恢复默认布局”后三项恢复 44／34／67，两面板重新展开。再次正常退出 0，两个精确 PID 消失；全部 20 表内容与行数摘要相同、integrity=ok、foreign key 空，包 27 文件不变。
+
+证据 `local-artifacts/editor-native-layout-drag-20261030/` 包含源码一致性、每步 AX、截图、前后数据库／包摘要和 verification。该回归补键盘调整、重开折叠与比例记忆、按钮恢复默认；不证明鼠标拖动、小窗口／大字号全部原生场景、折叠时音频连续性或 Windows。没有修改运行代码或重新安装正式 App。
