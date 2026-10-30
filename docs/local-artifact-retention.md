@@ -171,3 +171,8 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ### 2026-10-30：收听布局本机候选轮换
 
 正式 App 已为 e103c85；上一版 ac321b8 保留在 `/Applications/.Atogaki.previous.20261030-listening`，稳定 0.1.1 回退不变。清单／签名核对后移除已替代的 28e2909 `.Atogaki.previous.20261030-render-output`（101,578,133 bytes 逻辑内容），回退仍只有两份。本轮纯布局更新没有创建数据库备份，也没有新增 QA App 副本；截图、包清单、正式库只读摘要及验证在 `local-artifacts/listening-layout-20261030/`。原数据库、媒体、模型、恢复点和采用证据未清理。
+
+
+### 2026-10-30：收听操作精简候选
+
+本机为 0e699e6，前一版 e103c85 位于 `/Applications/.Atogaki.previous.20261030-listening-controls`，稳定 0.1.1 保留。移除已替代且清单匹配的 ac321b8 `.Atogaki.previous.20261030-listening`（101,635,317 bytes 逻辑内容），仍只保留两份回退。本轮未新增数据库备份或 QA App；验证与安装记录在 `local-artifacts/listening-controls-20261030/`。尚未发布新 Release。
