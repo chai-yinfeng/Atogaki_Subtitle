@@ -38,7 +38,7 @@
 | 完成任务编辑时不周期读取全详情／原始证据，摘要轻量 | task summary 接口、task-progress；62 轮显式打开 62 次详情 | 有对应调用边界证据；恢复／采用仍保留完整校验 |
 | selectedCueId／playbackCueId／processingRange／timelineViewport 分离 | editor-session；请求任务身份／代次；后端 revision 约束 | 有源码和多组迟到返回／冲突回归；不把某一组当成所有异步路径全覆盖 |
 | 布局偏好独立版本化，不写字幕产物 | editor-layout v3 本机偏好；跨任务／折叠恢复回归 | 有证据 |
-| 同机原生滚动改善、帧耗时 P95、长任务 | [生产 WebKit 对照](editor-version-comparison-2026-10-29.md)有大列表事件窗口改善；原生已获短时关联与操作覆盖 | 旧坐标／AX 滚动受限，后继三档键盘预检已有真实位移，匹配帧对照尚未录制；浏览器 rAF 不作原生呈现／严格 TTI，Long Tasks API unsupported；采集成本仍高 |
+| 同机原生滚动改善、帧耗时 P95、长任务 | [生产 WebKit 对照](editor-version-comparison-2026-10-29.md)有大列表事件窗口改善；原生已获短时关联与操作覆盖 | 旧坐标／AX 滚动受限，后继三档键盘预检已有真实位移，3,000 段两版同步短按已落入 trace，但当前版缺少宿主到显示 surface 的桥接，匹配 P95 仍不可用；浏览器 rAF 不作原生呈现／严格 TTI，Long Tasks API unsupported；采集成本仍高 |
 | 持续内存无增长、WebContent 初段抬升归因 | 十分钟固定循环 RSS；三分钟混合 DOM；90 秒原生工具；新增十分钟／207 轮双万段生产 WebKit XPC 启动／身份／共同退出 | 部分证据，整体仍未通过：原样本 RSS 约 297→414 MiB；后继 202 轮加两分钟空闲的跟踪数组／行／媒体均可回收，RSS 自然回落后 GC 反升，不能等同 retained heap；新增原生 616 秒／53 轮三档混合加 127 秒空闲，WebContent 后半段中位约 221–233 MiB、空闲后 151 MiB，十次实际写入正确；该负载未见逐轮持续增长，全部保留对象及真实视频负载未归因 |
 
 ## 三、模块与历史设计

@@ -369,3 +369,16 @@ QA 正常退出 0，准确 PID 消失，27 包文件及前后 20 表摘要不变
 本轮只证明三档可获得真实键盘滚动，不录制 xctrace、不生成 P95，也不把 Tab 次数当成跨任务固定的可靠焦点方案。下一步对照需要先在截图确认列表焦点和稳定起点，将准备与采样分开，使用明确短按时长，并在当前版建立同样的有效位移证据；帧分析沿用已有宿主／surface／swap 匹配和缺失拒绝规则。
 
 Cmd+Q 后首次原启动句柄仍运行，继续轮询同一 handle，第二次退出 0，精确 PID 消失。退出后全部 20 表摘要相同、integrity=ok／foreign key 空，基线包 27 文件不变；未编辑／播放／调用模型，也未操作正式 App。证据 `local-artifacts/editor-native-keyboard-preflight-20261029/`。早先无有效滚动的 baseline-scroll.trace 继续无效，本次预检不使旧 trace 追溯变为性能基线。
+
+
+## 2026-10-29：同步短按录制与当前显示归属缺口
+
+对同一合成三小时 WAV／3,000 段库，先后使用原 df5aa24 包和 cff9b0a 对应候选包（既有 5b80aa0＋父窗口 patch，27 文件核对）。公开 CUA Next／durationMs=1 驱动列表，准备阶段与采样分开，截图实际确认两版发生内层滚动。两版面板高度、摘要行密度、初始滚动位置、媒体 metadata 策略及进程年龄不同；本次仅建立相同按键协议的单次观察，不能视为相同像素距离／持续负载或稳定重复实验。正式 App 未动。
+
+首次 baseline-3000 采用工具往返等待录制就绪，实际按键在 trace +21.499 秒，8.661 秒采集早已结束，明确无效。baseline-3000-synced 的 fs.watch 触发 EMFILE；重试读到已结束的 readiness，输入比 ready 晚约 33 秒，同样无效。两份保留 invalid.json 与原始 trace，不参与滚动计算。改为独立目录、局部变量、原子信号文件与有界 50 ms 轮询：录制器等待输入端 armed，CUA 只在 ready 新鲜且 capture-ended 尚未出现时发送短按；ready 超过 500 ms 或 capture 已结束即拒绝发键。等采集结束信号后才读取 AX／截图，避免采样中反复查询。
+
+最终 baseline-3000-polling：trace 8.492 秒，输入在 +0.557–0.611 秒，就绪至发键约 24 ms；实际截图内层由第 2／3 段附近移至第 4／5 段。宿主 PID 89879 的 hitches-updates 有 34 行／31 个 surface＋swap 对（3 个重复对），31 个 swap 均关联到 displayed-surfaces，缺失对 0；独立 Display／vsync 覆盖预先固定的按键后两秒窗。探索分析给出这段窗的关联呈现间隔及宿主 update duration，但它包含稀疏／空闲呈现和重复 update，不能将间隔直接视为纯滚动帧成本，也不作为完整原生 P95 或改善证明。
+
+current-3000-polling：trace 8.493 秒，输入在 +0.544–0.582 秒，就绪至发键约 46 ms，截图第 1 行移到第 5 行。导出表的 hitches-updates **0 行**；虽有全局 swap 20、displayed 19、vsync 484 行，以及明确属于宿主 PID 90094 的 CA context 201／layer 444 行，但后两表没有 surface／swap 的归属桥接。当前版旧分析器在空集合 min() 处停止，保留失败，不填 0 或沿用历史版 surface。analysis-unavailable.json 明确将 presentation_interval_p95_ms 保持 null，不能据此比较前后 P95，也不能把全局显示或 60 Hz 硬件节拍当作应用性能。下一步先建立当前窗口的显示归属，不追加相同参数的大量录制。
+
+有效基线录制墙钟 21.87 秒／trace 观察峰值 642,452,800 bytes，体积保护发送 SIGINT 后正常保存；当前版墙钟 16.07 秒／75,322,144 bytes，无中断。所有录制退出 0、未 SIGKILL；两个最终宿主原启动句柄正常退出 0，精确宿主及 recorder PID 均消失。全部 20 表内容／行数和 27 文件 SHA 不变，integrity=ok／foreign key 空。原始脚本、信号、时间、AX／截图、TOC、表导出、失败／不可用报告、包／库摘要与 SHA manifest 均在 `local-artifacts/editor-native-keyboard-frames-20261029/`。本轮无产品源码变更，前端／后端既有测试未重复运行，根目录／Tauri fmt 和 diff 检查通过。
