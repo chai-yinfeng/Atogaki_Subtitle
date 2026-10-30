@@ -32,8 +32,6 @@ body:has(#listening-view:not(.hidden)) { overflow: hidden; }
 #listening-media-host video { max-height: 24dvh; object-fit: contain; }
 #listening-media-host audio { margin: 12px; }
 .listening-playback .playback-tools { flex-wrap: wrap; padding-top: 8px; gap: 5px; }
-.listening-playback .loop-tools { gap: 5px; margin: 8px 0; padding-bottom: 8px; }
-.listening-playback .loop-tools button { padding: 6px 8px; font-size: 11px; }
 .listening-playback .current-caption { min-height: 0; padding: 10px 4px; font-size: 13px; }
 .listening-playback-info { font-size: 11px; }
 .listening-playback-info summary { cursor: pointer; color: var(--muted); padding: 5px 0; }

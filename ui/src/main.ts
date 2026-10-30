@@ -4728,7 +4728,10 @@ function runPlaybackLoopAction(action: LoopAction): LoopMessage | null {
     ? `${playbackLoop.repeat ? "循环" : "试听"} ${formatPreciseTime(playbackLoop.startMs)} → ${formatPreciseTime(playbackLoop.endMs)}`
     : loopStartMs !== null ? `A: ${formatPreciseTime(loopStartMs)}` : "循环已关闭" };
 }
-const playbackLoopView = mountPlaybackLoopView(document.querySelectorAll(".playback-tools"), runPlaybackLoopAction);
+const playbackLoopView = mountPlaybackLoopView(
+  Array.from(document.querySelectorAll(".playback-tools")).filter(host => !host.closest("#listening-view")),
+  runPlaybackLoopAction,
+);
 
 
 const presetTools = document.createElement("div");

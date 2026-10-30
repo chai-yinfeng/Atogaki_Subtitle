@@ -26,6 +26,9 @@ const path = require('node:path');
       await page.locator('#show-listening').click();
       await page.locator('[data-listen-job]').first().click();
       await page.waitForFunction(() => document.querySelector('#listening-media-host video')?.readyState >= 1);
+      assert.equal(await page.locator('#listening-view .loop-tools, #listening-view [data-loop], #listening-view .loop-state').count(), 0);
+      assert.deepEqual(await page.locator('#listening-view .playback-tools button').allTextContents(), ['上一句', '−5 秒', '播放', '+5 秒', '下一句']);
+      assert.equal(await page.locator('#listening-playback-rate').isVisible(), true);
       const measure = () => page.evaluate(() => {
         const list = document.querySelector('#listening-subtitle-list'), box = list.getBoundingClientRect();
         return { viewport: [innerWidth, innerHeight], pageHeight: document.scrollingElement.scrollHeight, pageWidth: document.scrollingElement.scrollWidth, listTop: box.top, listBottom: box.bottom, listHeight: list.clientHeight, rows: list.children.length, libraryHeight: document.querySelector('#listening-job-list').clientHeight };

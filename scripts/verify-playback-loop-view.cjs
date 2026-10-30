@@ -15,7 +15,7 @@ const assert=require('node:assert/strict');
   await page.waitForFunction(()=>{const a=document.querySelector('#karaoke-media-host audio');return !a.seeking&&!a.paused&&a.currentTime>=3&&a.currentTime<3.4;});
   await audio.evaluate(a=>a.currentTime=5.9);await page.waitForFunction(()=>{const a=document.querySelector('#karaoke-media-host audio');return a.currentTime>=3&&a.currentTime<3.4;});
   await click('off');assert.equal(await message(),'循环已关闭');
-  await click('b');assert.match(await message(),/请先设置早于 B 的 A 点/);assert.ok((await page.locator('.loop-state').allTextContents()).some(text=>text==='循环已关闭'),'invalid B message stays local');
+  await click('b');assert.match(await message(),/请先设置早于 B 的 A 点/); // Multi-host local-message isolation is checked below; listening has no loop tools.
   await seek(3.5);await click('a');assert.equal(await message(),'A: 00:00:03.500');await seek(4.5);await click('b');assert.equal(await message(),'循环 00:00:03.500 → 00:00:04.500');await click('off');
   await seek(3.5);await click('head');assert.equal(await message(),'试听 00:00:02.500 → 00:00:04.000');await audio.evaluate(a=>a.currentTime=4.1);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio').paused);
   await seek(3.5);await click('tail');assert.equal(await message(),'试听 00:00:04.800 → 00:00:06.300');await audio.evaluate(a=>a.currentTime=6.4);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio').paused);
