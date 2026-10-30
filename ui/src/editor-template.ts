@@ -40,8 +40,8 @@ export function editorTemplate(primaryShortcutModifier: string): string {
 
       <dialog id="editor-repair-dialog" class="editor-repair-dialog"><div class="dialog-heading"><h2>重新识别与复核</h2><button type="button" class="secondary" data-editor-action="close-repair">关闭</button></div><div class="karaoke-repair-drawer">
 <div class="repair-range-picker" aria-label="图形化识别选区">
-  <div class="repair-range-toolbar"><button type="button" class="secondary" data-range-pan="-1">← 前一屏</button><label>时间缩放<input id="repair-range-zoom" type="range" min="0" max="100" aria-label="识别选区时间缩放"></label><button type="button" class="secondary" data-range-pan="1">后一屏 →</button><button type="button" id="repair-range-audition" class="secondary">试听选区</button><button type="button" id="repair-range-stop" class="secondary">停止试听</button></div>
-  <div class="repair-range-stage"><canvas id="repair-range-canvas" aria-label="识别范围波形与字幕时间轴"></canvas><div class="repair-range-selection"></div><button type="button" data-range-edge="start" class="repair-range-handle">起</button><button type="button" data-range-edge="end" class="repair-range-handle">止</button></div>
+  <div class="repair-range-toolbar"><button type="button" id="repair-range-audition" class="secondary">试听选区</button><button type="button" id="repair-range-stop" class="secondary">停止试听</button></div>
+  <div id="repair-timeline-host"><div class="repair-range-stage"><div class="repair-range-selection"></div><button type="button" data-range-edge="start" class="repair-range-handle">起</button><button type="button" data-range-edge="end" class="repair-range-handle">止</button></div></div>
   <p id="repair-wave-status" class="media-message"></p><p id="repair-range-summary" aria-live="polite"></p><pre id="repair-range-text"></pre>
 </div>
             <div class="retranscription-range" aria-labelledby="retranscription-heading">

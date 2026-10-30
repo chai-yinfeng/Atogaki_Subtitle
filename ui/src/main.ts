@@ -99,6 +99,7 @@ import "./editor.css";
 import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
 import { mountListeningLayout } from "./listening-layout";
+import { alignRepairRange } from "./repair-range";
 import { mountEditorRangePicker } from "./editor-range-picker";
 import { mountEditorLayout } from "./editor-layout";
 import { mountEditorCueList } from "./editor-cue-list";
@@ -1110,8 +1111,6 @@ const glossaryCorrectionTool = mountToolDialog(glossaryCorrectionDialog!, () => 
 const cleanupConfirmation = mountCandidateCleanupConfirmation(shell!);
 const repairTool = mountToolDialog(editorRepairDialog, () => {
   repairRangePicker.close();
-  if (repairPlayed) mediaPlayer.seek(repairReturnPosition);
-  repairPlayed = false;
   reviewSignals.clear(); candidateHistory.clear();
 }, () => !cleanupConfirmation.open);
 const processingBackend = createProcessingBackend(invoke);
@@ -1163,14 +1162,15 @@ const candidateHistory = mountCandidateHistory(editorRepairDialog.querySelector<
   cancel: () => void editorProcessing.cancel(),
   reopen: runId => { void editorProcessing.reopen(runId); },
 });
-let repairAudition = false, repairPlayed = false, repairReturnPosition = 0;
+let repairAudition = false;
 const repairRangePicker = mountEditorRangePicker(editorRepairDialog, {
   context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId,
     durationMs: editorWaveform.window?.duration_ms || Math.max(0, ...activeDetail.segments.map(cue => cue.end_ms)), cues: activeDetail.segments } : null,
-  request: editorBackend.waveform, time: formatPreciseTime, parse: parseTimecode,
-  position: () => repairAudition ? mediaPlayer.positionMs : -1,
+  canvas: karaokeWaveform!,
+  timeline: () => ({ waveform: editorWaveform.window, startMs: editorWaveform.startMs, endMs: editorWaveform.startMs + karaokeWindowDurationMs() }),
+  time: formatPreciseTime, parse: parseTimecode,
   changed: () => { activeRepairSignalId = null; if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false; if (repairAudition) stopRepairAudition(); },
-  audition: range => { playbackLoop = { ...range, repeat: false }; repairAudition = true; repairPlayed = true; seekTo(range.startMs); },
+  audition: range => { playbackLoop = { ...range, repeat: false }; repairAudition = true; seekTo(range.startMs); },
   stop: stopRepairAudition,
 });
 function stopRepairAudition(): void {
@@ -1183,7 +1183,7 @@ const reviewSignals = mountReviewSignals(editorRepairDialog, {
   locate: signal => {
     if (currentArea !== "karaoke" || signal.start_ms === null) return;
     mediaPlayer.media?.pause(); karaokeFollowPlayhead = false; syncTimelineFollowState();
-    repairPlayed = false; repairTool.close();
+    repairTool.close();
     seekTo(signal.start_ms, false); updateActiveSubtitle(signal.start_ms);
     void loadKaraokeWaveform(signal.start_ms);
     if (editorRoot.classList.contains("editor-waveform-hidden")) editorRoot.querySelector<HTMLButtonElement>('[data-editor-toggle="waveform"]')?.click();
@@ -1195,12 +1195,11 @@ const reviewSignals = mountReviewSignals(editorRepairDialog, {
     retranscriptionStartInput.value = formatPreciseTime(signal.start_ms);
     retranscriptionEndInput.value = formatPreciseTime(signal.end_ms);
     setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
-    repairRangePicker.sync(true);
+    repairRangePicker.sync();
     retranscriptionStartInput.focus();
   },
 });
 function openEditorRepair(): void {
-  repairReturnPosition = mediaPlayer.positionMs; repairPlayed = false;
   mediaPlayer.media?.pause();
   const cue = karaokeDraftSegment();
   if (retranscriptionStartInput && retranscriptionEndInput) {
@@ -3090,7 +3089,7 @@ function usePlayheadSubtitleForRetranscription(reportGap = true): void {
   activeRepairSignalId = null;
   retranscriptionStartInput.value = formatPreciseTime(segment.start_ms);
   retranscriptionEndInput.value = formatPreciseTime(segment.end_ms);
-  repairRangePicker.sync(true);
+  repairRangePicker.sync();
   setRetranscriptionMessage(`已选第 ${segment.segment_index + 1} 段完整字幕。选择识别方式后预览候选；Gemini 仍需本次上传授权。`);
 }
 
@@ -3098,9 +3097,9 @@ function useVisibleWindowForRetranscription(): void {
   if(authorizeGeminiUpload)authorizeGeminiUpload.checked=false;
   activeRepairSignalId=null;
   if (!editorWaveform.window || !retranscriptionStartInput || !retranscriptionEndInput) return;
-  retranscriptionStartInput.value = formatPreciseTime(editorWaveform.window.start_ms);
-  retranscriptionEndInput.value = formatPreciseTime(editorWaveform.window.end_ms);
-  repairRangePicker.sync(true);
+  retranscriptionStartInput.value = formatPreciseTime(editorWaveform.startMs);
+  retranscriptionEndInput.value = formatPreciseTime(Math.min(editorWaveform.window.duration_ms, editorWaveform.startMs + karaokeWindowDurationMs()));
+  repairRangePicker.sync();
   setRetranscriptionMessage("已填写当前可视范围；若边界穿过字幕，请显式对齐到完整字幕块。");
 }
 
@@ -3120,19 +3119,12 @@ function expandRetranscriptionRangeToSegments(): void {
   if (!activeDetail || !retranscriptionStartInput || !retranscriptionEndInput) return;
   const range = retranscriptionRange();
   if (!range) return;
-  const intersecting = activeDetail.segments.filter(
-    (segment) => segment.start_ms < range.endMs && segment.end_ms > range.startMs,
-  );
-  if (intersecting.length === 0) {
-    setRetranscriptionMessage("这个范围没有相交字幕块，边界保持不变。可用于补识别字幕空白。", false);
-    return;
-  }
-  const startMs = Math.min(range.startMs, ...intersecting.map((segment) => segment.start_ms));
-  const endMs = Math.max(range.endMs, ...intersecting.map((segment) => segment.end_ms));
+  const duration = editorWaveform.window?.duration_ms ?? Math.max(range.endMs, ...activeDetail.segments.map(cue => cue.end_ms));
+  const { startMs, endMs } = alignRepairRange(activeDetail.segments, range, duration);
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
-  repairRangePicker.sync(true);
-  setRetranscriptionMessage(`已明确扩展到 ${intersecting.length} 个完整字幕块；不会再切穿它们。`);
+  repairRangePicker.sync();
+  setRetranscriptionMessage(`已向外对齐至 ${formatPreciseTime(startMs)} → ${formatPreciseTime(endMs)}。`);
 }
 
 async function previewSelectedRange(): Promise<void> {
@@ -3197,6 +3189,7 @@ function renderKaraokeTimeline(): void {
 }
 function paintKaraokeTimeline(): void {
   const waveform = editorWaveform.window;
+  repairRangePicker.sync();
   const drag = timelineGestures.timing;
   const all = drag?.draft ?? activeDetail?.segments ?? [];
   const original = drag?.before ?? all;
@@ -3302,7 +3295,8 @@ async function undoKaraokeTextSave(): Promise<void> {
 }
 
 function updateKaraokePosition(milliseconds: number): void {
-  if (currentArea !== "karaoke" || editorRepairDialog.open) return;
+  if (currentArea !== "karaoke") return;
+  if (editorRepairDialog.open) { editorSession.playbackCueId = subtitleAt(milliseconds)?.id ?? null; updateTimelinePosition(milliseconds); return; }
   if (karaokeCurrentTime) {
     const value = formatPreciseTime(milliseconds);
     if (karaokeCurrentTime.textContent !== value) karaokeCurrentTime.textContent = value;
@@ -3346,8 +3340,11 @@ function updateKaraokePosition(milliseconds: number): void {
       ? "两块之间存在空白；连接会填满静音区，因此只允许连接边界真正相接的字幕"
       : "连接相接的下一字幕块";
   }
+  updateTimelinePosition(milliseconds);
+}
+function updateTimelinePosition(milliseconds: number): void {
   const waveform = editorWaveform.window;
-  if (karaokeFollowPlayhead && waveform && !timelineGestures.active && !editorWaveform.loading && !editorRoot.classList.contains("editor-waveform-hidden")) {
+  if (karaokeFollowPlayhead && waveform && !timelineGestures.active && !editorWaveform.loading && (!editorRoot.classList.contains("editor-waveform-hidden") || editorRepairDialog.open)) {
     const anchor = waveformFollowAnchor(milliseconds, waveform, karaokeWindowDurationMs());
     if (anchor !== null) {
       void loadKaraokeWaveform(anchor);

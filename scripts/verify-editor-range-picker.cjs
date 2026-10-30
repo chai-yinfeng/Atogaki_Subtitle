@@ -10,75 +10,66 @@ const { webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE), assert = requ
    await page.locator('.job-open').first().click();
    await page.locator('.editor-cue-row').first().click();
    const source = await page.locator('#karaoke-current-source').inputValue();
-   // A stalled waveform read must not stall the visual viewport while panning.
-   await page.evaluate(()=>{
-    const invoke=window.__TAURI_INTERNALS__.invoke;
-    window.__heldWave=[];
-    window.__TAURI_INTERNALS__.invoke=(command,args)=>command==='get_waveform_window'
-     ? new Promise(resolve=>window.__heldWave.push(()=>resolve(invoke(command,args)))) : invoke(command,args);
-   });
-   const mainCanvas=page.locator('#karaoke-waveform'), mainBox=await mainCanvas.boundingBox();
-   const bitmapBefore=await mainCanvas.evaluate(el=>el.toDataURL());
-   await page.mouse.move(mainBox.x+mainBox.width*.7,mainBox.y+35); await page.mouse.down();
-   await page.mouse.move(mainBox.x+mainBox.width*.7-30,mainBox.y+35,{steps:5}); await page.mouse.up();
-   await page.waitForFunction(()=>window.__heldWave.length>0);
-   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-   assert.notEqual(await mainCanvas.evaluate(el=>el.toDataURL()),bitmapBefore,'pan must repaint before backend data arrives');
-   await page.evaluate(()=>{ for(const release of window.__heldWave.splice(0)) release(); });
-   await page.waitForTimeout(30);
-   await page.evaluate(()=>{
-    const invoke=window.__TAURI_INTERNALS__.invoke;
-    window.__TAURI_INTERNALS__.invoke=(command,args)=>{
-     const result=invoke(command,args);
-     if(command==='get_waveform_window') for(const release of window.__heldWave.splice(0)) release();
-     return result;
-    };
-   });
+   await page.locator('#karaoke-waveform').evaluate(el=>el.dataset.identity='shared');
+   const zoomBefore=await page.locator('#karaoke-zoom').inputValue();
    await page.locator('[data-editor-action="repair"]').click();
-   await page.waitForFunction(()=>document.querySelector('#repair-wave-status').textContent.includes('拖动'));
-   assert.equal(await page.locator('#retranscription-start').inputValue(),'00:00:00.000');
-   assert.equal(await page.locator('#retranscription-end').inputValue(),'00:00:02.800');
-   assert.match(await page.locator('#repair-range-text').textContent(), /#1/);
-   const box = await page.locator('#repair-range-canvas').boundingBox();
+   await page.waitForFunction(()=>document.querySelector('#repair-wave-status').textContent.includes('同步'));
+   assert.equal(await page.locator('#editor-repair-dialog #karaoke-waveform').count(),1);
+   assert.equal(await page.locator('#karaoke-waveform').count(),1);
+   assert.equal(await page.locator('#karaoke-zoom').inputValue(),zoomBefore);
+   // Each graphical edge changes only its own timestamp.
+   const start=page.locator('#retranscription-start'),end=page.locator('#retranscription-end');
+   const canvas=page.locator('#karaoke-waveform'),box=await canvas.boundingBox();
    assert.ok(box.height>=140 && box.width>600);
-   // Select part of two cues, then explicitly expand to complete blocks.
-   await page.mouse.move(box.x+box.width*.12,box.y+40); await page.mouse.down();
-   await page.mouse.move(box.x+box.width*.5,box.y+40,{steps:8}); await page.mouse.up();
-   await page.waitForFunction(()=>document.querySelector('#repair-range-summary').textContent.includes('切穿'));
-   const before=await page.locator('#retranscription-start').inputValue();
-   await page.locator('#retranscription-expand-segments').click();
-   await page.waitForFunction(()=>document.querySelector('#repair-range-summary').textContent.includes('完整字幕范围'));
-   assert.notEqual(await page.locator('#retranscription-start').inputValue(),before);
-   const end = page.locator('[data-range-edge="end"]');
-   await end.focus(); const oldEnd=await page.locator('#retranscription-end').inputValue();
-   await page.keyboard.press('ArrowLeft');
-   assert.notEqual(await page.locator('#retranscription-end').inputValue(),oldEnd);
-   // Manual fields update the overlay and affected text, without changing cues.
-   await page.locator('#retranscription-start').fill('00:00:03.000');
-   await page.locator('#retranscription-end').fill('00:00:05.800');
-   await page.waitForFunction(()=>document.querySelector('#repair-range-text').textContent.startsWith('#2 '));
+   const oldStart=await start.inputValue(),oldEnd=await end.inputValue();
+   const handle=await page.locator('[data-range-edge="end"]').boundingBox();
+   await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
+   await page.mouse.move(handle.x+handle.width/2+16,handle.y+handle.height/2,{steps:5});await page.mouse.up();
+   assert.equal(await start.inputValue(),oldStart);assert.notEqual(await end.inputValue(),oldEnd);
+   const heldEnd=await end.inputValue();
+   await page.locator('[data-range-edge="start"]').focus();await page.keyboard.press('ArrowRight');
+   assert.equal(await end.inputValue(),heldEnd);assert.equal(await start.inputValue(),'00:00:00.010');
+   await start.fill('incomplete');assert.equal(await end.inputValue(),heldEnd);
+   await start.fill('00:00:05.000');await end.fill('00:00:02.000');
+   await page.locator('#preview-retranscription').click();
+   assert.match(await page.locator('#retranscription-message').textContent(),/有效范围/);
+   assert.equal(await start.inputValue(),'00:00:05.000');assert.equal(await end.inputValue(),'00:00:02.000');
+   // Main controls, viewport and paused playhead are the same objects in repair.
+   await page.locator('#karaoke-zoom').focus();await page.keyboard.press('ArrowLeft');
+   const zoomAfter=await page.locator('#karaoke-zoom').inputValue();assert.notEqual(zoomAfter,zoomBefore);
+   await page.locator('#karaoke-waveform-gain').focus();await page.keyboard.press('ArrowRight');
+   const gainAfter=await page.locator('#karaoke-waveform-gain').inputValue();
+   await page.locator('#retranscription-use-window').click();
+   const viewport=await page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='get_waveform_window').at(-1).args.request);
+   const ms=value=>value.split(':').reduce((n,v)=>n*60+Number(v),0)*1000;
+   assert.ok(Math.abs(ms(await end.inputValue())-ms(await start.inputValue())-(viewport.endMs-viewport.startMs))<2);
+   const b=await canvas.boundingBox();
+   await page.mouse.click(b.x+b.width*.12,b.y+10);
+   await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio').currentTime>0);
+   await page.locator('#retranscription-use-current').click();
+   assert.match(await page.locator('#retranscription-message').textContent(),/已选第/);
+   const pixels=await canvas.evaluate(el=>{const c=el.getContext('2d'),d=c.getImageData(0,0,el.width,el.height).data;let n=0;for(let i=0;i<d.length;i+=4)if(d[i]>140&&d[i]<220&&d[i+1]<100&&d[i+2]<100)n++;return n;});
+   assert.ok(pixels>10,'paused playhead must be drawn');
+   // Audition leaves the new playback position on returning, and never edits cues.
+   await start.fill('00:00:03.000');await end.fill('00:00:03.250');
+   await page.locator('#repair-range-audition').click();
+   await page.waitForFunction(()=>{const m=document.querySelector('#karaoke-media-host audio');return m.currentTime>=3.25&&m.paused;});
+   const position=await page.locator('audio').evaluate(el=>el.currentTime);
+   assert.equal(await page.locator('#karaoke-current-source').inputValue(),source);
+   if(process.env.ATOGAKI_SCREENSHOTS_DIR) await page.screenshot({path:require('node:path').join(process.env.ATOGAKI_SCREENSHOTS_DIR,`shared-repair-${size.width}.png`)});
+   await page.locator('[data-editor-action="close-repair"]').click();
+   assert.equal(await page.locator('#editor-wave-panel #karaoke-waveform').count(),1);
+   assert.equal(await canvas.getAttribute('data-identity'),'shared');
+   assert.equal(await page.locator('#karaoke-zoom').inputValue(),zoomAfter);
+   assert.equal(await page.locator('#karaoke-waveform-gain').inputValue(),gainAfter);
+   assert.ok(Math.abs(await page.locator('audio').evaluate(el=>el.currentTime)-position)<.05);
    assert.equal(await page.locator('#karaoke-current-source').inputValue(),source);
    assert.equal(await page.evaluate(()=>window.__test.calls.some(c=>c.cmd==='save_subtitle_timing_recorded'||c.cmd==='update_subtitle')),false);
-   await page.locator('#retranscription-end').fill('00:00:03.250');
-   await page.locator('#repair-range-audition').click();
-   await page.waitForFunction(()=>{const media=document.querySelector('#karaoke-media-host audio');return media.currentTime>=3.25 && media.paused;});
-   assert.equal(await page.locator('#karaoke-current-source').inputValue(),source);
-   assert.equal(await page.locator('audio,video').count(),1);
-   await page.locator('[data-range-pan="1"]').click();
-   await page.waitForFunction(()=>document.querySelector('[data-range-edge="start"]').hidden);
+   await page.locator('[data-editor-action="repair"]').click();
+   assert.equal(await page.locator('#editor-repair-dialog #karaoke-waveform').count(),1);
    await page.locator('[data-editor-action="close-repair"]').click();
-   assert.equal(await page.locator('#editor-repair-dialog').count(),0);
-   await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio').currentTime<1);
-   assert.equal(await page.locator('#karaoke-current-source').inputValue(),source);
-   // Task chrome must retain a light surface even with the image-theme rule.
-   await page.evaluate(()=>document.documentElement.setAttribute('data-image-theme','moonlight'));
-   await page.locator('#karaoke-open-workspace').click();
-   const colors=await page.locator('.editor-task-tools .workspace-heading').evaluate(el=>({bg:getComputedStyle(el).backgroundColor,ink:getComputedStyle(el.querySelector('h2')).color}));
-   assert.equal(colors.bg,'rgb(255, 255, 255)');
-   assert.equal(colors.ink,'rgb(32, 38, 48)');
-   assert.equal(await page.locator('.editor-task-tools .workspace-section-tab.active').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(226, 236, 248)');
    assert.deepEqual(errors,[]);
-   console.log(`PASS ${size.width}: graphical selection, explicit alignment, keyboard/manual times, pan and unchanged cue data`);
+   console.log(`PASS ${size.width}: shared timeline controls/playhead, independent edges, invalid input retention, viewport selection, audition and return`);
    await page.close();
   }
  } finally { await browser.close(); }

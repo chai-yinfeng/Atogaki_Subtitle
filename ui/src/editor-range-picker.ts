@@ -1,66 +1,64 @@
-import { createEditorWaveform } from "./editor-waveform";
-import { mountEditorTimeline } from "./editor-timeline-view";
+import { timelineGeometry } from "./editor-timeline-view";
 import type { SubtitleSegment, WaveformWindow } from "./editor-types";
 type Range = { startMs: number; endMs: number };
 type Options = {
   context(): { jobId: string; navigation: number; durationMs: number; cues: SubtitleSegment[] } | null;
-  request(jobId: string, startMs: number, endMs: number, points: number): Promise<WaveformWindow>;
+  timeline(): { waveform: WaveformWindow | null; startMs: number; endMs: number };
+  canvas: HTMLCanvasElement;
   time(ms: number): string;
   parse(value: string): number | null;
-  position(): number;
   changed(): void;
   audition(range: Range): void;
   stop(): void;
 };
-/** A disposable read-only timeline. Only the range inputs change; cue timing never does. */
+/** Mount the single editor timeline in repair; the overlay changes range inputs, never cue timing. */
 export function mountEditorRangePicker(root: HTMLElement, options: Options) {
-  const canvas = root.querySelector<HTMLCanvasElement>("#repair-range-canvas")!;
+  const canvas = options.canvas;
+  const panel = canvas.closest<HTMLElement>(".waveform-panel")!;
+  const host = root.querySelector<HTMLElement>("#repair-timeline-host")!;
+  const panelAnchor = document.createComment("shared-timeline-home");
+  const canvasAnchor = document.createComment("shared-canvas-home");
+  panel.before(panelAnchor); canvas.before(canvasAnchor);
   const startInput = root.querySelector<HTMLInputElement>("#retranscription-start")!;
   const endInput = root.querySelector<HTMLInputElement>("#retranscription-end")!;
   const summary = root.querySelector<HTMLElement>("#repair-range-summary")!;
   const text = root.querySelector<HTMLElement>("#repair-range-text")!;
   const status = root.querySelector<HTMLElement>("#repair-wave-status")!;
-  const zoom = root.querySelector<HTMLInputElement>("#repair-range-zoom")!;
   const stage = root.querySelector<HTMLElement>(".repair-range-stage")!;
   const shade = root.querySelector<HTMLElement>(".repair-range-selection")!;
   const handles = [...root.querySelectorAll<HTMLButtonElement>("[data-range-edge]")];
   const events = new AbortController();
-  let opened = false, windowMs = 30_000, frame: number | null = null;
+  let opened = false, frame: number | null = null;
   let metadataKey = "", metadataCues: SubtitleSegment[] | null = null;
   let drag: { id: number; edge: "start" | "end" | "new"; anchor: number; start: number; end: number; width: number; left: number } | null = null;
   const range = (): Range | null => {
     const startMs = options.parse(startInput.value), endMs = options.parse(endInput.value);
     return startMs !== null && endMs !== null && startMs >= 0 && endMs > startMs ? { startMs, endMs } : null;
   };
-  const duration = () => waveform.window?.duration_ms || options.context()?.durationMs || 0;
-  const waveform = createEditorWaveform({
-    context: () => { const c = options.context(); return opened && c ? { ...c, durationMs: duration(), windowMs } : null; },
-    points: () => canvas.clientWidth * devicePixelRatio,
-    request: options.request,
-    started: () => { status.textContent = "正在读取波形…"; },
-    accepted: () => { status.textContent = "拖动两端手柄调整范围；拖动空白处重新选区；横向滚动平移。"; render(); },
-    failed: error => { status.textContent = `波形读取失败：${String(error)}`; render(); },
-  });
-  const timeline = mountEditorTimeline(canvas, root, { time: options.time, resized: () => { if (opened) render(); } });
+  const duration = () => options.timeline().waveform?.duration_ms || options.context()?.durationMs || 0;
+  const setEdge = (edge: "start" | "end", ms: number) => {
+    (edge === "start" ? startInput : endInput).value = options.time(Math.round(Math.max(0, Math.min(duration(), ms))));
+    options.changed(); render();
+  };
   const setRange = (start: number, end: number) => {
     startInput.value = options.time(Math.round(Math.max(0, start)));
     endInput.value = options.time(Math.round(Math.min(duration(), end)));
     options.changed(); render();
   };
-  const view = () => ({ startMs: waveform.startMs, endMs: waveform.startMs + windowMs });
+  const view = () => options.timeline();
   const render = () => {
     if (!opened || frame !== null) return;
     frame = requestAnimationFrame(() => {
       frame = null;
       if (!opened) return;
       const context = options.context(), selected = range(), viewport = view();
-      const cues = context?.cues.filter(cue => cue.start_ms < viewport.endMs && cue.end_ms > viewport.startMs) ?? [];
-      timeline.render({ waveform: waveform.window, viewport, cues, selectedCueId: null, draggedCueId: null, playbackCueId: null, currentMs: options.position(), gain: 1, emptyMessage: "正在准备波形…" });
+      const windowMs = viewport.endMs - viewport.startMs;
+      status.textContent = "与主时间轴同步；拖动字幕轨道选择范围，拖动波形平移，标尺定位播放头。";
       shade.hidden = !selected;
       for (const handle of handles) {
-        const ms = selected ? handle.dataset.rangeEdge === "start" ? selected.startMs : selected.endMs : -1;
+        const ms = options.parse(handle.dataset.rangeEdge === "start" ? startInput.value : endInput.value) ?? -1;
         const percent = (ms - viewport.startMs) / windowMs * 100;
-        handle.hidden = !selected || percent < 0 || percent > 100;
+        handle.hidden = ms < 0 || percent < 0 || percent > 100;
         handle.style.left = `${Math.max(0, Math.min(100, percent))}%`;
         handle.setAttribute("aria-label", `${handle.dataset.rangeEdge === "start" ? "选区开始" : "选区结束"} ${options.time(Math.max(0, ms))}`);
       }
@@ -77,66 +75,55 @@ export function mountEditorRangePicker(root: HTMLElement, options: Options) {
       text.textContent = affected.map(cue => `#${cue.segment_index + 1} ${cue.source_text}`).join("\n");
     });
   };
-  const pan = (start: number) => { waveform.schedule(Math.max(0, Math.min(Math.max(0, duration() - windowMs), start))); render(); };
   const timeAt = (x: number, left: number, width: number, start: number, end: number) => Math.round(Math.max(0, Math.min(duration(), start + Math.max(0, Math.min(1, (x - left) / Math.max(1, width))) * (end - start))));
   stage.addEventListener("pointerdown", event => {
-    if (event.button !== 0 || !waveform.window) return;
-    const bounds = canvas.getBoundingClientRect(), selected = range(), viewport = view();
+    if (event.button !== 0 || !options.timeline().waveform) return;
+    const bounds = canvas.getBoundingClientRect(), viewport = view();
     const edge = (event.target as HTMLElement).closest<HTMLElement>("[data-range-edge]")?.dataset.rangeEdge as "start" | "end" | undefined;
+    // Waveform/ruler gestures remain owned by the original timeline controller.
+    if (!edge && event.clientY - bounds.top < timelineGeometry(bounds.height).trackTop) return;
+    event.stopPropagation();
     const anchor = Math.min(Math.max(0, duration() - 1), timeAt(event.clientX, bounds.left, bounds.width, viewport.startMs, viewport.endMs));
     drag = { id: event.pointerId, edge: edge ?? "new", anchor, start: viewport.startMs, end: viewport.endMs, width: bounds.width, left: bounds.left };
-    if (!edge || !selected) setRange(anchor, Math.min(duration(), anchor + 10));
+    if (!edge) setRange(anchor, Math.min(duration(), anchor + 10));
     stage.setPointerCapture(event.pointerId); event.preventDefault(); options.stop();
-  }, { signal: events.signal });
+  }, { capture: true, signal: events.signal });
   const move = (event: PointerEvent) => {
     if (!drag || drag.id !== event.pointerId) return;
-    const selected = range(); if (!selected) return;
+    event.stopPropagation();
     const ms = timeAt(event.clientX, drag.left, drag.width, drag.start, drag.end);
-    if (drag.edge === "start") setRange(Math.min(ms, selected.endMs - 1), selected.endMs);
-    else if (drag.edge === "end") setRange(selected.startMs, Math.max(selected.startMs + 1, ms));
+    if (drag.edge === "start" || drag.edge === "end") setEdge(drag.edge, ms);
     else setRange(Math.min(ms, drag.anchor), Math.max(ms, drag.anchor) + (ms === drag.anchor ? 1 : 0));
     event.preventDefault();
   };
-  stage.addEventListener("pointermove", move, { signal: events.signal });
-  stage.addEventListener("pointerup", event => { move(event); drag = null; if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId); }, { signal: events.signal });
+  stage.addEventListener("pointermove", move, { capture: true, signal: events.signal });
+  stage.addEventListener("pointerup", event => { if (!drag) return; move(event); drag = null; if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId); }, { capture: true, signal: events.signal });
+  stage.addEventListener("click", event => { if ((event.target as HTMLElement).closest("[data-range-edge]") || event.offsetY >= timelineGeometry(canvas.clientHeight).trackTop) event.stopPropagation(); }, { capture: true, signal: events.signal });
   for (const name of ["pointercancel", "lostpointercapture"]) stage.addEventListener(name, () => { drag = null; }, { signal: events.signal });
   for (const handle of handles) handle.addEventListener("keydown", event => {
     if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-    const selected = range(); if (!selected) return;
+    const edge = handle.dataset.rangeEdge as "start" | "end";
+    const value = options.parse(edge === "start" ? startInput.value : endInput.value); if (value === null) return;
     const delta = (event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 100 : 10);
-    if (handle.dataset.rangeEdge === "start") setRange(Math.max(0, Math.min(selected.endMs - 1, selected.startMs + delta)), selected.endMs);
-    else setRange(selected.startMs, Math.max(selected.startMs + 1, Math.min(duration(), selected.endMs + delta)));
+    setEdge(edge, value + delta);
     event.preventDefault(); event.stopPropagation();
   }, { signal: events.signal });
-  canvas.addEventListener("wheel", event => {
-    if (drag) return;
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.shiftKey ? event.deltaY : 0;
-    if (delta) { pan(waveform.startMs + delta / Math.max(1, canvas.clientWidth) * windowMs); event.preventDefault(); }
-  }, { passive: false, signal: events.signal });
-  zoom.addEventListener("input", () => {
-    const center = waveform.startMs + windowMs / 2;
-    windowMs = Math.round(2000 * Math.pow(60, Number(zoom.value) / 100)); pan(center - windowMs / 2);
-  }, { signal: events.signal });
-  for (const direction of [-1, 1]) root.querySelector(`[data-range-pan="${direction}"]`)?.addEventListener("click", () => pan(waveform.startMs + direction * windowMs * .75), { signal: events.signal });
   root.querySelector("#repair-range-audition")?.addEventListener("click", () => { const selected = range(); if (selected) options.audition(selected); }, { signal: events.signal });
   root.querySelector("#repair-range-stop")?.addEventListener("click", options.stop, { signal: events.signal });
   for (const input of [startInput, endInput]) input.addEventListener("input", () => { options.changed(); render(); }, { signal: events.signal });
-  const sync = (recenter = false) => {
-    render();
-    if (opened && recenter) { const selected = range(); if (selected) void waveform.load((selected.startMs + selected.endMs) / 2); }
-  };
+  const sync = () => render();
   const close = () => {
-    opened = false; drag = null; waveform.reset(); timeline.clear(); options.stop();
+    if (!opened) return;
+    opened = false; drag = null; options.stop();
+    canvasAnchor.after(canvas); host.append(stage); panelAnchor.after(panel);
     if (frame !== null) cancelAnimationFrame(frame); frame = null;
   };
   return {
     open() {
+      if (opened) return;
       opened = true; metadataKey = "";
-      const selected = range();
-      windowMs = Math.max(8000, Math.min(120000, selected ? (selected.endMs - selected.startMs) * 3 : 30000));
-      zoom.value = String(Math.log(windowMs / 2000) / Math.log(60) * 100);
-      void waveform.load(selected ? (selected.startMs + selected.endMs) / 2 : 0); render();
+      host.append(panel); stage.prepend(canvas); canvasAnchor.after(stage); render();
     }, sync, close,
-    dispose() { close(); events.abort(); waveform.dispose(); timeline.dispose(); },
+    dispose() { close(); events.abort(); panelAnchor.remove(); canvasAnchor.remove(); },
   };
 }

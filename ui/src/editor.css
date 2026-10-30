@@ -173,11 +173,13 @@ body:has(#karaoke-view:not(.hidden)) { overflow: hidden; background: #eceff3; }
 .editor-repair-dialog { width: min(1000px, 95vw); padding: 12px; }
 .editor-repair-dialog .dialog-heading h2 { font: 600 18px system-ui, sans-serif; }
 .repair-range-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
-.repair-range-toolbar label { display: flex; gap: 6px; align-items: center; }
 .repair-range-stage { position: relative; height: clamp(140px, 24dvh, 220px); touch-action: none; }
-#repair-range-canvas { width: 100%; height: 100%; display: block; }
 .repair-range-selection { position: absolute; inset: 0 auto 0; background: #245c9928; border-inline: 2px solid var(--accent); pointer-events: none; }
 .editor-repair-dialog .repair-range-handle { position: absolute; top: 0; bottom: 0; width: 18px; padding: 0; margin: 0; transform: translateX(-50%); cursor: ew-resize; color: white; background: #245c99bb; border: 1px solid #245c99; touch-action: none; }
 #repair-range-summary { font-size: 12px; margin: 6px 0; }
 #repair-range-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 86px; overflow-y: auto; font: 12px/1.5 system-ui; background: var(--surface-soft); padding: 6px; margin: 0; }
 #repair-wave-status { font-size: 11px; margin: 4px 0; }
+/* One mounted timeline moves between the editor and repair tool. */
+#karaoke-view #repair-timeline-host .waveform-panel { height: auto; }
+#karaoke-view .repair-range-stage .karaoke-waveform { width: 100%; height: 100%; min-height: 0; }
+#editor-repair-dialog #undo-subtitle-structure { display: none; }
