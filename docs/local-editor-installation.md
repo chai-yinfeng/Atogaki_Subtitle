@@ -116,3 +116,16 @@
 新包／两份回退签名及旧回退全清单核验后，只删除被替代的 0cf72c0 `/Applications/.Atogaki.previous.20261028-wave-follow`，逻辑 101,571,957 bytes；APFS 实际回收不作推断。保留上一版 e8d9a8d `/Applications/.Atogaki.previous.20261029-audio-demand` 与稳定 0.1.1 `.Atogaki.previous-20261020T210406Z`，未持续增加 App 回退。其他数据库恢复点、模型、媒体和采用证据保留。
 
 私有清单、构建／安装脚本、恢复点复用、签名／27 文件、20 表与轮换、AX／实际查看截图、verification／manifest 位于 `local-artifacts/install-backups/20261029-audio-demand/`。本机试装通过不关闭原生 P95、TTI、首次实际加载暂态、其他 IO／原生拖动和 Windows 等门禁；新版本人工反馈待收集。
+
+
+## 2026-10-30：视频覆盖确认与画质说明（ac321b8）
+
+沿用既有本机覆盖授权，从干净 ac321b8 构建正式 identifier 的 complete 四 sidecar release。本次包含视频输出父窗口绑定、粘贴／重复输出路径的实时存在性检查与覆盖确认、请求期间选项／任务变化保护，以及推荐 SRT／ASS 搭配原视频、烧录重新编码和码率不保证保真的说明。既有紧凑布局、上下原译文、跟随和按需音频保持；351 项前端测试、类型／生产构建、Tauri 36 passed／4 环境依赖 ignored、WebKit 烧录专项及隔离实际视频取消／确认覆盖均已通过。正式构建再次完成类型／生产构建、两套 fmt／diff；公开 v0.1.2 资产未改。
+
+安装前精确进程检查确认正式 App 已退出，旧 28e2909 的 27 文件与安装清单相同，13 任务均 done。SQLite backup API 新快照 34,852,864 bytes；与上次快照 checksum 不同，旧／新表摘要仅 local_settings 改变，因此本轮保留新恢复点，未复制整个数据目录、模型或媒体。替换前再核对全部 20 表不变；源包、暂存、安装包签名与 27 文件一致，四 sidecar 与本轮 QA checksum 相同；原子重命名更新 `/Applications/Atogaki.app`，版本号仍为 0.1.2。
+
+经系统 App 入口启动显示正式数据路径和 13 任务，只读打开 Daily English Podcast 的 405 段，检查导出页和烧录界面的新说明／标准码率标签后返回编辑器；未提交烧录、字幕写入、识别或翻译请求。保留暂停 0 秒／跟随开启的窗口供用户试用；首段从 9.320 秒开始，0 秒空白区没有当前字幕符合跟随规则，不把禁用输入框误判为加载失败。安装前／替换前／打开后全部 20 表摘要相同，integrity=ok、foreign key 空，13 任务／6,887 段保留。
+
+核对新包和两份回退签名、旧包全清单后，仅移除被取代的 e8d9a8d `.Atogaki.previous.20261029-audio-demand`（101,572,213 bytes 逻辑内容）及本轮已正常退出的 `/tmp/atogaki-render-overwrite-qa/Atogaki QA.app`（101,635,326 bytes）；不推断 APFS 实际回收量。保留上一版 28e2909 `.Atogaki.previous.20261030-render-output` 和稳定 0.1.1 `.Atogaki.previous-20261020T210406Z`。其他 QA、恢复点、模型、媒体、采用证据与未知文件保留。
+
+私有安装／恢复脚本、27 文件 checksum、数据库摘要、实际窗口 AX／截图与轮换清单位于 `local-artifacts/install-backups/20261030-render-output/`；修复前后隔离证据在 `local-artifacts/editor-native-render-overwrite-20261030/`。本机更新不代表原生性能、异常恢复组合、系统 Save 面板或 Windows 门禁全部完成；新版人工反馈待收集。

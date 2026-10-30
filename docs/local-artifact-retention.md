@@ -153,4 +153,9 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 
 ### 2026-10-30：视频覆盖专项候选
 
-`/tmp/atogaki-render-overwrite-qa/Atogaki QA.app` 是本次新增临时 QA 候选，基于 eb0fcb5 加 `local-artifacts/editor-native-render-overwrite-20261030/candidate.patch`，不计入正式 App 的两份回退保留。用途为复现粘贴路径覆盖缺口并验收修复；27 文件 checksum、构建日志、实际窗口证据及独立合成数据路径在同一证据目录。当前专项已正常退出并核对 PID 消失；候选暂保留供本轮后继复验，完成候选交付后可按精确路径清理。合成数据库／视频及结果另保留为验收证据，正式库、原媒体、模型和已采用 ASR 证据不受影响。
+`/tmp/atogaki-render-overwrite-qa/Atogaki QA.app` 是本次新增临时 QA 候选，基于 eb0fcb5 加 `local-artifacts/editor-native-render-overwrite-20261030/candidate.patch`，不计入正式 App 的两份回退保留。用途为复现粘贴路径覆盖缺口并验收修复；27 文件 checksum、构建日志、实际窗口证据及独立合成数据路径在同一证据目录。当前专项已正常退出并核对 PID 消失；正式 ac321b8 安装与数据核对通过后，已按精确路径删除该临时 QA（101,635,326 bytes 逻辑内容），保留 checksum 与验收证据。合成数据库／视频及结果另保留为验收证据，正式库、原媒体、模型和已采用 ASR 证据不受影响。
+
+
+### 2026-10-30：本机安装与回退轮换
+
+正式 `/Applications/Atogaki.app` 已为 ac321b8，上一版 28e2909 留在 `/Applications/.Atogaki.previous.20261030-render-output`，稳定 0.1.1 仍在 `.Atogaki.previous-20261020T210406Z`。已核对完整清单后移除被替代的 e8d9a8d `.Atogaki.previous.20261029-audio-demand`（101,572,213 bytes 逻辑内容）；App 回退仍为两份。当前正式库仅设置表相较上次安装变化，一致性快照 checksum 不同，保留 34,852,864 bytes 新恢复点；没有复制模型／媒体。安装与轮换清单、checksum 在 `local-artifacts/install-backups/20261030-render-output/`，不将数据库纳入 Git，也不将 APFS 逻辑内容当作实际回收量。
