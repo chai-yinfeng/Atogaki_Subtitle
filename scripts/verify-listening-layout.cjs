@@ -49,6 +49,22 @@ const path = require('node:path');
         await fs.mkdir(process.env.ATOGAKI_SCREENSHOTS_DIR, { recursive: true });
         await page.screenshot({ path: path.join(process.env.ATOGAKI_SCREENSHOTS_DIR, `listening-${viewport.width}.png`) });
       }
+      const media = await page.locator('#listening-media-host video').evaluate(el => { el.dataset.layoutIdentity = 'retained'; return el.dataset.layoutIdentity; });
+      const split = page.locator('.listening-splitter');
+      await split.focus(); await page.keyboard.press('ArrowRight');
+      assert.equal(await split.getAttribute('aria-valuenow'), '45');
+      await page.locator('#listening-layout-placement').selectOption('bottom');
+      await page.waitForFunction(() => document.querySelector('.listening-session').dataset.placement === 'bottom');
+      const bottom = await measure();
+      assert.ok(bottom.listHeight >= 120 && bottom.listBottom <= viewport.height, JSON.stringify(bottom));
+      await split.focus(); await page.keyboard.press('ArrowDown');
+      assert.equal(await split.getAttribute('aria-valuenow'), '54');
+      await page.locator('#listening-layout-placement').selectOption('hidden');
+      assert.equal(await page.locator('.listening-reading').isVisible(), false);
+      await page.locator('#listening-layout-placement').selectOption('right');
+      assert.equal(await split.getAttribute('aria-valuenow'), '45');
+      assert.equal(await page.locator('#listening-media-host video').getAttribute('data-layout-identity'), media);
+      assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('atogaki.listeningLayout.v1'))), { version: 1, placement: 'right', right: 45, bottom: 54 });
       assert.deepEqual(errors, []);
       console.log(JSON.stringify(layout)); await page.close();
     }

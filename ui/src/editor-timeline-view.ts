@@ -1,6 +1,7 @@
 import type { SubtitleSegment, WaveformWindow } from "./editor-types";
 export type TimelineSnapshot = {
   waveform: WaveformWindow | null;
+  viewport?: { startMs: number; endMs: number };
   cues: readonly SubtitleSegment[];
   selectedCueId: string | null;
   draggedCueId: string | null;
@@ -78,11 +79,13 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
       return;
     }
 
-    const bitmapKey = JSON.stringify([width, height, gain, accent, accentSoft,
+    const start = snapshot.viewport?.startMs ?? waveform.start_ms;
+    const end = snapshot.viewport?.endMs ?? waveform.end_ms;
+    const bitmapKey = JSON.stringify([width, height, start, end, gain, accent, accentSoft,
       theme.getPropertyValue("--ink"), theme.getPropertyValue("--surface-soft"), activeId,
       draggedCueId,
       timelineSegments.map(cue => [cue.id, cue.start_ms, cue.end_ms, cue.source_text])]);
-    const range = waveform.end_ms - waveform.start_ms;
+    const range = end - start;
     const rulerHeight = 28;
     if (bitmapCache?.waveform === waveform && bitmapCache.key === bitmapKey) {
       context.drawImage(bitmapCache.canvas, 0, 0, cssWidth, cssHeight);
@@ -96,10 +99,12 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
       context.lineTo(cssWidth, centerY);
       context.stroke();
       context.strokeStyle = accent;
-      context.lineWidth = Math.max(1, cssWidth / waveform.peaks.length);
+      context.lineWidth = Math.max(1, cssWidth * (waveform.end_ms - waveform.start_ms) / range / waveform.peaks.length);
       context.beginPath();
       waveform.peaks.forEach((peak, index) => {
-        const x = (index + 0.5) / waveform.peaks.length * cssWidth;
+        const time = waveform.start_ms + (index + 0.5) / waveform.peaks.length * (waveform.end_ms - waveform.start_ms);
+        const x = (time - start) / range * cssWidth;
+        if (x < 0 || x > cssWidth) return;
         const minimum = Math.max(-1, peak.min * gain);
         const maximum = Math.min(1, peak.max * gain);
         context.moveTo(x, centerY + minimum * waveformHeight * 0.46);
@@ -112,7 +117,7 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
       context.textAlign = "center";
       for (let marker = 0; marker <= 5; marker += 1) {
         const x = marker / 5 * cssWidth;
-        const time = waveform.start_ms + range * marker / 5;
+        const time = start + range * marker / 5;
         context.fillText(options.time(time), Math.min(cssWidth - 45, Math.max(45, x)), 17);
         context.strokeStyle = "rgba(112, 115, 106, .2)";
         context.beginPath();
@@ -122,9 +127,9 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
       }
 
       for (const segment of timelineSegments) {
-        if (segment.end_ms < waveform.start_ms || segment.start_ms > waveform.end_ms) continue;
-        const left = Math.max(0, (segment.start_ms - waveform.start_ms) / range * cssWidth);
-        const right = Math.min(cssWidth, (segment.end_ms - waveform.start_ms) / range * cssWidth);
+        if (segment.end_ms < start || segment.start_ms > end) continue;
+        const left = Math.max(0, (segment.start_ms - start) / range * cssWidth);
+        const right = Math.min(cssWidth, (segment.end_ms - start) / range * cssWidth);
         const active = segment.id === activeId;
         context.fillStyle = active ? accent : accentSoft;
         context.strokeStyle = accent;
@@ -158,30 +163,31 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
       for (let index = 0; index + 1 < timelineSegments.length; index += 1) {
         const left = timelineSegments[index];
         const right = timelineSegments[index + 1];
-        if (left.end_ms <= right.start_ms || left.end_ms < waveform.start_ms || right.start_ms > waveform.end_ms) continue;
-        const warningLeft = Math.max(0, (right.start_ms - waveform.start_ms) / range * cssWidth);
-        const warningRight = Math.min(cssWidth, (left.end_ms - waveform.start_ms) / range * cssWidth);
+        if (left.end_ms <= right.start_ms || left.end_ms < start || right.start_ms > end) continue;
+        const warningLeft = Math.max(0, (right.start_ms - start) / range * cssWidth);
+        const warningRight = Math.min(cssWidth, (left.end_ms - start) / range * cssWidth);
         context.fillStyle = "rgba(179, 75, 54, .3)";
         context.fillRect(warningLeft, trackTop, Math.max(2, warningRight - warningLeft), trackHeight);
       }
 
-      const bitmap = document.createElement("canvas");
-      bitmap.width = width; bitmap.height = height;
-      bitmap.getContext("2d")?.drawImage(canvas, 0, 0);
-      clear();
+      const bitmap = bitmapCache?.canvas ?? document.createElement("canvas");
+      if (bitmap.width !== width || bitmap.height !== height) { bitmap.width = width; bitmap.height = height; }
+      const bitmapContext = bitmap.getContext("2d");
+      bitmapContext?.clearRect(0, 0, width, height);
+      bitmapContext?.drawImage(canvas, 0, 0);
       bitmapCache = { waveform, key: bitmapKey, canvas: bitmap };
     }
 
     const playing = timelineSegments.find(cue => cue.id === playbackCueId);
     if (playing) {
       const { trackTop, trackHeight } = timelineGeometry(cssHeight);
-      const left = Math.max(0, (playing.start_ms - waveform.start_ms) / range * cssWidth);
-      const right = Math.min(cssWidth, (playing.end_ms - waveform.start_ms) / range * cssWidth);
+      const left = Math.max(0, (playing.start_ms - start) / range * cssWidth);
+      const right = Math.min(cssWidth, (playing.end_ms - start) / range * cssWidth);
       context.strokeStyle = "#b07800"; context.lineWidth = 2;
       context.strokeRect(left + 1, trackTop + 1, Math.max(2, right - left - 2), Math.max(2, trackHeight - 2));
     }
-    if (currentMs >= waveform.start_ms && currentMs <= waveform.end_ms) {
-      const playheadX = (currentMs - waveform.start_ms) / range * cssWidth;
+    if (currentMs >= start && currentMs <= end) {
+      const playheadX = (currentMs - start) / range * cssWidth;
       context.strokeStyle = "#b34b36";
       context.lineWidth = 2;
       context.beginPath();

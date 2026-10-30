@@ -38,10 +38,16 @@ export function editorTemplate(primaryShortcutModifier: string): string {
         <section class="editor-list-panel" aria-label="字幕列表"><div class="editor-list-toolbar"><input id="editor-search" type="search" aria-label="搜索字幕" placeholder="搜索原文或译文"><select id="editor-filter" aria-label="筛选字幕"><option value="all">全部字幕</option><option value="untranslated">未翻译</option><option value="stale">译文过期</option><option value="review">待复核</option></select><span id="editor-match-count" role="status"></span><button type="button" class="secondary" data-editor-action="reveal-playing">回到播放位置</button></div><p id="editor-selection-message" role="status"></p><div class="editor-cue-header" aria-hidden="true"><span>#</span><span>起止时间</span><span>原文</span><span>译文</span><span>状态</span></div><div id="editor-cue-list" class="editor-cue-list" role="grid" aria-label="字幕列表"></div></section>
       </div>
 
-      <dialog id="editor-repair-dialog" class="editor-repair-dialog"><div class="dialog-heading"><h2>重新识别与复核</h2><button type="button" class="secondary" data-editor-action="close-repair">关闭</button></div><div class="karaoke-repair-drawer">            <div class="retranscription-range" aria-labelledby="retranscription-heading">
+      <dialog id="editor-repair-dialog" class="editor-repair-dialog"><div class="dialog-heading"><h2>重新识别与复核</h2><button type="button" class="secondary" data-editor-action="close-repair">关闭</button></div><div class="karaoke-repair-drawer">
+<div class="repair-range-picker" aria-label="图形化识别选区">
+  <div class="repair-range-toolbar"><button type="button" class="secondary" data-range-pan="-1">← 前一屏</button><label>时间缩放<input id="repair-range-zoom" type="range" min="0" max="100" aria-label="识别选区时间缩放"></label><button type="button" class="secondary" data-range-pan="1">后一屏 →</button><button type="button" id="repair-range-audition" class="secondary">试听选区</button><button type="button" id="repair-range-stop" class="secondary">停止试听</button></div>
+  <div class="repair-range-stage"><canvas id="repair-range-canvas" aria-label="识别范围波形与字幕时间轴"></canvas><div class="repair-range-selection"></div><button type="button" data-range-edge="start" class="repair-range-handle">起</button><button type="button" data-range-edge="end" class="repair-range-handle">止</button></div>
+  <p id="repair-wave-status" class="media-message"></p><p id="repair-range-summary" aria-live="polite"></p><pre id="repair-range-text"></pre>
+</div>
+            <div class="retranscription-range" aria-labelledby="retranscription-heading">
               <div><p class="eyebrow">RECOGNIZE SELECTED RANGE</p><h4 id="retranscription-heading">局部重新识别</h4><p>选一段音频重新识别，先对照原字幕，再决定是否替换。</p></div>
-              <label>开始<input id="retranscription-start" inputmode="decimal" placeholder="00:49:00.000" /></label>
-              <label>结束<input id="retranscription-end" inputmode="decimal" placeholder="00:55:00.000" /></label>
+              <label>开始<input id="retranscription-start" inputmode="decimal" placeholder="开始时间" /></label>
+              <label>结束<input id="retranscription-end" inputmode="decimal" placeholder="结束时间" /></label>
               <label>识别 provider<select id="retranscription-provider"><option value="whisper.cpp">Whisper.cpp（本地）</option><option value="gemini-transcribe">Gemini 3.5 Transcribe（云端）</option></select></label>
               <label id="gemini-upload-consent" class="clear-secret hidden"><input id="authorize-gemini-upload" type="checkbox" /><span>允许将这次所选范围的音频上传给 Google；免费层数据可能用于改进产品</span></label>
               <div class="retranscription-actions"><button id="retranscription-use-current" type="button" class="secondary">使用播放头所在字幕段</button><button id="retranscription-use-window" type="button" class="secondary">使用当前波形范围</button><button id="retranscription-expand-segments" type="button" class="secondary">对齐到完整字幕块</button><button id="preview-retranscription" type="button">识别并预览</button></div>

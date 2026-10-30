@@ -98,6 +98,8 @@ import "./listening.css";
 import "./editor.css";
 import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
+import { mountListeningLayout } from "./listening-layout";
+import { mountEditorRangePicker } from "./editor-range-picker";
 import { mountEditorLayout } from "./editor-layout";
 import { mountEditorCueList } from "./editor-cue-list";
 import { mountCurrentCueEditor } from "./current-cue-editor";
@@ -414,6 +416,7 @@ app.innerHTML = `
         <section class="listening-player">
           <div class="panel-heading compact">
             <div><p class="eyebrow">NOW PLAYING</p><h3 id="listening-job-title">选择一个节目开始收听</h3></div>
+            <label class="listening-layout-choice">全文位置<select id="listening-layout-placement"><option value="right">右侧</option><option value="bottom">下侧</option><option value="hidden">收起</option></select></label>
             <button id="open-subtitle-overlay" type="button" class="secondary">打开悬浮字幕</button>
           </div>
           <div class="listening-session">
@@ -436,6 +439,7 @@ app.innerHTML = `
             <p id="listening-current-translation">简体中文翻译</p>
           </div>
           </div>
+          <div class="listening-splitter" tabindex="0" role="separator" aria-label="调整播放与全文比例" aria-valuemin="25" aria-valuemax="75"></div>
           <div class="listening-reading" aria-label="全文阅读与收藏">
           <div id="listening-subtitle-list" class="listening-subtitle-list" aria-label="节目全文"></div>
           <div id="listening-selection-menu" class="selection-menu hidden" role="dialog" aria-label="收藏所选原文">
@@ -907,6 +911,7 @@ const editorEnd = document.querySelector<HTMLInputElement>("#editor-cue-end")!;
 let editorTimeFingerprint = "";
 const editorRepairDialog = document.querySelector<HTMLDialogElement>("#editor-repair-dialog")!;
 const editorLayout = mountEditorLayout(editorRoot);
+const listeningLayout = mountListeningLayout(document.querySelector<HTMLElement>("#listening-view")!);
 const editorMenus = mountEditorMenus(editorRoot);
 const editorWaveform = createEditorWaveform({
   context: () => activeDetail && currentArea === "karaoke" ? {
@@ -980,7 +985,7 @@ const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
 });
 const timelineGestures = mountTimelineGestures<SubtitleSegment>(karaokeWaveform!, karaokeZoomInput!, editorRoot, {
   snapshot: () => activeDetail && editorWaveform.window && currentArea === "karaoke" ? {
-    jobId: activeDetail.job.job_id, cues: activeDetail.segments, waveform: editorWaveform.window,
+    jobId: activeDetail.job.job_id, cues: activeDetail.segments, waveform: { ...editorWaveform.window, start_ms: editorWaveform.startMs, end_ms: editorWaveform.startMs + karaokeWindowDurationMs() },
     currentMs: mediaPlayer.positionMs, viewStartMs: editorWaveform.startMs, durationMs: karaokeWindowDurationMs(),
   } : null,
   select: id => {
@@ -991,7 +996,7 @@ const timelineGestures = mountTimelineGestures<SubtitleSegment>(karaokeWaveform!
   pause: () => mediaPlayer.media?.pause(),
   seek: ms => { seekTo(ms, false); updateActiveSubtitle(ms); },
   stopFollowing: () => { karaokeFollowPlayhead = false; syncTimelineFollowState(); },
-  pan: start => editorWaveform.schedule(start),
+  pan: start => { editorWaveform.schedule(start); renderKaraokeTimeline(); },
   zoomValue: () => Number(karaokeZoomInput?.value ?? "66"),
   zoom: value => { karaokeZoomInput!.value = String(value); syncKaraokeZoomLabel(); },
   zoomForDuration: karaokeZoomValueForDuration,
@@ -1103,7 +1108,12 @@ const glossaryCorrectionTool = mountToolDialog(glossaryCorrectionDialog!, () => 
   if (glossaryCorrectionMessage) glossaryCorrectionMessage.textContent = "";
 });
 const cleanupConfirmation = mountCandidateCleanupConfirmation(shell!);
-const repairTool = mountToolDialog(editorRepairDialog, () => { reviewSignals.clear(); candidateHistory.clear(); }, () => !cleanupConfirmation.open);
+const repairTool = mountToolDialog(editorRepairDialog, () => {
+  repairRangePicker.close();
+  if (repairPlayed) mediaPlayer.seek(repairReturnPosition);
+  repairPlayed = false;
+  reviewSignals.clear(); candidateHistory.clear();
+}, () => !cleanupConfirmation.open);
 const processingBackend = createProcessingBackend(invoke);
 const editorProcessing = createEditorProcessing({
   backend: processingBackend,
@@ -1153,14 +1163,29 @@ const candidateHistory = mountCandidateHistory(editorRepairDialog.querySelector<
   cancel: () => void editorProcessing.cancel(),
   reopen: runId => { void editorProcessing.reopen(runId); },
 });
+let repairAudition = false, repairPlayed = false, repairReturnPosition = 0;
+const repairRangePicker = mountEditorRangePicker(editorRepairDialog, {
+  context: () => activeDetail ? { jobId: activeDetail.job.job_id, navigation: navigationRequestId,
+    durationMs: editorWaveform.window?.duration_ms || Math.max(0, ...activeDetail.segments.map(cue => cue.end_ms)), cues: activeDetail.segments } : null,
+  request: editorBackend.waveform, time: formatPreciseTime, parse: parseTimecode,
+  position: () => repairAudition ? mediaPlayer.positionMs : -1,
+  changed: () => { activeRepairSignalId = null; if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false; if (repairAudition) stopRepairAudition(); },
+  audition: range => { playbackLoop = { ...range, repeat: false }; repairAudition = true; repairPlayed = true; seekTo(range.startMs); },
+  stop: stopRepairAudition,
+});
+function stopRepairAudition(): void {
+  if (!repairAudition) return;
+  mediaPlayer.media?.pause(); playbackLoop = null; repairAudition = false;
+}
 const reviewSignals = mountReviewSignals(editorRepairDialog, {
   time: formatPreciseTime, escape: escapeHtml,
   review: (signalId, decision) => { void saveAsrReviewDecision(signalId, decision); },
   locate: signal => {
     if (currentArea !== "karaoke" || signal.start_ms === null) return;
     mediaPlayer.media?.pause(); karaokeFollowPlayhead = false; syncTimelineFollowState();
+    repairPlayed = false; repairTool.close();
     seekTo(signal.start_ms, false); updateActiveSubtitle(signal.start_ms);
-    void loadKaraokeWaveform(signal.start_ms); repairTool.close();
+    void loadKaraokeWaveform(signal.start_ms);
     if (editorRoot.classList.contains("editor-waveform-hidden")) editorRoot.querySelector<HTMLButtonElement>('[data-editor-toggle="waveform"]')?.click();
   },
   repair: signal => {
@@ -1170,11 +1195,24 @@ const reviewSignals = mountReviewSignals(editorRepairDialog, {
     retranscriptionStartInput.value = formatPreciseTime(signal.start_ms);
     retranscriptionEndInput.value = formatPreciseTime(signal.end_ms);
     setRetranscriptionMessage("已选取待复核范围；选择识别方式后，点击“识别并预览”。当前字幕尚未修改。", false);
+    repairRangePicker.sync(true);
     retranscriptionStartInput.focus();
   },
 });
 function openEditorRepair(): void {
+  repairReturnPosition = mediaPlayer.positionMs; repairPlayed = false;
+  mediaPlayer.media?.pause();
+  const cue = karaokeDraftSegment();
+  if (retranscriptionStartInput && retranscriptionEndInput) {
+    const start = cue?.start_ms ?? Math.round(mediaPlayer.positionMs);
+    retranscriptionStartInput.value = formatPreciseTime(start);
+    retranscriptionEndInput.value = formatPreciseTime(cue?.end_ms ?? start + 1000);
+  }
+  activeRepairSignalId = null;
+  if (authorizeGeminiUpload) authorizeGeminiUpload.checked = false;
+  setRetranscriptionMessage("拖动波形选区调整识别范围；先预览候选，再决定是否替换。");
   repairTool.open();
+  repairRangePicker.open();
   editorProcessing.opened();
   if (activeDetail) void loadAsrQualitySignals(activeDetail.job.job_id);
 }
@@ -1250,6 +1288,7 @@ window.addEventListener("pagehide", () => {
   imageThemes?.dispose();
   editorControls.dispose();
   editorRepairControls.dispose();
+  repairRangePicker.dispose();
   candidateComparisonView.dispose();
   playbackShortcutView.dispose();
   playbackLoopView.dispose();
@@ -1287,8 +1326,10 @@ window.addEventListener("pagehide", () => {
   subtitleExport.dispose();
   subtitleExportView.dispose();
   editorLayout.dispose();
+  listeningLayout.dispose();
   editorMenus.dispose();
   editorFollow.dispose();
+  if (timelinePaintFrame !== null) cancelAnimationFrame(timelinePaintFrame);
   editorTimeline.dispose();
   editorWaveform.dispose();
   timelineGestures.dispose();
@@ -3049,6 +3090,7 @@ function usePlayheadSubtitleForRetranscription(reportGap = true): void {
   activeRepairSignalId = null;
   retranscriptionStartInput.value = formatPreciseTime(segment.start_ms);
   retranscriptionEndInput.value = formatPreciseTime(segment.end_ms);
+  repairRangePicker.sync(true);
   setRetranscriptionMessage(`已选第 ${segment.segment_index + 1} 段完整字幕。选择识别方式后预览候选；Gemini 仍需本次上传授权。`);
 }
 
@@ -3058,6 +3100,7 @@ function useVisibleWindowForRetranscription(): void {
   if (!editorWaveform.window || !retranscriptionStartInput || !retranscriptionEndInput) return;
   retranscriptionStartInput.value = formatPreciseTime(editorWaveform.window.start_ms);
   retranscriptionEndInput.value = formatPreciseTime(editorWaveform.window.end_ms);
+  repairRangePicker.sync(true);
   setRetranscriptionMessage("已填写当前可视范围；若边界穿过字幕，请显式对齐到完整字幕块。");
 }
 
@@ -3088,6 +3131,7 @@ function expandRetranscriptionRangeToSegments(): void {
   const endMs = Math.max(range.endMs, ...intersecting.map((segment) => segment.end_ms));
   retranscriptionStartInput.value = formatPreciseTime(startMs);
   retranscriptionEndInput.value = formatPreciseTime(endMs);
+  repairRangePicker.sync(true);
   setRetranscriptionMessage(`已明确扩展到 ${intersecting.length} 个完整字幕块；不会再切穿它们。`);
 }
 
@@ -3146,16 +3190,21 @@ async function loadKaraokeWaveform(anchorMs: number, alignStart = false): Promis
   await editorWaveform.load(anchorMs, alignStart);
 }
 
+let timelinePaintFrame: number | null = null;
 function renderKaraokeTimeline(): void {
+  if (timelinePaintFrame !== null) return;
+  timelinePaintFrame = requestAnimationFrame(() => { timelinePaintFrame = null; paintKaraokeTimeline(); });
+}
+function paintKaraokeTimeline(): void {
   const waveform = editorWaveform.window;
   const drag = timelineGestures.timing;
   const all = drag?.draft ?? activeDetail?.segments ?? [];
   const original = drag?.before ?? all;
   const index = subtitleTimeline(original);
-  const positions = new Set(waveform ? index.visible(waveform.start_ms, waveform.end_ms).map(cue => index.position(cue.id)) : []);
+  const positions = new Set(waveform ? index.visible(editorWaveform.startMs, editorWaveform.startMs + karaokeWindowDurationMs()).map(cue => index.position(cue.id)) : []);
   if (drag) positions.add(drag.segmentIndex);
   editorTimeline.render({
-    waveform, cues: [...positions].sort((a,b) => a-b).map(i => all[i]),
+    waveform, viewport: { startMs: editorWaveform.startMs, endMs: editorWaveform.startMs + karaokeWindowDurationMs() }, cues: [...positions].sort((a,b) => a-b).map(i => all[i]),
     selectedCueId: editorSession.selectedCueId, playbackCueId: editorSession.playbackCueId,
     draggedCueId: drag ? all[drag.segmentIndex]?.id ?? null : null,
     gain: karaokeWaveformGain, currentMs: Math.round(mediaPlayer.positionMs),
@@ -3253,7 +3302,7 @@ async function undoKaraokeTextSave(): Promise<void> {
 }
 
 function updateKaraokePosition(milliseconds: number): void {
-  if (currentArea !== "karaoke") return;
+  if (currentArea !== "karaoke" || editorRepairDialog.open) return;
   if (karaokeCurrentTime) {
     const value = formatPreciseTime(milliseconds);
     if (karaokeCurrentTime.textContent !== value) karaokeCurrentTime.textContent = value;
@@ -3917,6 +3966,7 @@ function updateActiveSubtitle(milliseconds: number): void {
     activeSegmentId = nextId;
     highlightSegment(nextId);
   }
+  if (editorRepairDialog.open) repairRangePicker.sync();
   updateKaraokePosition(milliseconds);
   syncSubtitleOverlay(segment);
 }
