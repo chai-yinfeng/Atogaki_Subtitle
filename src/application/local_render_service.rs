@@ -650,6 +650,59 @@ mod tests {
         }
         assert!(output.is_file());
 
+        // A completed output must survive a rejected overwrite request, and only
+        // an explicitly approved second render may replace it.
+        let source_bytes = fs::read(&input).unwrap();
+        let sentinel = b"existing user output: preserve until render succeeds";
+        fs::write(&output, sentinel).unwrap();
+        let request = |overwrite_existing| LocalRenderRequest {
+            source_job_id: manifest.job_id.clone(),
+            output_path: output.clone(),
+            subtitle_track: SubtitleTrack::Bilingual,
+            quality: LocalRenderQuality::Balanced,
+            overwrite_existing,
+        };
+        let rejected = service.submit(request(false)).await.unwrap_err();
+        assert!(rejected.to_string().contains("already exists"));
+        assert_eq!(fs::read(&output).unwrap(), sentinel);
+        assert_eq!(service.list(&manifest.job_id).await.unwrap().len(), 1);
+
+        let replacement = service.submit(request(true)).await.unwrap();
+        let mut completed = None;
+        for _ in 0..200 {
+            let current = service.list(&manifest.job_id).await.unwrap();
+            let record = current
+                .iter()
+                .find(|record| record.id == replacement.id)
+                .unwrap();
+            if matches!(record.status.as_str(), "done" | "failed" | "cancelled") {
+                completed = Some(record.clone());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let completed = completed.expect("replacement render did not finish within ten seconds");
+        assert_eq!(completed.status, "done", "{:?}", completed.error_message);
+        assert_ne!(fs::read(&output).unwrap(), sentinel);
+        assert_eq!(fs::read(&input).unwrap(), source_bytes);
+        assert!(!temporary_output_path(&output, &replacement.id).exists());
+        assert!(
+            !root
+                .join(format!(".atogaki-{}.previous.mp4", replacement.id))
+                .exists()
+        );
+        let decoded = Command::new(desktop_ffmpeg_path())
+            .args(["-v", "error", "-xerror", "-i"])
+            .arg(&output)
+            .args(["-f", "null", "-"])
+            .output()
+            .unwrap();
+        assert!(
+            decoded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&decoded.stderr)
+        );
+
         drop(service);
         database.close().await;
         drop(database);

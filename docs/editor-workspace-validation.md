@@ -1143,3 +1143,12 @@ Tauri 36 passed／4 环境依赖 ignored；release 构建含前端类型／生�
 ## 2026-10-29：用户确认正式 App 的目录选择
 
 针对“当前正式 App → 导出字幕 → 选择目录 → 切换任意可写文件夹后 Open 是否能点击”，用户明确回答“Open 正常可点”。记录该人工操作通过，不扩大为全部目录、覆盖／烧录或 cff9b0a 后继源码已验；正式 App 仍为 28e2909。隔离 CUA 面板的偶发禁用继续作为待归因的验收环境现象保留，不宣称日常导出故障或根因已修复。
+
+
+## 2026-10-30：实际 FFmpeg 服务的已有输出覆盖回归
+
+扩展 `local_render_service::tests::lgpl_sidecar_renders_a_persisted_sqlite_workspace`，在独立临时目录生成一秒合成视频并创建真实 SQLite 工作区。首次烧录完成后，将测试输出改成明确的旧文件 sentinel：`overwrite_existing=false` 返回 already exists、原字节不变、烧录记录仍只有首次一条；随后 `true` 再次通过队列和实际内置 FFmpeg 完成烧录。按新 render ID 等待终态，确认 done、旧字节被替换、成品由 FFmpeg 完整解码成功、源视频逐字节不变，partial 与 previous 文件均不存在。测试退出后清理自己创建的临时目录，不读取正式数据。
+
+命令：`ATOGAKI_FFMPEG='/tmp/atogaki-editor-token-qa/Atogaki QA.app/Contents/MacOS/ffmpeg' cargo test --offline local_render_service::tests -- --include-ignored`，3 passed／0 ignored；含需显式启用的真实 sidecar 测试。根目录与 Tauri `cargo fmt --check`、`git diff --check` 通过。本轮只扩展后端回归，不改运行逻辑，也未重新安装 App。
+
+该证据证明服务层的拒绝与确认覆盖、成品可解码和源文件保留；不证明原生保存面板、覆盖确认交互、运行失败／取消时旧文件保留、崩溃窗口或 Windows 已验收。上述边界继续分别保留。
