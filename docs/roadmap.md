@@ -1,12 +1,23 @@
 # 开发路线图
 
-_最后更新：2026-10-30_
+_最后更新：2026-11-02_
 
 本页只保留当前交付状态、下一步和未完成门禁。逐次提交与旧测试计数已完整迁入 [2026-10-25 快照](roadmap-history-2026-10-25.md)，更早历史见 [2026-10-22 快照](roadmap-history-2026-10-22.md)。归档不改变验收结论，原证据仍在原路径。
 
 本轮日常交互已由用户验收并随 v0.1.3 发行。逐项证据边界见[统一编辑器验收清单](unified-editor-acceptance.md)；未证明的性能与异常组合保留为历史证据边界，不再自动作为本轮发布待办。
 
 产品范围以[产品方向](product-direction.md)、[稳定能力矩阵](app-capability-matrix.md)与有效 ADR 为准；实验晋升继续遵循 [0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。规范、研究和验收的分类见[文档索引](README.md)。SQLite、稳定 cue ID、唯一播放器／草稿、revision 与候选采用事务继续保留；字幕 schema、导出格式和源／译对应关系未改变。
+
+## 在线研究整合与桌面接入（2026-11-02）
+
+用户已确认路线：本地Zipformer（中／英／韩）或SenseVoice滚动草稿（日语）上屏，Qwen3-ASR定稿，再由独立翻译后端生成中文；在线首版macOS Apple Silicon 14.2+。默认不保存录音，开启保存后由用户手动创建离线精修任务。产品边界及尚待讨论的实施细节见[0065](decisions/0065-online-desktop-integration.md)。
+
+- [x] 准备基于main的独立整合分支，保留研究历史和main v0.1.3进度；研究ADR0045／0046归入研究子目录解决重号，原始证据与旧环境保留。尚未更新main或本机App。
+- [x] 现有研究证据：Qwen／SenseVoice整段对照、三语言Zipformer流式、日语／英语本地two-pass及两个revision时序回归；[链路记录](two-pass-smoke-validation.md)不等于桌面验收。
+- [ ] 讨论并实现受管worker、多文件模型包、离线ASR后端与语言／用途选择；Whisper收敛至small／medium／large-v3 Q5／turbo Q8，Hy-MT2保留1.8B，已有文件不自动删除。
+- [ ] 原生系统音频采集与在线会话，明确权限、音频时钟、设备调度和停止语义；默认不保存时不自动写录音文件。
+- [ ] 独立在线控制面板与置顶字幕渲染，草稿／定稿分色并显示状态；与离线播放悬浮状态隔离。
+- [ ] 可选录音与手动创建离线精修任务；完成相应Mac实机闭环后形成main里程碑。当前不扩展Windows实时验收。
 
 ## v0.1.3 稳定发行（2026-10-30）
 

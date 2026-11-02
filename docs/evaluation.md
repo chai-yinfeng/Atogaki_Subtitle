@@ -1,6 +1,6 @@
 # 识别与翻译质量基线
 
-_最后更新：2026-09-16_
+_最后更新：2026-10-02_
 
 评估使用用户有权处理的本机媒体。媒体、裁剪、人工参考和运行结果放在 Git 忽略的 `local-artifacts/evaluation/`，仓库不保存私人绝对路径或媒体内容。公开的格式示例见 [`evaluation-manifest.example.json`](evaluation-manifest.example.json) 和 [`evaluation-reference.example.json`](evaluation-reference.example.json)。
 
@@ -62,3 +62,15 @@ scripts/prepare-translation-blind-review.py \
 脚本会先核对 cue ID、时间和原文完全一致，再按 cue 以固定 seed 打乱候选。review 文件预留遗漏／增译、专名、指代、跨 cue 连贯、自然度和修改量字段；完成评分前不要打开 answer key。
 
 manifest 中保存媒体 SHA-256、范围、角色、参考状态、历史任务目录、模型和参数快照。路径只出现在本机 manifest；提交前使用示例文件检查字段，不复制真实值。
+
+## Online 日语参考的准备
+
+不要求先准备完整标准中文翻译。ASR 的 CER 需要少量听审后的日语原文，建议从现有开发样本选累计 5–10 分钟，覆盖否定、句末谓语、专名、长句和停顿；holdout 维持不参与调参。无法听清与重叠部分显式标记，不猜写。
+
+粉丝字幕可作为 `external_candidate_reference` 辅助核对，记录媒体版本、来源与是否逐字；删减、释义、润色和字幕合并不直接作为 CER gold。只有回听确认后的原文片段提升为 verified。中文译文用于辅助审查，允许多个合理表达，不把字符匹配率当作翻译准确率。
+
+翻译先固定已校对日语原文，分别检查信息完整性、否定／程度、专名、指代和自然度，再评估端到端结果，区分 ASR 错误传播。领域专名可单独分组报告；粉丝向样本本身符合当前个人场景，但不能据此宣称泛化能力。实时中间译文按当时已到达的上下文评审，不用尚未说出的信息惩罚模型；最终结果按完整上下文评审。
+
+Gemini 3.5 Transcribe 可作为独立 `model_reference` 辅助基线，保留相同音频范围、模型／参数与未经人工复核的状态。与本地 ASR 的分歧是听审优先级，不是自动纠错依据；只有听审后的片段成为 verified。2026-10-02 用户选择先完成本地实验，Gemini 参考稍后补充；本轮不上传音频或调用 Gemini。
+
+2026-10-04 经具体范围授权完成一次 60 秒 Gemini Transcribe，并删除云端临时音频；选出其中 18.9 秒问答作 evaluation-only 对照。用户核对发现精修画面的日文与实际听感不完全一致，模型也存在交叠文本顺序／词时间倒退，故均不自动提升为 gold。该 holdout 片段已经评估曝光，后续调参转到 development 样本；完整记录见 [候选问答验证](online-paragraph-reference-validation.md)。

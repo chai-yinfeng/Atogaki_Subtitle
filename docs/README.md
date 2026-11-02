@@ -1,6 +1,6 @@
 # 文档索引
 
-_更新：2026-10-29_
+_更新：2026-11-02_
 
 当前产品行为先看产品方向、能力矩阵与最新有效 ADR；完成度看路线图，验证范围看对应记录。研究提案不表示功能已实现，单次窗口截图或测试计数也不表示全平台门禁已通过。
 
@@ -31,6 +31,13 @@ _更新：2026-10-29_
 | [0060 音频块接缝](decisions/0060-overlap-alignment-before-acoustic-selection.md) | 重叠区先对齐后选择，无法可靠匹配时保留两侧观测并进入复核 |
 | [0061 完整结构撤销](decisions/0061-transactional-structure-undo-metadata.md) | 已确认的来源／依赖恢复、单调修订与后端收据；token／UI 已接入，原生元数据恢复与即时上下文回填主要路径通过；剩余门禁见路线图 |
 | [0062 音频按需加载](decisions/0062-editor-audio-demand-loading.md) | 编辑页音轨首次播放／定位才加载，保留唯一位置边界、视频预览和原生传输证据范围 |
+
+## 在线接入与研究入口
+
+- [0065 在线桌面整合](decisions/0065-online-desktop-integration.md)：用户已确认的模型／平台／保存边界，以及尚待讨论的实施方案；当前只准备整合分支，未交付App功能。
+- [当前online研究计划](online-asr-plan.md)、[0063模型范围](decisions/0063-online-two-pass-model-selection.md)、[0064本地草稿与定稿](decisions/0064-local-drafts-and-segment-finalization.md)。
+- [Qwen MLX跑通](qwen-mlx-smoke-validation.md)、[SenseVoice对照](sensevoice-smoke-validation.md)、[two-pass与Zipformer](two-pass-smoke-validation.md)：真实运行结果和质量／计时局限。
+- [旧0045独立会话](research/decisions/0045-independent-online-experiments.md)、[旧0046受控性能](research/decisions/0046-controlled-online-asr-performance.md)：研究历史，与主线不同同号ADR分目录保留，后继范围以0063–0065为准。
 
 ## 验收证据与运行记录
 

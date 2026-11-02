@@ -1,6 +1,6 @@
 # 产品方向：多语言音视频理解工作台
 
-_最后更新：2026-10-30_
+_最后更新：2026-11-02_
 
 本文定义当前产品边界，交付进度与未完成门禁见[路线图](roadmap.md)；研究、验收与历史材料分别列于[文档索引](README.md)。
 
@@ -43,13 +43,13 @@ Windows 基础发行通过实机闭环后，日常核心开发与交互质量继
 - 当前输入：本地音频和视频文件。
 - 当前输出：可回看的双语时间轴、学习收藏、SRT、ASS 和可选的带字幕视频。
 
-### 实时辅助（离线分层之后的实验阶段）
+### 在线理解与实时字幕（方向已确认，桌面待接入）
 
-实时模式只提供低延迟的理解辅助，不承诺最终准确性。它应录制会话，并在结束后自动运行离线精修以得到最终结果。
+用户已确认将独立online研究推进到Atogaki桌面。在线首版针对macOS Apple Silicon 14.2+，采集系统输出音频并在独立置顶字幕窗显示；离线最低系统要求保持。第一遍必须本地：中／英／韩使用对应Zipformer checkpoint，日语使用SenseVoiceSmall滚动草稿；第二遍统一采用Qwen3-ASR，先接已验证的本地MLX 1.7B，翻译后端独立选择。
 
-- 可接受十几秒级延迟和较粗的转写。
-- 优先展示原文粗转写；粗翻译仅作为可选提示。
-- 任何实时结果都需要明确标注为“处理中/非最终版”。
+草稿与模型定稿以颜色及状态标识区分。设置提供独立在线控制面板，用于选择语言、模型和翻译配置、控制会话及可选录音。默认不保存录音；用户开启保存后，停止时保留本地音频，由用户手动创建离线精修任务，不自动覆盖现有字幕或运行完整离线工作流。
+
+当前证据是独立CLI实时文件回放，系统音频采集、受管模型运行、控制面板与实时置顶显示尚未进入App。研究分段仍较碎，模型定稿不等于人工核准。接入范围与待讨论的实施提案见[0065](decisions/0065-online-desktop-integration.md)，原事件边界与回放证据见[0064](decisions/0064-local-drafts-and-segment-finalization.md)。
 
 ## 产品原则
 
@@ -80,7 +80,7 @@ ASR 可疑信号、人工／自动审查和修复尝试进入正式数据模型�
 
 实时 candidate、stable、committed 与离线精修结果分开。模型、算法、部署细节和质量结论按阶段验证，不因记录方向而视为已经实现。详见 [管线演进计划](pipeline-evolution.md) 与 [决策 0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
 
-桌面产品范围从 2026-09-18 起按 [能力矩阵](app-capability-matrix.md) 冻结。后续模型、prompt、分段、translation grouping、实时协议和 commit policy 优先在 CLI／evaluation harness 中验证，不再为每轮实验增加桌面入口或独立 Test App。可复用实现继续进入 core/application，只有通过固定质量基线、失败恢复和隐私边界验收，并经过单独产品确认的能力才晋升到桌面 UI；详见 [决策 0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。
+桌面产品范围从 2026-09-18 起按 [能力矩阵](app-capability-matrix.md) 冻结。后续模型、prompt、分段、translation grouping、实时协议和 commit policy 优先在 CLI／evaluation harness 中验证，不再为每轮实验增加桌面入口或独立 Test App。可复用实现继续进入 core/application，只有通过相应质量基线、失败恢复和隐私边界验收，并经过单独产品确认的能力才晋升到桌面 UI；2026-11-02已确认开始在线桌面接入，但不代表现有安装包已可用；详见 [决策 0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。
 
 ## 2026-10-18 执行补充：离线恢复与工作流统一
 

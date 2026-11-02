@@ -1,0 +1,12 @@
+{
+  "whisper-streaming": {
+    "url": "https://github.com/ufal/whisper_streaming.git",
+    "commit": "6da90b44b7e50d79695e68166d2a2c7609c75abb",
+    "directory": "whisper_streaming"
+  },
+  "simulstreaming": {
+    "url": "https://github.com/ufal/SimulStreaming.git",
+    "commit": "077ea37d5ab4ff98bc567e4507f140dc4e5d5ad6",
+    "directory": "SimulStreaming"
+  }
+}
