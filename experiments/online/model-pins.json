@@ -103,5 +103,31 @@
         }
       }
     }
+  },
+  "sensevoice-small": {
+    "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
+    "archive_sha256": "f6b2a72ebcb1ac7a764d4cfccd886e6bcb2a95c4657c2199d0ba95ed4b9ea71a",
+    "runtime": "sherpa-onnx",
+    "runtime_version": "2.0.1",
+    "tested_model": "model.onnx",
+    "precision": "float32",
+    "provider": "cpu",
+    "num_threads": 1,
+    "language": "ja",
+    "use_itn": true,
+    "files": {
+      "model.onnx": {
+        "sha256": "977016bd9c79f9eb343430b5cc305e07ab64d5212dff41b0dcfa1694bee9a8cb",
+        "bytes": 937617178
+      },
+      "model.int8.onnx": {
+        "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+        "bytes": 239233841
+      },
+      "tokens.txt": {
+        "sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
+        "bytes": 315894
+      }
+    }
   }
 }
