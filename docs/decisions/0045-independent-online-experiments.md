@@ -1,5 +1,7 @@
 # 0045：独立 online 会话与 Hy-MT2 翻译实验
 
+> 2026-11-02：模型与探索顺序由 [0063](0063-online-two-pass-model-selection.md) 取代；online／offline隔离边界保留。本文首个里程碑是历史实现，不是新two-pass完成状态。
+
 日期：2026-10-02
 
 状态：accepted（边界与探索顺序；模型效果待实测）

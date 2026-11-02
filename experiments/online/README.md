@@ -1,5 +1,7 @@
 # Online CLI 实验
 
+> 2026-11-02 当前入口：[模型清单与two-pass计划](../../docs/online-asr-plan.md)、[0063](../../docs/decisions/0063-online-two-pass-model-selection.md)。本目录现有代码仍是旧WS／SS／CPP回放与串行MT实验；SenseVoice／Qwen／vLLM和two-pass尚未接入。下文命令保留供复现旧实验，不是新方案的安装／运行说明。
+
 此目录独立于 offline 两段式业务与 GUI。第一轮 ASR 比较 Whisper-Streaming／LocalAgreement 与 SimulStreaming／AlignAtt；翻译固定 Hy-MT2。当前是上游 ASR 回放 + **串行翻译策略重放**，不是并发实时系统。
 
 ## 环境与输入
