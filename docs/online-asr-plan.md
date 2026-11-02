@@ -30,6 +30,31 @@ CLI／隔离产物继续独立于 offline 任务、SQLite 与 GUI；完整录音
 
 Zipformer 是模型架构，sherpa-onnx 是推理框架；语言范围依赖具体 checkpoint，不是框架天然限制。SenseVoice 支持日语是已公布能力，日语较弱是待验证假设。Qwen 0.6B 与1.7B也未在本机新方案比较，不预设速度和质量胜者。
 
+### Whisper large-v3 可选格式（2026-11-02核对，尚未选定）
+
+turbo与量化是独立维度：large-v3约1.55B、32层decoder；turbo约809M、4层decoder，是剪枝后微调模型，不是large-v3的量化别名。未量化常用F16，F32可用于数值对照，不作为本轮常用部署档；F16仍不是无限精度。
+
+以下为whisper.cpp常用候选，体积是十进制下载大小，不是推理峰值内存：
+
+| 模型／格式 | 约体积 | 获取与比较意义 |
+| --- | --- | --- |
+| large-v3 F16 | 3.10GB | 上游现成文件；保留完整decoder，作为质量／量化对照 |
+| large-v3 Q8_0 | 约1.66GB，实际以转换文件为准 | 可从原模型转换；本次核对的上游文件目录未列现成v3 Q8_0，不能误用v2 Q8_0 |
+| large-v3 Q5_0 | 1.08GB | 上游现成文件，项目目录已有；压缩权重但仍保留32层decoder |
+| large-v3-turbo F16 | 1.62GB | 上游现成文件；区分turbo结构变化与量化影响 |
+| large-v3-turbo Q8_0 | 874MB | 上游现成文件，项目目录已有；值得评估的速度／体积折中 |
+| large-v3-turbo Q5_0 | 574MB | 上游现成文件，项目目录已有；更省权重存储，质量／速度仍须实测 |
+
+whisper.cpp当前上游转换工具还列出Q4_0／Q4_1、Q5_1及Q2_K至Q6_K等格式，但不代表项目固定runtime均已验证，也不代表都有现成权重。本轮不扩成全量化矩阵。Q8／Q5是分块量化格式，不是所有张量都严格占8／5bit，也不能仅凭文件更小推断必然更快或质量无损。
+
+MLX可用F16／F32及其自身分组量化格式（上游提供4bit转换）；faster-whisper／CTranslate2可用FP16、INT8及INT8_FLOAT16等计算类型，实际取决于设备。GGML Q8_0、MLX 8bit与CTranslate2 INT8不视为同一产物或相同数值实现，文件不能跨runtime直接互换。turbo不保证每段日语都弱于完整v3，完整v3也不保证必然胜出；需固定输入和解码设置比较。
+
+建议讨论用turbo Q8_0作为首个候选，以turbo F16隔离量化影响，已有非turbo Q5_0作为完整模型对照；这是建议，不是新增下载／实验授权或最终选型。若只保留一个部署档，等待这些小范围比较后再确定。
+
+### SenseVoice公开版本
+
+SenseVoice论文包含Small和Large；Large的研究指标不等于权重已经公开。当前官方仓库公开的是SenseVoiceSmall；维护者2026-07-15明确表示Large checkpoint尚未发布且无可靠时间表，本次未找到后续官方Large发布。Small的ONNX、INT8、GGUF等是同一基础模型的部署／量化转换，不是另一种容量型号。本轮保持Small，不为等待Large阻塞探索，也不把Fun-ASR等不同家族当成Large别名。
+
 ### Silero 是否升级
 
 截至2026-11-02，公开 PyPI 最新包仍为6.2.3，与 `experiments/online/envs/simulstreaming/uv.lock` 一致；pyproject 是 `>=6.2.3`，复现仍使用 `uv sync --locked`。旧实验 JIT 模型 SHA-256 为 `e1122837f4154c511485fe0b9c64455f7b929c96fbb8d79fbdb336383ebd3720`。新 ONNX／sherpa 路径需另固定资产版本、摘要和状态处理，不能只复用包版本号。
@@ -68,6 +93,14 @@ VAD 边界、ASR 定稿、翻译语义组是不同事件。停顿可以触发第
 - 本次只整理文档；没有删模型、venv或日志，没有改桌面目录、源码、依赖、锁文件或运行新模型。清理已有大文件另做明确盘点。
 - 后续只提取实际选中的实现。是否同步 main 的共享工具／目录结构按具体缺口处理，不为模型实验整体合并234个主线提交。
 
+## 新方案确定后的整体清理（待执行）
+
+用户明确要求旧决策、测试结果和环境暂时保留；新探索确定后必须完成整体清理，作为选型收尾的一部分，不无限累积旧实现。
+
+先完成所选模型／runtime的实际质量、延迟和部署验证，保存足够复现结论的配置、版本、摘要与精简结果。随后统一盘点文档、旧runner与adapter、依赖／lock／venv、源码clone／build、模型格式、缓存与重复产物；移除不再使用的代码和可重建环境，归档仍有解释价值的结果，修正过期入口、重号ADR与失效命令。Git保留历史，不需要将所有旧实验继续留在活跃目录。
+
+清理按文件用途和引用关系处理；私人原始音频、人工参考、不可重建证据及正式offline共享模型／任务数据不因退出候选而批量删除。归档范围与可删除项届时明确，执行后记录清单、回收空间和仍保留的理由。最后从保留的pin／lock检查所选路径能重建、运行和通过相关回归，确认无旧进程／失效入口／无用依赖遗留。本次仅记录该要求，没有执行清理。
+
 ## 上游核对来源（2026-11-02）
 
 - [Qwen3-ASR官方模型与推理接口](https://github.com/QwenLM/Qwen3-ASR)：0.6B／1.7B，Transformers和vLLM后端；官方流式路径当前依赖vLLM。第二遍整段推理不要求流式接口。
@@ -76,3 +109,6 @@ VAD 边界、ASR 定稿、翻译语义组是不同事件。停顿可以触发第
 - [sherpa streaming transducer目录](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-transducer/index.html)：已列中／英／韩对应模型，未见日语条目；不是声称全世界不存在日语Zipformer权重。
 - [Silero PyPI](https://pypi.org/project/silero-vad/)与[上游](https://github.com/snakers4/silero-vad)。
 - [Hy-MT2 1.8B官方模型](https://huggingface.co/tencent/Hy-MT2-1.8B)。
+- [Whisper官方规格](https://github.com/openai/whisper)、[turbo模型卡](https://huggingface.co/openai/whisper-large-v3-turbo)及[GGML文件目录](https://huggingface.co/ggerganov/whisper.cpp/tree/main)。
+- [whisper.cpp量化类型](https://github.com/ggml-org/whisper.cpp/blob/master/examples/common-ggml.cpp)、[MLX转换](https://github.com/ml-explore/mlx-examples/tree/main/whisper)及[faster-whisper计算类型](https://github.com/SYSTRAN/faster-whisper)。
+- [SenseVoiceLarge发布状态：维护者答复](https://github.com/modelscope/FunASR/discussions/1910)及[FunAudioLLM论文](https://arxiv.org/abs/2407.04051)。
