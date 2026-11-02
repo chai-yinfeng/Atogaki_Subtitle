@@ -271,7 +271,8 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 整理旧分支：原WS／SS／CPP进度迁入[历史快照](online-progress-history-2026-10-05.md)，原始结果不覆盖；旧全矩阵、SS专项和全部锚点审核不再作为新路线前置门禁。
 - [x] 确认two-pass：第一遍草稿上屏，第二遍先做VAD／长度封口段的整段识别；声学边界、定稿和翻译分组分别处理。双流式后置。
 - [x] 确认主动模型范围：Whisper small／medium／一个large-v3 turbo或量化档；新增SenseVoiceSmall、Qwen3-ASR 0.6B／1.7B；MT只保留Hy-MT2 1.8B。Silero online lock维持6.2.3。尚未改源码／桌面目录或安装新模型。
-- [ ] 固定新增模型／runtime版本与最小输入输出合同，Mac先测MLX，测试同学环境另验证vLLM整段请求／响应、错误和运行条件。
+- [x] 按用户收窄范围跑通Qwen MLX 0.6B／1.7B：独立uv锁定环境，同18s／60s音频接Hy-MT2 1.8B，各两轮。热运行到完整译文分别1.120／2.039s与3.708／7.221s；仅文件就绪后的串行链路，不含采集／VAD／第一遍，见[记录](qwen-mlx-smoke-validation.md)。
+- [ ] SenseVoice接入及测试同学环境的vLLM接口验证仍待推进；本轮不做pipeline优化。
 - [ ] 固定自然结束的日语音频段，比较第二遍质量、冷／热耗时和内存，选择有限候选。
 - [ ] 确定日语第一遍；Zipformer只列中／英／韩对应checkpoint，未验证日语前不宣称支持。
 - [ ] 接实时回放，确定pre-roll、尾部等待、最大段长／重叠与坐标映射；重点验证长静音恢复及EOF。

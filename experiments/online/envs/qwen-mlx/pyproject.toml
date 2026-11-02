@@ -1,0 +1,10 @@
+[project]
+name = "atogaki-online-qwen-mlx"
+version = "0.0.1"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "mlx-qwen3-asr @ git+https://github.com/moona3k/mlx-qwen3-asr.git@41878a11cf338c59e13edc84bf4cb35f4b0f3ff6",
+]
+
+[tool.uv]
+package = false
