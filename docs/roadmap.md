@@ -275,9 +275,9 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] SenseVoiceSmall sherpa-onnx FP32／CPU单线程接同18s／60s输入与Hy-MT2，各两轮；热运行到完整译文0.615s／2.593s，原文／译文差异留作听看，见[记录](sensevoice-smoke-validation.md)。
 - vLLM：用户明确要求先搁置，停止环境与脚本准备；尚无GPU推理／服务接口实机验证。当前不继续推进该项。
 - [ ] 固定自然结束的日语音频段，比较第二遍质量、冷／热耗时和内存，选择有限候选。
-- [ ] 确定日语第一遍；Zipformer只列中／英／韩对应checkpoint，未验证日语前不宣称支持。
-- [ ] 接实时回放，确定pre-roll、尾部等待、最大段长／重叠与坐标映射；重点验证长静音恢复及EOF。
-- [ ] 接Hy-MT2 1.8B，测实际并发、队列与E2E；按需要另做云端对照。整段延迟不可接受时再讨论第二遍流式。
+- [x] 第一遍必须本地且允许滚动草稿：日语先接SenseVoice CPU，中／英／韩Zipformer按公开音频实际流式试跑；英语Zipformer接全链路。详见[0064](decisions/0064-local-drafts-and-segment-finalization.md)。
+- [x] 独立CLI已接32ms真实时钟供给、Silero ONNX、草稿／定稿revision和逐段MT，完成日语60s与英语6.625s回放；当前参数为试跑值，分段质量／真实长静音和长期积压尚未验收，见[记录](two-pass-smoke-validation.md)。
+- [x] CPU草稿／VAD与Qwen定稿→Hy-MT2串行GPU阶段已并行工作；21个实际封口段全部生成定稿／译文并核对revision。云端ASR只梳理官方价格与接入，未上传／调用；语义分组、采集和App UI另行推进。
 
 - [ ] 新方案确定后完成整体清理：归档旧决策／结果、收敛runner与依赖、移除可重建的旧环境／冗余模型格式，核对保留路径可重建；当前暂不清理。范围见[online计划](online-asr-plan.md#新方案确定后的整体清理待执行)。
 

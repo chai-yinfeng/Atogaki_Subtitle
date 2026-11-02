@@ -1,6 +1,6 @@
 # Online ASR 当前计划与模型清单
 
-_更新：2026-11-02。Qwen MLX及SenseVoiceSmall→本地MT已跑通；two-pass未接入，vLLM按用户要求搁置。_
+_更新：2026-11-02。本地two-pass独立CLI已跑通，Zipformer中／英／韩流式已验证；云端仅调查，vLLM继续搁置。_
 
 本文是 online 分支的当前入口，决策见 [0063](decisions/0063-online-two-pass-model-selection.md)。2026-10-02 至 10-05 的 WS／SS／CPP 结果保留为历史证据，不再按旧矩阵继续选型。本文的“保留／新增／退出”是实验范围，不代表桌面模型目录或磁盘文件已修改。
 
@@ -8,7 +8,7 @@ _更新：2026-11-02。Qwen MLX及SenseVoiceSmall→本地MT已跑通；two-pass
 
 整理前分支为 `codex/online-asr-experiments`，HEAD 为 `bd19b55`，工作区干净且与对应远端引用一致。相对本地 `origin/main`，分支独有16个提交、main独有234个提交，共同基点为 `fbbbcd95`。本次不合并 main、不改写历史；分支中的旧桌面进度不能当作当前 main 状态。0045／0046 与 main 上同编号的不同 ADR 重号，引用必须带文件名；本次使用0063避免再占用主线既有编号。
 
-已有能力：三套 Whisper 回放、独立媒体时钟、VAD／尾部动作实验、事件与资源日志、串行 MT 重放。最新旧报告记录39项 Python 回归及真实模型回放；本次没有重跑。Qwen MLX整段识别及串行Hy-MT2链路已跑通，见[记录](qwen-mlx-smoke-validation.md)；SenseVoiceSmall也已完成sherpa-onnx整段ASR→MT对照，见[记录](sensevoice-smoke-validation.md)；two-pass与并发在线翻译未接入，vLLM按用户要求搁置。
+已有能力：三套 Whisper 回放、独立媒体时钟、VAD／尾部动作实验、事件与资源日志、串行 MT 重放。最新旧报告记录39项 Python 回归及真实模型回放；本次没有重跑。Qwen MLX整段识别及串行Hy-MT2链路已跑通，见[记录](qwen-mlx-smoke-validation.md)；SenseVoiceSmall也已完成sherpa-onnx整段ASR→MT对照，见[记录](sensevoice-smoke-validation.md)；本地two-pass独立CLI已接通日语SenseVoice草稿和英语Zipformer草稿→Qwen1.7B→Hy-MT2，见[记录](two-pass-smoke-validation.md)；正式采集／App／云端尚未接入，vLLM继续搁置。
 
 CLI／隔离产物继续独立于 offline 任务、SQLite 与 GUI；完整录音可另交全文 offline 精修，online 的段级定稿不等于人工核准资料。新方案仍须记录模型／runtime revision、配置、输入摘要与失败，但不沿用旧三 backend 全矩阵作为前置门禁。
 
@@ -22,11 +22,11 @@ CLI／隔离产物继续独立于 offline 任务、SQLite 与 GUI；完整录音
 | Whisper tiny／base、未量化 large-v3 | 退出当前主动选型清单 | 仅保留旧实验、冒烟用途和已有文件，不删除 |
 | SenseVoiceSmall | 第二遍整段识别候选；支持中／粤／英／日／韩 | sherpa-onnx FP32／CPU单线程已跑通18s／60s ASR→MT，质量供用户对照 |
 | Qwen3-ASR 0.6B／1.7B | 第二遍整段识别主要候选 | MLX整段ASR→Hy-MT2已跑通，见[记录](qwen-mlx-smoke-validation.md)；vLLM按用户要求暂时搁置 |
-| streaming Zipformer | 第一遍实时草稿候选 | 仅标注中／英／韩场景，须选对应语言 checkpoint；未找到并验证日语权重前不标注支持日语 |
+| streaming Zipformer | 本地原生流式草稿 | 中／英／韩公开样本均已按时钟跑通，英语已接two-pass；不支持日语组合 |
 | Silero VAD 6.2.3 | 因果起停声检测，触发第二遍音频段封口 | online lock 已固定6.2.3；本次不升级 |
 | Hy-MT2 1.8B Q4_K_M | 唯一本地翻译候选 | 沿用已有 runtime 与权重；用户所称1.7B在此按正式名称1.8B记录 |
 | Hy-MT2 7B | 退出本轮本地选型 | 已跑历史实验；不继续优化或要求完成7B盲评，不卸载已有文件 |
-| 云端 ASR／MT | 本地质量或 E2E 不合适时的对照／替代 | 尚未选择具体服务，不继承过去的单次上传授权 |
+| 云端 ASR／MT | 本地质量或 E2E 不合适时的对照／替代 | 已梳理Gemini／Qwen3-ASR／Groq价格；本轮无新调用，不继承过去的单次上传授权 |
 
 Zipformer 是模型架构，sherpa-onnx 是推理框架；语言范围依赖具体 checkpoint，不是框架天然限制。SenseVoice 支持日语是已公布能力，日语较弱是待验证假设。Qwen 0.6B与1.7B已在同输入上跑通，用户目前更偏好1.7B质量；SenseVoice新增对照不自动改变该偏好，也不冒充gold评测。
 
@@ -63,17 +63,21 @@ SenseVoice论文包含Small和Large；Large的研究指标不等于权重已经�
 
 ## 第一阶段 two-pass 行为
 
+用户已确认第一遍必须本地，允许滚动窗口形成可回改草稿；定稿可本地／云端。当前CLI实现、模型分工、云端价格与局限以[0064](decisions/0064-local-drafts-and-segment-finalization.md)及[链路记录](two-pass-smoke-validation.md)为准。
+
 持续音频同时进入完整录音保存、第一遍草稿识别及因果 VAD。第一遍负责实时上屏；VAD 提供起声／停声信号，第二遍对已封口的完整音频段重新识别，替换对应活动段草稿。第二遍以原始音频为依据，初期不把第一遍文字作为强提示。
 
-这里的“整段”是一次 VAD／长度策略封口的音频段，不是等待整个会话结束。第一阶段不做第二遍流式；快慢模型同时流式的方案留待整段延迟实测后再决定。日语第一遍尚未选定，可先以已有 Whisper 草稿路线比较，不把 Zipformer 作为跨语言必需组件。
+这里的“整段”是一次 VAD／长度策略封口的音频段，不是等待整个会话结束。第一阶段不做第二遍流式；快慢模型同时流式的方案留待整段延迟实测后再决定。日语当前先用SenseVoiceSmall CPU滚动草稿，Whisper及Qwen MLX流式接口仍是后续对照候选，不把Zipformer作为跨语言必需组件。
 
 VAD 边界、ASR 定稿、翻译语义组是不同事件。停顿可以触发第二遍，但不自动保证句意完成，也不要求第一遍每次短停顿清空状态。第二遍定稿后再按句意／上下文和等待上限送翻译；草稿提前翻译及回改成本后置。
 
 长独白需最大段长和有限重叠；pre-roll、尾部静音等待、长段切点、跨段上下文和去重策略尚待实测确定，不在文档中假称已有默认值。完整录音与有限 ASR 工作上下文分离，分段记录原媒体坐标；不能要求起声后先解码全部历史静音。旧长静音回放仍可作为回归素材，但不必修完所有旧 adapter 才接新模型。
 
-段级定稿及译文绑定 segment ID／source revision；新定稿取代草稿，迟到译文不能写到新的原文版本。此处是待实现合同，不代表已有 two-pass 数据结构。
+段级定稿及译文绑定 segment ID／source revision；新定稿取代草稿，迟到译文不能写到新的原文版本。该合同已在独立CLI事件中实现并测试，不代表已迁入正式任务／字幕schema或GUI。
 
 ## Runtime 与验证顺序
+
+后续用户已要求接链路：已完成独立CLI日语／英语回放及三语言Zipformer；第一遍本地草稿，第二遍Qwen1.7B定稿后再译文。云端先梳理价格／准确率证据，不发起新音频上传；当前只有Gemini凭据由用户确认提供。当前分段仍较碎、没有语义合段优化。
 
 2026-11-02用户收窄当前工作：先跑通Qwen MLX并比较音频到原文／译文耗时，不建设优化pipeline或展开质量矩阵。已完成两档模型的18s／60s同输入试跑及本地MT，结果见[跑通记录](qwen-mlx-smoke-validation.md)。下面保留后续方向，不把全部条目作为本次前置要求。
 

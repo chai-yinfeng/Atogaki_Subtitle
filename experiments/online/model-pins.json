@@ -129,5 +129,92 @@
         "bytes": 315894
       }
     }
+  },
+  "streaming-zipformer": {
+    "runtime": "sherpa-onnx",
+    "runtime_version": "2.0.1",
+    "provider": "cpu",
+    "num_threads": 1,
+    "languages": {
+      "zh": {
+        "model_directory": "sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30",
+        "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30.tar.bz2",
+        "sha256": "5a2832047ea1f97dd0dc595b816c230c4bafad65cfc0341fa57517cadc50afd0",
+        "bytes": 132634597,
+        "files_used": {
+          "encoder.int8.onnx": {
+            "sha256": "5ac51e27981bb4dab01bb9be4958453ba50c3b61c063ddda0eab23fd3671aa4f",
+            "bytes": 161141793
+          },
+          "decoder.onnx": {
+            "sha256": "06522ad63cec0fdf6809f4e1db9bb4f7d710c34582e3b35db62ac60eccafac7e",
+            "bytes": 5165083
+          },
+          "joiner.int8.onnx": {
+            "sha256": "b34584dc6f561089e1d747fedebb3765f2caa72c927ef54d7ca55e5ae40a814b",
+            "bytes": 1033416
+          },
+          "tokens.txt": {
+            "sha256": "6193c7ea1c96d0d9a1e9652789b40d13a8a913b434a5451e93158f5a09fd6652",
+            "bytes": 20628
+          }
+        }
+      },
+      "en": {
+        "model_directory": "sherpa-onnx-streaming-zipformer-en-2023-06-26",
+        "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
+        "sha256": "639e25b578e9e997131402199419c13a941f8e4e198e2da1ce57dbf5cf401282",
+        "bytes": 310414022,
+        "files_used": {
+          "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx": {
+            "sha256": "5022b2eca5b19d1bc104fcf33e26bc32604b7df553cd2e1f62e31dc7b05e9c87",
+            "bytes": 70108816
+          },
+          "decoder-epoch-99-avg-1-chunk-16-left-128.onnx": {
+            "sha256": "85914f840b71110487ece7a30ebd0bd4b8fb5c2623215bba3aa5ab4c138fc591",
+            "bytes": 2093080
+          },
+          "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx": {
+            "sha256": "abd5e30f3f16fc510605c6029dba33f10e4386bd75c5bdc30cf94076864db10d",
+            "bytes": 259416
+          },
+          "tokens.txt": {
+            "sha256": "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb",
+            "bytes": 5048
+          }
+        }
+      },
+      "ko": {
+        "model_directory": "sherpa-onnx-streaming-zipformer-korean-2024-06-16",
+        "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2",
+        "sha256": "e346a5882a409650472be17326237e24df7bf409db6b4a8a52e1a61422bf2500",
+        "bytes": 418218652,
+        "files_used": {
+          "encoder-epoch-99-avg-1.int8.onnx": {
+            "sha256": "8d0b1aa24fbedd4e3948564ab7facd151b8ce9b0c48fc987c541de2de3af5697",
+            "bytes": 126968852
+          },
+          "decoder-epoch-99-avg-1.onnx": {
+            "sha256": "b29cfb4575141e50a30a22b2c4579934f3d4f45b83c9c8c08c3aef5a3fa7abfc",
+            "bytes": 11309084
+          },
+          "joiner-epoch-99-avg-1.int8.onnx": {
+            "sha256": "128b80a66a1f718488af8560f9d15895109b99ff3e573f0a0130e03774ef1ced",
+            "bytes": 2581421
+          },
+          "tokens.txt": {
+            "sha256": "016bdf0965029263b7ad01b742366ee542ef0bef38261510e8176ff6f2e9e668",
+            "bytes": 60246
+          }
+        }
+      }
+    }
+  },
+  "online-silero-onnx": {
+    "source_package": "silero-vad==6.2.3",
+    "asset": "data/silero_vad.onnx",
+    "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+    "bytes": 2327524,
+    "runtime": "sherpa-onnx==2.0.1"
   }
 }

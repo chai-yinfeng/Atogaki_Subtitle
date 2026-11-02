@@ -43,7 +43,7 @@ Windows 基础发行通过实机闭环后，日常核心开发与交互质量继
 
 ### 实时辅助（离线分层之后的实验阶段）
 
-实时模式只提供低延迟的理解辅助，不承诺最终准确性。它应保留会话录音，结束后可单独运行完整的全文 offline ASR → translation，以提高最终资料的准确率；自动调度方式后续确定。Online session、实时翻译调度和未来 GUI 与 offline 工作流分离，只共享适合的基础设施。当前CLI方向为第一遍实时草稿、第二遍VAD分段整段识别定稿；候选为SenseVoiceSmall及Qwen3-ASR 0.6B／1.7B，Mac已跑通MLX，vLLM验证按用户要求暂时搁置。本地翻译收敛到Hy-MT2 1.8B；Zipformer未有已验证日语权重时仅用于中／英／韩场景。实时two-pass组合与E2E仍待测，第二遍流式后置。见[0063](decisions/0063-online-two-pass-model-selection.md)和[当前online计划](online-asr-plan.md)。
+实时模式只提供低延迟的理解辅助，不承诺最终准确性。它应保留会话录音，结束后可单独运行完整的全文 offline ASR → translation，以提高最终资料的准确率；自动调度方式后续确定。Online session、实时翻译调度和未来 GUI 与 offline 工作流分离，只共享适合的基础设施。当前CLI已跑通本地第一遍实时草稿、第二遍VAD分段整段识别定稿及本地翻译；第一遍必须本地，允许滚动窗口回改，第二遍未来可显式选择云端；候选为SenseVoiceSmall及Qwen3-ASR 0.6B／1.7B，Mac已跑通MLX，vLLM验证按用户要求暂时搁置。本地翻译收敛到Hy-MT2 1.8B；Zipformer未有已验证日语权重时仅用于中／英／韩场景。独立文件回放已有计时，真实采集／App及语义分组质量尚未验收；第二遍流式后置。见[0063](decisions/0063-online-two-pass-model-selection.md)和[当前online计划](online-asr-plan.md)。
 
 - 实时 ASR 优先有用的可修改草稿；旧实验的有效显示 p50≤1s、p95≤2s保留为历史参考。新two-pass分别测草稿、定稿和译文延迟，结合质量、覆盖与队列增长确认预算，不能用输入处理落后冒充字幕延迟。见[当前online计划](online-asr-plan.md)。
 - 优先展示原文粗转写；粗翻译仅作为可选提示。
