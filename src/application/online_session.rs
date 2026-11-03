@@ -43,6 +43,7 @@ pub struct OnlineSessionStatus {
     pub session_id: Option<String>,
     pub phase: String,
     pub error: Option<String>,
+    pub translation_enabled: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -77,6 +78,7 @@ impl OnlineSessionService {
                 session_id: None,
                 phase: "idle".into(),
                 error: None,
+                translation_enabled: false,
             })
             .0,
             scheduler,
@@ -120,12 +122,14 @@ impl OnlineSessionService {
         let permit = self.scheduler.try_acquire_device().context(
             "local device is busy; finish the existing offline work before starting online capture",
         )?;
+        let translation_enabled = models.translation_url.is_some() || runtime.translator.is_some();
         let id = Uuid::new_v4().to_string();
         let (stop, receiver) = watch::channel(false);
         self.status.send_replace(OnlineSessionStatus {
             session_id: Some(id.clone()),
             phase: "loading".into(),
             error: None,
+            translation_enabled,
         });
         let status = self.status.clone();
         let task = tokio::spawn(async move {
@@ -143,6 +147,7 @@ impl OnlineSessionService {
                 session_id: Some(id.clone()),
                 phase: phase.into(),
                 error: error.clone(),
+                translation_enabled,
             });
             emit(OnlineSessionEvent {
                 session_id: id,

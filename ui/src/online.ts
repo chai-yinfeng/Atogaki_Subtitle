@@ -1,6 +1,6 @@
 import {invoke} from "@tauri-apps/api/core";
 import {listen} from "@tauri-apps/api/event";
-import {OnlineCaptions, activePhase, phaseLabel, type CaptionEvent, type OnlineSnapshot} from "./online-state";
+import {DraftPresentation, OnlineCaptions, activePhase, phaseLabel, type CaptionEvent, type OnlineSnapshot, type LiveEvent} from "./online-state";
 import "./online.css";
 
 type Choice={id:string;name:string;ready:boolean};
@@ -9,25 +9,60 @@ const control=document.body.dataset.view==="control";
 const root=document.querySelector<HTMLElement>("#online-root")!;
 root.innerHTML=`<section class="online-card">
 <header data-tauri-drag-region><strong data-tauri-drag-region>Atogaki · ${control?"在线字幕控制面板":"在线字幕"}</strong><button id="online-hide" class="quiet" type="button">${control?"字幕窗":"隐藏"}</button></header>
-${control?`<div class="configuration"><label>原文语言<select id="online-language"></select></label><label>Qwen3-ASR 定稿<select id="online-model"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>本地 Hy-MT2 翻译为中文</label><label class="check"><input type="checkbox" id="online-drafts" checked>显示可回改的译文草稿</label><p class="help">从系统输出读取音频，不使用麦克风。译文按较大上下文组回改，停顿约 3 秒后收口。原文与译文分别定稿。本次测试不保存录音。</p><div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止并完成末段</button></div></div>`:""}
+${control?`<div class="configuration"><label>原文语言<select id="online-language"></select></label><label>Qwen3-ASR 定稿<select id="online-model"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>本地 Hy-MT2 翻译为中文</label><label class="check"><input type="checkbox" id="online-drafts" checked>显示可回改的译文草稿</label><p class="help">从系统输出读取音频，不使用麦克风。译文跨语音段重译，停顿约 1.2 秒或达到组上限后收口。白色区域保留最近三组双语定稿，蓝色区域显示可回改草稿。本次测试不保存录音。</p><div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止并完成末段</button></div></div>`:""}
 <p id="online-status" role="status">正在读取会话状态…</p>
-<section class="track"><span id="source-state" class="badge">原文</span><p id="source-text">等待语音…</p></section>
-<section class="track"><span id="translation-state" class="badge">译文</span><p id="translation-text">等待翻译…</p></section>
-${control?`<p id="online-timing" class="help"></p><details><summary>最近定稿</summary><div id="online-history"></div></details>`:""}
+<section class="settled"><span class="badge">最近定稿 · 保留三组</span><p id="settled-empty" class="help">等待定稿…</p><div id="online-history"></div></section>
+<div id="online-activity"><section id="source-track" class="track"><span id="source-state" class="badge">原文</span><p id="source-text">等待语音…</p></section>
+<section id="translation-track" class="track"><span id="translation-state" class="badge">译文</span><p id="translation-text">等待翻译…</p></section>
+</div>
+${control?`<p id="online-timing" class="help"></p>`:""}
 </section>`;
 const model=new OnlineCaptions();
 const find=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
-const set=(id:string,text:string)=>{find(id).textContent=text;};
+const set=(id:string,text:string)=>{const node=find(id);if(node.textContent!==text)node.textContent=text;};
 let choices:Choices|null=null, busy=false, message="", disposed=false;
 let pendingCaptionSession:string|null=null;
+let displayedSession:string|null=null;
+let sourceDraft=new DraftPresentation(), translationDraft=new DraftPresentation();
+const settledNodes=new Map<string,HTMLElement>();
+function renderHistory(history:LiveEvent[]):void {
+ const container=find("online-history"), keys=new Set(history.map(e=>e.group_id??e.segment_id!));
+ const follow=container.scrollHeight-container.scrollTop-container.clientHeight<24;
+ let changed=false;
+ for(const [key,node] of settledNodes)if(!keys.has(key)){node.remove();settledNodes.delete(key);changed=true;}
+ for(const e of history){
+  const key=e.group_id??e.segment_id!;
+  if(settledNodes.has(key))continue;
+  const article=document.createElement("article");article.dataset.captionId=key;
+  const source=document.createElement("p");source.className="settled-source";source.textContent=e.source_text??e.text??"";article.append(source);
+  if(e.group_id){const translation=document.createElement("p");translation.textContent=e.text??"";article.append(translation);}
+  settledNodes.set(key,article);changed=true;
+ }
+ // Insert only newly arrived or out-of-order rows; unchanged cards keep their DOM.
+ let previous:Element|null=null;
+ for(const e of history){const node=settledNodes.get(e.group_id??e.segment_id!)!;
+  if((previous?previous.nextElementSibling:container.firstElementChild)!==node)container.insertBefore(node,previous?previous.nextElementSibling:container.firstElementChild);
+  previous=node;
+ }
+ find("settled-empty").hidden=history.length>0;
+ if(changed&&follow)container.scrollTop=container.scrollHeight;
+}
 function render():void {
  const state=model.status, t=model.tracks();
  set("online-status",message||state.error||phaseLabel[state.phase]||state.phase);
- for(const [prefix,e,name] of [["source",t.source,"原文"],["translation",t.translation,"译文"]] as const){
-  const draft=e?.kind.endsWith("draft")??false;
-  set(`${prefix}-state`,`${name}${e?(draft?"草稿":"定稿"):""}${e?.stale_source?" · 正在追上原文":""}`);
-  find(`${prefix}-text`).classList.toggle("draft",draft);
-  set(`${prefix}-text`,e?.text||(prefix==="source"?"等待语音…":"暂无译文"));
+ if(displayedSession!==state.sessionId){
+  displayedSession=state.sessionId;sourceDraft=new DraftPresentation();translationDraft=new DraftPresentation();
+  settledNodes.clear();find("online-history").replaceChildren();
+ }
+ renderHistory(t.history);
+ const now=performance.now();
+ const source=sourceDraft.select(t.activeSource,now), translation=translationDraft.select(t.activeTranslation,now);
+ find("online-activity").hidden=!source&&!translation;
+ for(const [prefix,e,name] of [["source",source,"原文"],["translation",translation,"译文"]] as const){
+  find(`${prefix}-track`).hidden=!e;
+  set(`${prefix}-state`,`${name}${e?.kind==="source_final"?"定稿 · 等待译文":"草稿"}${e?.stale_source?" · 正在追上原文":""}`);
+  find(`${prefix}-text`).classList.toggle("draft",e?.kind.endsWith("draft")??false);
+  set(`${prefix}-text`,e?.text??"");
  }
  if(!control)return;
  if(state.phase==="running"&&pendingCaptionSession===state.sessionId){pendingCaptionSession=null;void invoke("open_online_captions").catch(e=>{message=String(e);render();});}
@@ -40,8 +75,7 @@ function render():void {
  if(t.source?.kind==="source_final"&&t.source.after_audio_end_s!==undefined)timings.push(`原文定稿 ${t.source.after_audio_end_s.toFixed(2)}s`);
  if(t.translation?.kind==="translation_final"&&t.translation.after_audio_end_s!==undefined)timings.push(`译文定稿 ${t.translation.after_audio_end_s.toFixed(2)}s`);
  set("online-timing",timings.length?`${timings.join(" · ")}（各自音频段／组末尾之后）`:"延迟随定稿更新；草稿出现速度与定稿等待分别观察。");
- const history=find("online-history");history.replaceChildren();
- for(const e of t.history){const article=document.createElement("article");const src=document.createElement("p"),dst=document.createElement("p");src.textContent=e.source_text??"";dst.textContent=e.text??"";article.append(src,dst);history.append(article);}
+
 }
 async function refresh():Promise<void>{try{const snapshot=await invoke<OnlineSnapshot>("online_snapshot");if(disposed)return;model.snapshot(snapshot);render();}catch(e){message=String(e);render();}}
 async function mount():Promise<void>{

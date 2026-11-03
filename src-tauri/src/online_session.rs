@@ -218,9 +218,32 @@ pub async fn start_online_session(
                         data: event,
                     };
                     history.push(event.clone());
-                    if history.len() > 256 {
-                        history.remove(0);
+                    // Preserve a few settled captions when a long draft fills the ring,
+                    // so a newly opened window can recover the same reading history.
+                    let recent = history.len().saturating_sub(256);
+                    let mut source_finals = 0;
+                    let mut translation_finals = 0;
+                    let mut keep = vec![false; history.len()];
+                    for (index, item) in history.iter().enumerate().rev() {
+                        let settled = match item.data.event["kind"].as_str() {
+                            Some("source_final") => {
+                                source_finals += 1;
+                                source_finals <= 3
+                            }
+                            Some("translation_final") => {
+                                translation_finals += 1;
+                                translation_finals <= 3
+                            }
+                            _ => false,
+                        };
+                        keep[index] = index >= recent || settled;
                     }
+                    let mut index = 0;
+                    history.retain(|_| {
+                        let retained = keep[index];
+                        index += 1;
+                        retained
+                    });
                     let _ = app.emit("online-session-event", event);
                 }
             }),
@@ -275,7 +298,7 @@ pub fn open_online_captions(
         )
         .title("Atogaki · 在线字幕")
         .accept_first_mouse(true)
-        .inner_size(760., 330.)
+        .inner_size(760., 560.)
         .min_inner_size(420., 200.)
         .decorations(false)
         .always_on_top(true)

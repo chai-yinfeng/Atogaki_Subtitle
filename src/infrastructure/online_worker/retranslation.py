@@ -23,7 +23,7 @@ class Retranslation:
     can produce a committed translation. A VAD endpoint alone never commits MT.
     """
     def __init__(self, emit, *, language='ja', drafts=True, interval=.8,
-                 pause=3.0, max_seconds=45, max_chars=900):
+                 pause=1.2, max_seconds=20, max_chars=400):
         self.emit = emit
         self.language, self.drafts, self.interval = language, drafts, interval
         self.pause = pause

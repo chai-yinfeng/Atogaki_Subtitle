@@ -273,8 +273,10 @@ DeepSeek 自动／手动翻译用本地模拟 provider 验证短组打包、四�
 
 当前已覆盖`/Applications/Atogaki.app`，正常标识／正式数据目录不变。主窗口顶部“在线字幕”打开独立控制面板；日语默认SenseVoice草稿＋Qwen3-ASR1.7B定稿＋本地Hy-MT2。点击开始，等到接收系统音频后，在浏览器／IINA等外部播放器播放内容；字幕窗可拖动／调整大小。隐藏字幕不停止采集，结束请点“停止并完成末段”。默认不保存录音。
 
-先用同一内容比较译文草稿开／关，以及Qwen0.6B／1.7B；分别观察第一次可读字幕、定稿等待、长组是否容易读完与回改干扰。当前翻译组按3s停顿、45s／900字符上限收口，ASR分段保持；界面时间相对各自音频段／组末尾，不代替人工听感。配置在停止后更改。
+先用同一内容比较译文草稿开／关，以及Qwen0.6B／1.7B；分别观察第一次可读字幕、定稿等待、长组是否容易读完与回改干扰。当前翻译组恢复1.2s停顿、20s／400字符上限收口，ASR分段保持；显示层单独保留最近三组双语定稿。检查新草稿出现时白色定稿不变蓝、第四组定稿只淘汰最旧一组、每组原文与译文对应；前缀改写约两秒一次，纯追加／新组／定稿立即显示；关闭翻译时保留三条原文定稿。界面时间相对各自音频段／组末尾，不代替人工听感。配置在停止后更改。
 
 本机依赖已由开发者准备，不需用户运行脚本。另一台机器尚需完成runtime和多文件模型下载产品化；本地导入命令为`scripts/prepare-online-local.py --python-root ... --site-packages ... --asr-assets ... --hy-model ... --destination <App数据目录>`，只导入模型／runtime，不操作数据库或凭据。正常arm64 complete打包需先执行`bash scripts/prepare-online-capture.sh src-tauri/binaries/atogaki-audio-tap-aarch64-apple-darwin`；正式本机安装脚本已接这一步。
 
 本轮已有实际App链路／停止证据，359项前端、49项Python与184项Rust回归通过，Rust5项原本条件专项保持忽略；完整边界、原App回退位置及后续范围见[0068](decisions/0068-online-desktop-controls-and-live-context.md)。
+
+2026-11-03 已覆盖正常App，显示层修正及当前验证见[0069](decisions/0069-online-settled-caption-retention.md)和路线图。控制面板实际系统音频中观察到三组双语定稿与独立草稿，最后停在已停止；三组滚动淘汰、前缀改写门槛由状态回归覆盖，阅读手感留待用户体验。
