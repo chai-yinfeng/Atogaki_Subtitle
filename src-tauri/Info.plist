@@ -9,5 +9,7 @@
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Atogaki reads system audio to generate live subtitles locally. Audio is not saved by default.</string>
 </dict>
 </plist>

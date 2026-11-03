@@ -17,6 +17,7 @@ pub mod local_render_service;
 pub mod local_retranscription_service;
 pub mod local_task_service;
 pub mod local_workspace_service;
+pub mod online_session;
 pub mod stage_scheduler;
 pub mod structure_edit_session;
 pub mod structure_undo_history;

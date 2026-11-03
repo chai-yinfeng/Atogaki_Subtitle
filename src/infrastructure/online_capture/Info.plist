@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.chai-yinfeng.atogaki.audio-tap</string>
+<key>CFBundleName</key><string>Atogaki System Audio</string>
+<key>NSAudioCaptureUsageDescription</key><string>Atogaki reads system audio to generate live subtitles locally. Audio is not saved by default.</string>
+</dict></plist>

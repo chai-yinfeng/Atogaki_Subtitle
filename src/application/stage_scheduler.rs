@@ -27,6 +27,15 @@ impl StageScheduler {
         })
     }
 
+    /// Online owns the local device for the session. Refuse a busy device
+    /// instead of interrupting an offline job or buffering audio while queued.
+    pub fn try_acquire_device(&self) -> Option<OwnedSemaphorePermit> {
+        self.asr
+            .clone()
+            .try_acquire_many_owned(self.asr_capacity)
+            .ok()
+    }
+
     pub async fn acquire_asr(&self) -> OwnedSemaphorePermit {
         self.asr
             .clone()

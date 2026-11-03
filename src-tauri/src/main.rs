@@ -7,6 +7,7 @@ mod dictionary_download;
 mod dictionary_lookup;
 mod media_server;
 mod model_download;
+mod online_session;
 mod theme_artwork;
 
 use std::{
@@ -2131,6 +2132,12 @@ fn main() {
                 learning_service.clone(),
                 settings_service.clone(),
             );
+            app.manage(online_session::DesktopOnlineSession {
+                service: atogaki_subtitle::application::online_session::OnlineSessionService::new(
+                    task_service.stage_scheduler(),
+                ),
+                data_dir: data_dir.clone(),
+            });
             app.manage(DesktopState {
                 data_dir,
                 task_service,
@@ -2156,7 +2163,15 @@ fn main() {
                         {
                             let _ = overlay.destroy();
                         }
-                        app_handle.exit(0);
+                        let closing_app = app_handle.clone();
+                        let service = closing_app
+                            .state::<online_session::DesktopOnlineSession>()
+                            .service
+                            .clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = service.stop().await;
+                            closing_app.exit(0);
+                        });
                     }
                     #[cfg(target_os = "macos")]
                     WindowEvent::Focused(focused) => {
@@ -2181,6 +2196,9 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            online_session::online_session_status,
+            online_session::start_online_session,
+            online_session::stop_online_session,
             asr_credential_status,
             cancel_model_download,
             check_asr_credential,
@@ -2295,8 +2313,27 @@ fn main() {
             commands::editor::save_subtitle_timing_recorded,
             commands::editor::undo_subtitle_structure,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run Atogaki desktop application");
+        .build(tauri::generate_context!())
+        .expect("failed to build Atogaki desktop application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                let service = app
+                    .state::<online_session::DesktopOnlineSession>()
+                    .service
+                    .clone();
+                if matches!(
+                    service.status().phase.as_str(),
+                    "loading" | "requesting_audio" | "running" | "stopping" | "draining"
+                ) {
+                    api.prevent_exit();
+                    let closing_app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = service.stop().await;
+                        closing_app.exit(0);
+                    });
+                }
+            }
+        });
 }
 
 #[cfg(test)]

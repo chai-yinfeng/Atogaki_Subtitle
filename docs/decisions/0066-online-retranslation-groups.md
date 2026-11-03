@@ -22,6 +22,8 @@ CPU草稿与音频时钟继续独立。Qwen与本地MT在同一worker串行调�
 
 请求返回时若原文已变化，旧结果只允许以携带实际输入revision及stale_source的草稿显示；下一次请求追上最新状态，不把旧结果升级为定稿。相同原文／上下文可复用最近一次翻译，状态从草稿到定稿本身不触发重复生成。当前会话后端／配置固定，不支持中途热换。
 
+后继桌面会话与原生采集底座见[0067](0067-online-session-owner-and-system-audio.md)；下文保留该pipeline阶段的交付边界。
+
 ## 实现和限制
 
 [共享retranslation模块](../../src/infrastructure/online_worker/retranslation.py)将分组／版本／请求状态与模型运行分开；[run_two_pass.py](../../experiments/online/run_two_pass.py)接入真实时钟、SenseVoice／Zipformer草稿、Qwen最终ASR和Hy-MT2。默认启用译文草稿，`--no-translation-drafts`保留只翻译收口组的对照模式。当前仅本地HTTP翻译，无新云端调用或隐式回退。共享worker位于`src/infrastructure/online_worker/`，研究CLI为薄入口；`--pcm-stdin`支持单声道PCM16／16kHz，以EOF停止并排空。实时默认只输出JSONL，不写录音或事件文件；WAV回放与桌面共用同一识别／分组代码。音频环形缓冲30s，最终ASR队列最多8项；超负载可能反压输入，采集侧必须显式报错停止，不能无限积压。

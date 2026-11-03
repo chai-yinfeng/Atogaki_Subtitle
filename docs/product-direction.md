@@ -49,7 +49,7 @@ Windows 基础发行通过实机闭环后，日常核心开发与交互质量继
 
 草稿与模型定稿以颜色及状态标识区分。设置提供独立在线控制面板，用于选择语言、模型和翻译配置、控制会话及可选录音。默认不保存录音；用户开启保存后，停止时保留本地音频，由用户手动创建离线精修任务，不自动覆盖现有字幕或运行完整离线工作流。
 
-当前证据是独立CLI实时文件回放，系统音频采集、受管模型运行、控制面板与实时置顶显示尚未进入App。研究分段仍较碎，模型定稿不等于人工核准。接入范围与待讨论的实施提案见[0065](decisions/0065-online-desktop-integration.md)，原事件边界与回放证据见[0064](decisions/0064-local-drafts-and-segment-finalization.md)。
+当前已实现共享PCM worker、原生系统音频helper与桌面会话／IPC底座，分别完成真实模型管道、采集与进程合同验证；受管runtime／模型发行、控制面板与在线置顶显示尚未完成，也未完成完整App会话验收。研究分段仍较碎，模型定稿不等于人工核准。接入范围与待讨论的实施提案见[0065](decisions/0065-online-desktop-integration.md)，原事件边界与回放证据见[0064](decisions/0064-local-drafts-and-segment-finalization.md)。
 
 ## 产品原则
 
