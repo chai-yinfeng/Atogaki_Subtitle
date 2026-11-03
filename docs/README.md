@@ -35,6 +35,7 @@ _更新：2026-11-02_
 ## 在线接入与研究入口
 
 - [0065 在线桌面整合](decisions/0065-online-desktop-integration.md)：用户已确认的模型／平台／保存边界，以及尚待讨论的实施方案；当前只准备整合分支，未交付App功能。
+- [0068 桌面在线与更大翻译组](decisions/0068-online-desktop-controls-and-live-context.md)：本机App已覆盖，控制面板／字幕窗／受管本地模型可手测，正式任务保留。
 - [0067 会话与系统音频底座](decisions/0067-online-session-owner-and-system-audio.md)：Rust生命周期／IPC与Core Audio helper，明确已验证边界及未完成的runtime／模型包／窗口。
 - [0066 独立译文回改与定稿](decisions/0066-online-retranslation-groups.md)：跨VAD分组、草稿重译和独立版本／调度，CLI已接入，尚未接App。
 - [当前online研究计划](online-asr-plan.md)、[0063模型范围](decisions/0063-online-two-pass-model-selection.md)、[0064本地草稿与定稿](decisions/0064-local-drafts-and-segment-finalization.md)。

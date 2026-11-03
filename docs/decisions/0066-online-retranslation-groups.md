@@ -12,7 +12,7 @@ ASR前缀稳定不能证明译文前缀稳定。即使原文识别完全正确�
 
 原文继续按音频segment维护source_revision、source_draft／source_final；译文使用独立group_id、group_revision、source_revisions映射、context_revision、request_id及实际source_text。translation_draft可以覆盖组内全部译文，不提交中文公共前缀。translation_final需要组成员已封口、所有成员取得最终ASR，并精确匹配这些revision。source_final仍仅表示模型结果，不代表句意完整或人工核准。
 
-短VAD停顿只关闭声学段。翻译组允许跨段，初版曾用句末标点＋0.65s等待快速收口，质量检查发现模型会给未完成短语补句号；用户反馈确认优先改善MT上下文，现已取消这条规则。当前以1.2s长停顿、20s／400字符上限（在VAD段边界）及EOF收口；ASR分段不变。这些是启发式工程边界，不是语义完整证明或调优结论；时长／字符上限可超出至当前声学段结束（VAD当前最大12s），ASR积压也增加完成时间。强制收口保留completion_reason，不宣称句子完成。分组成员收口后等待最终ASR，不能提前冻结草稿译文。
+短VAD停顿只关闭声学段。翻译组允许跨段，初版曾用句末标点＋0.65s等待快速收口，质量检查发现模型会给未完成短语补句号；用户反馈确认优先改善MT上下文，现已取消这条规则。其后先以1.2s长停顿、20s／400字符上限收口；用户桌面反馈要求更大上下文，现按[0068](0068-online-desktop-controls-and-live-context.md)改为3s／45s／900字符及EOF，仍在VAD段边界收口，ASR分段不变。这些是启发式工程边界，不是语义完整证明或调优结论；时长／字符上限可超出至当前声学段结束（VAD当前最大12s），ASR积压也增加完成时间。强制收口保留completion_reason，不宣称句子完成。分组成员收口后等待最终ASR，不能提前冻结草稿译文。
 
 ## 调度与上下文
 

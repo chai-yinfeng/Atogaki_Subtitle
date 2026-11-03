@@ -18,8 +18,9 @@ _最后更新：2026-11-02_
 - [x] 收口复核后用户确认优先补足MT上下文，ASR暂不调整；取消句号快速提交，同样20个ASR段从17组并为10组。共享PCM worker已跑通日语60s及英语管道，见[后继记录](two-pass-smoke-validation.md#用户反馈后的上下文调整与pcm会话输入)。允许继续桌面会话，语气错误、未完成句及短段ASR质量仍保留验收边界。
 - [ ] 讨论并实现受管worker、多文件模型包、离线ASR后端与语言／用途选择；Whisper收敛至small／medium／large-v3 Q5／turbo Q8，Hy-MT2保留1.8B，已有文件不自动删除。
 - [x] 首个桌面会话底座：共享PCM worker、Rust会话／IPC／设备独占与停止排空、14.2+ arm64 Core Audio tap helper已实现；真实PCM模型回放、原生采集和相关进程回归分别通过，见[0067](decisions/0067-online-session-owner-and-system-audio.md)。尚未完成App内完整会话验收。
-- [ ] 私有Python与模型包／helper发行就绪、复用受管本地及云端MT，完成实际系统音频→模型的App会话；当前start缺运行资产会返回not-ready，不要求用户手动启动研究环境。
-- [ ] 独立在线控制面板与置顶字幕渲染，草稿／定稿分色并显示状态；与离线播放悬浮状态隔离。
+- [x] 本机私有Python／模型导入、helper打包与自动本地MT服务可用，真实系统音频→ASR／MT→窗口已跑通；不需手动启脚本。
+- [ ] 面向其他机器的runtime／模型下载和升级、在线云端provider复用及相应网络授权；当前本机导入不等于通用发行就绪。
+- [x] 在线控制面板、独立置顶字幕、会话事件恢复与受管Hy-MT2已接入并覆盖本机Atogaki；既有任务保留。用户要求更大MT组，默认3s／45s／900字符，ASR不变；验证与未完成项见[0068](decisions/0068-online-desktop-controls-and-live-context.md)。当前已停止采集，待人工延迟／体验反馈。
 - [ ] 可选录音与手动创建离线精修任务；完成相应Mac实机闭环后形成main里程碑。当前不扩展Windows实时验收。
 
 ## v0.1.3 稳定发行（2026-10-30）

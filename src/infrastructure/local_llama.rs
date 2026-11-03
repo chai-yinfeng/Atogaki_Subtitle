@@ -36,6 +36,7 @@ pub struct LocalLlamaConfig {
     pub style_instruction: String,
     pub context_size: u32,
     pub gpu_layers: u32,
+    pub parallel_slots: Option<u32>,
 }
 
 impl LocalLlamaConfig {
@@ -53,6 +54,7 @@ impl LocalLlamaConfig {
             style_instruction,
             context_size: 8_192,
             gpu_layers: 99,
+            parallel_slots: None,
         }
     }
 }
@@ -146,6 +148,9 @@ impl LocalLlamaRuntime {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true);
+        if let Some(slots) = self.config.parallel_slots {
+            command.arg("--parallel").arg(slots.to_string());
+        }
         let child = command.spawn().with_context(|| {
             format!(
                 "failed to start managed llama-server at {}",
@@ -249,6 +254,13 @@ impl LocalLlamaTranslationProvider {
             },
             &NetworkClientConfig::new("direct", None)?,
         )
+    }
+
+    /// Start the existing managed service for the local online worker. The
+    /// credential stays inside the backend and is never sent to a WebView.
+    pub async fn online_connection(&self) -> Result<(String, String)> {
+        self.runtime.ensure_started().await?;
+        Ok((self.runtime.base_url()?, self.runtime.api_key.clone()))
     }
 
     pub async fn shutdown(&self) -> Result<()> {

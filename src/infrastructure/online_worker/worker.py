@@ -306,8 +306,8 @@ def main():
             peak_final_queue_depth=max_pending, load_times=load_times, counts=events.counts,
             sherpa_onnx=version('sherpa-onnx'), wall_s=time.monotonic()-events.started,
             translation_drafts=a.translation_drafts,
-            translation_group_policy=dict(pause_s=1.2,
-                max_seconds=20, max_chars=400, draft_interval_s=.8,
+            translation_group_policy=dict(pause_s=3.0,
+                max_seconds=45, max_chars=900, draft_interval_s=.8,
                 bounds='at VAD boundaries; one ASR segment may overshoot', context_groups=1),
             note='file-clock demo; first draft is not verified-word latency; translation groups revise independently of ASR segments')
         if a.output:

@@ -1,6 +1,6 @@
 # Online ASR 当前计划与模型清单
 
-_更新：2026-11-02。会话底座当前进度及运行准备见[0067](decisions/0067-online-session-owner-and-system-audio.md)；本地two-pass独立CLI已跑通，Zipformer中／英／韩流式已验证；云端仅调查，vLLM继续搁置。_
+_更新：2026-11-02。当前本机可测桌面见[0068](decisions/0068-online-desktop-controls-and-live-context.md)；默认MT组为3s／45s／900字符，ASR不变。会话底座当前进度及运行准备见[0067](decisions/0067-online-session-owner-and-system-audio.md)；本地two-pass独立CLI已跑通，Zipformer中／英／韩流式已验证；云端仅调查，vLLM继续搁置。_
 
 本文是 online 分支的当前入口，决策见 [0063](decisions/0063-online-two-pass-model-selection.md)。2026-10-02 至 10-05 的 WS／SS／CPP 结果保留为历史证据，不再按旧矩阵继续选型。本文的“保留／新增／退出”是实验范围，不代表桌面模型目录或磁盘文件已修改。
 

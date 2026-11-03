@@ -7,7 +7,7 @@ from retranslation import Retranslation
 class RetranslationTests(unittest.TestCase):
     def setUp(self):
         self.events = []
-        self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)))
+        self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)), pause=1.2)
 
     def source(self, sid, text, revision=1, final=False, start=0, end=1):
         self.mt.observe(sid, start, end, closed=final)
@@ -45,6 +45,20 @@ class RetranslationTests(unittest.TestCase):
         self.assertEqual(request['source_text'], '一人で。のんびり過ごす。')
         self.assertEqual(set(request['source_revisions']), {'a', 'b'})
         self.assertEqual(request['completion_reason'], 'long_pause')
+
+    def test_live_default_keeps_short_asr_segments_in_one_larger_translation_group(self):
+        self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)))
+        self.source('a', 'ここで。', final=True, end=1)
+        self.mt.advance(3.5)
+        self.source('b', '一人で。', final=True, start=3.6, end=4.5)
+        self.mt.advance(7.0)
+        self.source('c', '話したい。', final=True, start=7.1, end=8)
+        self.mt.advance(11.1)
+        request = self.mt.take(0)
+        self.assertTrue(request['final'])
+        self.assertEqual(set(request['source_revisions']), {'a', 'b', 'c'})
+        self.assertEqual(self.mt.max_seconds, 45)
+        self.assertEqual(self.mt.max_chars, 900)
 
     def test_late_translation_retains_snapshot_then_latest_replaces_it(self):
         self.source('a', '来る', revision=1)

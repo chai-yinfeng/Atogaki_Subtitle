@@ -4,7 +4,8 @@
       "binaries/ffmpeg",
       "binaries/ffprobe",
       "binaries/whisper-cli",
-      "binaries/llama-server"
+      "binaries/llama-server",
+      "binaries/atogaki-audio-tap"
     ]
   }
 }

@@ -358,6 +358,7 @@ app.innerHTML = `
           <button id="show-listening" type="button" class="secondary">收听</button>
           <button id="show-learning" type="button" class="secondary">学习</button>
         </nav>
+        <button id="open-online" type="button" class="secondary">在线字幕</button>
         <button id="open-settings" type="button" class="secondary">设置</button>
         <button id="refresh" type="button">刷新任务</button>
       </div>
@@ -4932,3 +4933,6 @@ const desktopStartup = createDesktopStartup({
   failed: (name, error) => { if (settingsMessage) settingsMessage.textContent = `${name}初始化失败：${String(error)}`; },
 });
 desktopStartup.mount();
+
+// Online owns a separate session and window; opening controls does not change playback.
+document.getElementById("open-online")?.addEventListener("click", () => { void invoke("open_online_control").catch(error => window.alert(String(error))); });

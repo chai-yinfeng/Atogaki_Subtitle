@@ -89,7 +89,7 @@ struct SubtitleOverlayPayload {
 struct SubtitleOverlayState {
     current: Mutex<Option<SubtitleOverlayPayload>>,
     #[cfg(target_os = "macos")]
-    native_panel: Mutex<Option<usize>>,
+    native_panel: Arc<Mutex<Option<usize>>>,
 }
 
 #[tauri::command]
@@ -160,6 +160,21 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
     app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
+    show_caption_panel(
+        app,
+        window,
+        app.state::<SubtitleOverlayState>().native_panel.clone(),
+        "Atogaki 悬浮字幕",
+    )
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn show_caption_panel<R: tauri::Runtime>(
+    _app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+    panel_store: Arc<Mutex<Option<usize>>>,
+    title: &'static str,
+) -> Result<(), String> {
     use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
     use objc2_app_kit::{
         NSBackingStoreType, NSPanel, NSScreenSaverWindowLevel, NSWindow, NSWindowButton,
@@ -167,18 +182,11 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
     };
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
 
-    let app = app.clone();
     let window = window.clone();
     window
         .clone()
         .run_on_main_thread(move || {
-            if let Some(panel_pointer) = app
-                .state::<SubtitleOverlayState>()
-                .native_panel
-                .lock()
-                .ok()
-                .and_then(|panel| *panel)
-            {
+            if let Some(panel_pointer) = panel_store.lock().ok().and_then(|panel| *panel) {
                 let panel: &NSPanel = unsafe { &*(panel_pointer as *const NSPanel) };
                 panel.orderFrontRegardless();
                 return;
@@ -214,7 +222,7 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
             }) {
                 behavior |= NSWindowCollectionBehavior::CanJoinAllApplications;
             }
-            panel.setTitle(&NSString::from_str("Atogaki 悬浮字幕"));
+            panel.setTitle(&NSString::from_str(title));
             panel.setContentView(Some(&content_view));
             // The WebView was created for Tauri's hidden NSWindow, but its
             // window delegate must not be reused by this separately allocated
@@ -230,6 +238,7 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
                 }
             }
             panel.setMinSize(NSSize::new(360.0, 120.0));
+            panel.setMovableByWindowBackground(true);
             panel.setFloatingPanel(true);
             // Keep the panel non-activating when it is shown, but allow an
             // intentional click inside it to make its WebView key so the
@@ -243,7 +252,7 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
             panel.orderFrontRegardless();
 
             let panel_pointer = Retained::into_raw(panel) as usize;
-            if let Ok(mut stored) = app.state::<SubtitleOverlayState>().native_panel.lock() {
+            if let Ok(mut stored) = panel_store.lock() {
                 *stored = Some(panel_pointer);
             }
         })
@@ -2132,12 +2141,12 @@ fn main() {
                 learning_service.clone(),
                 settings_service.clone(),
             );
-            app.manage(online_session::DesktopOnlineSession {
-                service: atogaki_subtitle::application::online_session::OnlineSessionService::new(
+            app.manage(online_session::DesktopOnlineSession::new(
+                atogaki_subtitle::application::online_session::OnlineSessionService::new(
                     task_service.stage_scheduler(),
                 ),
-                data_dir: data_dir.clone(),
-            });
+                data_dir.clone(),
+            ));
             app.manage(DesktopState {
                 data_dir,
                 task_service,
@@ -2197,6 +2206,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             online_session::online_session_status,
+            online_session::online_choices,
+            online_session::online_snapshot,
+            online_session::open_online_control,
+            online_session::open_online_captions,
+            online_session::hide_online_captions,
             online_session::start_online_session,
             online_session::stop_online_session,
             asr_credential_status,

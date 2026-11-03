@@ -21,6 +21,7 @@ pub struct OnlineRuntime {
     /// Directory containing the online_worker package, not its __main__.py.
     pub worker_root: PathBuf,
     pub capture: PathBuf,
+    pub translator: Option<crate::infrastructure::local_llama::LocalLlamaTranslationProvider>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -32,6 +33,8 @@ pub struct OnlineModels {
     pub vad_model: PathBuf,
     /// The current worker only accepts loopback text translation. No cloud fallback.
     pub translation_url: Option<String>,
+    #[serde(default = "enabled")]
+    pub translation_drafts: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -47,6 +50,10 @@ pub struct OnlineSessionStatus {
 pub struct OnlineSessionEvent {
     pub session_id: String,
     pub event: Value,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 type EventSink = Arc<dyn Fn(OnlineSessionEvent) + Send + Sync>;
@@ -123,7 +130,11 @@ impl OnlineSessionService {
         let status = self.status.clone();
         let task = tokio::spawn(async move {
             let _permit = permit;
+            let translator = runtime.translator.clone();
             let result = run_session(&id, runtime, models, receiver, &status, &emit).await;
+            if let Some(translator) = translator {
+                let _ = translator.shutdown().await;
+            }
             let (phase, error) = match result {
                 Ok(()) => ("stopped", None),
                 Err(error) => ("failed", Some(format!("{error:#}"))),
@@ -179,15 +190,27 @@ fn relay(id: &str, line: &str, emit: &EventSink) -> Result<Value> {
 async fn run_session(
     id: &str,
     runtime: OnlineRuntime,
-    models: OnlineModels,
+    mut models: OnlineModels,
     mut stop: watch::Receiver<bool>,
     status: &watch::Sender<OnlineSessionStatus>,
     emit: &EventSink,
 ) -> Result<()> {
+    let mut translation_key = None;
+    if let Some(translator) = &runtime.translator {
+        tokio::select! {
+            _ = stop.changed() => return Ok(()),
+            connection = translator.online_connection() => {
+                let (url, key) = connection?;
+                models.translation_url = Some(url);
+                translation_key = Some(key);
+            }
+        }
+    }
     let mut command = Command::new(runtime.python);
     command
         .args([
             "-s",
+            "-B",
             "-u",
             "-m",
             "online_worker",
@@ -215,6 +238,12 @@ async fn run_session(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    if !models.translation_drafts {
+        command.arg("--no-translation-drafts");
+    }
+    if let Some(key) = translation_key {
+        command.env("ATOGAKI_ONLINE_LLAMA_KEY", key);
+    }
     if let Some(url) = models.translation_url {
         command.arg("--translation-url").arg(url);
     }
@@ -367,6 +396,7 @@ mod tests {
             python: root.join("python"),
             worker_root: root.clone(),
             capture: root.join("capture"),
+            translator: None,
         };
         let models = OnlineModels {
             language: "ja".into(),
@@ -374,6 +404,7 @@ mod tests {
             final_model: root.clone(),
             vad_model: root.join("vad.onnx"),
             translation_url: None,
+            translation_drafts: true,
         };
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded = events.clone();
