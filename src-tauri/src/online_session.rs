@@ -296,6 +296,7 @@ pub fn open_online_control(app: AppHandle) -> Result<(), String> {
 pub fn open_online_captions(
     app: AppHandle,
     state: State<'_, DesktopOnlineSession>,
+    focus: Option<bool>,
 ) -> Result<(), String> {
     let w = if let Some(w) = app.get_webview_window("online-captions") {
         w
@@ -307,7 +308,9 @@ pub fn open_online_captions(
         )
         .title("Atogaki · 在线字幕")
         .accept_first_mouse(true)
-        .inner_size(760., 560.)
+        .inner_size(920., 280.)
+        .transparent(true)
+        .background_color(tauri::window::Color(0, 0, 0, 0))
         .min_inner_size(420., 200.)
         .decorations(false)
         .always_on_top(true)
@@ -318,7 +321,13 @@ pub fn open_online_captions(
     };
     #[cfg(target_os = "macos")]
     {
-        crate::show_caption_panel(&app, &w, state.panel.clone(), "Atogaki 在线字幕")?;
+        crate::show_caption_panel(
+            &app,
+            &w,
+            state.panel.clone(),
+            "Atogaki 在线字幕",
+            focus.unwrap_or(false),
+        )?;
     }
     #[cfg(not(target_os = "macos"))]
     {

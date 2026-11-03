@@ -28,7 +28,7 @@ serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10.9"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite"] }
-tauri = { version = "2.11.5", features = ["protocol-asset"] }
+tauri = { version = "2.11.5", features = ["protocol-asset", "macos-private-api"] }
 tauri-plugin-dialog = "2.7.2"
 tar = "0.4"
 tokio = { version = "1", features = ["fs", "io-util", "sync", "net", "time"] }
@@ -38,5 +38,5 @@ zstd = "0.13"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSButton", "NSControl", "NSGraphics", "NSPanel", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSButton", "NSColor", "NSControl", "NSEvent", "NSGraphics", "NSPanel", "NSScreen", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSProcessInfo"] }

@@ -7,6 +7,8 @@ mod dictionary_download;
 mod dictionary_lookup;
 mod media_server;
 mod model_download;
+#[cfg(target_os = "macos")]
+mod online_panel;
 mod online_session;
 mod theme_artwork;
 
@@ -165,15 +167,17 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
         window,
         app.state::<SubtitleOverlayState>().native_panel.clone(),
         "Atogaki 悬浮字幕",
+        false,
     )
 }
 
 #[cfg(target_os = "macos")]
 pub(crate) fn show_caption_panel<R: tauri::Runtime>(
-    _app: &AppHandle<R>,
+    app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
     panel_store: Arc<Mutex<Option<usize>>>,
     title: &'static str,
+    focus: bool,
 ) -> Result<(), String> {
     use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
     use objc2_app_kit::{
@@ -182,13 +186,24 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
     };
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
 
+    let online = window.label() == "online-captions";
+    let reference_window = online
+        .then(|| {
+            app.get_webview_window("online-control")
+                .or_else(|| app.get_webview_window("main"))
+        })
+        .flatten();
     let window = window.clone();
     window
         .clone()
         .run_on_main_thread(move || {
             if let Some(panel_pointer) = panel_store.lock().ok().and_then(|panel| *panel) {
                 let panel: &NSPanel = unsafe { &*(panel_pointer as *const NSPanel) };
-                panel.orderFrontRegardless();
+                if focus {
+                    panel.makeKeyAndOrderFront(None);
+                } else {
+                    panel.orderFrontRegardless();
+                }
                 return;
             }
             let Ok(native_window) = window.ns_window() else {
@@ -201,16 +216,25 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
             let Some(main_thread) = MainThreadMarker::new() else {
                 return;
             };
-            let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
-                NSPanel::alloc(main_thread),
-                native_window.frame(),
-                NSWindowStyleMask::Titled
-                    | NSWindowStyleMask::Resizable
-                    | NSWindowStyleMask::UtilityWindow
-                    | NSWindowStyleMask::NonactivatingPanel,
-                NSBackingStoreType::Buffered,
-                false,
-            );
+            let panel = if online {
+                let screen = reference_window
+                    .as_ref()
+                    .and_then(|w| w.ns_window().ok())
+                    .and_then(|pointer| unsafe { &*pointer.cast::<NSWindow>() }.screen())
+                    .or_else(|| native_window.screen());
+                online_panel::new(native_window.frame(), screen.as_deref(), main_thread)
+            } else {
+                NSPanel::initWithContentRect_styleMask_backing_defer(
+                    NSPanel::alloc(main_thread),
+                    native_window.frame(),
+                    NSWindowStyleMask::Titled
+                        | NSWindowStyleMask::Resizable
+                        | NSWindowStyleMask::UtilityWindow
+                        | NSWindowStyleMask::NonactivatingPanel,
+                    NSBackingStoreType::Buffered,
+                    false,
+                )
+            };
             let mut behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::Stationary
                 | NSWindowCollectionBehavior::FullScreenAuxiliary;
@@ -237,8 +261,12 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
                     button.setHidden(true);
                 }
             }
-            panel.setMinSize(NSSize::new(360.0, 120.0));
-            panel.setMovableByWindowBackground(true);
+            panel.setMinSize(if online {
+                NSSize::new(420.0, 200.0)
+            } else {
+                NSSize::new(360.0, 120.0)
+            });
+            panel.setMovableByWindowBackground(!online);
             panel.setFloatingPanel(true);
             // Keep the panel non-activating when it is shown, but allow an
             // intentional click inside it to make its WebView key so the
@@ -249,7 +277,11 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
             panel.setLevel(NSScreenSaverWindowLevel);
             unsafe { panel.setReleasedWhenClosed(false) };
             native_window.orderOut(None);
-            panel.orderFrontRegardless();
+            if focus {
+                panel.makeKeyAndOrderFront(None);
+            } else {
+                panel.orderFrontRegardless();
+            }
 
             let panel_pointer = Retained::into_raw(panel) as usize;
             if let Ok(mut stored) = panel_store.lock() {
