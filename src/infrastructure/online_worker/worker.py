@@ -177,7 +177,8 @@ def main():
                             t = time.monotonic()
                             translated = translation.cached(request)
                             if translated is None:
-                                translated = translator.translate(request['source_text'], request['context'])
+                                translated = translator.translate(request['source_text'], request['context'],
+                                                                  request['lookahead_source'])
                             translation.complete(request, translated, time.monotonic()-t)
                             continue
                         if input_done and (not translator or not translation.pending()):
@@ -308,7 +309,8 @@ def main():
             translation_drafts=a.translation_drafts,
             translation_group_policy=dict(pause_s=1.2,
                 max_seconds=20, max_chars=400, draft_interval_s=.8,
-                bounds='at VAD boundaries; one ASR segment may overshoot', context_groups=1),
+                bounds='at final ASR boundaries; one segment may overshoot', context_groups=1,
+                sentence_lookahead_chars=8, commit_wait_after_qwen_s=4.0),
             note='file-clock demo; first draft is not verified-word latency; translation groups revise independently of ASR segments')
         if a.output:
             (a.output/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')

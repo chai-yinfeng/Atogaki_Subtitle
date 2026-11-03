@@ -22,30 +22,43 @@ test('new session clears old captions and rejects late events from the old sessi
  assert.equal(state.tracks().source,null);
 });
 
-test('three bilingual finals survive the event ring while the next group changes',()=>{
+test('locked MT prefix survives the event ring beside its revisable tail',()=>{
  const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- for(let i=1;i<=4;i++)state.accept(event(i,{kind:'translation_final',group_id:`g${i}`,start_s:i,end_s:i+1,source_text:`source ${i}`,text:`translation ${i}`}));
- for(let i=5;i<310;i++)state.accept(event(i,{kind:'translation_draft',group_id:'active',start_s:6,end_s:7,text:`draft ${i}`}));
- assert.deepEqual(state.tracks().history.map(e=>e.source_text),['source 2','source 3','source 4']);
- assert.equal(state.tracks().activeTranslation.text,'draft 309');
- state.accept(event(310,{kind:'translation_final',group_id:'active',start_s:6,end_s:7,source_text:'paired input',text:'final'}));
- assert.equal(state.tracks().activeTranslation,null);
- assert.deepEqual(state.tracks().history.map(e=>e.group_id),['g3','g4','active']);
+ state.accept(event(1,{kind:'translation_final',group_id:'locked',start_s:0,end_s:2,text:'white prefix'}));
+ for(let i=2;i<310;i++)state.accept(event(i,{kind:'translation_draft',group_id:'tail',start_s:2,end_s:5,text:`blue tail ${i}`}));
+ const parts=state.tracks().translationParts;
+ assert.deepEqual(parts.map(e=>e.kind),['translation_final','translation_draft']);
+ assert.equal(parts[0].text,'white prefix');
+ assert.equal(parts[1].text,'blue tail 309');
+ state.accept(event(310,{kind:'translation_final',group_id:'tail',start_s:2,end_s:5,text:'locked tail'}));
+ assert.deepEqual(state.tracks().translationParts.map(e=>e.kind),['translation_final','translation_final']);
 });
-test('settled translation hides its covered ASR but keeps the next source active',()=>{
+test('ASR locks independently while MT still revises the same audio range',()=>{
  const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- state.accept(event(1,{kind:'source_final',segment_id:'a',start_s:0,end_s:3,text:'a'}));
- state.accept(event(2,{kind:'translation_final',group_id:'g',start_s:0,end_s:3,source_text:'paired a',text:'A'}));
- assert.equal(state.tracks().activeSource,null);
- state.accept(event(3,{kind:'source_draft',segment_id:'b',start_s:3,end_s:4,text:'b'}));
- assert.equal(state.tracks().activeSource.text,'b');
+ state.accept(event(1,{kind:'source_final',segment_id:'a',start_s:0,end_s:3,text:'Qwen final'}));
+ state.accept(event(2,{kind:'source_draft',segment_id:'b',start_s:3,end_s:5,text:'SenseVoice draft'}));
+ state.accept(event(3,{kind:'translation_draft',group_id:'g',start_s:0,end_s:5,text:'still mutable'}));
+ assert.deepEqual(state.tracks().sourceParts.map(e=>e.kind),['source_final','source_draft']);
+ assert.deepEqual(state.tracks().translationParts.map(e=>e.kind),['translation_draft']);
 });
-test('without MT, the last three ASR finals are retained separately from the draft',()=>{
+test('reading range advances by audio time at whole-unit boundaries, not a three-item count',()=>{
  const state=new OnlineCaptions();state.snapshot({status:{...status('s'),translationEnabled:false},events:[]});
- for(let i=1;i<=4;i++)state.accept(event(i,{kind:'source_final',segment_id:`s${i}`,start_s:i,text:`source ${i}`}));
- state.accept(event(5,{kind:'source_draft',segment_id:'next',start_s:5,text:'draft'}));
- assert.deepEqual(state.tracks().history.map(e=>e.text),['source 2','source 3','source 4']);
- assert.equal(state.tracks().activeSource.text,'draft');
+ for(let i=1;i<=9;i++)state.accept(event(i,{kind:'source_final',segment_id:`s${i}`,start_s:i-1,end_s:i,text:`source ${i}`}));
+ assert.deepEqual(state.tracks().sourceParts.map(e=>e.segment_id),['s5','s6','s7','s8','s9']);
+ assert.deepEqual(state.tracks().translationParts,[]);
+ state.accept(event(10,{kind:'source_draft',segment_id:'next',start_s:9,end_s:16,text:'long draft'}));
+ assert.deepEqual(state.tracks().sourceParts.map(e=>e.segment_id),['s9','next']);
+ state.accept(event(11,{kind:'source_final',segment_id:'next',start_s:9,end_s:16,text:'Qwen result'}));
+ assert.deepEqual(state.tracks().sourceParts.map(e=>e.segment_id),['next']);
+});
+test('committing a split MT prefix replaces its former whole-group draft',()=>{
+ const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
+ state.accept(event(1,{kind:'translation_draft',group_id:'g1',start_s:0,end_s:5,text:'old whole draft'}));
+ state.accept(event(2,{kind:'translation_final',group_id:'g1',start_s:0,end_s:2,text:'prefix only'}));
+ state.accept(event(3,{kind:'translation_draft',group_id:'g2',start_s:2,end_s:5,text:'tail only'}));
+ assert.deepEqual(state.tracks().translationParts.map(e=>e.text),['prefix only','tail only']);
+ state.accept(event(4,{kind:'translation_draft',group_id:'g1',start_s:0,end_s:5,text:'late old draft'}));
+ assert.equal(state.tracks().translationParts[0].text,'prefix only');
 });
 
 test('prefix rewrites wait two seconds and replace the entire latest snapshot',()=>{
@@ -65,4 +78,12 @@ test('new groups and clearing the activity bypass the prefix gate',()=>{
  assert.equal(gate.select({kind:'source_draft',segment_id:'b',text:'new'},10).text,'new');
  assert.equal(gate.select(null,20),null);
  assert.equal(gate.select({kind:'source_draft',segment_id:'b',text:'reset'},30).text,'reset');
+});
+
+test('splitting a long MT draft never brings expired text back into the reading frame',()=>{
+ const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
+ for(let i=1;i<=3;i++)state.accept(event(i,{kind:'translation_final',group_id:`old${i}`,start_s:i-1,end_s:i,text:`old ${i}`}));
+ state.accept(event(4,{kind:'translation_draft',group_id:'g',start_s:3,end_s:10,text:'whole draft'}));
+ state.accept(event(5,{kind:'translation_final',group_id:'g',start_s:3,end_s:6,text:'locked prefix'}));
+ assert.deepEqual(state.tracks().translationParts.map(e=>e.text),['locked prefix']);
 });

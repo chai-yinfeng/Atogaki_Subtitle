@@ -35,6 +35,8 @@ export class OnlineCaptions {
   private sources = new Map<string, CaptionEvent>();
   private groups = new Map<string, CaptionEvent>();
   private prunedThrough = -1;
+  private sourceEnd = 0;
+  private translationEnd = 0;
 
   snapshot(snapshot: OnlineSnapshot): void {
     if (snapshot.status.sessionId !== this.status.sessionId) {
@@ -42,6 +44,7 @@ export class OnlineCaptions {
       this.sources.clear();
       this.groups.clear();
       this.prunedThrough = -1;
+      this.sourceEnd = this.translationEnd = 0;
     }
     this.status = snapshot.status;
     this.translationEnabled = snapshot.status.translationEnabled ?? true;
@@ -52,8 +55,12 @@ export class OnlineCaptions {
     if (event.sessionId !== this.status.sessionId || event.sequence <= this.prunedThrough || this.events.has(event.sequence)) return;
     this.events.set(event.sequence, event);
     const e = event.event;
-    if (e.segment_id && (e.kind === "source_draft" || e.kind === "source_final")) this.update(this.sources, e.segment_id, event, 8);
-    if (e.group_id && (e.kind === "translation_draft" || e.kind === "translation_final")) this.update(this.groups, e.group_id, event, 4);
+    if (e.segment_id && (e.kind === "source_draft" || e.kind === "source_final")) {
+      if (this.update(this.sources, e.segment_id, event, 64)) this.sourceEnd = Math.max(this.sourceEnd, e.end_s ?? e.start_s ?? 0);
+    }
+    if (e.group_id && (e.kind === "translation_draft" || e.kind === "translation_final")) {
+      if (this.update(this.groups, e.group_id, event, 64)) this.translationEnd = Math.max(this.translationEnd, e.end_s ?? e.start_s ?? 0);
+    }
     while (this.events.size > 256) {
       const oldest = Math.min(...this.events.keys());
       this.events.delete(oldest);
@@ -61,33 +68,37 @@ export class OnlineCaptions {
     }
   }
 
-  private update(map: Map<string, CaptionEvent>, key: string, incoming: CaptionEvent, limit: number): void {
+  private update(map: Map<string, CaptionEvent>, key: string, incoming: CaptionEvent, limit: number): boolean {
     const previous = map.get(key);
-    if (previous && (previous.sequence >= incoming.sequence || previous.event.kind.endsWith("final"))) return;
+    if (previous && (previous.sequence >= incoming.sequence || previous.event.kind.endsWith("final"))) return false;
     map.set(key, incoming);
     while (map.size > limit) {
       const oldest = [...map.entries()].sort((a, b) => byTime(a[1].event, b[1].event))[0][0];
       map.delete(oldest);
     }
+    return true;
   }
 
-  tracks(): { source: LiveEvent | null; translation: LiveEvent | null; history: LiveEvent[]; activeSource: LiveEvent | null; activeTranslation: LiveEvent | null } {
+  tracks(): { source: LiveEvent | null; translation: LiveEvent | null; sourceParts: LiveEvent[]; translationParts: LiveEvent[] } {
     const sources = [...this.sources.values()].map(e => e.event).sort(byTime);
     const translations = [...this.groups.values()].map(e => e.event).sort(byTime);
-    const source = sources.at(-1) ?? null;
-    const translation = translations.at(-1) ?? null;
-    const history = (this.translationEnabled
-      ? translations.filter(e => e.kind === "translation_final")
-      : sources.filter(e => e.kind === "source_final")).slice(-3);
-    const settledEnd = history.at(-1)?.end_s ?? -Infinity;
-    const activeSource = source && (this.translationEnabled
-      ? (source.end_s ?? Infinity) > settledEnd
-      : source.kind === "source_draft") ? source : null;
     return {
-      source, translation, history, activeSource,
-      activeTranslation: translation?.kind === "translation_draft" ? translation : null,
+      source: sources.at(-1) ?? null,
+      translation: translations.at(-1) ?? null,
+      sourceParts: readingWindow(sources, this.sourceEnd),
+      translationParts: this.translationEnabled ? readingWindow(translations, this.translationEnd) : [],
     };
   }
+
+}
+
+/** Five seconds is a soft reading range: keep complete units and the locked
+ * prefix immediately before a mutable tail. No word timings are invented. */
+function readingWindow(parts: LiveEvent[], end: number): LiveEvent[] {
+  const cutoff = end - 5;
+  const firstDraft = parts.findIndex(e => e.kind.endsWith("draft"));
+  const previousFinal = (firstDraft < 0 ? parts : parts.slice(0, firstDraft)).filter(e => e.kind.endsWith("final")).at(-1);
+  return parts.filter(e => e.kind.endsWith("draft") || e === previousFinal || (e.end_s ?? e.start_s ?? 0) > cutoff);
 }
 
 /** Prefix edits are atomic, revisable snapshots; append-only growth stays prompt. */

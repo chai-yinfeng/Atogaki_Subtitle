@@ -18,15 +18,19 @@ class HyMT2:
         self.client = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                                 NoRedirect())
 
-    def translate(self, source, context=()):
-        if context:
+    def translate(self, source, context=(), lookahead_source=''):
+        if context or lookahead_source:
             # Hy-MT2's documented background/source template keeps reference
             # material before the instruction, outside the text to translate.
             background = '\n'.join(f'Source: {src}\nTranslation: {dst}' for src, dst in context)
+            if lookahead_source:
+                background += ('\nFollowing source context (reference only; do not translate):\n'
+                               + lookahead_source)
             prompt = (f'[Background Information]\n{background}\n\n'
                       f'Please translate the following text into {self.target}, taking the '
-                      'provided background information into consideration. Only output the '
-                      'translated result without any additional explanation.\n\n'
+                      'provided background information into consideration. Output the '
+                      'translation of [Source Text] only, without repeating the background or following '
+                      'source context and without any additional explanation.\n\n'
                       f'[Source Text]\n{source}')
         else:
             prompt = (f'Translate the following segment into {self.target}, '

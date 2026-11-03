@@ -1,6 +1,7 @@
 """Revision-aware translation groups; independent of ASR/runtime and display UI."""
 from dataclasses import dataclass, field
 import threading
+import re
 
 
 @dataclass
@@ -14,6 +15,7 @@ class Group:
     committed: bool = False
     last_request: float = float('-inf')
     displayed_request: int = 0
+    lookahead: str = ''
 
 
 class Retranslation:
@@ -23,10 +25,12 @@ class Retranslation:
     can produce a committed translation. A VAD endpoint alone never commits MT.
     """
     def __init__(self, emit, *, language='ja', drafts=True, interval=.8,
-                 pause=1.2, max_seconds=20, max_chars=400):
+                 pause=1.2, max_seconds=20, max_chars=400, commit_wait=4.0):
         self.emit = emit
         self.language, self.drafts, self.interval = language, drafts, interval
         self.pause = pause
+        self.commit_wait = commit_wait
+        self.audio_seconds = 0.0
         self.max_seconds, self.max_chars = max_seconds, max_chars
         self.lock = threading.Lock()
         self.groups, self.segment_groups = [], {}
@@ -39,8 +43,7 @@ class Retranslation:
         self.cache = None
 
     def _text(self, group):
-        separator = ' ' if self.language in ('en', 'ko') else ''
-        return separator.join(s['text'] for s in group.segments.values() if s['text'])
+        return self._join(s['text'] for s in group.segments.values() if s['text'])
 
     def _seal(self, group, reason):
         if group.reason is None:
@@ -61,11 +64,13 @@ class Retranslation:
                     self.active = Group(f'group-{self.group_id}', start, end)
                     self.groups.append(self.active)
                 group = self.active
-                group.segments[sid] = dict(text='', revision=0, final=False, closed=False)
+                group.segments[sid] = dict(text='', revision=0, final=False, closed=False,
+                                           start=start, end=end, finalized_at=None)
                 self.segment_groups[sid] = group
             group = self.segment_groups[sid]
             group.end = max(group.end, end)
             group.segments[sid]['closed'] |= closed
+            group.segments[sid]['end'] = max(group.segments[sid]['end'], end)
             if closed and group.reason is None:
                 if group.end-group.start >= self.max_seconds:
                     self._seal(group, 'max_duration')
@@ -84,6 +89,8 @@ class Retranslation:
                 return
             segment.update(text=event['text'], revision=event['source_revision'],
                            final=event['kind'] == 'source_final')
+            if segment['final']:
+                segment['finalized_at'] = self.audio_seconds
             group.revision += 1
             # A character bound closes at an acoustic boundary, never midway
             # through a segment whose final ASR still covers the entire range.
@@ -93,6 +100,7 @@ class Retranslation:
 
     def advance(self, seconds, *, speech=False, eof=False):
         with self.lock:
+            self.audio_seconds = max(self.audio_seconds, seconds)
             group = self.active
             if group is None:
                 return
@@ -103,6 +111,61 @@ class Retranslation:
                 if quiet >= self.pause:
                     self._seal(group, 'long_pause')
 
+    def _commit_prefix(self, group):
+        """Commit whole finalized ASR units; never splice translated strings.
+
+        A sentence candidate needs following text as reference. A finite wait
+        also releases unfinished phrases, explicitly labelled as a timeout.
+        """
+        items = list(group.segments.items())
+        boundary, reason = None, None
+        prefix = []
+        for index, (_, segment) in enumerate(items):
+            if not segment['final']:
+                break
+            prefix.append(segment['text'])
+            following = self._join(s['text'] for _, s in items[index+1:])
+            # Qwen can punctuate fragments such as 一人で。; a bare period
+            # alone is insufficient. These bounds are heuristics, not syntax.
+            sentence = re.search(r'[。！？.!?][」』"\')）]*$', segment['text'].strip())
+            if sentence and len(''.join(prefix).strip()) >= 8 and len(following.strip()) >= 8:
+                boundary, reason = index+1, 'sentence_with_lookahead'
+                break
+        if boundary is None and group.reason is None:
+            ready = [s for _, s in items if s['final']]
+            if ready and items[0][1]['final'] and self.audio_seconds-ready[0]['finalized_at'] >= self.commit_wait:
+                boundary = 0
+                for _, segment in items:
+                    if not segment['final']:
+                        break
+                    boundary += 1
+                reason = 'commit_timeout'
+        if boundary is None:
+            return
+        if boundary == len(items):
+            self._seal(group, reason)
+            return
+        tail = dict(items[boundary:])
+        self.group_id += 1
+        remainder = Group(f'group-{self.group_id}', next(iter(tail.values()))['start'],
+                          group.end, segments=tail, revision=1, reason=group.reason)
+        group.segments = dict(items[:boundary])
+        group.end = items[boundary-1][1]['end']
+        group.lookahead = self._text(remainder)[:500]
+        group.revision += 1
+        # Old group_id now owns just the committed prefix. Its final replaces
+        # the former whole-group draft, and the tail gets a fresh identity.
+        group.reason = None
+        self._seal(group, reason)
+        self.groups.insert(self.groups.index(group)+1, remainder)
+        for sid in tail:
+            self.segment_groups[sid] = remainder
+        if remainder.reason is None:
+            self.active = remainder
+
+    def _join(self, texts):
+        return (' ' if self.language in ('en', 'ko') else '').join(texts)
+
     def take(self, now):
         with self.lock:
             if self.inflight is not None:
@@ -112,6 +175,7 @@ class Retranslation:
             group = next((g for g in self.groups if not g.committed), None)
             if group is None:
                 return None
+            self._commit_prefix(group)
             final = group.reason is not None and all(s['final'] for s in group.segments.values())
             text = self._text(group)
             signature = (group.revision, self.context_revision)
@@ -123,7 +187,7 @@ class Retranslation:
             request = dict(request_id=self.request_id, group_id=group.id,
                            group_revision=group.revision,
                            source_revisions={sid: s['revision'] for sid, s in group.segments.items()},
-                           source_text=text, context=self.context,
+                           source_text=text, context=self.context, lookahead_source=group.lookahead,
                            context_revision=self.context_revision, final=final,
                            start_s=group.start, end_s=group.end,
                            completion_reason=group.reason)
@@ -133,7 +197,7 @@ class Retranslation:
             return request.copy()
 
     def cached(self, request):
-        key = (request['source_text'], request['context'])
+        key = (request['source_text'], request['context'], request['lookahead_source'])
         return self.cache[1] if self.cache and self.cache[0] == key else None
 
     def complete(self, request, text, compute_s=0):
@@ -141,7 +205,7 @@ class Retranslation:
             if self.inflight != request:
                 raise ValueError('translation request is not in flight')
             self.inflight = None
-            self.cache = ((request['source_text'], request['context']), text)
+            self.cache = ((request['source_text'], request['context'], request['lookahead_source']), text)
             group = next(g for g in self.groups if g.id == request['group_id'])
             current = request['group_revision'] == group.revision
             if group.committed or request['request_id'] <= group.displayed_request:
@@ -155,9 +219,12 @@ class Retranslation:
                               stale_source=not current, provisional=not request['final'])
             if request['final']:
                 group.committed = True
-                # One bounded preceding group; immutable while translating
-                # the next one. No cascading retranslation of old captions.
-                self.context = ((request['source_text'][-1000:], text[-1000:]),)
+                # Keep bounded rolling reference even when sentence commits
+                # are short. Committed outputs themselves are never retranslated.
+                previous_source, previous_translation = self.context[0] if self.context else ('', '')
+                source_context = self._join(s for s in (previous_source, request['source_text']) if s)
+                translation_context = ' '.join(s for s in (previous_translation, text) if s)
+                self.context = ((source_context[-1000:], translation_context[-1000:]),)
                 self.context_revision += 1
                 # Completed groups no longer retain all segment texts/revisions.
                 self.groups.remove(group)

@@ -218,21 +218,30 @@ pub async fn start_online_session(
                         data: event,
                     };
                     history.push(event.clone());
-                    // Preserve a few settled captions when a long draft fills the ring,
-                    // so a newly opened window can recover the same reading history.
+                    // Recover each track's recent locked prefix even when its
+                    // mutable tail fills the event ring. The count is a memory
+                    // guard; reading retention is based on audio time.
                     let recent = history.len().saturating_sub(256);
                     let mut source_finals = 0;
                     let mut translation_finals = 0;
+                    let mut source_end = None;
+                    let mut translation_end = None;
                     let mut keep = vec![false; history.len()];
                     for (index, item) in history.iter().enumerate().rev() {
                         let settled = match item.data.event["kind"].as_str() {
                             Some("source_final") => {
                                 source_finals += 1;
-                                source_finals <= 3
+                                let end = item.data.event["end_s"].as_f64().unwrap_or(0.0);
+                                let latest = source_end.get_or_insert(end);
+                                *latest = f64::max(*latest, end);
+                                source_finals <= 64 && end > *latest - 5.0
                             }
                             Some("translation_final") => {
                                 translation_finals += 1;
-                                translation_finals <= 3
+                                let end = item.data.event["end_s"].as_f64().unwrap_or(0.0);
+                                let latest = translation_end.get_or_insert(end);
+                                *latest = f64::max(*latest, end);
+                                translation_finals <= 64 && end > *latest - 5.0
                             }
                             _ => false,
                         };

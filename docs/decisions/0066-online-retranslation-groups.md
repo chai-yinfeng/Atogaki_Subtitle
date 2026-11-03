@@ -2,6 +2,8 @@
 
 日期：2026-11-02。状态：accepted，用户确认按讨论推进pipeline；当前实现和验收范围为CLI实时文件回放，尚未进入桌面会话。
 
+后继：当前按句／超时提交和双框阅读见[0070](0070-online-independent-prefix-commit.md)。下文保留原整组提交阶段的选择及证据。
+
 ## 原因与选择
 
 ASR前缀稳定不能证明译文前缀稳定。即使原文识别完全正确，日语句末否定等后续信息仍可能改变中文前部。因此不将Whisper-Streaming的LocalAgreement／committed状态直接当成MT提交策略，不逐VAD段独立翻译并立即冻结。保留本地草稿→Qwen整段定稿的two-pass ASR，MT独立维护可整体替换的活动翻译组。

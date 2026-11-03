@@ -9,12 +9,10 @@ const control=document.body.dataset.view==="control";
 const root=document.querySelector<HTMLElement>("#online-root")!;
 root.innerHTML=`<section class="online-card">
 <header data-tauri-drag-region><strong data-tauri-drag-region>Atogaki · ${control?"在线字幕控制面板":"在线字幕"}</strong><button id="online-hide" class="quiet" type="button">${control?"字幕窗":"隐藏"}</button></header>
-${control?`<div class="configuration"><label>原文语言<select id="online-language"></select></label><label>Qwen3-ASR 定稿<select id="online-model"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>本地 Hy-MT2 翻译为中文</label><label class="check"><input type="checkbox" id="online-drafts" checked>显示可回改的译文草稿</label><p class="help">从系统输出读取音频，不使用麦克风。译文跨语音段重译，停顿约 1.2 秒或达到组上限后收口。白色区域保留最近三组双语定稿，蓝色区域显示可回改草稿。本次测试不保存录音。</p><div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止并完成末段</button></div></div>`:""}
+${control?`<div class="configuration"><label>原文语言<select id="online-language"></select></label><label>Qwen3-ASR 定稿<select id="online-model"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>本地 Hy-MT2 翻译为中文</label><label class="check"><input type="checkbox" id="online-drafts" checked>显示可回改的译文草稿</label><p class="help">从系统输出读取音频，不使用麦克风。原文、译文分别推进，框内保留已锁定的前文，蓝色尾部仍可回改；显示约 3–5 秒内容，按完整段保留。译文优先按句提交，长时间无句末时按已定稿原文边界提交。本次测试不保存录音。</p><div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止并完成末段</button></div></div>`:""}
 <p id="online-status" role="status">正在读取会话状态…</p>
-<section class="settled"><span class="badge">最近定稿 · 保留三组</span><p id="settled-empty" class="help">等待定稿…</p><div id="online-history"></div></section>
-<div id="online-activity"><section id="source-track" class="track"><span id="source-state" class="badge">原文</span><p id="source-text">等待语音…</p></section>
-<section id="translation-track" class="track"><span id="translation-state" class="badge">译文</span><p id="translation-text">等待翻译…</p></section>
-</div>
+<section id="source-track" class="track"><span class="badge">原文</span><p id="source-text">等待语音…</p></section>
+<section id="translation-track" class="track"><span class="badge">译文</span><p id="translation-text">等待翻译…</p></section>
 ${control?`<p id="online-timing" class="help"></p>`:""}
 </section>`;
 const model=new OnlineCaptions();
@@ -23,47 +21,40 @@ const set=(id:string,text:string)=>{const node=find(id);if(node.textContent!==te
 let choices:Choices|null=null, busy=false, message="", disposed=false;
 let pendingCaptionSession:string|null=null;
 let displayedSession:string|null=null;
-let sourceDraft=new DraftPresentation(), translationDraft=new DraftPresentation();
-const settledNodes=new Map<string,HTMLElement>();
-function renderHistory(history:LiveEvent[]):void {
- const container=find("online-history"), keys=new Set(history.map(e=>e.group_id??e.segment_id!));
+type PartNode={node:HTMLSpanElement;gate:DraftPresentation};
+const trackNodes={source:new Map<string,PartNode>(),translation:new Map<string,PartNode>()};
+function renderTrack(prefix:"source"|"translation",parts:LiveEvent[]):void {
+ const container=find(`${prefix}-text`), nodes=trackNodes[prefix];
+ const keys=new Set(parts.map(e=>e.group_id??e.segment_id!));
  const follow=container.scrollHeight-container.scrollTop-container.clientHeight<24;
  let changed=false;
- for(const [key,node] of settledNodes)if(!keys.has(key)){node.remove();settledNodes.delete(key);changed=true;}
- for(const e of history){
-  const key=e.group_id??e.segment_id!;
-  if(settledNodes.has(key))continue;
-  const article=document.createElement("article");article.dataset.captionId=key;
-  const source=document.createElement("p");source.className="settled-source";source.textContent=e.source_text??e.text??"";article.append(source);
-  if(e.group_id){const translation=document.createElement("p");translation.textContent=e.text??"";article.append(translation);}
-  settledNodes.set(key,article);changed=true;
- }
- // Insert only newly arrived or out-of-order rows; unchanged cards keep their DOM.
- let previous:Element|null=null;
- for(const e of history){const node=settledNodes.get(e.group_id??e.segment_id!)!;
-  if((previous?previous.nextElementSibling:container.firstElementChild)!==node)container.insertBefore(node,previous?previous.nextElementSibling:container.firstElementChild);
-  previous=node;
- }
- find("settled-empty").hidden=history.length>0;
+ for(const [key,{node}] of nodes)if(!keys.has(key)){node.remove();nodes.delete(key);changed=true;}
+ if(parts.length){
+  if(!nodes.size)container.replaceChildren();
+  let previous:Element|null=null;
+  for(const e of parts){
+   const key=e.group_id??e.segment_id!;
+   let part=nodes.get(key);
+   if(!part){part={node:document.createElement("span"),gate:new DraftPresentation()};part.node.dataset.captionId=key;nodes.set(key,part);}
+   const displayed=part.gate.select(e,performance.now())!;
+   const text=(displayed.text??"")+" ";
+   if(part.node.textContent!==text){part.node.textContent=text;changed=true;}
+   part.node.classList.toggle("draft",displayed.kind.endsWith("draft"));
+   if((previous?previous.nextElementSibling:container.firstElementChild)!==part.node){container.insertBefore(part.node,previous?previous.nextElementSibling:container.firstElementChild);changed=true;}
+   previous=part.node;
+  }
+ }else{set(`${prefix}-text`,prefix==="source"?"等待语音…":model.translationEnabled||!model.status.sessionId?"等待翻译…":"翻译已关闭");}
  if(changed&&follow)container.scrollTop=container.scrollHeight;
 }
 function render():void {
  const state=model.status, t=model.tracks();
  set("online-status",message||state.error||phaseLabel[state.phase]||state.phase);
  if(displayedSession!==state.sessionId){
-  displayedSession=state.sessionId;sourceDraft=new DraftPresentation();translationDraft=new DraftPresentation();
-  settledNodes.clear();find("online-history").replaceChildren();
+  displayedSession=state.sessionId;
+  for(const prefix of ["source","translation"] as const){trackNodes[prefix].clear();find(`${prefix}-text`).replaceChildren();}
  }
- renderHistory(t.history);
- const now=performance.now();
- const source=sourceDraft.select(t.activeSource,now), translation=translationDraft.select(t.activeTranslation,now);
- find("online-activity").hidden=!source&&!translation;
- for(const [prefix,e,name] of [["source",source,"原文"],["translation",translation,"译文"]] as const){
-  find(`${prefix}-track`).hidden=!e;
-  set(`${prefix}-state`,`${name}${e?.kind==="source_final"?"定稿 · 等待译文":"草稿"}${e?.stale_source?" · 正在追上原文":""}`);
-  find(`${prefix}-text`).classList.toggle("draft",e?.kind.endsWith("draft")??false);
-  set(`${prefix}-text`,e?.text??"");
- }
+ renderTrack("source",t.sourceParts);
+ renderTrack("translation",t.translationParts);
  if(!control)return;
  if(state.phase==="running"&&pendingCaptionSession===state.sessionId){pendingCaptionSession=null;void invoke("open_online_captions").catch(e=>{message=String(e);render();});}
  const active=activePhase(state.phase);

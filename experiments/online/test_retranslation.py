@@ -111,6 +111,76 @@ class RetranslationTests(unittest.TestCase):
         self.mt.advance(4, eof=True)
         self.assertTrue(self.mt.take(2)['final'])
 
+    def test_sentence_commits_only_final_prefix_and_uses_tail_as_reference(self):
+        self.source('a', '昨日は駅に行きました。', final=True, end=2)
+        self.source('b', 'そこで友達に会いました', start=2, end=4)
+        request = self.mt.take(0)
+        self.assertTrue(request['final'])
+        self.assertEqual(request['completion_reason'], 'sentence_with_lookahead')
+        self.assertEqual(request['source_text'], '昨日は駅に行きました。')
+        self.assertEqual(request['lookahead_source'], 'そこで友達に会いました')
+        self.assertEqual(request['source_revisions'], {'a': 1})
+        # New tail revisions do not invalidate the immutable Qwen prefix.
+        self.source('b', 'そこで先生に会いました。', revision=2, final=True, start=2, end=4)
+        self.mt.complete(request, '昨天去了车站。')
+        self.mt.advance(4, eof=True)
+        tail = self.mt.take(1)
+        self.assertNotEqual(tail['group_id'], request['group_id'])
+        self.assertEqual(tail['source_text'], 'そこで先生に会いました。')
+        self.assertEqual(tail['context'], (('昨日は駅に行きました。', '昨天去了车站。'),))
+        self.assertEqual(tail['source_revisions'], {'b': 2})
+        self.mt.complete(tail, '在那里遇到了老师。')
+        self.assertEqual(self.mt.pending(), 0)
+        self.assertEqual(self.mt.segment_groups, {})
+        self.assertEqual(self.mt.context[0][0], '昨日は駅に行きました。そこで先生に会いました。')
+
+    def test_timeout_commits_qwen_prefix_without_freezing_the_following_draft(self):
+        self.source('a', 'まだ話の途中ですが', final=True, end=1)
+        self.source('b', 'これから', start=1, end=5)
+        self.mt.advance(3.9, speech=True)
+        draft = self.mt.take(0)
+        self.assertFalse(draft['final'])
+        self.mt.complete(draft, '话还没说完，接下来')
+        self.mt.advance(4.1, speech=True)
+        request = self.mt.take(1)
+        self.assertEqual(request['completion_reason'], 'commit_timeout')
+        self.assertTrue(request['final'])
+        self.assertEqual(request['source_revisions'], {'a': 1})
+        self.assertEqual(request['source_text'], 'まだ話の途中ですが')
+        self.mt.complete(request, '话还没说完，')
+        self.assertEqual(self.mt.take(2)['source_text'], 'これから')
+
+    def test_timeout_cannot_commit_unfinalized_asr(self):
+        self.source('a', 'ずっと草稿', end=10)
+        self.mt.advance(10, speech=True)
+        request = self.mt.take(0)
+        self.assertFalse(request['final'])
+        self.mt.complete(request, '仍是草稿')
+        self.source('a', '確定した原文', revision=2, final=True, end=10)
+        updated = self.mt.take(1)
+        self.assertFalse(updated['final'])
+        self.mt.complete(updated, '定稿原文的活动译文')
+        self.mt.advance(14.1, speech=True)
+        request = self.mt.take(2)
+        self.assertTrue(request['final'])
+        self.assertEqual(request['completion_reason'], 'commit_timeout')
+
+    def test_sentence_split_preserves_eof_on_tail_and_commits_each_source_once(self):
+        for i in range(3):
+            self.source(str(i), f'これは文章の番号{i}です。', final=True, start=i, end=i+1)
+        self.mt.advance(3, eof=True)
+        committed = []
+        reasons = []
+        for i in range(3):
+            request = self.mt.take(i)
+            self.assertTrue(request['final'])
+            committed.extend(request['source_revisions'])
+            reasons.append(request['completion_reason'])
+            self.mt.complete(request, f'句子{i}')
+        self.assertEqual(committed, ['0', '1', '2'])
+        self.assertEqual(reasons, ['sentence_with_lookahead', 'sentence_with_lookahead', 'input_eof'])
+        self.assertEqual(self.mt.pending(), 0)
+
 
 if __name__ == '__main__':
     unittest.main()
