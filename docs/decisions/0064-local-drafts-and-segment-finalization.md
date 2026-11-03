@@ -12,6 +12,8 @@
 
 事件至少携带segment ID、媒体范围及source revision。迟到草稿不得覆盖已定稿段；译文只绑定实际采用的定稿revision。source_final只表示本次模型定稿，不表示人工核准或完整句意。VAD声学边界与翻译语义组仍不同；当前最小demo逐VAD段翻译并标注封口原因，不宣称已实现语义分组。
 
+2026-11-02后继：[0066](0066-online-retranslation-groups.md)已确认并接入独立翻译组与草稿重译；下面逐VAD段MT描述保留为初版证据，译文不再与单个ASR段同时提交。
+
 ## 当前实现与权衡
 
 `run_two_pass.py`以既有WAV模拟实时供给，日语先用SenseVoice滚动草稿→Silero→Qwen1.7B→Hy-MT2，英语用Zipformer替换草稿路径。提供事件JSONL及本地回放页；不改正式SQLite／offline cue、桌面GUI或麦克风采集。详细结果与局限见[验证记录](../two-pass-smoke-validation.md)。

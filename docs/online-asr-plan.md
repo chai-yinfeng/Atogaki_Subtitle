@@ -65,6 +65,8 @@ SenseVoice论文包含Small和Large；Large的研究指标不等于权重已经�
 
 ## 第一阶段 two-pass 行为
 
+后继pipeline采用[0066](decisions/0066-online-retranslation-groups.md)：译文按跨VAD活动组整体重译，ASR定稿不直接提交译文；CLI已接入草稿、收口及全组最终revision检查。正式采集与App尚未接入。
+
 用户已确认第一遍必须本地，允许滚动窗口形成可回改草稿；定稿可本地／云端。当前CLI实现、模型分工、云端价格与局限以[0064](decisions/0064-local-drafts-and-segment-finalization.md)及[链路记录](two-pass-smoke-validation.md)为准。
 
 持续音频同时进入完整录音保存、第一遍草稿识别及因果 VAD。第一遍负责实时上屏；VAD 提供起声／停声信号，第二遍对已封口的完整音频段重新识别，替换对应活动段草稿。第二遍以原始音频为依据，初期不把第一遍文字作为强提示。

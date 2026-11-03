@@ -35,6 +35,7 @@ _更新：2026-11-02_
 ## 在线接入与研究入口
 
 - [0065 在线桌面整合](decisions/0065-online-desktop-integration.md)：用户已确认的模型／平台／保存边界，以及尚待讨论的实施方案；当前只准备整合分支，未交付App功能。
+- [0066 独立译文回改与定稿](decisions/0066-online-retranslation-groups.md)：跨VAD分组、草稿重译和独立版本／调度，CLI已接入，尚未接App。
 - [当前online研究计划](online-asr-plan.md)、[0063模型范围](decisions/0063-online-two-pass-model-selection.md)、[0064本地草稿与定稿](decisions/0064-local-drafts-and-segment-finalization.md)。
 - [Qwen MLX跑通](qwen-mlx-smoke-validation.md)、[SenseVoice对照](sensevoice-smoke-validation.md)、[two-pass与Zipformer](two-pass-smoke-validation.md)：真实运行结果和质量／计时局限。
 - [旧0045独立会话](research/decisions/0045-independent-online-experiments.md)、[旧0046受控性能](research/decisions/0046-controlled-online-asr-performance.md)：研究历史，与主线不同同号ADR分目录保留，后继范围以0063–0065为准。

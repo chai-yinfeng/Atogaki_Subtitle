@@ -14,6 +14,7 @@ _最后更新：2026-11-02_
 
 - [x] 准备基于main的独立整合分支，保留研究历史和main v0.1.3进度；研究ADR0045／0046归入研究子目录解决重号，原始证据与旧环境保留。尚未更新main或本机App。
 - [x] 现有研究证据：Qwen／SenseVoice整段对照、三语言Zipformer流式、日语／英语本地two-pass及两个revision时序回归；[链路记录](two-pass-smoke-validation.md)不等于桌面验收。
+- [x] 按[0066](decisions/0066-online-retranslation-groups.md)接入独立翻译组、可回改译文草稿、全组最终ASR依赖和顺序提交；当前为CLI链路，实测与限制见[记录](two-pass-smoke-validation.md#独立翻译组与re-translation后继验证)。
 - [ ] 讨论并实现受管worker、多文件模型包、离线ASR后端与语言／用途选择；Whisper收敛至small／medium／large-v3 Q5／turbo Q8，Hy-MT2保留1.8B，已有文件不自动删除。
 - [ ] 原生系统音频采集与在线会话，明确权限、音频时钟、设备调度和停止语义；默认不保存时不自动写录音文件。
 - [ ] 独立在线控制面板与置顶字幕渲染，草稿／定稿分色并显示状态；与离线播放悬浮状态隔离。

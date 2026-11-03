@@ -70,11 +70,21 @@ class HyMT2:
         self.client = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                                 NoRedirect())
 
-    def translate(self, source):
+    def translate(self, source, context=()):
+        if context:
+            # Hy-MT2's documented background/source template keeps reference
+            # material before the instruction, outside the text to translate.
+            background = '\n'.join(f'Source: {src}\nTranslation: {dst}' for src, dst in context)
+            prompt = (f'[Background Information]\n{background}\n\n'
+                      f'Please translate the following text into {self.target}, taking the '
+                      'provided background information into consideration. Only output the '
+                      'translated result without any additional explanation.\n\n'
+                      f'[Source Text]\n{source}')
+        else:
+            prompt = (f'Translate the following segment into {self.target}, '
+                      f'without additional explanation.\n\n{source}')
         body = dict(model=self.model, stream=False, temperature=0.0, max_tokens=1024,
-                    messages=[dict(role='user', content=(
-                        f'Translate the following segment into {self.target}, without additional explanation.\n\n'
-                        + source))])
+                    messages=[dict(role='user', content=prompt)])
         headers = {'Content-Type': 'application/json'}
         key = os.environ.get('ATOGAKI_ONLINE_LLAMA_KEY')
         if key:
