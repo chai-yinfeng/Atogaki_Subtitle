@@ -12,7 +12,7 @@ ASR前缀稳定不能证明译文前缀稳定。即使原文识别完全正确�
 
 原文继续按音频segment维护source_revision、source_draft／source_final；译文使用独立group_id、group_revision、source_revisions映射、context_revision、request_id及实际source_text。translation_draft可以覆盖组内全部译文，不提交中文公共前缀。translation_final需要组成员已封口、所有成员取得最终ASR，并精确匹配这些revision。source_final仍仅表示模型结果，不代表句意完整或人工核准。
 
-短VAD停顿只关闭声学段。翻译组允许跨段，当前试跑策略：长停顿1.2s，或全部原文已定稿、末尾有句末标点且等待0.65s；最长20s／400字符在VAD段边界强制收口，EOF明确收口。这些是启发式工程边界，不是语义完整证明或调优结论；时长／字符上限可超出至当前声学段结束（VAD当前最大12s），ASR积压也增加完成时间。强制收口保留completion_reason，不宣称句子完成。分组成员收口后等待最终ASR，不能提前冻结草稿译文。
+短VAD停顿只关闭声学段。翻译组允许跨段，初版曾用句末标点＋0.65s等待快速收口，质量检查发现模型会给未完成短语补句号；用户反馈确认优先改善MT上下文，现已取消这条规则。当前以1.2s长停顿、20s／400字符上限（在VAD段边界）及EOF收口；ASR分段不变。这些是启发式工程边界，不是语义完整证明或调优结论；时长／字符上限可超出至当前声学段结束（VAD当前最大12s），ASR积压也增加完成时间。强制收口保留completion_reason，不宣称句子完成。分组成员收口后等待最终ASR，不能提前冻结草稿译文。
 
 ## 调度与上下文
 
@@ -24,8 +24,8 @@ CPU草稿与音频时钟继续独立。Qwen与本地MT在同一worker串行调�
 
 ## 实现和限制
 
-[retranslation.py](../../experiments/online/retranslation.py)将分组／版本／请求状态与模型运行分开；[run_two_pass.py](../../experiments/online/run_two_pass.py)接入真实时钟、SenseVoice／Zipformer草稿、Qwen最终ASR和Hy-MT2。默认启用译文草稿，`--no-translation-drafts`保留只翻译收口组的对照模式。当前仅本地HTTP翻译，无新云端调用或隐式回退。
+[共享retranslation模块](../../src/infrastructure/online_worker/retranslation.py)将分组／版本／请求状态与模型运行分开；[run_two_pass.py](../../experiments/online/run_two_pass.py)接入真实时钟、SenseVoice／Zipformer草稿、Qwen最终ASR和Hy-MT2。默认启用译文草稿，`--no-translation-drafts`保留只翻译收口组的对照模式。当前仅本地HTTP翻译，无新云端调用或隐式回退。共享worker位于`src/infrastructure/online_worker/`，研究CLI为薄入口；`--pcm-stdin`支持单声道PCM16／16kHz，以EOF停止并排空。实时默认只输出JSONL，不写录音或事件文件；WAV回放与桌面共用同一识别／分组代码。音频环形缓冲30s，最终ASR队列最多8项；超负载可能反压输入，采集侧必须显式报错停止，不能无限积压。
 
-不在本轮实现显示层mask-k、beam约束、前缀训练、系统音频采集、App UI或音频保存；模型worker打包、多文件模型管理仍是桌面接入待办。文件回放读取完整WAV，不冒充桌面默认不落录音的有界内存实现。慢后端的最终任务积压、失败恢复和长会话仍需产品化，当前失败会终止试跑并记录worker_error。
+不在本轮实现显示层mask-k、beam约束、前缀训练、系统音频采集、App UI或音频保存；模型worker打包、多文件模型管理仍是桌面接入待办。WAV回放也改为逐帧读取并使用同一环形缓冲。管道的音频时钟起点按首帧到达估计，与模型／权限等待分开，不冒充硬件时间戳。慢后端的最终任务积压、失败恢复和长会话仍需产品化，当前失败会终止试跑并记录worker_error。
 
 后继于[0064](0064-local-drafts-and-segment-finalization.md)的逐VAD段MT最小demo；不改变其旧实验事实。运行证据与局限见[链路记录](../two-pass-smoke-validation.md)。

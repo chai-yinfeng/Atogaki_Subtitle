@@ -24,13 +24,27 @@ class RetranslationTests(unittest.TestCase):
         self.assertFalse(request['final'])
         self.assertEqual(request['source_text'], '彼が来ると思っていたわけではない。')
         self.mt.complete(request, '我并不是以为他会来。')
-        self.mt.advance(3.2)
+        self.mt.advance(3.8)
         request = self.mt.take(11)
         self.assertTrue(request['final'])
         self.assertEqual(len(request['source_revisions']), 2)
         self.mt.complete(request, self.mt.cached(request))
         self.assertEqual(self.events[-1]['kind'], 'translation_final')
         self.assertFalse(self.events[-1]['stale_source'])
+
+    def test_asr_period_does_not_freeze_a_fragment_before_continuation(self):
+        self.source('a', '一人で。', final=True)
+        self.mt.advance(1.7)
+        request = self.mt.take(0)
+        self.assertFalse(request['final'])
+        self.mt.complete(request, '独自一人。')
+        self.source('b', 'のんびり過ごす。', final=True, start=1.8, end=3)
+        self.mt.advance(4.3)
+        request = self.mt.take(1)
+        self.assertTrue(request['final'])
+        self.assertEqual(request['source_text'], '一人で。のんびり過ごす。')
+        self.assertEqual(set(request['source_revisions']), {'a', 'b'})
+        self.assertEqual(request['completion_reason'], 'long_pause')
 
     def test_late_translation_retains_snapshot_then_latest_replaces_it(self):
         self.source('a', '来る', revision=1)
