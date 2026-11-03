@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
@@ -20,6 +23,7 @@ pub struct DesktopOnlineSession {
     pub service: OnlineSessionService,
     pub data_dir: PathBuf,
     events: Arc<Mutex<Vec<CaptionEvent>>>,
+    pub caption_locked: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     panel: Arc<Mutex<Option<usize>>>,
 }
@@ -29,6 +33,7 @@ impl DesktopOnlineSession {
             service,
             data_dir,
             events: Arc::default(),
+            caption_locked: Arc::default(),
             #[cfg(target_os = "macos")]
             panel: Arc::default(),
         }
@@ -72,9 +77,11 @@ pub struct CaptionEvent {
     data: OnlineSessionEvent,
 }
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     status: OnlineSessionStatus,
     events: Vec<CaptionEvent>,
+    caption_locked: bool,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -148,6 +155,7 @@ pub fn online_snapshot(state: State<'_, DesktopOnlineSession>) -> Result<Snapsho
     Ok(Snapshot {
         status: state.service.status(),
         events: state.events.lock().map_err(|e| e.to_string())?.clone(),
+        caption_locked: state.caption_locked.load(Ordering::Relaxed),
     })
 }
 #[tauri::command]
@@ -354,6 +362,30 @@ pub fn hide_online_captions(
     #[cfg(not(target_os = "macos"))]
     if let Some(w) = app.get_webview_window("online-captions") {
         let _ = w.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_online_caption_locked(
+    app: AppHandle,
+    state: State<'_, DesktopOnlineSession>,
+    locked: bool,
+) -> Result<(), String> {
+    state.caption_locked.store(locked, Ordering::Relaxed);
+    #[cfg(target_os = "macos")]
+    if let Some(window) = app.get_webview_window("online-captions") {
+        let panel = state.panel.clone();
+        let current = state.caption_locked.clone();
+        window
+            .run_on_main_thread(move || {
+                if let Some(pointer) = panel.lock().ok().and_then(|p| *p) {
+                    let panel: &objc2_app_kit::NSPanel =
+                        unsafe { &*(pointer as *const objc2_app_kit::NSPanel) };
+                    panel.setIgnoresMouseEvents(current.load(Ordering::Relaxed));
+                }
+            })
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

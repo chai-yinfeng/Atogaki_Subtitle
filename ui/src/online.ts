@@ -10,6 +10,7 @@ const root=document.querySelector<HTMLElement>("#online-root")!;
 root.innerHTML=`<section class="online-card">
 <header ${control?"data-tauri-drag-region":""}><strong ${control?"data-tauri-drag-region":""}>Atogaki · ${control?"在线字幕控制面板":"在线字幕"}</strong><button id="online-hide" class="quiet" type="button">${control?"字幕窗":"隐藏"}</button></header>
 ${control?`<div class="configuration"><label>原文语言<select id="online-language"></select></label><label>Qwen3-ASR 定稿<select id="online-model"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>本地 Hy-MT2 翻译为中文</label><label class="check"><input type="checkbox" id="online-drafts" checked>显示可回改的译文草稿</label><p class="help">从系统输出读取音频，不使用麦克风。原文、译文分别推进，框内保留已锁定的前文，蓝色尾部仍可回改；显示约 3–5 秒内容，按完整段保留。译文优先按句提交，长时间无句末时按已定稿原文边界提交。本次测试不保存录音。</p><div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止并完成末段</button></div></div>`:""}
+${control?`<label class="check overlay-lock"><input type="checkbox" id="online-lock">锁定字幕窗（鼠标穿透；在此取消锁定）</label>`:""}
 <p id="online-status" role="status">正在读取会话状态…</p>
 <section id="source-track" class="track"><span class="badge">原文</span><p id="source-text">等待语音…</p></section>
 <section id="translation-track" class="track"><span class="badge">译文</span><p id="translation-text">等待翻译…</p></section>
@@ -20,6 +21,7 @@ const find=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
 const set=(id:string,text:string)=>{const node=find(id);if(node.textContent!==text)node.textContent=text;};
 let choices:Choices|null=null, busy=false, message="", disposed=false;
 let pendingCaptionSession:string|null=null;
+let captionLocked=false, lockBusy=false;
 let displayedSession:string|null=null;
 type PartNode={node:HTMLSpanElement;gate:DraftPresentation};
 const trackNodes={source:new Map<string,PartNode>(),translation:new Map<string,PartNode>()};
@@ -48,6 +50,8 @@ function renderTrack(prefix:"source"|"translation",parts:LiveEvent[]):void {
 }
 function render():void {
  const state=model.status, t=model.tracks();
+ document.body.dataset.locked=String(captionLocked);
+ if(control){const lock=find<HTMLInputElement>("online-lock");lock.disabled=lockBusy;if(!lockBusy)lock.checked=captionLocked;}
  set("online-status",message||state.error||phaseLabel[state.phase]||state.phase);
  if(displayedSession!==state.sessionId){
   displayedSession=state.sessionId;
@@ -68,10 +72,14 @@ function render():void {
  set("online-timing",timings.length?`${timings.join(" · ")}（各自音频段／组末尾之后）`:"延迟随定稿更新；草稿出现速度与定稿等待分别观察。");
 
 }
-async function refresh():Promise<void>{try{const snapshot=await invoke<OnlineSnapshot>("online_snapshot");if(disposed)return;model.snapshot(snapshot);render();}catch(e){message=String(e);render();}}
+async function refresh():Promise<void>{try{const snapshot=await invoke<OnlineSnapshot>("online_snapshot");if(disposed)return;captionLocked=snapshot.captionLocked??false;model.snapshot(snapshot);render();}catch(e){message=String(e);render();}}
 async function mount():Promise<void>{
 const unlisten=await listen<CaptionEvent>("online-session-event",({payload})=>{model.accept(payload);render();});
 if(control){
+ find("online-lock").onchange=async()=>{
+  const locked=find<HTMLInputElement>("online-lock").checked;lockBusy=true;render();
+  try{await invoke("set_online_caption_locked",{locked});captionLocked=locked;}catch(e){message=String(e);}finally{lockBusy=false;await refresh();}
+ };
  try{
   choices=await invoke<Choices>("online_choices");
   for(const [id,list] of [["online-language",choices.languages],["online-model",choices.finals]] as const){

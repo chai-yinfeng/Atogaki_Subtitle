@@ -17,7 +17,7 @@ export type LiveEvent = {
   provisional?: boolean;
 };
 export type CaptionEvent = { sessionId: string; sequence: number; event: LiveEvent };
-export type OnlineSnapshot = { status: OnlineStatus; events: CaptionEvent[] };
+export type OnlineSnapshot = { status: OnlineStatus; events: CaptionEvent[]; captionLocked?: boolean };
 export const phaseLabel: Record<string, string> = {
   idle: "未开始", loading: "正在加载模型", requesting_audio: "等待系统音频权限",
   running: "正在接收系统音频", stopping: "正在停止采集", draining: "正在完成最后一段",

@@ -17,3 +17,9 @@ body[data-view=caption] .badge{font-size:10px;line-height:14px;color:#c8d0d6}
 body[data-view=caption] .track p{min-height:0;height:100%;max-height:none;margin:0;font-size:24px;line-height:1.35;overflow-y:auto;scrollbar-gutter:stable;text-shadow:0 1px 2px rgba(0,0,0,.6)}
 body[data-view=caption] #source-text{font-size:21px}
 body[data-view=caption] .track .draft{color:#99c6f4}
+
+.overlay-lock{margin:12px 0;font-size:14px}.overlay-lock input{accent-color:#247664}
+body[data-view=caption] .online-card::before,body[data-view=caption] .online-card::after{content:"";position:absolute;left:12px;right:12px;height:8px;z-index:3;cursor:ns-resize}
+body[data-view=caption] .online-card::before{top:0}body[data-view=caption] .online-card::after{bottom:0}
+body[data-view=caption][data-locked=true] header,body[data-view=caption][data-locked=true] #online-status{opacity:0!important;pointer-events:none!important}
+body[data-view=caption][data-locked=true] header button{pointer-events:none}

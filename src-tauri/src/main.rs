@@ -187,6 +187,11 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
 
     let online = window.label() == "online-captions";
+    let caption_locked = online.then(|| {
+        app.state::<online_session::DesktopOnlineSession>()
+            .caption_locked
+            .clone()
+    });
     let reference_window = online
         .then(|| {
             app.get_webview_window("online-control")
@@ -197,9 +202,15 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
     window
         .clone()
         .run_on_main_thread(move || {
+            let locked = caption_locked
+                .as_ref()
+                .is_some_and(|value| value.load(std::sync::atomic::Ordering::Relaxed));
             if let Some(panel_pointer) = panel_store.lock().ok().and_then(|panel| *panel) {
                 let panel: &NSPanel = unsafe { &*(panel_pointer as *const NSPanel) };
-                if focus {
+                if online {
+                    panel.setIgnoresMouseEvents(locked);
+                }
+                if focus && !locked {
                     panel.makeKeyAndOrderFront(None);
                 } else {
                     panel.orderFrontRegardless();
@@ -277,7 +288,10 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
             panel.setLevel(NSScreenSaverWindowLevel);
             unsafe { panel.setReleasedWhenClosed(false) };
             native_window.orderOut(None);
-            if focus {
+            if online {
+                panel.setIgnoresMouseEvents(locked);
+            }
+            if focus && !locked {
                 panel.makeKeyAndOrderFront(None);
             } else {
                 panel.orderFrontRegardless();
@@ -2243,6 +2257,7 @@ fn main() {
             online_session::open_online_control,
             online_session::open_online_captions,
             online_session::hide_online_captions,
+            online_session::set_online_caption_locked,
             online_session::start_online_session,
             online_session::stop_online_session,
             asr_credential_status,
