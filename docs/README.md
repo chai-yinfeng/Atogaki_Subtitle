@@ -38,6 +38,7 @@ _更新：2026-11-02_
 - [0068 桌面在线与更大翻译组](decisions/0068-online-desktop-controls-and-live-context.md)：本机App已覆盖，控制面板／字幕窗／受管本地模型可手测，正式任务保留。
 - [0067 会话与系统音频底座](decisions/0067-online-session-owner-and-system-audio.md)：Rust生命周期／IPC与Core Audio helper，明确已验证边界及未完成的runtime／模型包／窗口。
 - [0066 独立译文回改与定稿](decisions/0066-online-retranslation-groups.md)：跨VAD分组、草稿重译和独立版本／调度，CLI已接入，尚未接App。
+- [0072 日语跨段重译](decisions/0072-japanese-semantic-block-retranslation.md)：短块草稿／更完整源文重译定稿，首版启发式与质量限制。
 - [当前online研究计划](online-asr-plan.md)、[0063模型范围](decisions/0063-online-two-pass-model-selection.md)、[0064本地草稿与定稿](decisions/0064-local-drafts-and-segment-finalization.md)。
 - [Qwen MLX跑通](qwen-mlx-smoke-validation.md)、[SenseVoice对照](sensevoice-smoke-validation.md)、[two-pass与Zipformer](two-pass-smoke-validation.md)：真实运行结果和质量／计时局限。
 - [旧0045独立会话](research/decisions/0045-independent-online-experiments.md)、[旧0046受控性能](research/decisions/0046-controlled-online-asr-performance.md)：研究历史，与主线不同同号ADR分目录保留，后继范围以0063–0065为准。
@@ -65,6 +66,7 @@ _更新：2026-11-02_
 - [Aegisub 能力映射](aegisub-capability-map.md)：当前独立实现的能力与后续候选，不是完整复刻或扩大制作软件范围的承诺。
 - [管线演进计划](pipeline-evolution.md)：保留研究阶段的接口与质量门禁；已落地部分应对照后继 ADR 和验收记录，不按原审阅基线推断当前实现。
 - [Web Serve／Postgres 退役影响](legacy-web-retirement-impact.md)：调用、兼容与依赖审计已完成；隔离 feature 或删除尚待讨论，本轮未退役。
+- [轻量本地翻译后端调研](local-translation-backends.md)：LMT-60、NLLB、M2M100、TranslateGemma及英日小模型的适用边界；仅调查，未替换。
 - [Muse 流式 ASR 研究](muse-voice-transcribe-research.md)、[翻译 Provider 候选](translation-provider-options.md)、[视觉参考讨论](visual-reference-notes.md)：研究时点的材料，不等同当前产品默认项。
 
 ## 历史记录

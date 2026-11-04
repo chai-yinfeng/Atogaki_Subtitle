@@ -22,14 +22,15 @@ class Retranslation:
     """One in-flight MT request. Source updates coalesce into current group state.
 
     Audio boundaries seal membership, not text. Only all-final source revisions
-    can produce a committed translation. A VAD endpoint alone never commits MT.
+    can produce a committed translation. Japanese keeps short pauses inside a
+    revisable semantic block and requires finalized right context for a sentence.
     """
     def __init__(self, emit, *, language='ja', drafts=True, interval=.8,
-                 pause=1.2, max_seconds=20, max_chars=400, commit_wait=4.0):
+                 pause=None, max_seconds=20, max_chars=400, commit_wait=None):
         self.emit = emit
         self.language, self.drafts, self.interval = language, drafts, interval
-        self.pause = pause
-        self.commit_wait = commit_wait
+        self.pause = pause if pause is not None else (3.0 if language == 'ja' else 1.2)
+        self.commit_wait = commit_wait if commit_wait is not None else (8.0 if language == 'ja' else 4.0)
         self.audio_seconds = 0.0
         self.max_seconds, self.max_chars = max_seconds, max_chars
         self.lock = threading.Lock()
@@ -124,12 +125,24 @@ class Retranslation:
             if not segment['final']:
                 break
             prefix.append(segment['text'])
-            following = self._join(s['text'] for _, s in items[index+1:])
+            following_items = items[index+1:]
+            if self.language == 'ja':
+                # Draft right context can still reverse a negation/referent.
+                # Never skip an unfinalized segment to peek at a later final.
+                following_items = []
+                for item in items[index+1:]:
+                    if not item[1]['final']:
+                        break
+                    following_items.append(item)
+            following = self._join(s['text'] for _, s in following_items)
             # Qwen can punctuate fragments such as 一人で。; a bare period
             # alone is insufficient. These bounds are heuristics, not syntax.
             sentence = re.search(r'[。！？.!?][」』"\')）]*$', segment['text'].strip())
+            if self.language == 'ja':
+                sentence = sentence and self._japanese_sentence(segment['text'], following)
             if sentence and len(''.join(prefix).strip()) >= 8 and len(following.strip()) >= 8:
-                boundary, reason = index+1, 'sentence_with_lookahead'
+                boundary, reason = index+1, ('japanese_sentence_with_final_lookahead'
+                                             if self.language == 'ja' else 'sentence_with_lookahead')
                 break
         if boundary is None and group.reason is None:
             ready = [s for _, s in items if s['final']]
@@ -139,7 +152,7 @@ class Retranslation:
                     if not segment['final']:
                         break
                     boundary += 1
-                reason = 'commit_timeout'
+                reason = 'japanese_timeout' if self.language == 'ja' else 'commit_timeout'
         if boundary is None:
             return
         if boundary == len(items):
@@ -151,7 +164,7 @@ class Retranslation:
                           group.end, segments=tail, revision=1, reason=group.reason)
         group.segments = dict(items[:boundary])
         group.end = items[boundary-1][1]['end']
-        group.lookahead = self._text(remainder)[:500]
+        group.lookahead = self._following_text(remainder)[:500]
         group.revision += 1
         # Old group_id now owns just the committed prefix. Its final replaces
         # the former whole-group draft, and the tail gets a fresh identity.
@@ -166,6 +179,32 @@ class Retranslation:
     def _join(self, texts):
         return (' ' if self.language in ('en', 'ko') else '').join(texts)
 
+    def _following_text(self, group):
+        texts = []
+        for segment in group.segments.values():
+            if self.language == 'ja' and not segment['final']:
+                break
+            texts.append(segment['text'])
+        return self._join(texts)
+
+    @staticmethod
+    def _japanese_sentence(text, following):
+        """Conservative surface hints, not a semantic-completeness classifier.
+
+        ASR often punctuates particles/hesitations as sentences. Leave those
+        inside the same MT Source Text, including common right-hand reversals.
+        Bounds/EOF still release speech that these deliberately limited hints
+        cannot classify. No additional model or per-frame parser is required.
+        """
+        body = re.sub(r'[。！？.!?」』"\')）\s]+$', '', text)
+        predicate = re.search(r'(?:です|でした|でしょう|ます|ました|ません|だ|だった|だろう|'
+                              r'ない|なかった|たい|たかった|[うくぐすつぬぶむるた])'
+                              r'(?:よね|かな|よ|ね|な|か)?$', body)
+        continuation = re.match(r'^[\s。、「『]*(?:わけ(?:では|じゃ)|という|のでは|んじゃ|とは|'
+                                r'んです|のです|だけ|ほど|くらい|ぐらい|ため|ので|のに|'
+                                r'けど|けれど|ですが|だが|ものの|と思|って)', following)
+        return bool(predicate and following and not continuation)
+
     def take(self, now):
         with self.lock:
             if self.inflight is not None:
@@ -176,6 +215,16 @@ class Retranslation:
             if group is None:
                 return None
             self._commit_prefix(group)
+            # A hard/pause-closed block may already have later Qwen text. This
+            # reference crosses group boundaries without translating it twice.
+            if self.language == 'ja' and group.reason is not None:
+                later = self.groups[self.groups.index(group)+1:]
+                texts = []
+                for next_group in later:
+                    texts.append(self._following_text(next_group))
+                    if any(not s['final'] for s in next_group.segments.values()):
+                        break
+                group.lookahead = self._join(texts)[:500]
             final = group.reason is not None and all(s['final'] for s in group.segments.values())
             text = self._text(group)
             signature = (group.revision, self.context_revision)
@@ -190,6 +239,7 @@ class Retranslation:
                            source_text=text, context=self.context, lookahead_source=group.lookahead,
                            context_revision=self.context_revision, final=final,
                            start_s=group.start, end_s=group.end,
+                           first_source_end_s=next(iter(group.segments.values()))['end'],
                            completion_reason=group.reason)
             group.last_request = now
             group.requested_signature = signature

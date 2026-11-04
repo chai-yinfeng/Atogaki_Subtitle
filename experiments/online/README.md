@@ -174,3 +174,18 @@ CPP 的模型在 native worker 内，RSS 增长另外按每个 child PID 计算�
 `--phase live-long --live-backends whisper-streaming whisper-cpp` 在已冻结 native 参数上补 live VAD 十分钟资源／积压对照。纯静音 off 的 hallucination 及短 live 的时钟开销说明不能只用 cached 概率外推部署效果；失败配置可明确排除，不重复 holdout。选择器分别检查 off 和 live 的持续性证据，不把两种运行合成一条长样本。
 
 本轮固定配置、80组模型回放、3组忙碌取消及参考状态见 [受控验证报告](../../docs/online-controlled-asr-validation.md)。当前 pause runner 在长静音后会按30s追赶旧 PCM；live 长回归已暴露此调度问题，不能作为可部署默认。`sustained.passed` 只代表原增长条件；`deployment_diagnostics_passed` 还要求 VAD 起声坐标的输入恢复不超过2s。这是保守的调度诊断，不是有效文本延迟。完整录音与有限 ASR 上下文的分离策略尚未收敛，后续修复必须保留真实媒体坐标并单独复测。WS／CPP 预处理没有隔离测量，分析报告用 null 表示，原 metadata 中的0为占位值。
+
+
+## 日语MT固定ASR策略对照
+
+`compare_japanese_mt.py`复用已登记development样本的私有事件文件，不读取音频、不重跑ASR、不请求云端。需要自行启动已有loopback Hy-MT2服务；不覆盖输出目录。baseline文件使用待比较commit中的原实现快照：
+
+```sh
+git show 263705e:src/infrastructure/online_worker/retranslation.py > /tmp/atogaki-baseline-retranslation.py
+python3 experiments/online/compare_japanese_mt.py \
+  --events /path/to/development/events.jsonl \
+  --baseline-module /tmp/atogaki-baseline-retranslation.py \
+  --duration 60 --output local-artifacts/online/japanese-mt-comparison
+```
+
+输入到达时间固定，真实MT计算耗时推进虚拟时钟；模型运行期间已到达的更新合并到下一请求。捕获范围以segment_closed为准，识别草稿的尾部静音不能延长已关闭段。最终输出必须每个Qwen段恰好覆盖一次。结果保存请求、源revision、模型输出、compute、距组末段与首段结束的等待，以及逐段review.md；整段翻译只是同模型上下文参照，不是gold。当前单次baseline→candidate顺序没有重复／交叉轮换，亦不含ASR设备竞争，不能用于新E2E速度排名。样本role由调用者核对，不自动授权holdout调参。首版实测与限制见[记录](../../docs/two-pass-smoke-validation.md#日语跨段重译首版2026-11-04)。

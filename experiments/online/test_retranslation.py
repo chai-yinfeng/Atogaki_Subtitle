@@ -7,7 +7,7 @@ from retranslation import Retranslation
 class RetranslationTests(unittest.TestCase):
     def setUp(self):
         self.events = []
-        self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)), pause=1.2)
+        self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)), language='zh', pause=1.2)
 
     def source(self, sid, text, revision=1, final=False, start=0, end=1):
         self.mt.observe(sid, start, end, closed=final)
@@ -47,7 +47,7 @@ class RetranslationTests(unittest.TestCase):
         self.assertEqual(request['completion_reason'], 'long_pause')
 
     def test_default_finalizes_short_mt_group_independently_of_display_retention(self):
-        self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)))
+        self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)), language='zh')
         self.source('a', 'ここで話したい。', final=True, end=1)
         self.mt.advance(2.3)
         request = self.mt.take(0)
@@ -99,7 +99,7 @@ class RetranslationTests(unittest.TestCase):
 
     def test_duration_bound_at_segment_boundary_and_final_only_mode(self):
         self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)),
-                                drafts=False, max_seconds=2)
+                                language='zh', drafts=False, max_seconds=2)
         self.source('a', 'unfinished', final=True, end=3)
         request = self.mt.take(0)
         self.assertTrue(request['final'])
@@ -180,6 +180,105 @@ class RetranslationTests(unittest.TestCase):
         self.assertEqual(committed, ['0', '1', '2'])
         self.assertEqual(reasons, ['sentence_with_lookahead', 'sentence_with_lookahead', 'input_eof'])
         self.assertEqual(self.mt.pending(), 0)
+
+
+class JapaneseBlockTests(unittest.TestCase):
+    def setUp(self):
+        self.events = []
+        self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)))
+
+    def source(self, sid, text, start, end, final=True):
+        self.mt.observe(sid, start, end, closed=final)
+        self.mt.update(dict(segment_id=sid, text=text, source_revision=2 if final else 1,
+                            kind='source_final' if final else 'source_draft'))
+
+    def test_short_pause_and_particle_fragments_stay_in_one_source_block(self):
+        self.source('a', '今回は。', 0, 1)
+        self.mt.advance(2.3)
+        draft = self.mt.take(0)
+        self.assertFalse(draft['final'])
+        self.mt.complete(draft, '这次。')
+        self.source('b', '一人で。', 2.4, 3)
+        self.source('c', 'のんびりする場所を作ってもらえまして。', 3.2, 5)
+        self.source('d', 'まさに憩いの場的な。', 5.2, 6)
+        self.mt.advance(6, speech=True)
+        draft = self.mt.take(1)
+        self.assertFalse(draft['final'])
+        self.assertEqual(set(draft['source_revisions']), {'a', 'b', 'c', 'd'})
+        self.mt.complete(draft, '这次为我安排了一个可以独自悠闲待着的地方。')
+        self.mt.advance(9.1)
+        final = self.mt.take(2)
+        self.assertTrue(final['final'])
+        self.assertEqual(final['completion_reason'], 'long_pause')
+        self.assertEqual(final['source_text'], draft['source_text'])
+
+    def test_only_final_right_context_can_commit_a_complete_predicate(self):
+        self.source('a', '昨日は駅に行きました。', 0, 2)
+        self.source('b', 'そこで友達に会いました。', 2, 4, final=False)
+        draft = self.mt.take(0)
+        self.assertFalse(draft['final'])
+        self.mt.complete(draft, '昨天去了车站，在那里遇到了朋友。')
+        self.source('b', 'そこで先生に会いました。', 2, 4)
+        final = self.mt.take(1)
+        self.assertTrue(final['final'])
+        self.assertEqual(final['source_revisions'], {'a': 2})
+        self.assertEqual(final['lookahead_source'], 'そこで先生に会いました。')
+        self.assertEqual(final['completion_reason'], 'japanese_sentence_with_final_lookahead')
+        self.mt.complete(final, '昨天去了车站。')
+        self.mt.advance(4, eof=True)
+        tail = self.mt.take(2)
+        self.assertEqual(tail['source_revisions'], {'b': 2})
+        self.mt.complete(tail, '在那里遇到了老师。')
+        self.assertEqual(self.mt.pending(), 0)
+
+    def test_late_negation_is_jointly_translated_not_reference_only(self):
+        self.source('a', '彼が来ると思っていた。', 0, 2)
+        self.source('b', 'わけではないんです。', 2, 4)
+        draft = self.mt.take(0)
+        self.assertFalse(draft['final'])
+        self.assertEqual(draft['source_text'], '彼が来ると思っていた。わけではないんです。')
+
+    def test_closed_block_gets_final_context_across_group_boundary(self):
+        self.source('a', '最初の話です。', 0, 1)
+        self.mt.advance(4.1)
+        self.source('b', '後の原文はまだ草稿。', 4.2, 5, final=False)
+        self.source('c', '後の後だけ定稿。', 5.2, 6)
+        final = self.mt.take(0)
+        self.assertTrue(final['final'])
+        self.assertEqual(final['lookahead_source'], '')
+        self.mt.complete(final, '第一个话题。')
+        self.mt.advance(6, eof=True)
+        self.source('b', '後の原文が確定しました。', 4.2, 5)
+        tail = self.mt.take(1)
+        covered = list(tail['source_revisions'])
+        self.mt.complete(tail, '后续原文。')
+        while self.mt.pending():
+            tail = self.mt.take(2)
+            covered.extend(tail['source_revisions'])
+            self.mt.complete(tail, '其余原文。')
+        self.assertEqual(covered, ['b', 'c'])
+
+    def test_cross_group_reference_is_not_translated_twice(self):
+        self.source('a', '最初の話です。', 0, 1)
+        self.mt.advance(4.1)
+        self.source('b', '別の話を始めます。', 4.2, 5)
+        final = self.mt.take(0)
+        self.assertEqual(final['lookahead_source'], '別の話を始めます。')
+        self.assertEqual(final['source_revisions'], {'a': 2})
+        self.mt.complete(final, '第一个话题。')
+        self.mt.advance(5, eof=True)
+        tail = self.mt.take(1)
+        self.assertEqual(tail['source_revisions'], {'b': 2})
+
+    def test_timeout_is_bounded_and_does_not_lock_a_draft(self):
+        self.source('a', '話の途中ですが。', 0, 2)
+        self.source('b', 'まだ変わる後文。', 2, 10, final=False)
+        self.mt.advance(8.1, speech=True)
+        final = self.mt.take(0)
+        self.assertTrue(final['final'])
+        self.assertEqual(final['completion_reason'], 'japanese_timeout')
+        self.assertEqual(final['source_revisions'], {'a': 2})
+        self.assertEqual(final['lookahead_source'], '')
 
 
 if __name__ == '__main__':

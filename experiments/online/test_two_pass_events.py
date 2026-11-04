@@ -2,11 +2,22 @@
 from contextlib import redirect_stdout
 import io
 import unittest
+from unittest.mock import patch
 
 from run_two_pass import Events
 
 
 class RevisionContractTests(unittest.TestCase):
+    def test_translation_delay_exposes_wait_since_first_source_segment(self):
+        with redirect_stdout(io.StringIO()):
+            events = Events(io.StringIO())
+            events.started, events.audio_offset_s = 100, 5
+            with patch('online_worker.worker.time.monotonic', return_value=130):
+                draft = events.emit('translation_draft', group_id='g', text='译文',
+                                    start_s=0, end_s=10, first_source_end_s=4)
+        self.assertEqual(draft['after_audio_end_s'], 15)
+        self.assertEqual(draft['after_first_audio_end_s'], 21)
+
     def test_late_draft_cannot_replace_final_source(self):
         stream = io.StringIO()
         with redirect_stdout(io.StringIO()):

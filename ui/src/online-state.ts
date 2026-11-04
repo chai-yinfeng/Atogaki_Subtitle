@@ -13,6 +13,7 @@ export type LiveEvent = {
   start_s?: number;
   end_s?: number;
   after_audio_end_s?: number;
+  after_first_audio_end_s?: number;
   stale_source?: boolean;
   provisional?: boolean;
 };

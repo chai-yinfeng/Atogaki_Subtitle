@@ -45,6 +45,9 @@ class Events:
                     raise ValueError('translation does not match finalized source revision')
             if kind in ('translation_draft', 'translation_final'):
                 data['after_audio_end_s'] = time.monotonic()-self.started-self.audio_offset_s-data.get('end_s', 0)
+                if 'first_source_end_s' in data:
+                    data['after_first_audio_end_s'] = (time.monotonic()-self.started-self.audio_offset_s
+                                                       - data['first_source_end_s'])
             event = dict(kind=kind, emission_s=time.monotonic() - self.started, **data)
             if self.stream is not None:
                 self.stream.write(json.dumps(event, ensure_ascii=False) + '\n')
