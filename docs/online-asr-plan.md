@@ -1,6 +1,6 @@
 # Online ASR 当前计划与模型清单
 
-_更新：2026-11-04。日语MT跨短停顿重译及保守句末＋最终后文提交见[0072](decisions/0072-japanese-semantic-block-retranslation.md)，3s／8s为首版兜底，质量未验收；其他语言仍沿用[0070](decisions/0070-online-independent-prefix-commit.md)默认1.2s／4s。双框显示软窗口与语义块分开，ASR不变。会话底座见[0067](decisions/0067-online-session-owner-and-system-audio.md)；云端与轻量MT仅调查，vLLM继续搁置。_
+_更新：2026-11-06。[0073](decisions/0073-local-index-translation-and-paired-context.md)新增Index本地翻译选择、完整源译历史对及词表／场景提示；沿用0072分段与等待。日语MT跨短停顿重译及保守句末＋最终后文提交见[0072](decisions/0072-japanese-semantic-block-retranslation.md)，3s／8s为首版兜底，质量未验收；其他语言仍沿用[0070](decisions/0070-online-independent-prefix-commit.md)默认1.2s／4s。双框显示软窗口与语义块分开，ASR不变。会话底座见[0067](decisions/0067-online-session-owner-and-system-audio.md)；云端与轻量MT仅调查，vLLM继续搁置。_
 
 本文是 online 分支的当前入口，决策见 [0063](decisions/0063-online-two-pass-model-selection.md)。2026-10-02 至 10-05 的 WS／SS／CPP 结果保留为历史证据，不再按旧矩阵继续选型。本文的“保留／新增／退出”是实验范围，不代表桌面模型目录或磁盘文件已修改。
 

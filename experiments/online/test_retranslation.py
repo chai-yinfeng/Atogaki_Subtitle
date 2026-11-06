@@ -132,7 +132,7 @@ class RetranslationTests(unittest.TestCase):
         self.mt.complete(tail, '在那里遇到了老师。')
         self.assertEqual(self.mt.pending(), 0)
         self.assertEqual(self.mt.segment_groups, {})
-        self.assertEqual(self.mt.context[0][0], '昨日は駅に行きました。そこで先生に会いました。')
+        self.assertEqual(''.join(src for src, _ in self.mt.context), '昨日は駅に行きました。そこで先生に会いました。')
 
     def test_timeout_commits_qwen_prefix_without_freezing_the_following_draft(self):
         self.source('a', 'まだ話の途中ですが', final=True, end=1)
@@ -279,6 +279,21 @@ class JapaneseBlockTests(unittest.TestCase):
         self.assertEqual(final['completion_reason'], 'japanese_timeout')
         self.assertEqual(final['source_revisions'], {'a': 2})
         self.assertEqual(final['lookahead_source'], '')
+
+    def test_history_evicts_complete_aligned_pairs_and_ignores_drafts(self):
+        for i in range(5):
+            self.source(str(i), str(i)*250, i*4, i*4+1)
+            self.mt.advance(i*4+1, eof=True)
+            request = self.mt.take(i)
+            self.mt.complete(request, f'译{i}'*125)
+        self.assertLessEqual(sum(len(src)+len(dst) for src, dst in self.mt.context), 2000)
+        self.assertEqual(len(self.mt.context), 4)
+        self.assertEqual(self.mt.context[0], ('1'*250, '译1'*125))
+        self.assertEqual(self.mt.context[-1], ('4'*250, '译4'*125))
+        before = self.mt.context
+        self.source('draft', '还在变化的原文', 22, 23, final=False)
+        self.mt.complete(self.mt.take(6), '草稿译文')
+        self.assertEqual(self.mt.context, before)
 
 
 if __name__ == '__main__':

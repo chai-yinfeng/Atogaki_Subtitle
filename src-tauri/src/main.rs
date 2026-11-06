@@ -976,6 +976,7 @@ async fn translation_profiles(
         "gemini",
         "deepl",
         "hy-mt2-local",
+        "index-translate-local",
         "openai-compatible",
     ] {
         let mut profile = state

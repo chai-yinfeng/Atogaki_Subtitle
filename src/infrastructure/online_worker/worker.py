@@ -4,6 +4,7 @@ import argparse
 import hashlib
 from importlib.metadata import version
 import json
+import os
 from pathlib import Path
 import queue
 import threading
@@ -160,7 +161,12 @@ def main():
                     mx.synchronize()
                 else:
                     model = sensevoice(a.final_model, a.language)
-                translator = HyMT2(a.translation_url, 'Hy-MT2-1.8B-Q4_K_M', 'Simplified Chinese') if a.translation_url else None
+                mt_config = (json.loads(os.environ.get('ATOGAKI_ONLINE_MT_CONTEXT', '{}')) or {})
+                translator = HyMT2(a.translation_url, mt_config.get('model', 'Hy-MT2-1.8B-Q4_K_M'),
+                                   'Simplified Chinese', backend=mt_config.get('backend', 'hy-mt2'),
+                                   source_language=a.language,
+                                   protected_terms=mt_config.get('protected_terms', ()),
+                                   scene=mt_config.get('scene', '')) if a.translation_url else None
                 load_times['final_s'] = time.monotonic() - t
                 final_ready.set()
                 input_done = False
@@ -310,10 +316,10 @@ def main():
             peak_final_queue_depth=max_pending, load_times=load_times, counts=events.counts,
             sherpa_onnx=version('sherpa-onnx'), wall_s=time.monotonic()-events.started,
             translation_drafts=a.translation_drafts,
-            translation_group_policy=dict(pause_s=1.2,
-                max_seconds=20, max_chars=400, draft_interval_s=.8,
-                bounds='at final ASR boundaries; one segment may overshoot', context_groups=1,
-                sentence_lookahead_chars=8, commit_wait_after_qwen_s=4.0),
+            translation_group_policy=dict(pause_s=translation.pause,
+                max_seconds=translation.max_seconds, max_chars=translation.max_chars, draft_interval_s=translation.interval,
+                bounds='at final ASR boundaries; one segment may overshoot', context_groups_max=8, context_character_budget=2000,
+                sentence_lookahead_chars=8, commit_wait_after_qwen_s=translation.commit_wait),
             note='file-clock demo; first draft is not verified-word latency; translation groups revise independently of ASR segments')
         if a.output:
             (a.output/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')

@@ -269,12 +269,12 @@ class Retranslation:
                               stale_source=not current, provisional=not request['final'])
             if request['final']:
                 group.committed = True
-                # Keep bounded rolling reference even when sentence commits
-                # are short. Committed outputs themselves are never retranslated.
-                previous_source, previous_translation = self.context[0] if self.context else ('', '')
-                source_context = self._join(s for s in (previous_source, request['source_text']) if s)
-                translation_context = ' '.join(s for s in (previous_translation, text) if s)
-                self.context = ((source_context[-1000:], translation_context[-1000:]),)
+                # Evict complete aligned pairs, never independent half-sentence
+                # suffixes. Character budget is conservative, not token counting.
+                history = (*self.context, (request['source_text'], text))
+                while history and (len(history) > 8 or sum(len(src)+len(dst) for src, dst in history) > 2000):
+                    history = history[1:]
+                self.context = history
                 self.context_revision += 1
                 # Completed groups no longer retain all segment texts/revisions.
                 self.groups.remove(group)

@@ -166,3 +166,16 @@ Groq的短段最低计费不能忽略：当前60s demo若20段分别提交，全
 原始事件、命令、code SHA-256、逐段源／译、请求快照及人工可读report保存在忽略目录`local-artifacts/online/japanese-mt-20261104/`。正式策略数据只使用`comparison-verified/`。初轮`comparison/`把滚动草稿尾部静音带入范围、旧实现首段计时还取到早期草稿范围；修正重建、增加范围回归后重跑，失败口径与初轮消融仍保留，不混入表格。尚未量化用户阅读体验、正确译文首次出现时间或token级NE／TL。
 
 后续先由用户检查逐段结果与桌面白蓝尾部体验；优先比较完整语义块下MT／prompt／领域参考，避免继续仅加等待。若模型质量可用而等待仍长，再考虑训练型分割或更好的边界候选。轻量离线后端仅完成[调查](local-translation-backends.md)，没有替换。
+
+
+## Index与成组上下文（2026-11-06）
+
+[0073](decisions/0073-local-index-translation-and-paired-context.md)已实现。继续使用本机M4、原固定llama.cpp `391fac16460f15233a7740550d858ac96df3419d`、Metal、context=8192、单slot。Index官方Q4_K_M的revision／SHA-256／大小与下载catalog一致；复用runtime，没有增加MLX依赖，也没有下载vision projector。
+
+实际在线adapter以单user约束prompt、temperature=0、max_tokens=1024、显式关闭thinking，完成专名／授受、后置否定、未完句三条合成日文请求，单次HTTP wall约0.54／0.32／0.33秒，不含模型加载、ASR或音频等待。专名保留、进程正常回收；未完句仍输出了完整陈述，不能据此宣称已解决补全问题或优于Hy-MT2。随后受管Rust离线接口测试通过两条稳定cue ID、专名占位恢复及shutdown，验证真实严格JSON合同。没有发起云端请求或处理新的用户音频。
+
+另完成同一development音频前12秒的真实SenseVoice→Qwen MLX→Index文件时钟回放，5个ASR最终段、2个MT最终块，状态completed、errors为空，EOF后排空并回收本地服务。该片段终点是人为截断，不是完整语义结尾；这是CLI链路冒烟，不等于桌面系统音频延迟或质量验收。复核时发现旧summary将pause／commit_wait硬编码为1.2／4，现改读实际对象参数；保留初轮摘要，并以`two-pass-verified/summary.json`确认3／8秒，未改变调度。
+
+66项Python（整组历史预算／草稿隔离／提示角色／专名／Index格式与thinking等）、366项前端、184项Rust核心测试通过；核心另外6项忽略中的Index硬件测试已单独实际执行通过。桌面37项通过、4项原有忽略；第一次沙箱端口绑定失败的4项保留，带本机回环权限重跑通过。类型／生产UI构建、两套fmt与diff检查通过。参数与原始输出保存在忽略目录`local-artifacts/online/index-context-20261106/`，与旧开发集策略对照分开。
+
+上下文策略只改变在线prompt历史和可信提示组织；旧离线分组／词表快照继续使用原合同。当前无新的真实节目盲测或在线全链路E2E结论。建议同片段保持相同词表／场景切换模型，分别检查专名、人物关系、语气、未完句和端到端等待，不把短句接口耗时当作字幕延迟。

@@ -35,6 +35,8 @@ pub struct OnlineModels {
     pub translation_url: Option<String>,
     #[serde(default = "enabled")]
     pub translation_drafts: bool,
+    #[serde(default)]
+    pub translation_context: Value,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -243,6 +245,10 @@ async fn run_session(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    command.env(
+        "ATOGAKI_ONLINE_MT_CONTEXT",
+        models.translation_context.to_string(),
+    );
     if !models.translation_drafts {
         command.arg("--no-translation-drafts");
     }
@@ -410,6 +416,7 @@ mod tests {
             vad_model: root.join("vad.onnx"),
             translation_url: None,
             translation_drafts: true,
+            translation_context: Value::Null,
         };
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded = events.clone();

@@ -88,7 +88,10 @@ impl TranslationProvider for ScheduledTranslationProvider {
         Box::pin(async move {
             // Local translation owns the device exclusively; cloud requests
             // overlap ASR and share one global request budget across jobs.
-            let _permit = if self.provider.status().id == "hy-mt2-local" {
+            let _permit = if matches!(
+                self.provider.status().id.as_str(),
+                "hy-mt2-local" | "index-translate-local"
+            ) {
                 self.scheduler
                     .asr
                     .clone()
@@ -203,27 +206,29 @@ mod tests {
 
     #[tokio::test]
     async fn local_translation_waits_for_asr_and_cancel_releases_device() {
-        let scheduler = StageScheduler::new(2);
-        let asr = scheduler.acquire_asr().await;
-        let (started, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        let provider = scheduler.translation_provider(Arc::new(Provider {
-            id: "hy-mt2-local",
-            started,
-            release: Arc::new(Semaphore::new(0)),
-            peak: Arc::new(AtomicUsize::new(0)),
-            active: AtomicUsize::new(0),
-        }));
-        let task = tokio::spawn(async move { provider.translate(request()).await });
-        tokio::task::yield_now().await;
-        assert!(receiver.try_recv().is_err());
-        drop(asr);
-        tokio::time::timeout(std::time::Duration::from_secs(2), receiver.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(scheduler.asr.available_permits(), 0);
-        task.abort();
-        assert!(task.await.unwrap_err().is_cancelled());
-        assert_eq!(scheduler.asr.available_permits(), 2);
+        for id in ["hy-mt2-local", "index-translate-local"] {
+            let scheduler = StageScheduler::new(2);
+            let asr = scheduler.acquire_asr().await;
+            let (started, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            let provider = scheduler.translation_provider(Arc::new(Provider {
+                id,
+                started,
+                release: Arc::new(Semaphore::new(0)),
+                peak: Arc::new(AtomicUsize::new(0)),
+                active: AtomicUsize::new(0),
+            }));
+            let task = tokio::spawn(async move { provider.translate(request()).await });
+            tokio::task::yield_now().await;
+            assert!(receiver.try_recv().is_err());
+            drop(asr);
+            tokio::time::timeout(std::time::Duration::from_secs(2), receiver.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(scheduler.asr.available_permits(), 0);
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+            assert_eq!(scheduler.asr.available_permits(), 2);
+        }
     }
 }

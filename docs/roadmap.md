@@ -1,12 +1,18 @@
 # 开发路线图
 
-_最后更新：2026-11-04_
+_最后更新：2026-11-06_
 
 本页只保留当前交付状态、下一步和未完成门禁。逐次提交与旧测试计数已完整迁入 [2026-10-25 快照](roadmap-history-2026-10-25.md)，更早历史见 [2026-10-22 快照](roadmap-history-2026-10-22.md)。归档不改变验收结论，原证据仍在原路径。
 
 本轮日常交互已由用户验收并随 v0.1.3 发行。逐项证据边界见[统一编辑器验收清单](unified-editor-acceptance.md)；未证明的性能与异常组合保留为历史证据边界，不再自动作为本轮发布待办。
 
 产品范围以[产品方向](product-direction.md)、[稳定能力矩阵](app-capability-matrix.md)与有效 ADR 为准；实验晋升继续遵循 [0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。规范、研究和验收的分类见[文档索引](README.md)。SQLite、稳定 cue ID、唯一播放器／草稿、revision 与候选采用事务继续保留；字幕 schema、导出格式和源／译对应关系未改变。
+
+## Index本地后端与成组上下文（2026-11-06）
+
+用户反馈日语试用质量明显改善，并要求新增Index-Translate 2B及优化上下文。已接入官方Q4_K_M GGUF，沿用受管llama.cpp／Metal；离线设置、新任务、任务级后端与模型下载支持新增选择，在线控制面板可选Hy-MT2或Index，默认不切换。上文由两个独立截尾字符串改为完整源译对，最多8组／合计2000字符，区分历史原文证据与译法参考。新增在线词表核心专名选择、语言校验与会话冻结、可选用户场景提示和完整prompt长度保护。ASR、分组等待与显示规则不变，见[0073](decisions/0073-local-index-translation-and-paired-context.md)。
+
+66项Python回归、366项前端、184项Rust核心回归及37项桌面回归通过；另有真实Index受管进程／离线稳定ID／专名恢复测试、三条在线文本请求和12秒SenseVoice→Qwen MLX→Index完整文件回放。桌面HTTP回归在沙箱内4项因端口权限失败，取得本机回环权限后重跑通过。模型文件已核对固定revision及SHA-256，没有更换默认翻译后端。真实节目质量和完整新E2E尚未验收，未完句仍可能补足。证据见[链路记录](two-pass-smoke-validation.md#index与成组上下文2026-11-06)。
 
 ## 日语跨段重译首版与轻量MT调查（2026-11-04）
 

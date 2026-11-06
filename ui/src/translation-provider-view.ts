@@ -34,13 +34,13 @@ export function mountTranslationProviderView(root: HTMLElement, options: Options
   };
   const render = () => {
     if (disposed) return;
-    const state = options.state(), selected = select.value, cloud = selected !== "none" && selected !== "hy-mt2-local";
+    const state = options.state(), selected = select.value, cloud = !["none", "hy-mt2-local", "index-translate-local"].includes(selected);
     for (const card of root.querySelectorAll<HTMLElement>("[data-provider-card]")) {
       const id = card.dataset.providerCard!;
       card.classList.toggle("active", selected === id);
       const status = card.querySelector<HTMLElement>("[data-provider-readiness]")!;
       const readiness = state.readiness.get(id) ?? "";
-      const text = (id === "hy-mt2-local" && readiness === "unverified" ? "本地资源就绪，尚未验证" : labels[readiness] ?? "正在读取配置状态…") + (state.dirty.has(id) ? "（当前草稿未保存）" : "");
+      const text = (["hy-mt2-local", "index-translate-local"].includes(id) && readiness === "unverified" ? "本地资源就绪，尚未验证" : labels[readiness] ?? "正在读取配置状态…") + (state.dirty.has(id) ? "（当前草稿未保存）" : "");
       if (status.textContent !== text) status.textContent = text;
       if (id === selected && cloud) {
         const body = card.querySelector<HTMLElement>("[data-provider-editor]")!;
@@ -52,7 +52,7 @@ export function mountTranslationProviderView(root: HTMLElement, options: Options
     root.querySelector("#api-key-field")?.classList.toggle("hidden", !cloud);
     root.querySelector("#llm-provider-fields")?.classList.toggle("hidden", !["gemini", "deepseek", "openai-compatible"].includes(selected));
     root.querySelector("#provider-base-url-field")?.classList.toggle("hidden", selected !== "openai-compatible");
-    const model = root.querySelector<HTMLInputElement>("#settings-provider-model"); if (model) model.disabled = selected === "hy-mt2-local";
+    const model = root.querySelector<HTMLInputElement>("#settings-provider-model"); if (model) model.disabled = ["hy-mt2-local", "index-translate-local"].includes(selected);
     const providerLabel = selected === "gemini" ? "Gemini（与语音识别共用）" : selected === "deepseek" ? "DeepSeek" : selected === "openai-compatible" ? "OpenAI-compatible" : "DeepL";
     const keyLabel = root.querySelector("#api-key-label"); if (keyLabel) keyLabel.textContent = `${providerLabel} API Key`;
     const currentModel = options.localModel();
@@ -93,7 +93,7 @@ export function mountTranslationProviderView(root: HTMLElement, options: Options
       render();
     } else if (button.hasAttribute("data-test-provider") && id) void run("test", id, button);
     else if (button.hasAttribute("data-check-provider") && id) void run("check", id, button);
-    else if ((button.hasAttribute("data-save-provider-key") || button.hasAttribute("data-delete-provider-key")) && select.value !== "none" && select.value !== "hy-mt2-local") void run(button.hasAttribute("data-delete-provider-key") ? "delete" : "save", select.value, button);
+    else if ((button.hasAttribute("data-save-provider-key") || button.hasAttribute("data-delete-provider-key")) && !["none", "hy-mt2-local", "index-translate-local"].includes(select.value)) void run(button.hasAttribute("data-delete-provider-key") ? "delete" : "save", select.value, button);
   }, { signal: events.signal });
   modelChoice.addEventListener("change", () => {
     options.chooseLocalModel(modelChoice.value);

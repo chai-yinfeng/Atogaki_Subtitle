@@ -68,6 +68,7 @@ pub struct Choices {
     finals: Vec<Choice>,
     runtime_ready: bool,
     translation_ready: bool,
+    translators: Vec<Choice>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,6 +91,26 @@ pub struct Start {
     final_model: String,
     translate: bool,
     translation_drafts: bool,
+    #[serde(default = "default_translation_backend")]
+    translation_backend: String,
+    #[serde(default)]
+    scene: String,
+    glossary_id: Option<String>,
+}
+fn default_translation_backend() -> String {
+    "hy-mt2".into()
+}
+
+async fn index_model(
+    desktop: &crate::DesktopState,
+    state: &DesktopOnlineSession,
+) -> Result<PathBuf, String> {
+    Ok(desktop
+        .settings_service
+        .downloaded_model_path("index-translate")
+        .await
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| state.data_dir.join("models/Index-Translate-2B.Q4_K_M.gguf")))
 }
 fn assets(state: &DesktopOnlineSession) -> Result<Assets, String> {
     let bytes = std::fs::read(state.data_dir.join("models/online/manifest.json"))
@@ -110,12 +131,27 @@ fn runtime(app: &AppHandle, state: &DesktopOnlineSession) -> Result<OnlineRuntim
     })
 }
 #[tauri::command]
-pub fn online_choices(
+pub async fn online_choices(
     app: AppHandle,
     state: State<'_, DesktopOnlineSession>,
+    desktop: State<'_, crate::DesktopState>,
 ) -> Result<Choices, String> {
     let a = assets(&state)?;
     let r = runtime(&app, &state)?;
+    let translators = vec![
+        Choice {
+            id: "hy-mt2".into(),
+            name: "Hy-MT2 1.8B".into(),
+            ready: a.hy_mt2.as_ref().is_some_and(|p| p.is_file())
+                && desktop_llama_server_path().is_file(),
+        },
+        Choice {
+            id: "index-translate".into(),
+            name: "Index-Translate 2B Q4".into(),
+            ready: index_model(&desktop, &state).await?.is_file()
+                && desktop_llama_server_path().is_file(),
+        },
+    ];
     Ok(Choices {
         languages: [
             ("ja", "日语 · SenseVoice"),
@@ -142,8 +178,8 @@ pub fn online_choices(
         runtime_ready: cfg!(all(target_os = "macos", target_arch = "aarch64"))
             && r.python.is_file()
             && r.capture.is_file(),
-        translation_ready: a.hy_mt2.is_some_and(|p| p.is_file())
-            && desktop_llama_server_path().is_file(),
+        translation_ready: translators.iter().any(|m| m.ready),
+        translators,
     })
 }
 #[tauri::command]
@@ -162,6 +198,7 @@ pub fn online_snapshot(state: State<'_, DesktopOnlineSession>) -> Result<Snapsho
 pub async fn start_online_session(
     app: AppHandle,
     state: State<'_, DesktopOnlineSession>,
+    desktop: State<'_, crate::DesktopState>,
     options: Start,
 ) -> Result<OnlineSessionStatus, String> {
     if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
@@ -189,12 +226,38 @@ pub async fn start_online_session(
         .iter()
         .find(|m| m.id == options.final_model)
         .ok_or("未安装所选定稿模型")?;
+    if options.scene.chars().count() > 1000 {
+        return Err("场景提示最多1000字符".into());
+    }
+    let terms = if options.translate
+        && let Some(id) = options.glossary_id.as_deref()
+    {
+        desktop
+            .glossary_service
+            .online_translation_terms(id, &options.language)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        vec![]
+    };
+    let mut translation_context =
+        serde_json::json!({"scene":options.scene.trim(), "protected_terms":terms});
     if options.translate {
-        let mut config = LocalLlamaConfig::hy_mt2(
-            desktop_llama_server_path(),
-            a.hy_mt2.ok_or("未安装本地翻译模型")?,
-            String::new(),
-        );
+        let mut config = match options.translation_backend.as_str() {
+            "hy-mt2" => LocalLlamaConfig::hy_mt2(
+                desktop_llama_server_path(),
+                a.hy_mt2.ok_or("未安装Hy-MT2翻译模型")?,
+                String::new(),
+            ),
+            "index-translate" => LocalLlamaConfig::index_translate(
+                desktop_llama_server_path(),
+                index_model(&desktop, &state).await?,
+                String::new(),
+            ),
+            _ => return Err("未知本地翻译后端".into()),
+        };
+        translation_context["backend"] = serde_json::json!(options.translation_backend);
+        translation_context["model"] = serde_json::json!(config.model_id);
         config.parallel_slots = Some(1);
         r.translator = Some(LocalLlamaTranslationProvider::new(config).map_err(|e| e.to_string())?);
     }
@@ -205,6 +268,7 @@ pub async fn start_online_session(
         vad_model: a.vad,
         translation_url: None,
         translation_drafts: options.translation_drafts,
+        translation_context,
     };
     let events = state.events.clone();
     state

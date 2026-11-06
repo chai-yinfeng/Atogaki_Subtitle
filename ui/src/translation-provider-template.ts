@@ -3,19 +3,21 @@ const entries = [
   ["gemini", "Gemini", "只发送字幕文本和上下文；与 Gemini 语音识别共用 Key。保存或删除 Key 会同时影响两处，音频上传仍需单独授权。"],
   ["deepl", "DeepL", "云端文本翻译；使用独立的 DeepL 凭据。"],
   ["hy-mt2-local", "Hy-MT2 · 本地翻译", "离线翻译，无需上传字幕。1.8B 占用较少，7B 需要更多内存和处理时间。"],
+  ["index-translate-local", "Index-Translate 2B · 本地翻译", "完全本地运行；在模型与存储下载官方 Q4_K_M，保留现有默认后端。"],
   ["openai-compatible", "OpenAI-compatible", "高级：自定义端点、模型与独立凭据。"],
 ] as const;
 
 export function translationProviderTemplate(): string {
   const cards = entries.map(([id, title, description]) => {
-    const card = `<article class="provider-card" data-provider-card="${id}"><h4>${title}</h4><p>${description}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary ${id === "hy-mt2-local" ? "hidden" : ""}" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<label class="local-model-choice">翻译模型<select id="local-translation-model-choice"></select></label><p>模型详情与下载位于“模型与存储”。</p>' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div></article>`;
+    const card = `<article class="provider-card" data-provider-card="${id}"><h4>${title}</h4><p>${description}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary ${["hy-mt2-local", "index-translate-local"].includes(id) ? "hidden" : ""}" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<label class="local-model-choice">翻译模型<select id="local-translation-model-choice"></select></label><p>模型详情与下载位于“模型与存储”。</p>' : id === "index-translate-local" ? '<p>模型详情与下载位于“模型与存储”；下载后可选择此后端。</p>' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div></article>`;
     return id === "openai-compatible" ? `<details><summary>高级：自定义兼容服务</summary>${card}</details>` : card;
   }).join("");
   return `<section class="settings-section hidden" data-settings-page="translation" data-translation-settings>
-    <div class="settings-section-heading"><div><strong>翻译</strong><span>Hy-MT2 完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
+    <div class="settings-section-heading"><div><strong>翻译</strong><span>本地模型完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
           <label>下次新任务的默认翻译方式（保存后生效）
             <select id="settings-provider">
               <option value="hy-mt2-local">Hy-MT2（本地翻译）</option>
+              <option value="index-translate-local">Index-Translate 2B（本地翻译）</option>
               <option value="deepl">DeepL（传统翻译 API）</option>
               <option value="deepseek">DeepSeek（LLM API）</option><option value="gemini">Gemini（LLM API）</option>
               <option value="openai-compatible">OpenAI-compatible（高级）</option>

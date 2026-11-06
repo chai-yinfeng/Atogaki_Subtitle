@@ -38,6 +38,7 @@ _更新：2026-11-02_
 - [0068 桌面在线与更大翻译组](decisions/0068-online-desktop-controls-and-live-context.md)：本机App已覆盖，控制面板／字幕窗／受管本地模型可手测，正式任务保留。
 - [0067 会话与系统音频底座](decisions/0067-online-session-owner-and-system-audio.md)：Rust生命周期／IPC与Core Audio helper，明确已验证边界及未完成的runtime／模型包／窗口。
 - [0066 独立译文回改与定稿](decisions/0066-online-retranslation-groups.md)：跨VAD分组、草稿重译和独立版本／调度，CLI已接入，尚未接App。
+- [0073 Index本地翻译与成组上下文](decisions/0073-local-index-translation-and-paired-context.md)：离线／在线新增模型选择，词表核心专名与场景提示、成组历史及验证边界。
 - [0072 日语跨段重译](decisions/0072-japanese-semantic-block-retranslation.md)：短块草稿／更完整源文重译定稿，首版启发式与质量限制。
 - [当前online研究计划](online-asr-plan.md)、[0063模型范围](decisions/0063-online-two-pass-model-selection.md)、[0064本地草稿与定稿](decisions/0064-local-drafts-and-segment-finalization.md)。
 - [Qwen MLX跑通](qwen-mlx-smoke-validation.md)、[SenseVoice对照](sensevoice-smoke-validation.md)、[two-pass与Zipformer](two-pass-smoke-validation.md)：真实运行结果和质量／计时局限。

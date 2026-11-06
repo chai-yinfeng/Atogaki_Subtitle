@@ -108,6 +108,22 @@ impl LocalGlossaryService {
             .ok_or_else(|| anyhow!("local glossary not found: {glossary_id}"))
     }
 
+    /// Freeze the same core proper-name hints used by offline tasks. Recognition
+    /// correction mappings are not bilingual translation mappings.
+    pub async fn online_translation_terms(
+        &self,
+        glossary_id: &str,
+        language: &str,
+    ) -> Result<Vec<String>> {
+        let detail = self.get(glossary_id).await?;
+        if detail.glossary.source_language != language {
+            return Err(anyhow!(
+                "glossary language does not match online source language"
+            ));
+        }
+        Ok(glossary_for_task(&detail, &[])?.translation_protected_terms())
+    }
+
     pub async fn save(
         &self,
         glossary_id: Option<&str>,
@@ -472,6 +488,20 @@ mod tests {
             .prompt_preview(&detail.glossary.id, &[])
             .await
             .unwrap();
+        let online_terms = service
+            .online_translation_terms(&detail.glossary.id, "ja")
+            .await
+            .unwrap();
+        assert!(online_terms.contains(&"スイ".to_string()));
+        assert!(online_terms.contains(&"suis".to_string()));
+        assert!(!online_terms.contains(&"水井".to_string()));
+        assert!(!online_terms.contains(&"月に吠える".to_string()));
+        assert!(
+            service
+                .online_translation_terms(&detail.glossary.id, "en")
+                .await
+                .is_err()
+        );
         let core_prompt = core_only.prompt.unwrap();
         assert!(core_prompt.contains("suis"));
         assert!(!core_prompt.contains("スイ"));

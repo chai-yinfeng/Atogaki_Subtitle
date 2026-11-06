@@ -23,3 +23,5 @@ body[data-view=caption] .online-card::before,body[data-view=caption] .online-car
 body[data-view=caption] .online-card::before{top:0}body[data-view=caption] .online-card::after{bottom:0}
 body[data-view=caption][data-locked=true] header,body[data-view=caption][data-locked=true] #online-status{opacity:0!important;pointer-events:none!important}
 body[data-view=caption][data-locked=true] header button{pointer-events:none}
+
+.configuration textarea{font:inherit;border:1px solid #a8b7bb;border-radius:7px;padding:8px;resize:vertical;min-height:48px}

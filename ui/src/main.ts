@@ -380,7 +380,7 @@ app.innerHTML = `
             <label><input id="vad-enabled" type="checkbox" checked />启用语音活动检测（推荐）</label>
             <span>先过滤静音、音乐和环境声，再交给 Whisper；使用 Silero VAD 默认参数。</span>
           </div>
-          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>云端随稳定原文提前翻译，本地在完整转录后翻译；云端只发送字幕文本和上下文。</span></label>
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="index-translate-local">Index-Translate 2B · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>云端随稳定原文提前翻译，本地在完整转录后翻译；云端只发送字幕文本和上下文。</span></label>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
@@ -1749,7 +1749,7 @@ modelManagement = createModelManagementSession({
     };
   },
   captureSelection: kind => {
-    const input = kind === "whisper" ? settingsWhisperModel : kind === "vad" ? settingsVadModel : settingsHyMt2Model;
+    const input = kind === "index-translate" ? null : kind === "whisper" ? settingsWhisperModel : kind === "vad" ? settingsVadModel : settingsHyMt2Model;
     const snapshot = settingsDirtyFields.snapshot();
     return { acknowledge: () => { if (!input) return false; settingsDirtyFields.acknowledge(snapshot, input.id); return settingsDirtyFields.has(input.id); } };
   },

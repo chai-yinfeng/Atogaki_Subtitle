@@ -689,6 +689,17 @@ fn model_catalog() -> &'static [ModelCatalogItem] {
             sha256: "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
         },
         ModelCatalogItem {
+            id: "index-translate-2b-q4-k-m",
+            kind: "index-translate",
+            name: "Index-Translate 2B Q4_K_M",
+            file_name: "Index-Translate-2B.Q4_K_M.gguf",
+            size_label: "约 1.22 GiB",
+            recommended_for: "本地多语翻译；支持上下文与人名提示。",
+            source_url: "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF",
+            download_path: "IndexTeam/Index-Translate-2B-GGUF/resolve/3a0eca6ce931d88d00614d427ab3ed8ff0743902/Index-Translate-2B.Q4_K_M.gguf",
+            sha256: "044b313d29342bd3b2c77cbb64023ca0d209bd9b3247763f9d162767ef2d746a",
+        },
+        ModelCatalogItem {
             id: "hy-mt2-1.8b-q4-k-m",
             kind: "hy-mt2",
             name: "Hy-MT2 1.8B Q4_K_M（本地翻译推荐）",
