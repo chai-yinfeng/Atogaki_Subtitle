@@ -10,7 +10,7 @@ use atogaki_subtitle::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -83,6 +83,7 @@ pub struct Snapshot {
     status: OnlineSessionStatus,
     events: Vec<CaptionEvent>,
     caption_locked: bool,
+    caption_visible: bool,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -187,11 +188,35 @@ pub fn online_session_status(state: State<'_, DesktopOnlineSession>) -> OnlineSe
     state.service.status()
 }
 #[tauri::command]
-pub fn online_snapshot(state: State<'_, DesktopOnlineSession>) -> Result<Snapshot, String> {
+pub async fn online_snapshot(
+    app: AppHandle,
+    state: State<'_, DesktopOnlineSession>,
+) -> Result<Snapshot, String> {
+    #[cfg(target_os = "macos")]
+    let caption_visible = {
+        let pointer = *state.panel.lock().map_err(|e| e.to_string())?;
+        if let Some(pointer) = pointer {
+            let (send, receive) = tokio::sync::oneshot::channel();
+            app.run_on_main_thread(move || {
+                let panel: &objc2_app_kit::NSPanel =
+                    unsafe { &*(pointer as *const objc2_app_kit::NSPanel) };
+                let _ = send.send(panel.isVisible());
+            })
+            .map_err(|e| e.to_string())?;
+            receive.await.map_err(|e| e.to_string())?
+        } else {
+            false
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    let caption_visible = app
+        .get_webview_window("online-captions")
+        .is_some_and(|w| w.is_visible().unwrap_or(false));
     Ok(Snapshot {
         status: state.service.status(),
         events: state.events.lock().map_err(|e| e.to_string())?.clone(),
         caption_locked: state.caption_locked.load(Ordering::Relaxed),
+        caption_visible,
     })
 }
 #[tauri::command]
@@ -290,30 +315,23 @@ pub async fn start_online_session(
                         data: event,
                     };
                     history.push(event.clone());
-                    // Recover each track's recent locked prefix even when its
-                    // mutable tail fills the event ring. The count is a memory
-                    // guard; reading retention is based on audio time.
+                    // Restore paired originals and latest MT revisions when a
+                    // new caption window opens, including an older MT draft.
+                    // These are memory caps, not visible-history item counts.
                     let recent = history.len().saturating_sub(256);
                     let mut source_finals = 0;
-                    let mut translation_finals = 0;
-                    let mut source_end = None;
-                    let mut translation_end = None;
+                    let mut translation_groups = HashSet::new();
                     let mut keep = vec![false; history.len()];
                     for (index, item) in history.iter().enumerate().rev() {
                         let settled = match item.data.event["kind"].as_str() {
                             Some("source_final") => {
                                 source_finals += 1;
-                                let end = item.data.event["end_s"].as_f64().unwrap_or(0.0);
-                                let latest = source_end.get_or_insert(end);
-                                *latest = f64::max(*latest, end);
-                                source_finals <= 64 && end > *latest - 5.0
+                                source_finals <= 64
                             }
-                            Some("translation_final") => {
-                                translation_finals += 1;
-                                let end = item.data.event["end_s"].as_f64().unwrap_or(0.0);
-                                let latest = translation_end.get_or_insert(end);
-                                *latest = f64::max(*latest, end);
-                                translation_finals <= 64 && end > *latest - 5.0
+                            Some("translation_final" | "translation_draft") => {
+                                let id = item.data.event["group_id"].as_str().unwrap_or("");
+                                translation_groups.len() < 64
+                                    && translation_groups.insert(id.to_string())
                             }
                             _ => false,
                         };
@@ -428,6 +446,38 @@ pub fn hide_online_captions(
         let _ = w.hide();
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_online_captions(
+    app: AppHandle,
+    state: State<'_, DesktopOnlineSession>,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(pointer) = *state.panel.lock().map_err(|e| e.to_string())? {
+        let locked = state.caption_locked.clone();
+        return app
+            .run_on_main_thread(move || {
+                let panel: &objc2_app_kit::NSPanel =
+                    unsafe { &*(pointer as *const objc2_app_kit::NSPanel) };
+                if panel.isVisible() {
+                    panel.orderOut(None);
+                } else if locked.load(Ordering::Relaxed) {
+                    panel.orderFrontRegardless();
+                } else {
+                    panel.makeKeyAndOrderFront(None);
+                }
+            })
+            .map_err(|e| e.to_string());
+    }
+    #[cfg(not(target_os = "macos"))]
+    if app
+        .get_webview_window("online-captions")
+        .is_some_and(|w| w.is_visible().unwrap_or(false))
+    {
+        return hide_online_captions(app, state);
+    }
+    open_online_captions(app, state, Some(true))
 }
 
 #[tauri::command]

@@ -10,7 +10,7 @@ const control=document.body.dataset.view==="control";
 const root=document.querySelector<HTMLElement>("#online-root")!;
 root.innerHTML=`<section class="online-card">
 <header ${control?"data-tauri-drag-region":""}><strong ${control?"data-tauri-drag-region":""}>Atogaki · ${control?"在线字幕控制面板":"在线字幕"}</strong><button id="online-hide" class="quiet" type="button">${control?"字幕窗":"隐藏"}</button></header>
-${control?`<div class="configuration"><label>原文语言<select id="online-language"></select></label><label>Qwen3-ASR 定稿<select id="online-model"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>启用本地中文翻译</label><label>翻译模型<select id="online-translator"></select></label><label>词表（核心人名／术语）<select id="online-glossary"><option value="">不使用词表</option></select></label><label class="help">场景提示（可选，仅供翻译参考）<textarea id="online-scene" maxlength="1000" rows="2" placeholder="例如：个人电台，讲述过去的经历。只填写确定的信息。"></textarea></label><label class="check"><input type="checkbox" id="online-drafts" checked>显示可回改的译文草稿</label><p class="help">从系统输出读取音频，不使用麦克风。原文、译文分别推进，框内保留已锁定的前文，蓝色尾部仍可回改；显示约 3–5 秒内容，按完整段保留。日语先显示草稿，再结合已定稿后文重译；长停顿或等待上限仍会提交未完句。本次测试不保存录音。</p><div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止并完成末段</button><button id="online-refresh" class="secondary">刷新模型／词表</button></div></div>`:""}
+${control?`<div class="configuration"><label>原文语言<select id="online-language"></select></label><label>Qwen3-ASR 定稿<select id="online-model"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>启用本地中文翻译</label><label>翻译模型<select id="online-translator"></select></label><label>词表（核心人名／术语）<select id="online-glossary"><option value="">不使用词表</option></select></label><label class="help">场景提示（可选，仅供翻译参考）<textarea id="online-scene" maxlength="1000" rows="2" placeholder="例如：个人电台，讲述过去的经历。只填写确定的信息。"></textarea></label><label class="check"><input type="checkbox" id="online-drafts" checked>显示可回改的译文草稿</label><p class="help">从系统输出读取音频，不使用麦克风。原译文按对应组共同保留，原文末尾追加最近未译内容；白色已锁定，蓝色仍可回改。约 3–5 秒为软阅读范围，长组完整保留。日语先显示草稿，再结合已定稿后文重译；长停顿或等待上限仍会提交未完句。本次测试不保存录音。</p><div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止并完成末段</button><button id="online-refresh" class="secondary">刷新模型／词表</button></div></div>`:""}
 ${control?`<label class="check overlay-lock"><input type="checkbox" id="online-lock">锁定字幕窗（鼠标穿透；在此取消锁定）</label>`:""}
 <p id="online-status" role="status">正在读取会话状态…</p>
 <section id="source-track" class="track"><span class="badge">原文</span><p id="source-text">等待语音…</p></section>
@@ -23,10 +23,12 @@ const set=(id:string,text:string)=>{const node=find(id);if(node.textContent!==te
 let choices:Choices|null=null, busy=false, message="", disposed=false;
 let pendingCaptionSession:string|null=null;
 let captionLocked=false, lockBusy=false;
+let captionVisible=false, captionBusy=false;
 let displayedSession:string|null=null;
 type PartNode={node:HTMLSpanElement;gate:DraftPresentation};
 const trackNodes={source:new Map<string,PartNode>(),translation:new Map<string,PartNode>()};
-function renderTrack(prefix:"source"|"translation",parts:LiveEvent[]):void {
+function renderTrack(prefix:"source"|"translation",parts:LiveEvent[]):LiveEvent[] {
+ const shown:LiveEvent[]=[];
  const container=find(`${prefix}-text`), nodes=trackNodes[prefix];
  const keys=new Set(parts.map(e=>e.group_id??e.segment_id!));
  const follow=container.scrollHeight-container.scrollTop-container.clientHeight<24;
@@ -40,26 +42,31 @@ function renderTrack(prefix:"source"|"translation",parts:LiveEvent[]):void {
    let part=nodes.get(key);
    if(!part){part={node:document.createElement("span"),gate:new DraftPresentation()};part.node.dataset.captionId=key;nodes.set(key,part);}
    const displayed=part.gate.select(e,performance.now())!;
+   shown.push(displayed);
    const text=(displayed.text??"")+" ";
    if(part.node.textContent!==text){part.node.textContent=text;changed=true;}
    part.node.classList.toggle("draft",displayed.kind.endsWith("draft"));
+   part.node.classList.toggle("omitted",displayed.kind==="source_gap");
+   if(displayed.kind==="source_gap")part.node.setAttribute("aria-label","省略的未译原文");
    if((previous?previous.nextElementSibling:container.firstElementChild)!==part.node){container.insertBefore(part.node,previous?previous.nextElementSibling:container.firstElementChild);changed=true;}
    previous=part.node;
   }
  }else{set(`${prefix}-text`,prefix==="source"?"等待语音…":model.translationEnabled||!model.status.sessionId?"等待翻译…":"翻译已关闭");}
  if(changed&&follow)container.scrollTop=container.scrollHeight;
+ return shown;
 }
 function render():void {
  const state=model.status, t=model.tracks();
  document.body.dataset.locked=String(captionLocked);
  if(control){const lock=find<HTMLInputElement>("online-lock");lock.disabled=lockBusy;if(!lockBusy)lock.checked=captionLocked;}
+ if(control){const toggle=find<HTMLButtonElement>("online-hide");toggle.disabled=captionBusy;toggle.textContent=captionVisible?"隐藏字幕窗":"显示字幕窗";toggle.setAttribute("aria-pressed",String(captionVisible));}
  set("online-status",message||state.error||phaseLabel[state.phase]||state.phase);
  if(displayedSession!==state.sessionId){
   displayedSession=state.sessionId;
   for(const prefix of ["source","translation"] as const){trackNodes[prefix].clear();find(`${prefix}-text`).replaceChildren();}
  }
- renderTrack("source",t.sourceParts);
- renderTrack("translation",t.translationParts);
+ const shownTranslations=renderTrack("translation",t.translationParts);
+ renderTrack("source",model.tracks(shownTranslations).sourceParts);
  if(!control)return;
  if(state.phase==="running"&&pendingCaptionSession===state.sessionId){pendingCaptionSession=null;void invoke("open_online_captions").catch(e=>{message=String(e);render();});}
  const active=activePhase(state.phase);
@@ -73,7 +80,7 @@ function render():void {
  set("online-timing",timings.length?`${timings.join(" · ")}（从对应音频段结束计）`:"延迟随定稿更新；草稿出现速度与定稿等待分别观察。");
 
 }
-async function refresh():Promise<void>{try{const snapshot=await invoke<OnlineSnapshot>("online_snapshot");if(disposed)return;captionLocked=snapshot.captionLocked??false;model.snapshot(snapshot);render();}catch(e){message=String(e);render();}}
+async function refresh():Promise<void>{try{const snapshot=await invoke<OnlineSnapshot>("online_snapshot");if(disposed)return;captionLocked=snapshot.captionLocked??false;captionVisible=snapshot.captionVisible??false;model.snapshot(snapshot);render();}catch(e){message=String(e);render();}}
 function filterGlossaries():void {
  const select=find<HTMLSelectElement>("online-glossary"), language=find<HTMLSelectElement>("online-language").value;
  for(const option of select.options)option.disabled=!!option.value&&option.dataset.language!==language;
@@ -120,7 +127,10 @@ if(control){
  find("online-translator").onchange=()=>render();
  find("online-refresh").onclick=()=>void loadChoices().then(()=>{message="";render();}).catch(e=>{message=String(e);render();});
 }
-find("online-hide").onclick=()=>void invoke(control?"open_online_captions":"hide_online_captions",control?{focus:true}:undefined);
+find("online-hide").onclick=async()=>{
+ if(captionBusy)return;if(control)pendingCaptionSession=null;captionBusy=true;render();
+ try{await invoke(control?"toggle_online_captions":"hide_online_captions");}catch(e){message=String(e);}finally{captionBusy=false;await refresh();}
+};
 await refresh();
 const poll=setInterval(()=>void refresh(),500);
 window.addEventListener("beforeunload",()=>{disposed=true;clearInterval(poll);unlisten();});

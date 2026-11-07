@@ -25,3 +25,5 @@ body[data-view=caption][data-locked=true] header,body[data-view=caption][data-lo
 body[data-view=caption][data-locked=true] header button{pointer-events:none}
 
 .configuration textarea{font:inherit;border:1px solid #a8b7bb;border-radius:7px;padding:8px;resize:vertical;min-height:48px}
+
+.track .omitted{color:#839199}

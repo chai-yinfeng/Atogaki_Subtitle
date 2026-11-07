@@ -2257,6 +2257,7 @@ fn main() {
             online_session::online_snapshot,
             online_session::open_online_control,
             online_session::open_online_captions,
+            online_session::toggle_online_captions,
             online_session::hide_online_captions,
             online_session::set_online_caption_locked,
             online_session::start_online_session,
