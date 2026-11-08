@@ -113,3 +113,24 @@ Vol.1与旧保留集属于同节目，按已曝光development管理；Vol.33拟�
 本轮仅调查参考模型，不下载或替换：Qwen官方[公开系列](https://github.com/QwenLM/Qwen3-ASR)为0.6B／1.7B，没有同系列7B权重。制作参考优先现有Qwen1.7B FP16与完整Whisper large-v3的独立转录及人工字幕交叉核对，纠正专名／否定／角色分歧后再对齐；参数更多或模型一致不自动等于正确。[VibeVoice-ASR](https://huggingface.co/microsoft/VibeVoice-ASR)提供长音频、说话人与时间输出，另有[社区MLX 4bit](https://huggingface.co/mlx-community/VibeVoice-ASR-4bit)及[MLX runtime示例](https://github.com/Blaizzy/mlx-audio/blob/main/docs/getting-started/quickstart-cli.md)，可作较大模型复核候选；未验证本机运行、日语质量或峰值内存，不先把它指定为参考真值。
 
 用户“在线追平离线80%或部分能力”作为产品方向保留，尚未定义为通过阈值；后续以经核验语义锚点的信息覆盖、关键错误和延迟共同判断，不以参考译文的逐字相似度代替理解质量。本轮JSON／范围／音频摘要校验及fmt／diff检查通过；没有完成新ASR、翻译、OCR或延迟基线。
+
+### 本地下载后的候选调整（2026-11-08）
+
+用户将Vol.1–4、33–35下载到既有後書き的翻译目录，36／37继续补充，长电台暂缓。本轮以已存在且可读取的7期重选8段，均已裁出核心PCM音频及独立参考上下文，全部180秒／合计24分钟，不再依赖长电台。版本2[清单](../experiments/online/datasets/japanese-radio/screening.json)沿用旧ID；radio-02／04转备选，radio-07／08延期，旧清单副本与裁片保留。新范围如下：
+
+| ID | 来源 | 本机媒体范围 | 初筛内容 |
+| --- | --- | --- | --- |
+| radio-01 | Vol.1 | 00:10–03:10 | 专辑感想、创作意图与接话 |
+| radio-03 | Vol.2 | 00:45–03:45 | 生活经历、引语与人物互动 |
+| radio-05 | Vol.33 | 03:30–06:30 | 视觉共享、知识与假设性讨论 |
+| radio-06 | Vol.33 | 10:00–13:00 | 身体动作与刷屏日常话题 |
+| radio-09 | Vol.3 | 06:00–09:00 | 方言误听与生活态度 |
+| radio-10 | Vol.4 | 02:00–05:00 | 虚构世界、角色设定与假设 |
+| radio-11 | Vol.34 | 03:00–06:00 | 人名、饭局回忆与转述 |
+| radio-12 | Vol.35 | 20:00–23:00 | 饮食习惯与文化差异 |
+
+本机原文件只读，先校验音视频轨、时长并冻结源媒体摘要，记录大小／mtime确保索引时未变化；抽样画面保留明确seek时间。裁片校验mono／16kHz／PCM16格式、核心精确180秒、上下文范围与摘要。网页秒数、旧原录音时间不自动映射到这些下载版本，实际坐标以本机源hash为准。话题仍是稀疏画面字幕初筛，目标语言现象未逐项核验，完整听审与自然句界尚未完成。所有版本的媒体、画面、私人路径及模型输出仅在忽略目录中保存。
+
+用户确认参考制作流程后，顺序运行既有Qwen3-ASR1.7B MLX FP16和完整Whisper large-v3 MLX FP16，均使用相同的8份参考上下文WAV，无ASR词表prompt、无翻译、无新下载、无云端调用。核心共1440秒，加参考前后文后模型各处理1900秒；这包含未来参考上下文，不是在线因果回放或E2E延迟基准。Qwen沿用`run_qwen_mlx.py --repeat 1`，8份均非空且未触发截断；Whisper固定日语／transcribe／temperature=0／condition_on_previous_text／word_timestamps，8份均正常返回。8组输入摘要对应，Whisper共6830个词时间条目通过有限数值、起止顺序与音频范围检查；该检查不证明声学精度、文字准确或覆盖完整。
+
+私有`reference-local-20261108/`保存执行脚本／命令、实际模型与lock摘要、选择快照、两套输出、退出状态及`validation.json`；`review.md`提供核心音频、原视频位置、完整上下文转录、核心附近Whisper段时间和最多3处归一化文字分歧，差异仅供核对、不作为CER或质量排名。既有Yorushika词表另存快照供后续专名复核，本轮ASR未读取。所有输出均为`model_reference_unreviewed`，没有自动升为gold；OCR人工字幕提取、语义／专名校对、声学校准、中文参考和当前在线延迟回归仍待完成。原有App、在线配置与模型均未修改。
