@@ -2,6 +2,7 @@
 """Summarize causal worker traces; provider boundaries are diagnostic, not semantic gold."""
 import argparse
 import json
+import re
 from pathlib import Path
 from harness import percentile
 
@@ -12,9 +13,14 @@ def stats(values):
 
 
 def summarize(events, summary):
+    offset = summary.get('audio_clock_offset_s', 0.0)
     closed = {e['segment_id']: e for e in events if e['kind'] == 'segment_closed'}
     finals = [e for e in events if e['kind'] == 'source_final']
     translations = [e for e in events if e['kind'] in {'translation_draft', 'translation_final'}]
+    structural_echo = [e for e in translations if re.search(
+        r'〖约束要求〗|〖背景信息|Translation \(wording reference only\):|\[Previous source and translation pairs\]|Group \d+\s+Source:',
+        e.get('text', ''))]
+    expansion = [e for e in translations if len(e.get('text', '')) > max(300, 6 * len(e.get('source_text', '')))]
     mt_intervals = [(e['emission_s'] - e['compute_s'], e['emission_s']) for e in translations]
     queue_rows = []
     for e in finals:
@@ -33,7 +39,8 @@ def summarize(events, summary):
         final = next((e for e in versions if e['kind'] == 'translation_final'), None)
         close = group_closes.get(key)
         last = final or versions[-1]
-        source_end = last.get('first_source_end_s', last['end_s'])
+        reason = last.get('completion_reason') or (close['completion_reason'] if close else None)
+        source_end = offset + last.get('first_source_end_s', last['end_s'])
         latest_source = [e for e in finals if e['segment_id'] in last.get('source_revisions', {})]
         last_source_time = max((e['emission_s'] for e in latest_source), default=None)
         # Retrospective matching to the last group's first acoustic segment;
@@ -46,12 +53,12 @@ def summarize(events, summary):
                 last_text_change = version['emission_s']
             previous_text = version['text']
         rows.append(dict(group_id=key, has_final=final is not None,
-                         eof=bool(close and close['completion_reason'] == 'input_eof'),
-                         close_reason=close['completion_reason'] if close else None,
+                         eof=reason == 'input_eof',
+                         close_reason=reason,
                          first_return_s=first['emission_s'], last_returned_text_change_s=last_text_change,
                          first_return_after_first_source_end_s=first['emission_s'] - source_end,
                          final_after_first_source_end_s=final['emission_s'] - source_end if final else None,
-                         final_after_last_source_end_s=final['emission_s'] - final['end_s'] if final else None,
+                         final_after_last_source_end_s=final['emission_s'] - offset - final['end_s'] if final else None,
                          final_compute_s=final['compute_s'] if final else None,
                          last_source_final_s=last_source_time,
                          final_after_last_source_final_s=final['emission_s'] - last_source_time if final and last_source_time is not None else None,
@@ -69,15 +76,22 @@ def summarize(events, summary):
                 source_compute=stats([e['compute_s'] for e in finals]),
                 source_queue_returned_mt_overlap=stats([r['returned_mt_overlap_s'] for r in queue_rows]),
                 source_queue_details=queue_rows,
-                vad_close_wait=stats([e['emission_s'] - e['end_s'] for e in closed.values() if e.get('reason') != 'input_eof']),
+                vad_close_wait=stats([e['emission_s'] - offset - e['end_s'] for e in closed.values() if e.get('reason') != 'input_eof']),
                 mt_compute=stats([e['compute_s'] for e in translations]),
+                mt_return_count=len(translations),
+                prompt_structure_echo_returns=len(structural_echo),
+                prompt_structure_echo_finals=sum(e['kind'] == 'translation_final' for e in structural_echo),
+                first_prompt_structure_echo_s=min((e['emission_s'] for e in structural_echo), default=None),
+                max_target_characters=max((len(e.get('text', '')) for e in translations), default=0),
+                large_expansion_returns=len(expansion),
                 non_eof_final_after_first_end=stats([r['final_after_first_source_end_s'] for r in normal]),
                 non_eof_final_after_last_end=stats([r['final_after_last_source_end_s'] for r in normal]),
                 non_eof_final_after_last_qwen=stats([r['final_after_last_source_final_s'] for r in normal if r['final_after_last_source_final_s'] is not None]),
                 translated_groups=len(rows), closed_groups_without_any_translation=sorted(set(group_closes)-set(groups)),
                 unfinished_groups=len(all_group_ids - finalized_ids),
                 groups_without_final=sorted(all_group_ids - finalized_ids),
-                eof_groups=sum(e['completion_reason'] == 'input_eof' for e in group_closes.values()),
+                eof_groups=sum(r['eof'] for r in rows) + sum(
+                    group_closes[key]['completion_reason'] == 'input_eof' for key in set(group_closes)-set(groups)),
                 groups=rows)
 
 
@@ -98,6 +112,7 @@ def main():
         'EOF groups are excluded from ordinary final latency distributions.',
         'MT return minus compute is an estimated request start, not an observed queue event.',
         'Post-Qwen wait combines semantic commit policy, scheduler and MT; it is not pure model compute.',
+        'Prompt-structure echo uses exact template markers; expansion is only a length diagnostic, neither is a semantic quality score.',
         'Returned-MT/ASR-queue overlap uses inferred intervals and omits failed requests; not causal proof or all queue time.',
         'No GUI IPC or paint time included. No verified MT correctness score is produced.'])
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
