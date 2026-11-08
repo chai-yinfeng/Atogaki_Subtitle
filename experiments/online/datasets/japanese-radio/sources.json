@@ -11,7 +11,7 @@
       "displayed_duration_s": 577,
       "collection": "early",
       "discovery": "browser_page",
-      "media_status": "not_acquired",
+      "media_status": "local_copy_found; identity_with_web_timeline_not_yet_verified",
       "subtitle_status": "burned_bilingual_page_observed",
       "split": "unassigned"
     },
@@ -24,7 +24,7 @@
       "collection": "early",
       "discovery": "browser_page",
       "media_status": "not_acquired",
-      "subtitle_status": "not_inspected",
+      "subtitle_status": "burned_bilingual_observed",
       "split": "unassigned"
     },
     {

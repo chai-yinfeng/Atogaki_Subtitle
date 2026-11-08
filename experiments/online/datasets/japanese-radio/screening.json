@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "created_at": "2026-11-08",
+  "dataset_id": "japanese-radio",
+  "selection_status": "initial_screening",
+  "core_total_s": 1440,
+  "cases": [
+    {
+      "id": "radio-01",
+      "source_id": "atogaki-vol01",
+      "start_ms": 10000,
+      "end_ms": 190000,
+      "topic": "专辑感想与创作意图",
+      "target_phenomena": [
+        "album_discussion",
+        "intent_and_completion",
+        "fillers",
+        "speaker_turns"
+      ],
+      "screening_method": "local_contact_sheet",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "not_verified",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "approximate_frame_offsets_s": [
+        40,
+        100,
+        160
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-02",
+      "source_id": "atogaki-vol01",
+      "start_ms": 240000,
+      "end_ms": 420000,
+      "topic": "曲名、发音与录制安排",
+      "target_phenomena": [
+        "proper_names",
+        "song_titles",
+        "phonetic_discussion",
+        "recording_process"
+      ],
+      "screening_method": "local_contact_sheet",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "not_verified",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "approximate_frame_offsets_s": [
+        280,
+        340,
+        400
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-03",
+      "source_id": "atogaki-vol02",
+      "start_ms": 45000,
+      "end_ms": 225000,
+      "topic": "生活经历、引语与人物互动",
+      "target_phenomena": [
+        "daily_life",
+        "reported_speech",
+        "speaker_roles"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "evaluation_candidate",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "not_verified",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "approximate_frame_offsets_s": [
+        93,
+        186
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-04",
+      "source_id": "atogaki-vol02",
+      "start_ms": 270000,
+      "end_ms": 450000,
+      "topic": "下载、安装与使用经历",
+      "target_phenomena": [
+        "technology_terms",
+        "loanwords",
+        "past_experience"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "evaluation_candidate",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "not_verified",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "approximate_frame_offsets_s": [
+        335
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-05",
+      "source_id": "atogaki-vol33",
+      "start_ms": 210000,
+      "end_ms": 390000,
+      "topic": "视觉共享、知识与假设性讨论",
+      "target_phenomena": [
+        "abstract_reasoning",
+        "hypothetical_statements",
+        "long_context"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "not_verified",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "approximate_frame_offsets_s": [
+        247,
+        307,
+        366
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-06",
+      "source_id": "atogaki-vol33",
+      "start_ms": 600000,
+      "end_ms": 780000,
+      "topic": "身体动作与刷屏日常话题",
+      "target_phenomena": [
+        "topic_shift",
+        "colloquial_expression",
+        "context_dependent_reference"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "not_verified",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "approximate_frame_offsets_s": [
+        666,
+        723
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-07",
+      "source_id": "yorushika-radio-20240118",
+      "start_ms": 1740000,
+      "end_ms": 1920000,
+      "topic": "感官描述与听众问答转场",
+      "target_phenomena": [
+        "figurative_description",
+        "question_transition",
+        "live_radio"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "evaluation_candidate",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "not_verified",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "approximate_frame_offsets_s": [
+        1805,
+        1895
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-08",
+      "source_id": "yorushika-radio-20240118",
+      "start_ms": 3540000,
+      "end_ms": 3720000,
+      "topic": "歌曲写作与《晴る》来信",
+      "target_phenomena": [
+        "creative_process",
+        "song_titles",
+        "listener_letters"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "evaluation_candidate",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "not_verified",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "approximate_frame_offsets_s": [
+        3605,
+        3694
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    }
+  ],
+  "notes": [
+    "Eight non-overlapping core windows, each 180 seconds, across four recordings.",
+    "Topic tags reflect sparse visual subtitle checks, not full listening or confirmed coverage throughout each window.",
+    "Target phenomena are selection goals, not verified linguistic annotations.",
+    "Boundaries may move after transcription and continuity review; freeze audio hashes and alignment before latency scoring.",
+    "Context audio is for reference production; online replay remains causal. Score only the 180-second core, keep 30-second pre-roll policy fixed across runs, exclude trailing context from scored input.",
+    "Evaluation candidates have been visually screened and are not unseen blind tests. Split by episode; verify identity against old holdout before freezing."
+  ]
+}
