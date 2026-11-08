@@ -21,6 +21,25 @@ python3 -m unittest discover -s experiments/online -p test_burned_reference.py
 
 输入selection保存本机媒体路径、摘要和范围；输出目录必须不存在。帧时间取ffmpeg实际PTS，不按帧号推算；保存全部采样图、原始OCR、连续显示文字候选及开放的边界。文字框从Vision裁区坐标转换回原图后测量颜色；日中双语、左右双侧、右面板和灰色上下文分别处理。只合并连续同位的相同文字，不模糊合并否定差异，也不把真正分开的重复发言全局去重。双侧同时可见的文字不能证明谁正在发声。采样显示时间不代替声学时间，OCR置信度不代表语义正确，不直接导出gold／用于CER。正式参考冻结前仍需核验、对齐，详见[评测记录](../../docs/evaluation.md#烧录字幕候选与重复复核2026-11-08)。
 
+## 参考台账与two-pass延迟诊断（2026-11-08）
+
+当前私有日语目录已有selection、两套参考ASR、三份Whisper复核、OCR和人工反馈后，可运行：
+
+```sh
+python3 experiments/online/reference_ledger.py \
+  --dataset local-artifacts/datasets/japanese-radio \
+  --output local-artifacts/datasets/japanese-radio/reference-ledger-20261108.json
+python3 experiments/online/summarize_two_pass.py \
+  --batch local-artifacts/datasets/japanese-radio/baseline-20261108 \
+  --output local-artifacts/datasets/japanese-radio/baseline-20261108/metrics.json
+node --experimental-strip-types experiments/online/replay_presentation.mjs \
+  local-artifacts/datasets/japanese-radio/baseline-20261108/radio-03/events.jsonl \
+  local-artifacts/datasets/japanese-radio/baseline-20261108/radio-03/presentation.json
+node --experimental-strip-types --test experiments/online/test_presentation_replay.mjs
+```
+
+这些命令只整理已有输出，不调用模型。台账保持原文声学估计、OCR显示时间与人工核准各自独立，关联是N:M时间候选而非gold字幕；核心交集不插值。统计失败／未完成组不丢弃，EOF单列，距首段与距末段延迟分别报告；未核验语义及时间不进入有效延迟。显示回放执行生产状态／节流逻辑并模拟500ms轮询，包含跳过版本，排除真实IPC和绘制时间。详见[实测边界与记录](../../docs/evaluation.md#参考证据台账与当前链路基线2026-11-08)。本轮实际回放命令、模型摘要、固定词表和运行状态在私有批次目录，不将私人源路径或完整转录提交Git。
+
 ## 环境与输入
 
 ```sh
