@@ -4,6 +4,23 @@
 
 此目录独立于 offline 两段式业务与 GUI。第一轮 ASR 比较 Whisper-Streaming／LocalAgreement 与 SimulStreaming／AlignAtt；翻译固定 Hy-MT2。当前是上游 ASR 回放 + **串行翻译策略重放**，不是并发实时系统。
 
+## 烧录字幕参考准备（macOS，2026-11-08）
+
+`burned_reference.py`与`vision_ocr.swift`用于当前日语电台数据集的本地OCR候选提取，不进入App或在线推理路径。复用系统Vision与ffmpeg，无额外Python包；需要macOS／Xcode工具链。布局规则仅针对本轮来源，处理新样式前先验证区域和颜色，不能把阈值当通用字幕检测器。
+
+```sh
+swiftc -O -module-cache-path /tmp/atogaki-ocr-module-cache \
+  experiments/online/vision_ocr.swift \
+  -o local-artifacts/datasets/japanese-radio/vision-ocr
+python3 experiments/online/burned_reference.py \
+  --selection local-artifacts/datasets/japanese-radio/selection.json \
+  --helper local-artifacts/datasets/japanese-radio/vision-ocr \
+  --output local-artifacts/datasets/japanese-radio/new-ocr-run
+python3 -m unittest discover -s experiments/online -p test_burned_reference.py
+```
+
+输入selection保存本机媒体路径、摘要和范围；输出目录必须不存在。帧时间取ffmpeg实际PTS，不按帧号推算；保存全部采样图、原始OCR、连续显示文字候选及开放的边界。文字框从Vision裁区坐标转换回原图后测量颜色；日中双语、左右双侧、右面板和灰色上下文分别处理。只合并连续同位的相同文字，不模糊合并否定差异，也不把真正分开的重复发言全局去重。双侧同时可见的文字不能证明谁正在发声。采样显示时间不代替声学时间，OCR置信度不代表语义正确，不直接导出gold／用于CER。正式参考冻结前仍需核验、对齐，详见[评测记录](../../docs/evaluation.md#烧录字幕候选与重复复核2026-11-08)。
+
 ## 环境与输入
 
 ```sh
