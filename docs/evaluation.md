@@ -1,6 +1,6 @@
 # 识别与翻译质量基线
 
-_最后更新：2026-10-02_
+_最后更新：2026-11-08_
 
 评估使用用户有权处理的本机媒体。媒体、裁剪、人工参考和运行结果放在 Git 忽略的 `local-artifacts/evaluation/`，仓库不保存私人绝对路径或媒体内容。公开的格式示例见 [`evaluation-manifest.example.json`](evaluation-manifest.example.json) 和 [`evaluation-reference.example.json`](evaluation-reference.example.json)。
 
@@ -74,3 +74,19 @@ manifest 中保存媒体 SHA-256、范围、角色、参考状态、历史任务
 Gemini 3.5 Transcribe 可作为独立 `model_reference` 辅助基线，保留相同音频范围、模型／参数与未经人工复核的状态。与本地 ASR 的分歧是听审优先级，不是自动纠错依据；只有听审后的片段成为 verified。2026-10-02 用户选择先完成本地实验，Gemini 参考稍后补充；本轮不上传音频或调用 Gemini。
 
 2026-10-04 经具体范围授权完成一次 60 秒 Gemini Transcribe，并删除云端临时音频；选出其中 18.9 秒问答作 evaluation-only 对照。用户核对发现精修画面的日文与实际听感不完全一致，模型也存在交叠文本顺序／词时间倒退，故均不自动提升为 gold。该 holdout 片段已经评估曝光，后续调参转到 development 样本；完整记录见 [候选问答验证](online-paragraph-reference-validation.md)。
+
+## 日语电台数据集扩充（2026-11-08）
+
+用户指定後書きVol.1–4、Vol.33–37与2024-01-18长电台为主要来源。公开链接及浏览器观察登记在[来源清单](../experiments/online/datasets/japanese-radio/sources.json)；真实媒体、参考和本机路径统一放在忽略目录`local-artifacts/datasets/japanese-radio/`，不迁移或覆盖旧证据。当前只完成来源核对与旧资产索引，尚未取得新视频媒体或提取字幕，不代表已经建立可评分的新基准。
+
+核对三个入口页面：Vol.1–4显示时长分别9:37／8:31／9:53／9:07；Vol.33–37为23:56／20:50／27:23／31:01／35:27；长电台约1:52:40。Vol.1画面为一页多句的日中双语稿，Vol.33画面含中文，长电台画面含中文且字幕菜单只观察到“中文AI”选项。不能将AI轨视为人工校对参考，也不能把一页稿件的显示时间套给每句发言。Vol.34–37的独立URL仍待逐项确认；不能将合集入口误作每集音频。公开元数据API三次均返回HTTP 412；浏览器可以正常播放，但未取得完整字幕轨清单，因此不能断言没有独立人工字幕。
+
+旧基准并非完全缺失：旧evaluation manifest含5个开发／保留／英语／长回归／故障回归条目，媒体仍存在，原文reference路径状态为pending，其对应目录当前为空。早期受控ASR另有4个60秒development窗口、4份已成功生成并删除远端文件的Gemini词时间参考及20个待核验锚点，见[旧验证记录](online-controlled-asr-validation.md)。近期two-pass／日语重译主要重复使用《湖吉の庭Vol.1》15–75秒，不能代表内容覆盖充分。本次复制该60秒及四个窗口到新目录，连同Gemini参考、原review状态和旧manifest快照建立私有索引；共5个回放输入但独立音频只有240秒，不能相加成300秒或分到不同训练／验收角色。旧holdout及已曝光状态保持，不重新宣称盲测。
+
+参考准备优先提取人工字幕；烧录字幕使用OCR后抽查，保留画面显示区间与声学发言区间两条时间轴。缺少原文时，Gemini Transcribe／Whisper large-v3可生成带时间的日语候选；Qwen3-ASR需单独启用并验证时间对齐，当前online默认输出没有词时间。VAD仅辅助找语音范围，不能替代句词对齐。每条源文赋稳定ID，DeepSeek或其他离线MT按ID输出译文并继承源文范围，不生成新的声学时间。OCR、ASR、MT候选分别保留来源和核验状态，已有离线字幕亦不自动成为gold。
+
+2026-11-08复核[Gemini官方转录文档](https://ai.google.dev/gemini-api/docs/transcribe?hl=en)及[模型限制](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe?authuser=57)：当前接入的`gemini-3.5-transcribe`支持verbatim词时间，但文档未提供直接中文翻译及译文时间轴合同；不能把通用Gemini音频理解与此转录接口混为一谈。词时间模式单请求最长30分钟，启用时间可能降低转录质量，且不兼容custom vocabulary。新参考宜先按选中片段生成，完整长节目不直接整集提交。本轮未读凭据、未上传媒体、未调用付费API。
+
+下一步先完成新来源媒体获取与小范围字幕提取，选择含上下文的连续片段，再冻结开发／验收划分；同一集及其重叠片段保持同一角色，并核对是否与旧holdout同源。每例保留音频摘要、原媒体offset、原文／译文、词表／场景、独立文字与时间核验状态。完整离线上下文可用于制作参考，但回放只能访问当时已到达音频；不能把未来内容写入在线场景提示。
+
+在线延迟以固定的源文锚点评估首次有效译文、最后实质改写、锁定及积压，分别保留后端返回与前端实际显示时间；未输出锚点仍计入覆盖率。分组末段延迟不能替代首段等待，provider估计时间与听审声学时间分别标识。首先补齐当前链路baseline，尚未实现新的自动评分器，也未因建立目录宣称延迟回归已闭环。

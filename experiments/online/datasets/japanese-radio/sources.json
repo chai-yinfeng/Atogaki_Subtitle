@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "created_at": "2026-11-08",
+  "dataset_id": "japanese-radio",
+  "sources": [
+    {
+      "id": "atogaki-vol01",
+      "url": "https://www.bilibili.com/video/BV13CovBFEpr/",
+      "episode": 1,
+      "title": "【中日双字】后书电台vol.1【ヨルシカ後書き】",
+      "displayed_duration_s": 577,
+      "collection": "early",
+      "discovery": "browser_page",
+      "media_status": "not_acquired",
+      "subtitle_status": "burned_bilingual_page_observed",
+      "split": "unassigned"
+    },
+    {
+      "id": "atogaki-vol02",
+      "url": "https://www.bilibili.com/video/BV1akR1BXEqi/",
+      "episode": 2,
+      "title": "【中日双字】后书电台vol.2【ヨルシカ後書き】",
+      "displayed_duration_s": 511,
+      "collection": "early",
+      "discovery": "browser_page",
+      "media_status": "not_acquired",
+      "subtitle_status": "not_inspected",
+      "split": "unassigned"
+    },
+    {
+      "id": "atogaki-vol03",
+      "url": "https://www.bilibili.com/video/BV1MpVY6CE1Z/",
+      "episode": 3,
+      "title": "【中日双字】后书电台vol.3【ヨルシカ後書き】",
+      "displayed_duration_s": 593,
+      "collection": "early",
+      "discovery": "browser_page",
+      "media_status": "not_acquired",
+      "subtitle_status": "not_inspected",
+      "split": "unassigned"
+    },
+    {
+      "id": "atogaki-vol04",
+      "url": "https://www.bilibili.com/video/BV1wxgk6QEhs/",
+      "episode": 4,
+      "title": "【中日双字】后书电台vol.4【ヨルシカ後書き】",
+      "displayed_duration_s": 547,
+      "collection": "early",
+      "discovery": "browser_page",
+      "media_status": "not_acquired",
+      "subtitle_status": "not_inspected",
+      "split": "unassigned"
+    },
+    {
+      "id": "atogaki-vol33",
+      "url": "https://www.bilibili.com/video/BV1inPDeKENR/",
+      "collection_entry_point": "https://www.bilibili.com/video/BV1inPDeKENR/",
+      "episode": 33,
+      "title": "后记 Radio Vol.33",
+      "displayed_duration_s": 1436,
+      "collection": "later",
+      "discovery": "browser_collection",
+      "media_status": "not_acquired",
+      "subtitle_status": "burned_chinese_observed",
+      "split": "unassigned"
+    },
+    {
+      "id": "atogaki-vol34",
+      "url": null,
+      "collection_entry_point": "https://www.bilibili.com/video/BV1inPDeKENR/",
+      "episode": 34,
+      "title": "后记 Radio Vol.34",
+      "displayed_duration_s": 1250,
+      "collection": "later",
+      "discovery": "browser_collection",
+      "media_status": "not_acquired",
+      "subtitle_status": "not_inspected",
+      "split": "unassigned"
+    },
+    {
+      "id": "atogaki-vol35",
+      "url": null,
+      "collection_entry_point": "https://www.bilibili.com/video/BV1inPDeKENR/",
+      "episode": 35,
+      "title": "后记 Radio Vol.35",
+      "displayed_duration_s": 1643,
+      "collection": "later",
+      "discovery": "browser_collection",
+      "media_status": "not_acquired",
+      "subtitle_status": "not_inspected",
+      "split": "unassigned"
+    },
+    {
+      "id": "atogaki-vol36",
+      "url": null,
+      "collection_entry_point": "https://www.bilibili.com/video/BV1inPDeKENR/",
+      "episode": 36,
+      "title": "后记 Radio Vol.36",
+      "displayed_duration_s": 1861,
+      "collection": "later",
+      "discovery": "browser_collection",
+      "media_status": "not_acquired",
+      "subtitle_status": "not_inspected",
+      "split": "unassigned"
+    },
+    {
+      "id": "atogaki-vol37",
+      "url": null,
+      "collection_entry_point": "https://www.bilibili.com/video/BV1inPDeKENR/",
+      "episode": 37,
+      "title": "后记 Radio Vol.37",
+      "displayed_duration_s": 2127,
+      "collection": "later",
+      "discovery": "browser_collection",
+      "media_status": "not_acquired",
+      "subtitle_status": "not_inspected",
+      "split": "unassigned"
+    },
+    {
+      "id": "yorushika-radio-20240118",
+      "url": "https://www.bilibili.com/video/BV1zi421h7Uz/",
+      "title": "【全熟】ヨルシカ 电台【2024.1.18】",
+      "displayed_duration_s": 6759.833,
+      "collection": "long",
+      "discovery": "browser_page_and_video_element",
+      "media_status": "not_acquired",
+      "subtitle_status": "burned_chinese_observed; player_menu_only_chinese_AI_seen",
+      "split": "unassigned"
+    }
+  ],
+  "notes": [
+    "Durations are browser observations, not frozen media durations.",
+    "No complete subtitle inventory obtained: public metadata API returned HTTP 412; browser playback succeeded.",
+    "Null episode URLs must be resolved from the collection; never treat collection entry point as each episode audio.",
+    "Human subtitle content remains local; no media or extracted subtitles in Git."
+  ]
+}
