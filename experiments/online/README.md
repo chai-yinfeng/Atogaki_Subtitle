@@ -271,3 +271,15 @@ python3 experiments/online/source_clock_reference.py \
 - 草稿请求和呈现时刻仍可因负载不同而变化。真实MT会改变自身历史译文，参考输入稳定不证明真实语义稳定。
 
 正式矩阵与回归范围见[评测记录](../../docs/evaluation.md#原文时钟分组的调度不变性参考2026-11-09)。
+
+## Qwen context 有限恢复（实验）
+
+`qwen_context_recovery.py`复用现有`Session.transcribe`，不导入模型依赖，也不接入App。`transcribe_with_recovery`接收同一音频对象、语言和可选context；完整输出与context在NFKC／大小写／空白／标点归一化后完全相同时，拒绝该次结果。空文本或token截断也拒绝。只有首次提供了非空context，才允许对同一音频再做一次空context识别；运行异常直接失败，不自动重启模型。返回两次原始结果、拒绝原因和全部计算时间，均不拼接或删除猜测的词表前缀。
+
+这只是已知完整提示复述的恢复边界：不能检测局部复述、一般幻觉或语义错误，空提示也可能在静音时输出应答。真实音频恰好朗读词表时，允许空提示重识别后仍返回相同文字；不是永久禁止词表内容。调用方负责输入／模型摘要、私有输出、同步计时和资源回收；失败异常保留`attempts`供审计。
+
+```sh
+python3 -B -m unittest discover -s experiments/online -p test_qwen_context_recovery.py
+```
+
+实际PCM恢复与固定MT分组对照见[评测记录](../../docs/evaluation.md#qwen提示复述的有限恢复与固定mt对照2026-11-09)。不因正常EOS或词形命中把结果认证为正确原文，不将离线固定组的耗时当作桌面E2E。
