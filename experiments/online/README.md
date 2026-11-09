@@ -236,3 +236,17 @@ python3 experiments/online/compare_japanese_mt.py \
 ```
 
 输入到达时间固定，真实MT计算耗时推进虚拟时钟；模型运行期间已到达的更新合并到下一请求。捕获范围以segment_closed为准，识别草稿的尾部静音不能延长已关闭段。最终输出必须每个Qwen段恰好覆盖一次。结果保存请求、源revision、模型输出、compute、距组末段与首段结束的等待，以及逐段review.md；整段翻译只是同模型上下文参照，不是gold。当前单次baseline→candidate顺序没有重复／交叉轮换，亦不含ASR设备竞争，不能用于新E2E速度排名。样本role由调用者核对，不自动授权holdout调参。首版实测与限制见[记录](../../docs/two-pass-smoke-validation.md#日语跨段重译首版2026-11-04)。
+
+## 后验语义锚点复核
+
+`semantic_anchor_review.py`将冻结双语后验锚点映射到固定ASR参数实验的实际原文和定稿组，不凭时间重叠自动判译文正确。保存原文依据、组正文、源段ID、整组锁定时间和末尾估计敏感性区间；EOF强制组不进入普通锁定等待汇总。可附带绑定参考／result摘要的语义观察，未评行保持pending，错误／缺失仍在分母，含额外规则说明的输出不因关键词正确而计为可直接采用。它不宣称首次正确译文或真实GUI延迟。
+
+```sh
+python3 experiments/online/semantic_anchor_review.py \
+  --anchors local-artifacts/datasets/japanese-radio/anchors-20261109/anchors.json \
+  --study local-artifacts/datasets/japanese-radio/grouping-study-20261109 \
+  --observations local-artifacts/datasets/japanese-radio/grouping-study-20261109/semantic-observations.json \
+  --output local-artifacts/datasets/japanese-radio/grouping-study-20261109/semantic-review.json
+```
+
+输入均为私有产物；输出需使用新路径。只读取已落盘result，不代表整项study已结束，必须另核对status及所有预定运行。原文信息充分性、核心语义、额外输出和声学时间分别记录，不能把局部锚点正确率当作整段翻译准确率。
