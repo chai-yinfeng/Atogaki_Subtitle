@@ -73,6 +73,29 @@ def sense_text(model, samples):
     return stream.result.text
 
 
+def complete_translation(translator, translation, request, events, output=None):
+    started = time.monotonic()
+    try:
+        text = translation.cached(request)
+        if text is None:
+            text = translator.translate(request['source_text'], request['context'], request['lookahead_source'])
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
+        terminal = translation.fail(request)
+        events.emit('translation_error', request_id=request['request_id'], group_id=request['group_id'],
+                    final=request['final'], terminal=terminal, error=str(error),
+                    finish_reason=getattr(error, 'finish_reason', None),
+                    compute_s=time.monotonic()-started)
+        if output:
+            # Rejected bodies remain only in an explicitly requested private
+            # replay artifact, never in caption transport or accepted history.
+            with (output/'translation-rejections.jsonl').open('a') as stream:
+                stream.write(json.dumps(dict(request=request, error=str(error),
+                    finish_reason=getattr(error, 'finish_reason', None),
+                    rejected_output=getattr(error, 'output', None)), ensure_ascii=False)+'\n')
+        return
+    translation.complete(request, text, time.monotonic()-started)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     inputs = p.add_mutually_exclusive_group(required=True)
@@ -183,12 +206,7 @@ def main():
                     if job is None:
                         request = translation.take(time.monotonic()) if translator else None
                         if request:
-                            t = time.monotonic()
-                            translated = translation.cached(request)
-                            if translated is None:
-                                translated = translator.translate(request['source_text'], request['context'],
-                                                                  request['lookahead_source'])
-                            translation.complete(request, translated, time.monotonic()-t)
+                            complete_translation(translator, translation, request, events, a.output)
                             continue
                         if input_done and (not translator or not translation.pending()):
                             break
@@ -303,7 +321,9 @@ def main():
             drafts.put_nowait(None)
         finals.put(None)
         draft_thread.join(); final_thread.join()
-        summary = dict(status='failed' if errors else 'completed', errors=errors,
+        summary = dict(status='failed' if errors else 'degraded' if events.counts.get('translation_failed') else 'completed', errors=errors,
+            translation_failed_groups=events.counts.get('translation_failed', 0),
+            translation_rejections=events.counts.get('translation_error', 0),
             audio_seconds=pcm.end/16000,
             audio_sha256=hashlib.sha256(a.audio.read_bytes()).hexdigest() if a.audio else None,
             input_mode="wav-replay" if a.audio else "pcm-pipe", audio_ring_seconds=30,

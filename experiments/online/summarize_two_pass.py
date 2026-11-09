@@ -16,6 +16,8 @@ def summarize(events, summary):
     offset = summary.get('audio_clock_offset_s', 0.0)
     closed = {e['segment_id']: e for e in events if e['kind'] == 'segment_closed'}
     finals = [e for e in events if e['kind'] == 'source_final']
+    failed = {e['group_id']: e for e in events if e['kind'] == 'translation_failed'}
+    rejections = [e for e in events if e['kind'] == 'translation_error']
     translations = [e for e in events if e['kind'] in {'translation_draft', 'translation_final'}]
     structural_echo = [e for e in translations if re.search(
         r'〖约束要求〗|〖背景信息|Translation \(wording reference only\):|\[Previous source and translation pairs\]|Group \d+\s+Source:',
@@ -65,7 +67,7 @@ def summarize(events, summary):
                          final_request_start_estimate_s=final['emission_s'] - final['compute_s'] if final else None,
                          revisions=len(versions), stale_returns=sum(bool(e.get('stale_source')) for e in versions)))
     normal = [r for r in rows if r['has_final'] and not r['eof']]
-    all_group_ids = set(groups) | set(group_closes)
+    all_group_ids = set(groups) | set(group_closes) | set(failed)
     finalized_ids = {r['group_id'] for r in rows if r['has_final']}
     return dict(status=summary['status'], audio_seconds=summary['audio_seconds'],
                 errors=summary.get('errors', []), peak_final_queue_depth=summary.get('peak_final_queue_depth'),
@@ -79,6 +81,10 @@ def summarize(events, summary):
                 vad_close_wait=stats([e['emission_s'] - offset - e['end_s'] for e in closed.values() if e.get('reason') != 'input_eof']),
                 mt_compute=stats([e['compute_s'] for e in translations]),
                 mt_return_count=len(translations),
+                mt_rejected_compute=stats([e['compute_s'] for e in rejections]),
+                mt_all_observed_attempt_compute=stats([e['compute_s'] for e in translations+rejections]),
+                mt_rejections=len(rejections),
+                failed_translation_groups=sorted(failed),
                 prompt_structure_echo_returns=len(structural_echo),
                 prompt_structure_echo_finals=sum(e['kind'] == 'translation_final' for e in structural_echo),
                 first_prompt_structure_echo_s=min((e['emission_s'] for e in structural_echo), default=None),
@@ -88,7 +94,8 @@ def summarize(events, summary):
                 non_eof_final_after_last_end=stats([r['final_after_last_source_end_s'] for r in normal]),
                 non_eof_final_after_last_qwen=stats([r['final_after_last_source_final_s'] for r in normal if r['final_after_last_source_final_s'] is not None]),
                 translated_groups=len(rows), closed_groups_without_any_translation=sorted(set(group_closes)-set(groups)),
-                unfinished_groups=len(all_group_ids - finalized_ids),
+                unfinished_groups=len(all_group_ids - finalized_ids - set(failed)),
+                untranslated_groups=len(all_group_ids - finalized_ids),
                 groups_without_final=sorted(all_group_ids - finalized_ids),
                 eof_groups=sum(r['eof'] for r in rows) + sum(
                     group_closes[key]['completion_reason'] == 'input_eof' for key in set(group_closes)-set(groups)),
@@ -114,6 +121,7 @@ def main():
         'Post-Qwen wait combines semantic commit policy, scheduler and MT; it is not pure model compute.',
         'Prompt-structure echo uses exact template markers; expansion is only a length diagnostic, neither is a semantic quality score.',
         'Returned-MT/ASR-queue overlap uses inferred intervals and omits failed requests; not causal proof or all queue time.',
+        'Terminal failed groups remain untranslated; degraded is not a successful translation run. Rejected compute is reported separately and with all observed attempts.',
         'No GUI IPC or paint time included. No verified MT correctness score is produced.'])
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps([{k: r[k] for k in ('case_id', 'status', 'audio_seconds', 'source_after_audio_end', 'source_queue_wait', 'mt_compute', 'non_eof_final_after_first_end', 'non_eof_final_after_last_end', 'unfinished_groups')} for r in cases], indent=2))

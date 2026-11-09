@@ -328,7 +328,9 @@ pub async fn start_online_session(
                                 source_finals += 1;
                                 source_finals <= 64
                             }
-                            Some("translation_final" | "translation_draft") => {
+                            Some(
+                                "translation_final" | "translation_draft" | "translation_failed",
+                            ) => {
                                 let id = item.data.event["group_id"].as_str().unwrap_or("");
                                 translation_groups.len() < 64
                                     && translation_groups.insert(id.to_string())

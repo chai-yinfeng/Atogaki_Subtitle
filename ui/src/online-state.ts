@@ -33,6 +33,7 @@ const byTime = (a: LiveEvent, b: LiveEvent) => (a.start_s ?? 0) - (b.start_s ?? 
 export class OnlineCaptions {
   status: OnlineStatus = { sessionId: null, phase: "idle", error: null };
   translationEnabled = true;
+  translationFailures = 0;
   private events = new Map<number, CaptionEvent>();
   private sources = new Map<string, CaptionEvent>();
   private groups = new Map<string, CaptionEvent>();
@@ -43,6 +44,7 @@ export class OnlineCaptions {
 
   snapshot(snapshot: OnlineSnapshot): void {
     if (snapshot.status.sessionId !== this.status.sessionId) {
+      this.translationFailures = 0;
       this.events.clear();
       this.sources.clear();
       this.groups.clear();
@@ -57,6 +59,7 @@ export class OnlineCaptions {
 
   accept(event: CaptionEvent): void {
     if (event.sessionId !== this.status.sessionId || event.sequence <= this.prunedThrough || this.events.has(event.sequence)) return;
+    if (event.event.kind === "translation_failed") event = {...event, event:{...event.event, text:"本段翻译失败"}};
     this.events.set(event.sequence, event);
     const e = event.event;
     if (e.segment_id && (e.kind === "source_draft" || e.kind === "source_final")) {
@@ -67,8 +70,9 @@ export class OnlineCaptions {
         }
       }
     }
-    if (e.group_id && (e.kind === "translation_draft" || e.kind === "translation_final")) {
+    if (e.group_id && (e.kind === "translation_draft" || e.kind === "translation_final" || e.kind === "translation_failed")) {
       if (this.update(this.groups, e.group_id, event, 64)) {
+        if (e.kind === "translation_failed") this.translationFailures++;
         this.translationEnd = Math.max(this.translationEnd, e.end_s ?? e.start_s ?? 0);
         this.groupSources.set(e.group_id, this.sourcesFor(e));
         for (const id of this.groupSources.keys()) if (!this.groups.has(id)) this.groupSources.delete(id);
@@ -91,13 +95,13 @@ export class OnlineCaptions {
     // A newly opened window may only receive the MT snapshot after older ASR
     // events left the transport ring. Its actual input still recovers the pair.
     // MT finals require all-final Qwen source; unknown draft portions stay blue.
-    return group.source_text ? [{kind: group.kind === "translation_final" ? "source_final" : "source_draft",
+    return group.source_text ? [{kind: (group.kind === "translation_final" || group.kind === "translation_failed") ? "source_final" : "source_draft",
       segment_id: `paired:${group.group_id}`, start_s: group.start_s, end_s: group.end_s, text: group.source_text}] : parts;
   }
 
   private update(map: Map<string, CaptionEvent>, key: string, incoming: CaptionEvent, limit: number): boolean {
     const previous = map.get(key);
-    if (previous && (previous.sequence >= incoming.sequence || previous.event.kind.endsWith("final"))) return false;
+    if (previous && (previous.sequence >= incoming.sequence || (previous.event.kind.endsWith("final") || previous.event.kind === "translation_failed"))) return false;
     map.set(key, incoming);
     while (map.size > limit) {
       const oldest = [...map.entries()].sort((a, b) => byTime(a[1].event, b[1].event))[0][0];
@@ -139,7 +143,7 @@ export class OnlineCaptions {
  * while a split final is waiting for its new tail's first translation. */
 function pairedReadingWindow(parts: LiveEvent[], end: number): LiveEvent[] {
   const current = parts.at(-1);
-  return parts.filter(e => e === current || (e.kind === "translation_final" &&
+  return parts.filter(e => e === current || ((e.kind === "translation_final" || e.kind === "translation_failed") &&
     (e.end_s ?? e.start_s ?? 0) > end - 5));
 }
 
@@ -161,7 +165,7 @@ export class DraftPresentation {
   select(next: LiveEvent | null, now: number): LiveEvent | null {
     if (!next) { this.current = null; this.lastRewrite = -Infinity; return null; }
     const key = (e: LiveEvent) => e.group_id ?? e.segment_id;
-    if (!this.current || key(next) !== key(this.current) || next.kind.endsWith("final")) {
+    if (!this.current || key(next) !== key(this.current) || (next.kind.endsWith("final") || next.kind === "translation_failed")) {
       this.current = next;
       this.lastRewrite = now;
     } else if (next.text === this.current.text) {

@@ -49,6 +49,15 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(result['vad_close_wait']['p50_s'], 1)
         self.assertEqual(result['non_eof_final_after_last_end']['p50_s'], 3)
 
+    def test_retired_failure_remains_untranslated_and_cost_is_not_hidden(self):
+        events = [dict(kind='translation_failed', group_id='g'),
+                  dict(kind='translation_error', compute_s=9)]
+        result = summarize(events, dict(status='degraded', audio_seconds=10))
+        self.assertEqual(result['unfinished_groups'], 0)
+        self.assertEqual(result['untranslated_groups'], 1)
+        self.assertEqual(result['failed_translation_groups'], ['g'])
+        self.assertEqual(result['mt_all_observed_attempt_compute']['p95_s'], 9)
+
     def test_first_end_wait_and_last_end_wait_remain_distinct(self):
         event = dict(kind='translation_final', group_id='g', emission_s=12, start_s=0, end_s=10,
                      first_source_end_s=2, compute_s=.5, text='译文')

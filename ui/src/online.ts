@@ -46,7 +46,7 @@ function renderTrack(prefix:"source"|"translation",parts:LiveEvent[]):LiveEvent[
    const text=(displayed.text??"")+" ";
    if(part.node.textContent!==text){part.node.textContent=text;changed=true;}
    part.node.classList.toggle("draft",displayed.kind.endsWith("draft"));
-   part.node.classList.toggle("omitted",displayed.kind==="source_gap");
+   part.node.classList.toggle("omitted",displayed.kind==="source_gap"||displayed.kind==="translation_failed");
    if(displayed.kind==="source_gap")part.node.setAttribute("aria-label","省略的未译原文");
    if((previous?previous.nextElementSibling:container.firstElementChild)!==part.node){container.insertBefore(part.node,previous?previous.nextElementSibling:container.firstElementChild);changed=true;}
    previous=part.node;
@@ -60,7 +60,7 @@ function render():void {
  document.body.dataset.locked=String(captionLocked);
  if(control){const lock=find<HTMLInputElement>("online-lock");lock.disabled=lockBusy;if(!lockBusy)lock.checked=captionLocked;}
  if(control){const toggle=find<HTMLButtonElement>("online-hide");toggle.disabled=captionBusy;toggle.textContent=captionVisible?"隐藏字幕窗":"显示字幕窗";toggle.setAttribute("aria-pressed",String(captionVisible));}
- set("online-status",message||state.error||phaseLabel[state.phase]||state.phase);
+ set("online-status",message||state.error||`${phaseLabel[state.phase]||state.phase}${model.translationFailures?" · 部分片段翻译失败，原文已保留":""}`);
  if(displayedSession!==state.sessionId){
   displayedSession=state.sessionId;
   for(const prefix of ["source","translation"] as const){trackNodes[prefix].clear();find(`${prefix}-text`).replaceChildren();}

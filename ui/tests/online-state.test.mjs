@@ -142,3 +142,23 @@ test('splitting a long MT draft never brings expired text back into the reading 
  state.accept(event(5,{kind:'translation_final',group_id:'g',start_s:3,end_s:6,text:'locked prefix'}));
  assert.deepEqual(state.tracks().translationParts.map(e=>e.text),['locked prefix']);
 });
+
+test('terminal translation failure replaces draft immediately, keeps Qwen pair and survives snapshots',()=>{
+ const model=new OnlineCaptions();model.snapshot({status:status('s'),events:[]});
+ const source=event(1,{kind:'source_final',segment_id:'a',start_s:0,end_s:2,text:'原文'});
+ const draft=event(2,{kind:'translation_draft',group_id:'g',start_s:0,end_s:2,text:'旧草稿',source_revisions:{a:1}});
+ const failed=event(3,{kind:'translation_failed',group_id:'g',start_s:0,end_s:2,source_text:'原文',source_revisions:{a:1}});
+ model.accept(source);model.accept(draft);
+ const gate=new DraftPresentation();gate.select(draft.event,0);
+ model.accept(failed);
+ const shown=model.tracks().translationParts[0];
+ assert.equal(shown.text,'本段翻译失败');assert.equal(gate.select(shown,10).kind,'translation_failed');
+ assert.equal(model.tracks().sourceParts[0].kind,'source_final');
+ assert.equal(model.translationFailures,1);assert.equal(failed.event.text,undefined);
+ model.accept(event(4,{...draft.event,text:'晚到草稿'}));
+ assert.equal(model.tracks().translationParts[0].kind,'translation_failed');
+ const restored=new OnlineCaptions();restored.snapshot({status:status('s'),events:[failed]});
+ assert.equal(restored.tracks().sourceParts[0].kind,'source_final');
+ assert.equal(restored.translationFailures,1);
+ restored.snapshot({status:status('other'),events:[]});assert.equal(restored.translationFailures,0);
+});

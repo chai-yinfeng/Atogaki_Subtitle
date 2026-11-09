@@ -16,6 +16,8 @@ class Group:
     last_request: float = float('-inf')
     displayed_request: int = 0
     lookahead: str = ''
+    failed_revision: int = -1
+    final_failures: int = 0
 
 
 class Retranslation:
@@ -285,3 +287,28 @@ class Retranslation:
     def pending(self):
         with self.lock:
             return len(self.groups)
+
+    def fail(self, request):
+        """Drafts wait for a new revision; current finals get one bounded retry.
+
+        A terminal failure retires only this group, without publishing a final,
+        caching rejected text, or adding an unreliable pair to context.
+        """
+        with self.lock:
+            if self.inflight != request:
+                raise ValueError('translation request is not in flight')
+            self.inflight = None
+            group = next(g for g in self.groups if g.id == request['group_id'])
+            if not request['final'] or request['group_revision'] != group.revision:
+                return False
+            if group.failed_revision != group.revision:
+                group.failed_revision, group.final_failures = group.revision, 0
+            group.final_failures += 1
+            if group.final_failures < 2:
+                return False
+            data = {key: value for key, value in request.items() if key not in ('context', 'final')}
+            self.emit('translation_failed', **data, provisional=False)
+            self.groups.remove(group)
+            for sid in group.segments:
+                del self.segment_groups[sid]
+            return True

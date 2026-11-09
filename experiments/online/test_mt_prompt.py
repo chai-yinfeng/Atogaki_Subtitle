@@ -52,7 +52,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(adapter.translate('原文。'), '译文')
         self.assertFalse(requests[0]['chat_template_kwargs']['enable_thinking'])
         self.assertEqual([m['role'] for m in requests[0]['messages']], ['user'])
-        self.assertIn('〖源文〗\n原文。', requests[0]['messages'][0]['content'])
+        self.assertTrue(requests[0]['messages'][0]['content'].endswith('\n\n原文。'))
         adapter.client.content = '<think>unfinished'
         with self.assertRaisesRegex(ValueError, 'unfinished thinking'):
             adapter.translate('原文。')
