@@ -14,7 +14,7 @@ Index使用官方普通翻译请求，参考与规则在前、当前源文作为
 
 两种本地后端的响应均先校验，再进入字幕／缓存／历史：非stop、空输出、未闭合thinking、输入原文本身没有的确切提示结构标记，或超过max(300, 6×当前原文字符数)的输出整条拒绝，不截取某个猜测前缀。长度是保守防失控门限，可能误拒合法长译文；标记检查也不能发现所有语义增译。输入原文确实包含相同标记时允许正常翻译，不把任意“背景”词语当错误。
 
-拒绝原因及实际finish_reason进入translation_error事件。原始拒绝正文只在显式CLI --output的私有translation-rejections.jsonl保存，默认桌面会话不持久保存、不将拒绝正文送入字幕transport。没有自动云端回退、自动录音或离线精修。
+拒绝原因进入translation_error事件，非正常结束时保留实际finish_reason。可取得的拒绝正文只在显式CLI --output的私有translation-rejections.jsonl保存，默认桌面会话不持久保存、不将拒绝正文送入字幕transport。没有自动云端回退、自动录音或离线精修。
 
 ## 有限恢复与显示
 

@@ -40,6 +40,17 @@ node --experimental-strip-types --test experiments/online/test_presentation_repl
 
 这些命令只整理已有输出，不调用模型。台账保持原文声学估计、OCR显示时间与人工核准各自独立，关联是N:M时间候选而非gold字幕；核心交集不插值。统计失败／未完成组不丢弃，EOF单列，距首段与距末段延迟分别报告；未核验语义及时间不进入有效延迟。显示回放执行生产状态／节流逻辑并模拟500ms轮询，包含跳过版本，排除真实IPC和绘制时间。详见[实测边界与记录](../../docs/evaluation.md#参考证据台账与当前链路基线2026-11-08)。本轮实际回放命令、模型摘要、固定词表和运行状态在私有批次目录，不将私人源路径或完整转录提交Git。
 
+`compare_two_pass.py`用于完整固定批次对照，读取每例原始事件并复用统计器；核对有序音频摘要、冻结词表／场景、服务与模型命令、MT权重／二进制摘要及ASR／分组参数，允许临时端口不同。缺少任何一例summary会失败，不把正在运行的批次写成完整结果：
+
+```sh
+python3 experiments/online/compare_two_pass.py \
+  --baseline local-artifacts/datasets/japanese-radio/baseline-20261108 \
+  --candidate local-artifacts/datasets/japanese-radio/mt-repair-replay-20261108 \
+  --output local-artifacts/datasets/japanese-radio/mt-repair-replay-20261108/comparison.json
+```
+
+输出使用新路径，不覆盖旧报告。失败基线的分位数只是幸存返回；候选degraded、终止失败组和未完成组均不算翻译成功。接受／拒绝／所有可观测MT尝试耗时分开；旧fatal响应没有完整耗时，不能补零。各配置仅一次，组合修改不独立归因，winner保持null，无语义gold或真实绘制延迟结论。ASR权重仍须用私有完成审计核对，不能仅靠相同路径。
+
 ## 环境与输入
 
 ```sh

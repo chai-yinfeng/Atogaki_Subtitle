@@ -383,6 +383,30 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    #[test]
+    fn translation_failures_are_relayed_without_aborting_the_session() {
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = recorded.clone();
+        let sink: EventSink = Arc::new(move |event| captured.lock().unwrap().push(event));
+        for kind in ["translation_error", "translation_failed"] {
+            relay(
+                "session",
+                &json!({"kind": kind, "error": "MT rejected"}).to_string(),
+                &sink,
+            )
+            .unwrap();
+        }
+        assert!(
+            relay(
+                "session",
+                r#"{"kind":"worker_error","error":"ASR failed"}"#,
+                &sink
+            )
+            .is_err()
+        );
+        assert_eq!(recorded.lock().unwrap().len(), 3);
+    }
+
     fn executable(path: &std::path::Path, body: &str) {
         std::fs::write(path, body).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
