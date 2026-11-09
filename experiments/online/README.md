@@ -283,3 +283,15 @@ python3 -B -m unittest discover -s experiments/online -p test_qwen_context_recov
 ```
 
 实际PCM恢复与固定MT分组对照见[评测记录](../../docs/evaluation.md#qwen提示复述的有限恢复与固定mt对照2026-11-09)。不因正常EOS或词形命中把结果认证为正确原文，不将离线固定组的耗时当作桌面E2E。
+
+## 可见草稿的语义时间线（实验）
+
+先用既有`replay_presentation.mjs`执行生产`OnlineCaptions`／`DraftPresentation`，再把原始事件、显示快照及冻结锚点传给`draft_anchor_review.collect(anchor, events, presentation)`。该函数只按覆盖锚点的完整ASR单位关联可见组；跨组文字一起提交评审，保留空窗、重复显示、草稿／定稿种类及原时间。它不会用文字重叠推断语义，不会把worker已返回但未显示的版本计为首次可读。
+
+返回packet的每个文字版本都需显式`correct`／`incorrect`／`incomplete`／`uncertain`判断及reviewer；`summarize(packet, observations)`要求`packet_sha256=digest(packet)`及完整`judgments`映射。观察值可另带`output_contract_issue`，有合同问题即不计可用。相同文字共享语义判断，但保留每次状态变化；相同文字较早作为草稿出现，不会提前计算最终锁定。覆盖缺失／失败不认证为定稿成功。摘要分别给首次正确可见、后续可见退化、最终正确及实际最终事件时间；空窗不被当成正确版本。
+
+```sh
+python3 -B -m unittest discover -s experiments/online -p test_draft_anchor_review.py
+```
+
+首次正确不等于稳定、可安全锁定或整组都正确。严格局部事实与部分因果线索分别标注；同一锚点的相同关联文字共享判断，不认证跨屏隐含语境，依赖隐含指代的版本需保守评审。语义评审仍需人或明确身份的评审者。带符号的时间差允许为负，端点敏感范围不是置信区间；原生IPC、绘制和真实用户阅读均未测量。实际生产回放检查见[评测记录](../../docs/evaluation.md#可见草稿与定稿退化检查2026-11-09)。
