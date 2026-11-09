@@ -67,9 +67,14 @@ def replay(events, policy, translator, duration):
             started = time.monotonic()
             text = mt.cached(request)
             cached = text is not None
+            failure = None
             if text is None:
-                text = translator.translate(request['source_text'], request['context'],
-                                            request['lookahead_source'])
+                try:
+                    text = translator.translate(request['source_text'], request['context'],
+                                                request['lookahead_source'])
+                except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
+                    failure = dict(error=str(error), finish_reason=getattr(error, 'finish_reason', None),
+                                   rejected_output=getattr(error, 'output', None))
             compute = time.monotonic()-started
             clock[0] += compute
             # Consume arrivals before returning the request, just as capture
@@ -80,9 +85,16 @@ def replay(events, policy, translator, duration):
                 observe(e)
                 index += 1
             advance(clock[0])
-            result = mt.complete(request, text, compute)
+            if failure is None:
+                result = mt.complete(request, text, compute)
+            else:
+                terminal = mt.fail(request)
+                result = None
+                emit('translation_error', **{key: value for key, value in request.items()
+                     if key not in ('context', 'final')}, error=failure['error'],
+                     finish_reason=failure['finish_reason'], terminal=terminal, compute_s=compute)
             requests.append(dict(**request, compute_s=compute, cached=cached,
-                                 accepted=result is not None, text=text))
+                                 accepted=result is not None, text=text, failure=failure))
         else:
             clock[0] += .1
         if clock[0] > duration+120:
@@ -90,14 +102,20 @@ def replay(events, policy, translator, duration):
     finals = [e for e in output if e['kind'] == 'translation_final']
     coverage = [sid for e in finals for sid in e['source_revisions']]
     expected = [e['segment_id'] for e in arrivals if e['kind'] == 'source_final']
-    if len(coverage) != len(set(coverage)) or set(coverage) != set(expected):
-        raise ValueError('final translations must cover each final source exactly once')
+    failed = [e for e in output if e['kind'] == 'translation_failed']
+    failed_coverage = [sid for e in failed for sid in e['source_revisions']]
+    accounted = coverage + failed_coverage
+    if len(accounted) != len(set(accounted)) or set(accounted) != set(expected):
+        raise ValueError('each final source must be translated or explicitly failed exactly once')
     summary = dict(final_blocks=len(finals), draft_updates=sum(e['kind'] == 'translation_draft' for e in output),
                    requests=len(requests), compute_total_s=sum(r['compute_s'] for r in requests),
-                   final_after_block_end_p50_s=statistics.median(e['after_audio_end_s'] for e in finals),
-                   final_after_first_segment_end_p50_s=statistics.median(e['after_first_audio_end_s'] for e in finals),
-                   final_after_first_segment_end_max_s=max(e['after_first_audio_end_s'] for e in finals),
-                   source_segments=len(expected), coverage_exactly_once=True)
+                   final_after_block_end_p50_s=statistics.median(e['after_audio_end_s'] for e in finals) if finals else None,
+                   final_after_first_segment_end_p50_s=statistics.median(e['after_first_audio_end_s'] for e in finals) if finals else None,
+                   final_after_first_segment_end_max_s=max((e['after_first_audio_end_s'] for e in finals), default=None),
+                   source_segments=len(expected), coverage_exactly_once=not failed,
+                   status='degraded' if failed else 'completed', failed_groups=len(failed),
+                   rejected_requests=sum(r['failure'] is not None for r in requests),
+                   accounted_exactly_once=True)
     return dict(summary=summary, events=output, requests=requests)
 
 
