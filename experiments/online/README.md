@@ -295,3 +295,24 @@ python3 -B -m unittest discover -s experiments/online -p test_draft_anchor_revie
 ```
 
 首次正确不等于稳定、可安全锁定或整组都正确。严格局部事实与部分因果线索分别标注；同一锚点的相同关联文字共享判断，不认证跨屏隐含语境，依赖隐含指代的版本需保守评审。语义评审仍需人或明确身份的评审者。带符号的时间差允许为负，端点敏感范围不是置信区间；原生IPC、绘制和真实用户阅读均未测量。实际生产回放检查见[评测记录](../../docs/evaluation.md#可见草稿与定稿退化检查2026-11-09)。
+
+## 词表输入与规范化预览
+
+已有CLI的`apply-glossary`会改写任务文件。研究任意冻结源文时，使用`examples/glossary_probe.rs`直接调用生产`Glossary`库，仅输出JSON，不读取数据库／任务或调用模型：
+
+```sh
+cargo run --offline --example glossary_probe < private-input.json > NEW-private-output.json
+```
+
+调用者负责提供新输出路径和已解析的词条范围；示例不替代`glossary_for_task`的核心／内容组选择服务。输入格式如下，`target_text`是识别规范拼写，不是中译词义：
+
+```json
+{
+  "variants": [{"name": "example", "entries": [
+    {"source_text": "ノア", "target_text": "Noa", "include_in_prompt": true}
+  ]}],
+  "sources": [{"id": "s1", "text": "ノアさんです。"}]
+}
+```
+
+输出分别保留原文／规范后文本、Whisper提示预览及保护词集合。提示预览不表示在线ASR已经使用它；同一词表的替换规则与MT保护范围也不同。重复源文ID或变体名会失败。私有输入／输出不可提交；字面命中只作候选，实际替换必须以原库边界规则执行结果为准。五段实际输入审计与既有歧义规则风险见[评测记录](../../docs/evaluation.md#离线与在线词表输入审计2026-11-09)。
