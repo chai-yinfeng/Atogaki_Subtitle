@@ -181,3 +181,9 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 ## 2026-10-30：v0.1.3 正式发行保留
 
 `local-artifacts/release-v0.1.3/assets/` 的 DMG、对应源码包及两份 SHA-256 是本机权威发行材料，连同包清单、发布 API 摘要、校验和原生截图保留。重新下载的四资产逐字节一致、源码解包正文与归档一致后删除临时副本；macOS tar 的 AppleDouble 元数据由系统解包时消费，不当作缺失源码。旧 829cbbe App 回退经完整摘要核对后删除，保留已验收 0d4cc61 与稳定 0.1.1 两份回退；不新增 SQLite 快照，不清理模型、媒体、采用证据、未知数据或其余共享缓存。
+
+## 2026-11-09：Index F16精度研究资产
+
+当前`e3a1`工作树的`local-artifacts/online/index-precision-20261109/Index-Translate-2B.f16.gguf`保留，大小3,897,387,520 bytes，SHA-256 `f9ab1279d1169ad18655a7b8085a9111bef12a0e2eb733aaa2234186241e5ad7`；来自官方`IndexTeam/Index-Translate-2B-GGUF` revision `3a0eca6ce931d88d00614d427ab3ed8ff0743902`，与原Q4仅做同后端精度研究，不是App受管下载或采用的默认模型。官方清单／校验和、下载与模型核验脚本／摘要及`index-precision-probe-20261109/`评审保留，研究结果见[评测记录](evaluation.md#index同版本q4与f16精度路径基线2026-11-09)。
+
+仅在合并文件通过官方完整SHA-256后，删除本次下载器创建的连续`.part`前缀及8个精确Range分片，保留范围／分片hash收据；未以此清理旧Q4、研究环境、音频、数据库或其他未知文件。最终F16与原Q4均保留，两个模型服务已退出；不从文件逻辑大小推断APFS实际回收空间。
