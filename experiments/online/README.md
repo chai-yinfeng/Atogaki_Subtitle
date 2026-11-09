@@ -250,3 +250,24 @@ python3 experiments/online/semantic_anchor_review.py \
 ```
 
 输入均为私有产物；输出需使用新路径。只读取已落盘result，不代表整项study已结束，必须另核对status及所有预定运行。原文信息充分性、核心语义、额外输出和声学时间分别记录，不能把局部锚点正确率当作整段翻译准确率。
+
+
+## 原文时钟分组参考（实验）
+
+`source_clock_reference.py`用于隔离MT耗时对组成员的影响，复用生产`Retranslation`的句末／超时／停顿／长度启发式，不接入App。原文更新与0.1秒定时事件按源时间合并，同刻先更新原文；闭组冻结成员，全体原文定稿后冻结当前原文及当时可用的后文参考。虚拟单槽消费者仍合并草稿、拒绝已变更快照、按顺序提交、终稿最多两次尝试，失败不进历史；空文本旧组保留占位以避免后组越序。历史沿用8对／2000字符。
+
+```sh
+python3 experiments/online/source_clock_reference.py \
+  --events local-artifacts/datasets/japanese-radio/source-clock-study-20261109-v2/radio-06/source-events.json \
+  --duration 90 --wait 4 \
+  --output local-artifacts/datasets/japanese-radio/source-clock-study-20261109-v2/reference-example.json
+```
+
+输入为已选development窗口的事件JSON数组（不是原始JSONL），输出要求新路径。命令编译只读参考计划，并运行0／0.5／2／6／12秒五档**合成耗时**，返回的译文仅为摘要占位，不调用模型或给语义评分。接口`compile_plan(..., max_seconds=..., tick=...)`可用于固定参数研究；`consume(plan, cost)`另外支持虚拟失败注入。研究与产品边界：
+
+- 闭组不可再切分，后文在ready时冻结，均是待评估设计，不能当作生产代码的等价重构；冻结后文可能放弃晚到的消歧信息。
+- 消费者积压上限是实验失败守卫，不是已实现的直播背压；生产者保留完整计划供离线审计。
+- 沿用录制capture范围重建语音／静音，不是新VAD或ASR设备竞争实验；虚拟完成时刻不是真实延迟，参考消费者也未模拟生产MT缓存复用。
+- 草稿请求和呈现时刻仍可因负载不同而变化。真实MT会改变自身历史译文，参考输入稳定不证明真实语义稳定。
+
+正式矩阵与回归范围见[评测记录](../../docs/evaluation.md#原文时钟分组的调度不变性参考2026-11-09)。
