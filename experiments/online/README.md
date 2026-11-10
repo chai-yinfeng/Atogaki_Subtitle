@@ -316,3 +316,5 @@ cargo run --offline --example glossary_probe < private-input.json > NEW-private-
 ```
 
 输出分别保留原文／规范后文本、Whisper提示预览及保护词集合。提示预览不表示在线ASR已经使用它；同一词表的替换规则与MT保护范围也不同。重复源文ID或变体名会失败。私有输入／输出不可提交；字面命中只作候选，实际替换必须以原库边界规则执行结果为准。五段实际输入审计与既有歧义规则风险见[评测记录](../../docs/evaluation.md#离线与在线词表输入审计2026-11-09)。
+
+`summarize_two_pass.py`的v2输出另将每段最终ASR的推导排队区间分解为已接受MT草稿／定稿、带时间记录的拒绝MT、其他最终ASR计算和未解释时间。不同类别重叠标为ambiguous，不重复计时；原`returned_mt_overlap_s`仍只计已接受MT。缺少返回／时间的请求不补造，单独报告无时间拒绝数。全局合计是逐段等待之和，不是墙钟占用、GPU计算或拆线程后的预计收益；详见[排队审计](../../docs/evaluation.md#qwen排队区间与在途mt阻塞审计2026-11-09)。

@@ -12,6 +12,26 @@ def stats(values):
                 p95_s=percentile(values, .95), max_s=max(values, default=None))
 
 
+def partition_interval(start, end, intervals):
+    """Partition inferred elapsed time without double-counting overlapping work.
+
+    Labels are trace observations, not counterfactual time saved. Multiple
+    simultaneous labels remain ambiguous rather than being assigned a cause.
+    """
+    clipped = [(max(start, left), min(end, right), label)
+               for left, right, label in intervals
+               if min(end, right) > max(start, left)]
+    points = sorted({start, end} | {point for left, right, _ in clipped
+                                   for point in (left, right)})
+    result = {}
+    for left, right in zip(points, points[1:]):
+        labels = {label for a, b, label in clipped if a < right and b > left}
+        label = next(iter(labels)) if len(labels) == 1 else (
+            'ambiguous' if labels else 'unattributed')
+        result[label] = result.get(label, 0.0) + right - left
+    return result
+
+
 def summarize(events, summary):
     offset = summary.get('audio_clock_offset_s', 0.0)
     closed = {e['segment_id']: e for e in events if e['kind'] == 'segment_closed'}
@@ -24,14 +44,28 @@ def summarize(events, summary):
         e.get('text', ''))]
     expansion = [e for e in translations if len(e.get('text', '')) > max(300, 6 * len(e.get('source_text', '')))]
     mt_intervals = [(e['emission_s'] - e['compute_s'], e['emission_s']) for e in translations]
+    observed_work = [(left, right, 'accepted_' + e['kind'].removeprefix('translation_'))
+                     for (left, right), e in zip(mt_intervals, translations)]
+    timed_rejections = [e for e in rejections if 'emission_s' in e]
+    for e in timed_rejections:
+        stage = ('final' if e['final'] else 'draft') if 'final' in e else 'unknown'
+        observed_work.append((e['emission_s'] - e['compute_s'], e['emission_s'],
+                              'rejected_' + stage))
+    source_intervals = [(e['emission_s'] - e['compute_s'], e['emission_s'],
+                         'other_source_compute') for e in finals]
     queue_rows = []
     for e in finals:
         inference_start = e['emission_s'] - e['compute_s']
         queued = inference_start - e['queue_wait_s']
-        mt_overlap = sum(max(0, min(inference_start, end) - max(queued, start))
-                         for start, end in mt_intervals)
+        accepted = partition_interval(queued, inference_start,
+                                      [(left, right, 'mt') for left, right in mt_intervals])
+        partition = partition_interval(queued, inference_start,
+                                       observed_work + source_intervals)
         queue_rows.append(dict(segment_id=e['segment_id'], queue_wait_s=e['queue_wait_s'],
-                               returned_mt_overlap_s=mt_overlap))
+                               queue_start_estimate_s=queued,
+                               inference_start_estimate_s=inference_start,
+                               returned_mt_overlap_s=accepted.get('mt', 0.0),
+                               observed_work_partition_s=partition))
     groups = {}
     for e in translations:
         groups.setdefault(e['group_id'], []).append(e)
@@ -78,6 +112,11 @@ def summarize(events, summary):
                 source_compute=stats([e['compute_s'] for e in finals]),
                 source_queue_returned_mt_overlap=stats([r['returned_mt_overlap_s'] for r in queue_rows]),
                 source_queue_details=queue_rows,
+                source_queue_partition_totals_s={
+                    label: sum(r['observed_work_partition_s'].get(label, 0.0) for r in queue_rows)
+                    for label in sorted({label for r in queue_rows
+                                         for label in r['observed_work_partition_s']})},
+                mt_rejections_without_timing=len(rejections) - len(timed_rejections),
                 vad_close_wait=stats([e['emission_s'] - offset - e['end_s'] for e in closed.values() if e.get('reason') != 'input_eof']),
                 mt_compute=stats([e['compute_s'] for e in translations]),
                 mt_return_count=len(translations),
@@ -113,7 +152,7 @@ def main():
             continue
         events = [json.loads(line) for line in (directory / 'events.jsonl').read_text().splitlines()]
         cases.append(dict(case_id=directory.name, **summarize(events, json.loads((directory / 'summary.json').read_text()))))
-    result = dict(version=1, cases=cases, notes=[
+    result = dict(version=2, cases=cases, notes=[
         'Failed cases retain partial metrics and are not complete 180s runs.',
         'Latencies are relative to worker/provider segment ends, not verified semantic anchors.',
         'EOF groups are excluded from ordinary final latency distributions.',
@@ -121,6 +160,8 @@ def main():
         'Post-Qwen wait combines semantic commit policy, scheduler and MT; it is not pure model compute.',
         'Prompt-structure echo uses exact template markers; expansion is only a length diagnostic, neither is a semantic quality score.',
         'Returned-MT/ASR-queue overlap uses inferred intervals and omits failed requests; not causal proof or all queue time.',
+        'Observed-work partition additionally includes timed rejected MT and other returned Qwen computations. Missing returns cannot be reconstructed.',
+        'Partition intervals use return minus compute and inferred queue entry. Concurrent labels remain ambiguous; totals sum per-segment waits, not wall-clock occupancy or time saved by parallelism.',
         'Terminal failed groups remain untranslated; degraded is not a successful translation run. Rejected compute is reported separately and with all observed attempts.',
         'No GUI IPC or paint time included. No verified MT correctness score is produced.'])
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')

@@ -1,5 +1,5 @@
 import unittest
-from summarize_two_pass import summarize
+from summarize_two_pass import partition_interval, summarize
 
 
 class SummaryTests(unittest.TestCase):
@@ -34,6 +34,33 @@ class SummaryTests(unittest.TestCase):
                        compute_s=1, queue_wait_s=3, after_audio_end_s=6)]
         result = summarize(events, dict(status='completed', audio_seconds=7))
         self.assertEqual(result['source_queue_returned_mt_overlap']['p50_s'], 2)
+
+    def test_queue_partition_retains_rejected_draft_and_prior_source_work(self):
+        events = [dict(kind='translation_error', emission_s=5, compute_s=4, final=False),
+                  dict(kind='source_final', segment_id='first', emission_s=6, end_s=1,
+                       compute_s=1, queue_wait_s=2, after_audio_end_s=5),
+                  dict(kind='source_final', segment_id='second', emission_s=8, end_s=2,
+                       compute_s=1, queue_wait_s=3, after_audio_end_s=6)]
+        result = summarize(events, dict(status='completed', audio_seconds=8))
+        first, second = result['source_queue_details']
+        self.assertEqual(first['observed_work_partition_s'], {'rejected_draft': 2})
+        self.assertEqual(second['observed_work_partition_s'],
+                         {'rejected_draft': 1, 'other_source_compute': 1, 'unattributed': 1})
+        self.assertEqual(result['source_queue_partition_totals_s']['rejected_draft'], 3)
+        self.assertEqual(result['source_queue_returned_mt_overlap']['max_s'], 0)
+        for row in result['source_queue_details']:
+            self.assertAlmostEqual(sum(row['observed_work_partition_s'].values()), row['queue_wait_s'])
+
+    def test_overlapping_intervals_are_not_double_counted_or_arbitrarily_assigned(self):
+        self.assertEqual(partition_interval(0, 5, [(1, 4, 'a'), (2, 3, 'b'), (1, 4, 'a')]),
+                         {'unattributed': 2, 'a': 2, 'ambiguous': 1})
+        self.assertEqual(partition_interval(2, 2, [(1, 4, 'a')]), {})
+
+    def test_rejection_missing_timestamp_is_not_given_invented_interval(self):
+        result = summarize([dict(kind='translation_error', compute_s=9)],
+                           dict(status='failed', audio_seconds=10))
+        self.assertEqual(result['mt_rejections_without_timing'], 1)
+        self.assertEqual(result['source_queue_partition_totals_s'], {})
 
     def test_closed_group_without_any_return_counts_as_unfinished(self):
         events = [dict(kind='translation_group_closed', group_id='g', completion_reason='pause')]
