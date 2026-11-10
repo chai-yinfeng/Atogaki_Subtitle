@@ -332,3 +332,8 @@ cargo run --offline --example glossary_probe < private-input.json > NEW-private-
 `mt_deadline_probe.request(base_url, payload, budget_s=..., stop_after_content=...)`仅接受无凭据的回环HTTP和`stream=true`，直接用标准库HTTP连接，不继承代理。它在SSE读取时按总预算缩短socket timeout，也可在指定数量的非空content事件后主动关闭双向连接。返回原始wire记录与`completed`／`deadline`／`cancelled_after_content`／`unexpected_eof`状态，不提供可直接采用的译文；传输完成也不等于通过生产MT校验。心跳不重置预算，截止后收到的完成标记不算成功。
 
 该探针不是生产adapter、调度器或硬实时保证；连接、I/O与本机调度可能使观测晚于预算。必须对自己启动的服务另外观察slot忙→空闲及任务取消日志，随后执行正常短请求，不能以客户端返回推断服务端GPU已停止。当前`/slots`与任务日志核验属于已固定llama-server的能力，不假设云端或其他provider也支持。实际合成探针结果见[取消能力记录](../../docs/evaluation.md#本地mt单请求取消能力验证2026-11-09)；不将压力测试的强制长输出用于语义评分。
+
+
+`source_clock_reference.consume_requests(plan, execute, interval=.8)`允许用实测请求替代纯虚拟cost。回调只接收当时快照、尝试次数及已接受完整历史，返回`seconds`／`fails`／`text`；包含HTTP取消后slot释放的实测时间应由调用者计入seconds。虚拟时钟跳过空闲，原计划不随耗时改组；只有非过期成功草稿可发出，定稿最多两次，失败不入历史。`consume`与CLI仍为合成cost入口，不自动运行模型。完整计划是研究离线数据结构，不是有界实时队列，compile_plan仍使用既有日语基线启发式；消费者把文本视为不透明数据的测试不证明跨语言分组质量。此处严格过期规则与生产stale蓝字不同，结果不得冒称生产优化。
+
+2026-11-09固定源钟草稿预算回放完成后，用户要求先进行结构与系统设计分析，停止在结构未收敛时继续大量实验或参数搜索。后续先明确生产／研究差异、状态所有权、三类时间语义、资源／取消／历史提交契约，再为具体结构假设安排最小验证；不因现有工具方便就扩充参数矩阵。详见[本轮结果及顺序调整](../../docs/evaluation.md#固定源钟的草稿预算回放与结构分析优先2026-11-09)。

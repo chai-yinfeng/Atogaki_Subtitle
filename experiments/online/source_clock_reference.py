@@ -118,6 +118,26 @@ def consume(plan, cost, *, interval=.8, pending_limit=128):
     cost(snapshot, attempt) returns (seconds, fails). Text is a synthetic digest,
     never a semantic judgment. Only events with emission_s <= now enter state.
     """
+    def execute(snapshot, attempt, _context):
+        seconds, fails = cost(snapshot, attempt)
+        text = 'synthetic-'+hashlib.sha256(snapshot['source_text'].encode()).hexdigest()[:12]
+        return dict(seconds=seconds, fails=fails, text=text)
+
+    result = consume_requests(plan, execute, interval=interval, pending_limit=pending_limit)
+    result['notes'].append('Synthetic virtual compute only, no model or semantic scores.')
+    return result
+
+
+def consume_requests(plan, execute, *, interval=.8, pending_limit=128):
+    """Same source-clock consumer with measured requests and actual target history.
+
+    execute(snapshot, attempt, history) returns seconds/fails/text. It may perform
+    real I/O; returned duration advances the virtual clock, idle time is skipped.
+    A cancelled draft is a failed attempt and waits for a new signature. Finals
+    retain exactly two attempts. This does not model new ASR or GPU competition.
+    """
+    if not math.isfinite(interval) or interval <= 0 or pending_limit < 1:
+        raise ValueError('positive finite interval and pending limit required')
     events = plan['events']
     now, index, inflight = 0.0, 0, None
     latest, done, requested, attempts, last_start = {}, set(), {}, {}, {}
@@ -180,10 +200,12 @@ def consume(plan, cost, *, interval=.8, pending_limit=128):
         if not snap['final'] and (requested.get(gid) == key or now+1e-9 < last_start.get(gid, -math.inf)+interval):
             continue
         attempts[gid] = attempts.get(gid, 0)+1 if snap['final'] else 0
-        seconds, fails = cost(snap, attempts[gid])
+        result = execute(snap, attempts[gid], history)
+        seconds, fails, text = result['seconds'], result['fails'], result['text']
         if not math.isfinite(seconds) or seconds < 0:
-            raise ValueError('invalid synthetic compute cost')
-        text = 'synthetic-'+hashlib.sha256(snap['source_text'].encode()).hexdigest()[:12]
+            raise ValueError('invalid request duration')
+        if not isinstance(fails, bool) or not isinstance(text, str) or (not fails and not text.strip()):
+            raise ValueError('invalid request outcome')
         job = dict(snapshot=snap, context=history, start_s=now, finish_s=now+seconds,
                    fails=fails, text=text, accepted=False)
         requests.append(job)
@@ -193,8 +215,8 @@ def consume(plan, cost, *, interval=.8, pending_limit=128):
         raise AssertionError('consumer coverage is not exactly once including explicit failures')
     return dict(requests=requests, events=emitted, peak_pending=peak_pending,
                 final_history=history, finished_s=now,
-                notes=['Synthetic virtual compute only, no model or semantic scores.',
-                       'Changed draft snapshots rejected; frozen finals retry at most twice.',
+                notes=['Changed draft snapshots rejected; frozen finals retry at most twice.',
+                       'Virtual clock skips idle time; caller supplies request duration and outcome.',
                        'Pending limit is an experiment guard, not production backpressure.'])
 
 

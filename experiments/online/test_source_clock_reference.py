@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from compare_japanese_mt import replay
 from retranslation import Retranslation
-from source_clock_reference import compile_plan, consume, signature
+from source_clock_reference import compile_plan, consume, consume_requests, signature
 
 
 def race(second=6.1):
@@ -161,6 +161,69 @@ class SourceClockTests(unittest.TestCase):
         with self.assertRaises(ValueError):compile_plan(race(),10,commit_wait=-1)
         with self.assertRaises(ValueError):compile_plan(race(),10,max_seconds=float('nan'))
         with self.assertRaises(ValueError):consume(compile_plan(race(),10),lambda _s,_a: (float('nan'),False))
+
+    def test_measured_requests_use_actual_accepted_target_history(self):
+        contexts = []
+        def execute(snap, attempt, history):
+            contexts.append(history)
+            return dict(seconds=.2, fails=False, text='actual:'+snap['source_text'])
+        result = consume_requests(compile_plan(race(),10,commit_wait=4), execute)
+        self.assertEqual(len(result['final_history']), 2)
+        self.assertTrue(all(target.startswith('actual:') for _, target in result['final_history']))
+        self.assertTrue(any(history == result['final_history'][:1] for history in contexts))
+
+    def test_cancelled_drafts_never_enter_history_or_retry_same_revision(self):
+        def execute(snap, attempt, history):
+            self.assertTrue(all(target != 'cancelled partial' for _, target in history))
+            return dict(seconds=.3, fails=not snap['final'],
+                        text='final target' if snap['final'] else 'cancelled partial')
+        result = consume_requests(compile_plan(race(),10,commit_wait=4), execute)
+        drafts = [r for r in result['requests'] if not r['snapshot']['final']]
+        keys = [(r['snapshot']['group_id'], signature(r['snapshot'])) for r in drafts]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertTrue(all(not r['accepted'] for r in drafts))
+        self.assertEqual([target for _, target in result['final_history']], ['final target']*2)
+
+    def test_measured_consumer_does_not_interpret_language_or_rewrite_text(self):
+        original = compile_plan(race(),10,commit_wait=4)
+        memberships = []
+        for text in ['unclosed phrase', '尚未说完', '아직 말하는 중', 'まだ途中']:
+            plan = copy.deepcopy(original)
+            for snapshot in plan['events']:
+                if snapshot['kind'] == 'snapshot':
+                    snapshot['source_text'] = text
+            result = consume_requests(plan, lambda _s,_a,_h: dict(seconds=1, fails=False, text='target'))
+            memberships.append([e['source_ids'] for e in result['events'] if e['kind']=='translation_final'])
+            self.assertTrue(all(r['snapshot']['source_text']==text for r in result['requests']))
+        self.assertTrue(all(value==memberships[0] for value in memberships))
+
+    def test_measured_consumer_rejects_invalid_outcome_and_interval(self):
+        plan=compile_plan(race(),10)
+        for outcome in [dict(seconds=-1,fails=False,text='x'),
+                        dict(seconds=1,fails=False,text=''),
+                        dict(seconds=1,fails='cancelled',text='x')]:
+            with self.assertRaises(ValueError):
+                consume_requests(plan, lambda _s,_a,_h: outcome)
+        with self.assertRaises(ValueError):
+            consume_requests(plan, lambda *_: None, interval=0)
+
+    def test_long_draft_budget_preserves_final_inputs_and_history_in_controlled_stress(self):
+        plan = compile_plan(race(),10,commit_wait=4)
+        results = []
+        for budget in (None, 2):
+            def execute(snap, attempt, history):
+                if snap['final']:
+                    return dict(seconds=.2, fails=False, text='final target')
+                return dict(seconds=20.5 if budget is None else budget,
+                            fails=budget is not None, text='unaccepted draft')
+            results.append(consume_requests(plan, execute))
+        final_inputs = [[(r['snapshot'],r['context']) for r in result['requests']
+                         if r['snapshot']['final']] for result in results]
+        self.assertEqual(final_inputs[0], final_inputs[1])
+        self.assertEqual(results[0]['final_history'], results[1]['final_history'])
+        self.assertLess(results[1]['finished_s'], results[0]['finished_s'])
+        self.assertTrue(all('unaccepted draft' not in target
+                            for _,target in results[1]['final_history']))
 
 
 if __name__=='__main__':
