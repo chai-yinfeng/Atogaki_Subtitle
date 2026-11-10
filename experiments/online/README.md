@@ -326,3 +326,9 @@ cargo run --offline --example glossary_probe < private-input.json > NEW-private-
 输出分别保留原文／规范后文本、Whisper提示预览及保护词集合。提示预览不表示在线ASR已经使用它；同一词表的替换规则与MT保护范围也不同。重复源文ID或变体名会失败。私有输入／输出不可提交；字面命中只作候选，实际替换必须以原库边界规则执行结果为准。五段实际输入审计与既有歧义规则风险见[评测记录](../../docs/evaluation.md#离线与在线词表输入审计2026-11-09)。
 
 `summarize_two_pass.py`的v2输出另将每段最终ASR的推导排队区间分解为已接受MT草稿／定稿、带时间记录的拒绝MT、其他最终ASR计算和未解释时间。不同类别重叠标为ambiguous，不重复计时；原`returned_mt_overlap_s`仍只计已接受MT。缺少返回／时间的请求不补造，单独报告无时间拒绝数。全局合计是逐段等待之和，不是墙钟占用、GPU计算或拆线程后的预计收益；详见[排队审计](../../docs/evaluation.md#qwen排队区间与在途mt阻塞审计2026-11-09)。
+
+## 单次MT取消能力探针
+
+`mt_deadline_probe.request(base_url, payload, budget_s=..., stop_after_content=...)`仅接受无凭据的回环HTTP和`stream=true`，直接用标准库HTTP连接，不继承代理。它在SSE读取时按总预算缩短socket timeout，也可在指定数量的非空content事件后主动关闭双向连接。返回原始wire记录与`completed`／`deadline`／`cancelled_after_content`／`unexpected_eof`状态，不提供可直接采用的译文；传输完成也不等于通过生产MT校验。心跳不重置预算，截止后收到的完成标记不算成功。
+
+该探针不是生产adapter、调度器或硬实时保证；连接、I/O与本机调度可能使观测晚于预算。必须对自己启动的服务另外观察slot忙→空闲及任务取消日志，随后执行正常短请求，不能以客户端返回推断服务端GPU已停止。当前`/slots`与任务日志核验属于已固定llama-server的能力，不假设云端或其他provider也支持。实际合成探针结果见[取消能力记录](../../docs/evaluation.md#本地mt单请求取消能力验证2026-11-09)；不将压力测试的强制长输出用于语义评分。
