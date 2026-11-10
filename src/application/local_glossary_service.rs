@@ -380,7 +380,11 @@ fn parse_builtin_glossary(file_text: &str) -> Result<Vec<LocalGlossaryTermInput>
 mod tests {
     use std::fs;
 
-    use super::{LocalGlossaryService, LocalGlossaryTermDraft, glossary_for_task};
+    use sha2::{Digest, Sha256};
+
+    use super::{
+        LocalGlossaryService, LocalGlossaryTermDraft, glossary_for_task, parse_builtin_glossary,
+    };
     use crate::{
         application::{job_manifest::JobManifest, job_snapshot::JobSnapshot},
         domain::TranscriptSegment,
@@ -549,11 +553,16 @@ mod tests {
 
         assert_eq!(glossary.core_term_count, 12);
         assert_eq!(glossary.content_term_count, 129);
-        assert_eq!(glossary.correction_only_count, 2);
+        assert_eq!(glossary.correction_only_count, 1);
         assert_eq!(glossary.content_group_count, 11);
         let detail = service.get(&glossary.id).await.unwrap();
         let resolved = glossary_for_task(&detail, &[]).unwrap();
-        assert_eq!(resolved.corrected_text("すいとなぶな"), "suisとn-buna");
+        assert_eq!(resolved.corrected_text("すいとなぶな"), "すいとn-buna");
+        assert_eq!(resolved.corrected_text("スイとなぶな"), "suisとn-buna");
+        assert_eq!(
+            resolved.corrected_text("動きやすい服が安い。すいません。"),
+            "動きやすい服が安い。すいません。"
+        );
         let preview = service.prompt_preview(&glossary.id, &[]).await.unwrap();
         let prompt = preview.prompt.unwrap();
         assert!(prompt.contains("suis"));
@@ -566,6 +575,60 @@ mod tests {
         assert!(detail.terms.iter().any(|term| {
             term.source_text == "盗作" && term.content_group.as_deref() == Some("盗作")
         }));
+
+        drop(service);
+        database.close().await;
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn builtin_alias_removal_refreshes_only_the_builtin_copy() {
+        let root = std::env::temp_dir().join(format!(
+            "atogaki-builtin-alias-refresh-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let database = LocalDatabase::open(root.join("atogaki.sqlite"))
+            .await
+            .unwrap();
+        let source = include_str!("../../assets/glossaries/yorushika.txt");
+        let old_source = format!("{source}\nすい => suis\n");
+        let old_version = format!("sha256:{:x}", Sha256::digest(old_source.as_bytes()));
+        database
+            .ensure_builtin_glossary(
+                "Yorushika",
+                "yorushika",
+                &old_version,
+                "ja",
+                parse_builtin_glossary(&old_source).unwrap(),
+            )
+            .await
+            .unwrap();
+        let old_builtin = database.list_glossaries().await.unwrap().remove(0);
+        let custom = database
+            .save_glossary(
+                Some(&old_builtin.id),
+                old_builtin.name.clone(),
+                "ja",
+                parse_builtin_glossary(&old_source).unwrap(),
+            )
+            .await
+            .unwrap();
+        let service = LocalGlossaryService::new(database.clone());
+        service.ensure_builtins().await.unwrap();
+        let updated = service.get(&old_builtin.id).await.unwrap();
+        let resolved = glossary_for_task(&updated, &[]).unwrap();
+        assert_ne!(updated.glossary.builtin_version, Some(old_version));
+        assert_eq!(resolved.corrected_text("動きやすい"), "動きやすい");
+        let retained = service.get(&custom.glossary.id).await.unwrap();
+        assert!(retained.glossary.builtin_key.is_none());
+        let retained = glossary_for_task(&retained, &[]).unwrap();
+        assert_eq!(retained.corrected_text("すい"), "suis");
+        assert_eq!(resolved.whisper_prompt(None), retained.whisper_prompt(None));
+        assert_eq!(
+            resolved.translation_protected_terms(),
+            retained.translation_protected_terms()
+        );
 
         drop(service);
         database.close().await;
