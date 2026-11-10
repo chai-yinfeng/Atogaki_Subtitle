@@ -187,3 +187,23 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 当前`e3a1`工作树的`local-artifacts/online/index-precision-20261109/Index-Translate-2B.f16.gguf`保留，大小3,897,387,520 bytes，SHA-256 `f9ab1279d1169ad18655a7b8085a9111bef12a0e2eb733aaa2234186241e5ad7`；来自官方`IndexTeam/Index-Translate-2B-GGUF` revision `3a0eca6ce931d88d00614d427ab3ed8ff0743902`，与原Q4仅做同后端精度研究，不是App受管下载或采用的默认模型。官方清单／校验和、下载与模型核验脚本／摘要及`index-precision-probe-20261109/`评审保留，研究结果见[评测记录](evaluation.md#index同版本q4与f16精度路径基线2026-11-09)。
 
 仅在合并文件通过官方完整SHA-256后，删除本次下载器创建的连续`.part`前缀及8个精确Range分片，保留范围／分片hash收据；未以此清理旧Q4、研究环境、音频、数据库或其他未知文件。最终F16与原Q4均保留，两个模型服务已退出；不从文件逻辑大小推断APFS实际回收空间。
+
+
+## 2026-11-09：在线研究目录与OCR去重
+
+本轮当前工作树为`e3a1/Atogaki_Sub`，不是本页2026-10旧盘点的工作树。用户要求及时清理不用的产物，并明确优化应优先采用跨场景、语言及模型的通用机制；研究约束见[online说明](../experiments/online/README.md#后续研究约束与产物管理2026-11-09)。没有因为单次结果未胜出就删除失败证据或改写参考。
+
+当前布局按用途分为：
+
+- `src/infrastructure/online_worker/`：实际生产ASR／MT／分组实现；`experiments/online/`：可复用回放、统计、测试和固定依赖；`docs/evaluation.md`等：结论和来源。这些进入Git，音频及实验正文不进入Git。
+- `local-artifacts/datasets/japanese-radio/`：来源索引、selection音频／参考上下文、OCR原始与修订候选、人审、alignment与冻结anchors，以及每轮独立study／probe／chain结果。原视频按用户原目录引用；不搬移原视频或因新候选覆盖旧结果。alignment模型／extras是历史布局例外，保留现有引用；新共享模型优先在online统一保存。
+- `local-artifacts/online/`：共享研究模型、历史在线桌面包／交付日志／校验。模型、旧包与其出处不能仅按日期视为缓存；本轮未清理它们，也没有复制新App或模型。
+- `target/`、`src-tauri/target/`：编译产物与缓存，与正式App、模型、数据库分开。共享或有活动构建的目录不自动清理。
+
+盘点前dataset约4.1GiB、online约5.9GiB（du显示口径）。OCR约1.8GiB中5627个PNG经完整SHA-256分组；1695组有重复。优先保留人工核对／verified及其后的固定顺序实体，每种字节内容至少保留一个实体，将2921份完全相同副本原子替换为相对链接；仅替换已列出且size／mtime／hash复核一致的PNG。每个目标为同OCR根内保留的普通PNG，不是临时文件或另一个待替换链接；未来清理必须同时保护被引用实体。并非只按文件名去重，也没有将不同OCR文字版本合并。
+
+重复实体逻辑内容928,753,550 bytes（约886MiB）；OCR当前du约962MiB，不代表精确APFS空闲增量。全部5627条原图片路径仍可读，内容SHA与去重前一致；除2921份图片类型变为链接及父目录元数据外，路径集合相同，其余6721条非目录元数据一致。音频、OCR JSON、人工核对、冻结参考、模型、运行结果和原媒体均未删除。稍后补写的私有README为状态更新，不混称清理前后逐字节不变。
+
+复用已有只读`scripts/inventory-local-artifacts.py`记录dataset／online两个明确root的前后元数据；它没有删除入口，不以未哈希的清单证明模型字节不变。另存逐PNG hash、去重计划、逐项日志、全PNG内容核验和路径／非替换项核验。操作前按进程名检查未发现ffmpeg／OCR／swift／cargo／rustc／llama-server，未读取进程参数或凭据。清单保存在忽略的`local-artifacts/artifact-retention-20261109/`；没有新增清理框架、定时自动删除或正式数据库备份。
+
+今后每轮复用源媒体和共享模型，新结果保留配置、源码／输入摘要、实际请求响应、状态与评审来源。明确过期的可重建缓存、已核验重复内容可及时清理，留清单；采用证据、人工参考、唯一错误样本、未知用途文件和独立恢复点继续保护。失败实验的少量结果保留以避免重复试错，不能把失败本身当作删除依据。
