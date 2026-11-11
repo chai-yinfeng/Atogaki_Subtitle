@@ -44,7 +44,7 @@ class RetranslationTests(unittest.TestCase):
         self.assertTrue(request['final'])
         self.assertEqual(request['source_text'], '一人で。のんびり過ごす。')
         self.assertEqual(set(request['source_revisions']), {'a', 'b'})
-        self.assertEqual(request['completion_reason'], 'long_pause')
+        self.assertEqual(request['completion_reason'], 'commit_timeout')
 
     def test_default_finalizes_short_mt_group_independently_of_display_retention(self):
         self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)), language='zh')
@@ -73,7 +73,9 @@ class RetranslationTests(unittest.TestCase):
         self.source('a', 'draft')
         self.mt.observe('a', 0, 1, closed=True)
         self.mt.advance(3)
-        self.assertIsNone(self.mt.take(0))
+        preview = self.mt.take(0)
+        self.assertFalse(preview['final'])
+        self.mt.complete(preview, '临时译文')
         self.source('a', 'final', revision=2, final=True)
         self.mt.complete(self.mt.take(1), '定稿')
         self.source('b', 'next', start=3, end=4)
@@ -223,21 +225,18 @@ class JapaneseBlockTests(unittest.TestCase):
         self.mt.advance(9.1)
         final = self.mt.take(2)
         self.assertTrue(final['final'])
-        self.assertEqual(final['completion_reason'], 'long_pause')
+        self.assertEqual(final['completion_reason'], 'japanese_timeout')
         self.assertEqual(final['source_text'], draft['source_text'])
 
-    def test_only_final_right_context_can_commit_a_complete_predicate(self):
+    def test_local_draft_right_context_can_close_only_the_confirmed_target(self):
         self.source('a', '昨日は駅に行きました。', 0, 2)
         self.source('b', 'そこで友達に会いました。', 2, 4, final=False)
-        draft = self.mt.take(0)
-        self.assertFalse(draft['final'])
-        self.mt.complete(draft, '昨天去了车站，在那里遇到了朋友。')
-        self.source('b', 'そこで先生に会いました。', 2, 4)
-        final = self.mt.take(1)
+        final = self.mt.take(0)
         self.assertTrue(final['final'])
         self.assertEqual(final['source_revisions'], {'a': 2})
-        self.assertEqual(final['lookahead_source'], 'そこで先生に会いました。')
-        self.assertEqual(final['completion_reason'], 'japanese_sentence_with_final_lookahead')
+        self.assertEqual(final['lookahead_source'], 'そこで友達に会いました。')
+        self.assertEqual(final['completion_reason'], 'japanese_sentence_with_lookahead')
+        self.source('b', 'そこで先生に会いました。', 2, 4)
         self.mt.complete(final, '昨天去了车站。')
         self.mt.advance(4, eof=True)
         tail = self.mt.take(2)
@@ -259,7 +258,7 @@ class JapaneseBlockTests(unittest.TestCase):
         self.source('c', '後の後だけ定稿。', 5.2, 6)
         final = self.mt.take(0)
         self.assertTrue(final['final'])
-        self.assertEqual(final['lookahead_source'], '')
+        self.assertEqual(final['lookahead_source'], '後の原文はまだ草稿。後の後だけ定稿。')
         self.mt.complete(final, '第一个话题。')
         self.mt.advance(6, eof=True)
         self.source('b', '後の原文が確定しました。', 4.2, 5)
@@ -292,7 +291,7 @@ class JapaneseBlockTests(unittest.TestCase):
         self.assertTrue(final['final'])
         self.assertEqual(final['completion_reason'], 'japanese_timeout')
         self.assertEqual(final['source_revisions'], {'a': 2})
-        self.assertEqual(final['lookahead_source'], '')
+        self.assertEqual(final['lookahead_source'], 'まだ変わる後文。')
 
     def test_history_evicts_whole_source_groups_and_ignores_translations(self):
         for i in range(9):
@@ -308,6 +307,70 @@ class JapaneseBlockTests(unittest.TestCase):
         self.source('draft', '还在变化的原文', 40, 41, final=False)
         self.mt.complete(self.mt.take(10), '草稿译文')
         self.assertEqual(self.mt.context, before)
+
+
+class SourceDrivenStateTests(unittest.TestCase):
+    def test_right_context_metadata_covers_only_the_included_prefix(self):
+        mt = Retranslation(lambda *_a, **_k: None, max_seconds=1)
+        for sid, text, start in [('a', 'current', 0), ('b', 'x'*600, 1), ('c', 'excluded', 2)]:
+            mt.observe(sid, start, start+1, closed=True)
+            mt.update(dict(kind='source_draft', segment_id=sid, text=text, source_revision=1))
+        request = mt.take(0)
+        self.assertEqual(request['lookahead_source'], 'x'*500)
+        self.assertEqual(request['lookahead_revisions'], {'b': 1})
+        self.assertTrue(request['lookahead_provisional'])
+
+    def state(self):
+        mt = Retranslation(lambda *_a, **_k: None, commit_wait=4)
+        mt.observe('a', 0, 1, closed=True, now=1)
+        mt.update(dict(kind='source_final', segment_id='a', text='まだ途中で。',
+                       source_revision=1, emission_s=2))
+        return mt
+
+    def test_take_does_not_advance_cutoff_or_change_membership(self):
+        mt = self.state()
+        request = mt.take(100)
+        self.assertFalse(request['final'])
+        self.assertIsNone(mt.groups[0].reason)
+        mt.complete(request, 'preview')
+        mt.advance(1, now=6, speech=True)
+        self.assertTrue(mt.take(101)['final'])
+
+    def test_equal_time_final_is_included_but_later_final_does_not_reopen_prefix(self):
+        for arrival, expected in [(6, {'a', 'b'}), (6.1, {'a'})]:
+            mt = self.state()
+            mt.observe('b', 1.5, 5.8, now=3)
+            mt.update(dict(kind='source_draft', segment_id='b', text='続き',
+                           source_revision=1, emission_s=3))
+            mt.update(dict(kind='source_final', segment_id='b', text='続きの文章です。',
+                           source_revision=2, emission_s=arrival))
+            request = mt.take(100)
+            self.assertTrue(request['final'])
+            self.assertEqual(set(request['source_revisions']), expected)
+
+    def test_confirmed_progress_gets_one_opportunity_then_drafts_yield(self):
+        mt = self.state()
+        mt.observe('b', 1.1, 2)
+        mt.update(dict(kind='source_draft', segment_id='b', text='続き', source_revision=1))
+        self.assertEqual(mt.priority(0), 'confirmed')
+        mt.complete(mt.take(0), 'preview')
+        mt.update(dict(kind='source_draft', segment_id='b', text='続きも', source_revision=2))
+        self.assertEqual(mt.priority(1), 'draft')
+        mt.stop_drafts()
+        self.assertIsNone(mt.priority(2))
+
+    def test_old_source_revision_cannot_revert_the_latest_snapshot(self):
+        mt = Retranslation(lambda *_a, **_k: None)
+        mt.observe('a', 0, 1)
+        for revision, text in [(2, '否定'), (1, '肯定')]:
+            mt.update(dict(kind='source_draft', segment_id='a', text=text, source_revision=revision))
+        self.assertEqual(mt.take(0)['source_text'], '否定')
+
+    def test_events_are_published_outside_state_lock(self):
+        mt = Retranslation(lambda *_a, **_k: self.assertFalse(mt.lock.locked()), max_seconds=1)
+        mt.observe('a', 0, 1, closed=True)
+        mt.update(dict(kind='source_final', segment_id='a', text='source', source_revision=1))
+        mt.complete(mt.take(0), 'target')
 
 
 if __name__ == '__main__':

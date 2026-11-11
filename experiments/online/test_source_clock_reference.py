@@ -31,7 +31,7 @@ def membership(rows):
 
 
 class SourceClockTests(unittest.TestCase):
-    def test_original_take_depends_on_compute_even_with_fixed_arrivals(self):
+    def test_production_membership_no_longer_depends_on_mt_compute(self):
         results=[]
         for seconds in (0, .5, 2, 6):
             elapsed=[0.0]
@@ -42,7 +42,7 @@ class SourceClockTests(unittest.TestCase):
             with patch('compare_japanese_mt.time.monotonic',side_effect=lambda: elapsed[0]):
                 result=replay(race(),partial(Retranslation,commit_wait=4),Translator(),10)
             results.append(tuple(tuple(e['source_revisions']) for e in result['events'] if e['kind']=='translation_final'))
-        self.assertGreater(len(set(results)),1)
+        self.assertEqual(len(set(results)),1)
 
     def test_reference_membership_does_not_follow_the_model_slot(self):
         plan=compile_plan(race(),10,commit_wait=4)
@@ -109,7 +109,7 @@ class SourceClockTests(unittest.TestCase):
             consume(plan,lambda _s,_a: (20,False),pending_limit=1)
         self.assertEqual(plan,before)
 
-    def test_closed_cap_membership_cannot_be_split_by_late_source(self):
+    def test_candidate_range_can_refine_before_true_membership_seals(self):
         events=[]
         for sid,start,end,arrive in [('a',0,6,8),('b',6.5,12,14),('c',12.5,15,16)]:
             events.extend([dict(kind='segment_closed',emission_s=end,segment_id=sid,start_s=start,end_s=end),
@@ -118,8 +118,8 @@ class SourceClockTests(unittest.TestCase):
         events.sort(key=lambda e:e['emission_s'])
         plan=compile_plan(events,20,max_seconds=10)
         first=finals(plan)[0]
-        self.assertEqual(tuple(first['source_revisions']),('a','b'))
-        self.assertEqual(first['completion_reason'],'max_duration')
+        self.assertEqual(tuple(first['source_revisions']),('a',))
+        self.assertEqual(first['completion_reason'],'japanese_sentence_with_lookahead')
 
     def test_stale_source_draft_after_final_does_not_change_ready_job(self):
         events=race()+[dict(kind='source_draft',emission_s=9,segment_id='a',start_s=0,end_s=1,

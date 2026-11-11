@@ -49,11 +49,12 @@ class HyMT2:
                 (f'\nTranslation (wording reference only): {dst}' if dst else '')
                 for i, (src, dst) in enumerate(context)))
         if lookahead_source:
-            background.append('[Following source context: reference only; do not translate]\n'+lookahead_source)
+            background.append('[Following source context: provisional reference only; do not translate]\n'+lookahead_source)
         rules = ('Translate only the current source. Use previous/following source to resolve '
                  'references and omissions when clearly supported. Previous translations are only '
                  'wording references and may be wrong; source text takes precedence. '
                  'Scene hints must not override explicit source facts. '
+                 'Following source may be an inaccurate ASR draft; it must not override current source facts. '
                  'Do not repeat context, invent facts, or complete an unfinished sentence. '
                  'Preserve listed proper names verbatim. Output only the translation.')
         background = '\n\n'.join(background)
@@ -70,7 +71,7 @@ class HyMT2:
             prompt = (prelude +
                       '翻译规则：只翻译本次原文，专名保持原样。利用背景原文理解指代和省略；'
                       '历史译文可能有误，仅供措辞参考。不要复述背景、编造事实或补完未完句，'
-                      '场景不能覆盖原文事实。\n\n'
+                      '后续原文可能是识别草稿；后文和场景不能覆盖本次原文事实。\n\n'
                       f'请将以下{languages.get(self.source_language, "")}文本翻译为{target}，'
                       f'直接输出翻译结果，不要进行任何解释。\n\n{source}')
         elif background:

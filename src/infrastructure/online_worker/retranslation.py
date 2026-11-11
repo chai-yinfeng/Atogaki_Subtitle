@@ -1,5 +1,6 @@
 """Revision-aware translation groups; independent of ASR/runtime and display UI."""
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 import threading
 import re
 
@@ -12,6 +13,7 @@ class Group:
     segments: dict = field(default_factory=dict)
     revision: int = 0
     reason: str | None = None
+    range_reason: str | None = None
     committed: bool = False
     last_request: float = float('-inf')
     displayed_request: int = 0
@@ -23,9 +25,9 @@ class Group:
 class Retranslation:
     """One in-flight MT request. Source updates coalesce into current group state.
 
-    Audio boundaries seal membership, not text. Only all-final source revisions
-    can produce a committed translation. Japanese keeps short pauses inside a
-    revisable semantic block and requires finalized right context for a sentence.
+    Source/audio events determine membership; taking work never partitions it.
+    Only all-final current source can commit. Following local drafts are optional
+    reference, never part of the current request's translated coverage.
     """
     def __init__(self, emit, *, language='ja', drafts=True, interval=.8,
                  pause=None, max_seconds=20, max_chars=400, commit_wait=None):
@@ -34,6 +36,7 @@ class Retranslation:
         self.pause = pause if pause is not None else (3.0 if language == 'ja' else 1.2)
         self.commit_wait = commit_wait if commit_wait is not None else (8.0 if language == 'ja' else 4.0)
         self.audio_seconds = 0.0
+        self.now = 0.0
         self.max_seconds, self.max_chars = max_seconds, max_chars
         self.lock = threading.Lock()
         self.groups, self.segment_groups = [], {}
@@ -44,6 +47,24 @@ class Retranslation:
         self.group_id = 0
         self.inflight = None
         self.cache = None
+        self.outbox = []
+
+    @contextmanager
+    def _transition(self):
+        with self.lock:
+            try:
+                yield
+            finally:
+                pending, self.outbox = self.outbox, []
+        # No model, HTTP or event-pipe I/O while owning the state lock.
+        for kind, data in pending:
+            self.emit(kind, **data)
+
+    def _close_range(self, group, reason):
+        if group.range_reason is None:
+            group.range_reason = reason
+            if self.active is group:
+                self.active = None
 
     def _text(self, group):
         return self._join(s['text'] for s in group.segments.values() if s['text'])
@@ -53,15 +74,38 @@ class Retranslation:
             group.reason = reason
             if self.active is group:
                 self.active = None
-            self.emit('translation_group_closed', group_id=group.id,
-                      start_s=group.start, end_s=group.end, completion_reason=reason)
+            group.revision += 1
+            self.outbox.append(('translation_group_closed', dict(group_id=group.id,
+                start_s=group.start, end_s=group.end, completion_reason=reason)))
 
-    def observe(self, sid, start, end, *, closed=False):
+    def _settle(self):
+        while True:
+            before = [(g.id, g.reason, tuple(g.segments)) for g in self.groups]
+            for group in list(self.groups):
+                if group.reason is not None:
+                    continue
+                self._commit_prefix(group)
+                if (group.reason is None and group.range_reason is not None
+                        and all(s['final'] for s in group.segments.values())):
+                    self._seal(group, group.range_reason)
+            if before == [(g.id, g.reason, tuple(g.segments)) for g in self.groups]:
+                break
+
+    def _before(self, now):
+        if now is not None:
+            # Expired cutoffs precede later input. Equal-time input wins ties.
+            previous = self.now
+            self.now = max(self.now, now - 1e-9)
+            self._settle()
+            self.now = max(previous, now)
+
+    def observe(self, sid, start, end, *, closed=False, now=None):
         """Capture registers ranges before dispatching recognition jobs."""
-        with self.lock:
+        with self._transition():
+            self._before(now)
             if sid not in self.segment_groups:
                 if self.active and start-self.active.end >= self.pause:
-                    self._seal(self.active, 'long_pause')
+                    self._close_range(self.active, 'long_pause')
                 if self.active is None:
                     self.group_id += 1
                     self.active = Group(f'group-{self.group_id}', start, end)
@@ -71,49 +115,54 @@ class Retranslation:
                                            start=start, end=end, finalized_at=None)
                 self.segment_groups[sid] = group
             group = self.segment_groups[sid]
+            if group.reason is not None:
+                return
             group.end = max(group.end, end)
             group.segments[sid]['closed'] |= closed
             group.segments[sid]['end'] = max(group.segments[sid]['end'], end)
             if closed and group.reason is None:
                 if group.end-group.start >= self.max_seconds:
-                    self._seal(group, 'max_duration')
+                    self._close_range(group, 'max_duration')
                 elif len(self._text(group)) >= self.max_chars:
-                    self._seal(group, 'max_chars')
+                    self._close_range(group, 'max_chars')
+            self._settle()
 
     def update(self, event):
         if event is None:
             return
-        with self.lock:
+        with self._transition():
+            self._before(event.get('emission_s'))
             group = self.segment_groups.get(event['segment_id'])
             if group is None:
                 return  # A draft emitted before final ASR may arrive after MT commit.
             segment = group.segments[event['segment_id']]
-            if group.committed or segment['final']:
+            if group.committed or segment['final'] or event['source_revision'] <= segment['revision']:
                 return
             segment.update(text=event['text'], revision=event['source_revision'],
                            final=event['kind'] == 'source_final')
             if segment['final']:
-                segment['finalized_at'] = self.audio_seconds
+                segment['finalized_at'] = self.now
                 self.context_revision += 1
             group.revision += 1
             # A character bound closes at an acoustic boundary, never midway
             # through a segment whose final ASR still covers the entire range.
             if (group.reason is None and all(s['closed'] for s in group.segments.values())
                     and len(self._text(group)) >= self.max_chars):
-                self._seal(group, 'max_chars')
+                self._close_range(group, 'max_chars')
+            self._settle()
 
-    def advance(self, seconds, *, speech=False, eof=False):
-        with self.lock:
+    def advance(self, seconds, *, speech=False, eof=False, now=None):
+        with self._transition():
+            self._before(seconds if now is None else now)
             self.audio_seconds = max(self.audio_seconds, seconds)
             group = self.active
-            if group is None:
-                return
-            if eof:
-                self._seal(group, 'input_eof')
-            elif not speech and all(s['closed'] for s in group.segments.values()):
-                quiet = seconds-group.end
-                if quiet >= self.pause:
-                    self._seal(group, 'long_pause')
+            if group is not None:
+                if eof:
+                    self._close_range(group, 'input_eof')
+                elif not speech and all(s['closed'] for s in group.segments.values()):
+                    if seconds-group.end >= self.pause:
+                        self._close_range(group, 'long_pause')
+            self._settle()
 
     def _commit_prefix(self, group):
         """Commit whole finalized ASR units; never splice translated strings.
@@ -121,6 +170,8 @@ class Retranslation:
         A sentence candidate needs following text as reference. A finite wait
         also releases unfinished phrases, explicitly labelled as a timeout.
         """
+        if group.reason is not None:
+            return
         items = list(group.segments.items())
         boundary, reason = None, None
         prefix = []
@@ -128,15 +179,11 @@ class Retranslation:
             if not segment['final']:
                 break
             prefix.append(segment['text'])
-            following_items = items[index+1:]
-            if self.language == 'ja':
-                # Draft right context can still reverse a negation/referent.
-                # Never skip an unfinalized segment to peek at a later final.
-                following_items = []
-                for item in items[index+1:]:
-                    if not item[1]['final']:
-                        break
-                    following_items.append(item)
+            following_items = []
+            for item in items[index+1:]:
+                if not item[1]['text']:
+                    break
+                following_items.append(item)
             following = self._join(s['text'] for _, s in following_items)
             # Qwen can punctuate fragments such as 一人で。; a bare period
             # alone is insufficient. These bounds are heuristics, not syntax.
@@ -144,12 +191,12 @@ class Retranslation:
             if self.language == 'ja':
                 sentence = sentence and self._japanese_sentence(segment['text'], following)
             if sentence and len(''.join(prefix).strip()) >= 8 and len(following.strip()) >= 8:
-                boundary, reason = index+1, ('japanese_sentence_with_final_lookahead'
+                boundary, reason = index+1, ('japanese_sentence_with_lookahead'
                                              if self.language == 'ja' else 'sentence_with_lookahead')
                 break
-        if boundary is None and group.reason is None:
+        if boundary is None and group.range_reason is None:
             ready = [s for _, s in items if s['final']]
-            if ready and items[0][1]['final'] and self.audio_seconds-ready[0]['finalized_at'] >= self.commit_wait:
+            if ready and items[0][1]['final'] and self.now-ready[0]['finalized_at'] >= self.commit_wait:
                 boundary = 0
                 for _, segment in items:
                     if not segment['final']:
@@ -164,7 +211,7 @@ class Retranslation:
         tail = dict(items[boundary:])
         self.group_id += 1
         remainder = Group(f'group-{self.group_id}', next(iter(tail.values()))['start'],
-                          group.end, segments=tail, revision=1, reason=group.reason)
+                          group.end, segments=tail, revision=1, range_reason=group.range_reason)
         group.segments = dict(items[:boundary])
         group.end = items[boundary-1][1]['end']
         group.lookahead = self._following_text(remainder)[:500]
@@ -176,7 +223,7 @@ class Retranslation:
         self.groups.insert(self.groups.index(group)+1, remainder)
         for sid in tail:
             self.segment_groups[sid] = remainder
-        if remainder.reason is None:
+        if remainder.range_reason is None:
             self.active = remainder
 
     def _join(self, texts):
@@ -185,7 +232,7 @@ class Retranslation:
     def _following_text(self, group):
         texts = []
         for segment in group.segments.values():
-            if self.language == 'ja' and not segment['final']:
+            if not segment['text']:
                 break
             texts.append(segment['text'])
         return self._join(texts)
@@ -240,45 +287,71 @@ class Retranslation:
                                 r'けど|けれど|ですが|だが|ものの|と思|って)', following)
         return bool(predicate and following and not continuation)
 
+    def _candidate(self, now):
+        group = next((g for g in self.groups if not g.committed), None)
+        if group is None:
+            return None
+        texts, right = [], []
+        right_chars = 0
+        for following in self.groups[self.groups.index(group)+1:]:
+            for sid, segment in following.segments.items():
+                if not segment['text']:
+                    break
+                separator = 1 if texts and self.language in ('en', 'ko') else 0
+                if right_chars + separator >= 500:
+                    break
+                part = segment['text'][:500-right_chars-separator]
+                texts.append(part)
+                right_chars += len(part)+separator
+                right.append((sid, segment))
+            if right_chars >= 500 or any(not s['text'] for s in following.segments.values()):
+                break
+        final = group.reason is not None and all(s['final'] for s in group.segments.values())
+        text = self._text(group)
+        context = self._source_history(before=group.start)
+        signature = (group.revision, context)
+        if not text or (not final and (not self.drafts
+                or now-group.last_request < self.interval
+                or getattr(group, 'requested_signature', None) == signature)):
+            return None
+        confirmed = tuple((sid, s['revision']) for sid, s in group.segments.items() if s['final'])
+        priority = ('final' if final else 'confirmed' if confirmed and
+                    confirmed != getattr(group, 'requested_confirmed', ()) else 'draft')
+        request = dict(request_id=self.request_id+1, group_id=group.id,
+                       group_revision=group.revision,
+                       source_revisions={sid: s['revision'] for sid, s in group.segments.items()},
+                       source_text=text, context=context, lookahead_source=self._join(texts)[:500],
+                       lookahead_revisions={sid: s['revision'] for sid, s in right},
+                       lookahead_provisional=any(not s['final'] for _, s in right),
+                       context_revision=self.context_revision, final=final,
+                       start_s=group.start, end_s=group.end,
+                       first_source_end_s=next(iter(group.segments.values()))['end'],
+                       completion_reason=group.reason)
+        return group, request, signature, confirmed, priority
+
+    def priority(self, now):
+        with self.lock:
+            if self.inflight is not None:
+                return None
+            candidate = self._candidate(now)
+            return candidate[-1] if candidate else None
+
+    def stop_drafts(self):
+        with self.lock:
+            self.drafts = False
+
     def take(self, now):
         with self.lock:
             if self.inflight is not None:
                 raise RuntimeError('only one translation request may run')
-            # Keep context deterministic: commit groups in audio order. There
-            # is no unbounded queue of obsolete draft translation snapshots.
-            group = next((g for g in self.groups if not g.committed), None)
-            if group is None:
+            candidate = self._candidate(now)
+            if candidate is None:
                 return None
-            self._commit_prefix(group)
-            # A hard/pause-closed block may already have later Qwen text. This
-            # reference crosses group boundaries without translating it twice.
-            if self.language == 'ja' and group.reason is not None:
-                later = self.groups[self.groups.index(group)+1:]
-                texts = []
-                for next_group in later:
-                    texts.append(self._following_text(next_group))
-                    if any(not s['final'] for s in next_group.segments.values()):
-                        break
-                group.lookahead = self._join(texts)[:500]
-            final = group.reason is not None and all(s['final'] for s in group.segments.values())
-            text = self._text(group)
-            context = self._source_history(before=group.start)
-            signature = (group.revision, context)
-            if not text or (not final and (not self.drafts or group.reason is not None
-                    or now-group.last_request < self.interval
-                    or getattr(group, 'requested_signature', None) == signature)):
-                return None
-            self.request_id += 1
-            request = dict(request_id=self.request_id, group_id=group.id,
-                           group_revision=group.revision,
-                           source_revisions={sid: s['revision'] for sid, s in group.segments.items()},
-                           source_text=text, context=context, lookahead_source=group.lookahead,
-                           context_revision=self.context_revision, final=final,
-                           start_s=group.start, end_s=group.end,
-                           first_source_end_s=next(iter(group.segments.values()))['end'],
-                           completion_reason=group.reason)
+            group, request, signature, confirmed, _ = candidate
+            self.request_id = request['request_id']
             group.last_request = now
             group.requested_signature = signature
+            group.requested_confirmed = confirmed
             self.inflight = request
             return request.copy()
 
@@ -287,7 +360,7 @@ class Retranslation:
         return self.cache[1] if self.cache and self.cache[0] == key else None
 
     def complete(self, request, text, compute_s=0):
-        with self.lock:
+        with self._transition():
             if self.inflight != request:
                 raise ValueError('translation request is not in flight')
             self.inflight = None
@@ -300,13 +373,14 @@ class Retranslation:
                 return None
             group.displayed_request = request['request_id']
             data = {key: value for key, value in request.items() if key not in ('context', 'final')}
-            event = self.emit('translation_final' if request['final'] else 'translation_draft',
-                              **data, text=text, compute_s=compute_s,
-                              stale_source=not current, provisional=not request['final'])
+            kind = 'translation_final' if request['final'] else 'translation_draft'
+            data.update(text=text, compute_s=compute_s, stale_source=not current,
+                        provisional=not request['final'])
+            self.outbox.append((kind, data))
             if request['final']:
                 group.committed = True
                 self._retire(group)
-            return event
+            return dict(kind=kind, **data)
 
     def pending(self):
         with self.lock:
@@ -318,7 +392,7 @@ class Retranslation:
         A terminal failure retires only this group, without publishing a final,
         caching rejected text, or adding an unreliable pair to context.
         """
-        with self.lock:
+        with self._transition():
             if self.inflight != request:
                 raise ValueError('translation request is not in flight')
             self.inflight = None
@@ -331,6 +405,6 @@ class Retranslation:
             if group.final_failures < 2:
                 return False
             data = {key: value for key, value in request.items() if key not in ('context', 'final')}
-            self.emit('translation_failed', **data, provisional=False)
+            self.outbox.append(('translation_failed', dict(**data, provisional=False)))
             self._retire(group)
             return True

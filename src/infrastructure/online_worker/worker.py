@@ -13,6 +13,7 @@ import time
 from .mt import HyMT2
 from .asr_models import zipformer
 from .retranslation import Retranslation
+from .stage_admission import StageAdmission
 from .pcm_input import PCMInput, AudioRing
 
 
@@ -73,6 +74,17 @@ def sense_text(model, samples):
     return stream.result.text
 
 
+def enqueue_final(jobs, job, errors):
+    """Backpressure must release capture if its consumer has failed."""
+    while not errors:
+        try:
+            jobs.put(job, timeout=.05)
+            return True
+        except queue.Full:
+            continue
+    return False
+
+
 def complete_translation(translator, translation, request, events, output=None):
     started = time.monotonic()
     try:
@@ -128,7 +140,9 @@ def main():
     config.silero_vad.max_speech_duration = 12
     vad = sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=60)
     drafts, finals = queue.Queue(maxsize=1), queue.Queue(maxsize=8)
-    draft_ready, final_ready = threading.Event(), threading.Event()
+    draft_ready, final_ready, mt_ready = threading.Event(), threading.Event(), threading.Event()
+    asr_done = threading.Event()
+    session_started = threading.Event()
     errors, load_times = [], {}
     replaced, max_pending = 0, 0
     from contextlib import nullcontext
@@ -136,6 +150,7 @@ def main():
         events = Events(event_file)
         translation = Retranslation(events.emit, language=a.language, drafts=a.translation_drafts)
         audio_clock = dict(seconds=0, speech=False, eof=False)
+        admission = StageAdmission(translation if a.translation_url else None)
 
         def draft_worker():
             try:
@@ -171,6 +186,7 @@ def main():
                         translation.update(draft_event)
             except Exception as error:
                 errors.append(repr(error))
+                admission.abort()
                 events.emit('worker_error', worker='draft', error=repr(error))
                 draft_ready.set()
 
@@ -184,67 +200,81 @@ def main():
                     mx.synchronize()
                 else:
                     model = sensevoice(a.final_model, a.language)
-                mt_config = (json.loads(os.environ.get('ATOGAKI_ONLINE_MT_CONTEXT', '{}')) or {})
-                translator = HyMT2(a.translation_url, mt_config.get('model', 'Hy-MT2-1.8B-Q4_K_M'),
-                                   'Simplified Chinese', backend=mt_config.get('backend', 'hy-mt2'),
-                                   source_language=a.language,
-                                   protected_terms=mt_config.get('protected_terms', ()),
-                                   scene=mt_config.get('scene', '')) if a.translation_url else None
                 load_times['final_s'] = time.monotonic() - t
                 final_ready.set()
-                input_done = False
-                while True:
-                    # Final ASR always precedes pending MT. An already-running
-                    # HTTP generation is not preempted; drafts have no FIFO.
-                    translation.advance(**audio_clock)
+                while not errors:
                     try:
-                        job = finals.get(timeout=.02) if not input_done else None
-                        if job is None:
-                            input_done = True
+                        job = finals.get(timeout=.02)
                     except queue.Empty:
-                        job = None
-                    if job is None:
-                        request = translation.take(time.monotonic()) if translator else None
-                        if request:
-                            complete_translation(translator, translation, request, events, a.output)
-                            continue
-                        if input_done and (not translator or not translation.pending()):
-                            break
-                        if input_done:
-                            raise RuntimeError('translation groups incomplete after final ASR drain')
                         continue
-                    before = time.monotonic()
-                    if a.final == 'qwen':
-                        language = {'ja':'Japanese','zh':'Chinese','en':'English','ko':'Korean'}[a.language]
-                        result = model.transcribe((job['samples'], 16000), language=language)
-                        mx.synchronize()
-                        if result.truncated:
-                            raise RuntimeError('final ASR hit token limit')
-                        text = result.text
-                    else:
-                        text = sense_text(model, job['samples'])
-                    if not text.strip():
-                        raise RuntimeError('empty final ASR output')
-                    final_event = events.emit('source_final', segment_id=job['segment_id'],
-                        start_s=job['start_s'], end_s=job['end_s'], text=text,
-                        compute_s=time.monotonic()-before,
-                        queue_wait_s=before-job['queued_at'],
-                        after_audio_end_s=time.monotonic()-events.started-events.audio_offset_s-job['end_s'],
-                        completion_reason=job['reason'], model_final=True, human_verified=False)
-                    translation.update(final_event)
+                    if job is None:
+                        break
+                    with admission.asr():
+                        before = time.monotonic()
+                        if a.final == 'qwen':
+                            language = {'ja':'Japanese','zh':'Chinese','en':'English','ko':'Korean'}[a.language]
+                            result = model.transcribe((job['samples'], 16000), language=language)
+                            mx.synchronize()
+                            if result.truncated:
+                                raise RuntimeError('final ASR hit token limit')
+                            text = result.text
+                        else:
+                            text = sense_text(model, job['samples'])
+                        if not text.strip():
+                            raise RuntimeError('empty final ASR output')
+                        final_event = events.emit('source_final', segment_id=job['segment_id'],
+                            start_s=job['start_s'], end_s=job['end_s'], text=text,
+                            compute_s=time.monotonic()-before,
+                            queue_wait_s=before-job['queued_at'],
+                            after_audio_end_s=time.monotonic()-events.started-events.audio_offset_s-job['end_s'],
+                            completion_reason=job['reason'], model_final=True, human_verified=False)
+                        translation.update(final_event)
             except Exception as error:
                 errors.append(repr(error))
+                admission.abort()
                 events.emit('worker_error', worker='final', error=repr(error))
                 final_ready.set()
+            finally:
+                asr_done.set()
+
+        def mt_worker():
+            try:
+                mt_config = json.loads(os.environ.get('ATOGAKI_ONLINE_MT_CONTEXT', '{}')) or {}
+                translator = HyMT2(a.translation_url, mt_config.get('model', 'Hy-MT2-1.8B-Q4_K_M'),
+                    'Simplified Chinese', backend=mt_config.get('backend', 'hy-mt2'),
+                    source_language=a.language, protected_terms=mt_config.get('protected_terms', ()),
+                    scene=mt_config.get('scene', '')) if a.translation_url else None
+                mt_ready.set()
+                session_started.wait()
+                while not errors:
+                    translation.advance(**audio_clock, now=time.monotonic()-events.started)
+                    request = admission.take_mt() if translator else None
+                    if request:
+                        try:
+                            complete_translation(translator, translation, request, events, a.output)
+                        finally:
+                            admission.complete_mt()
+                        continue
+                    if asr_done.is_set() and (not translator or not translation.pending()):
+                        break
+                    time.sleep(.02)
+            except Exception as error:
+                errors.append(repr(error))
+                admission.abort()
+                events.emit('worker_error', worker='translation', error=repr(error))
+                mt_ready.set()
 
         draft_thread = threading.Thread(target=draft_worker, name='local-draft', daemon=True)
         final_thread = threading.Thread(target=final_worker, name='segment-final', daemon=True)
-        draft_thread.start(); final_thread.start()
-        draft_ready.wait(); final_ready.wait()
+        mt_thread = threading.Thread(target=mt_worker, name='local-translation', daemon=True)
+        draft_thread.start(); final_thread.start(); mt_thread.start()
+        draft_ready.wait(); final_ready.wait(); mt_ready.wait()
         if errors:
+            session_started.set()
             raise RuntimeError('; '.join(errors))
         events.started = time.monotonic()
         events.emit('session_ready', sample_rate=16000, channels=1, sample_format='s16le')
+        session_started.set()
         starts, last_end, last_snapshot = {}, 0, -1.0
 
         def snapshot(segment, received, closed=False, reason=None):
@@ -252,7 +282,8 @@ def main():
             start = starts.setdefault(sid, max(last_end, segment.start-3200, 0))
             end = min(segment.start+len(segment.samples), received, pcm.end)
             if end > start:
-                translation.observe(sid, start/16000, end/16000, closed=closed)
+                translation.observe(sid, start/16000, end/16000, closed=closed,
+                                    now=time.monotonic()-events.started)
             return dict(segment_id=sid, start_s=start/16000, end_s=end/16000,
                         samples=pcm.snapshot(start, end), closed=closed, reason=reason)
 
@@ -270,7 +301,7 @@ def main():
 
         def close_segments(received, eof=False):
             nonlocal last_end, max_pending
-            while not vad.empty():
+            while not errors and not vad.empty():
                 segment = vad.front
                 reason = 'input_eof' if eof else 'vad_or_max_duration'
                 job = snapshot(segment, received, True, reason)
@@ -279,7 +310,8 @@ def main():
                                 start_s=job['start_s'], end_s=job['end_s'], reason=reason)
                     send_draft(job)
                     job['queued_at'] = time.monotonic()
-                    finals.put(job)
+                    if not enqueue_final(finals, job, errors):
+                        break
                     max_pending = max(max_pending, finals.qsize())
                     last_end = int(round(job['end_s']*16000))
                     starts.pop(job['segment_id'], None)
@@ -301,17 +333,18 @@ def main():
             vad.accept_waveform(chunk)
             close_segments(end)
             audio_clock.update(seconds=end/16000, speech=vad.is_speech_detected())
-            translation.advance(**audio_clock)
+            translation.advance(**audio_clock, now=time.monotonic()-events.started)
             interval = 1.0 if a.draft == 'sensevoice' else .032
             if vad.is_speech_detected() and end/16000-last_snapshot >= interval:
                 job = snapshot(vad.current_segment, end)
                 if len(job['samples']):
                     send_draft(job)
                     last_snapshot = end/16000
+        translation.stop_drafts()
         vad.flush()
         close_segments(pcm.end, eof=True)
         audio_clock.update(seconds=pcm.end/16000, speech=False, eof=True)
-        translation.advance(**audio_clock)
+        translation.advance(**audio_clock, now=time.monotonic()-events.started)
         # A dead worker must not prevent ending the other worker or saving the summary.
         if draft_thread.is_alive():
             try:
@@ -319,8 +352,11 @@ def main():
             except queue.Empty:
                 pass
             drafts.put_nowait(None)
-        finals.put(None)
-        draft_thread.join(); final_thread.join()
+        if not errors:
+            enqueue_final(finals, None, errors)
+        else:
+            admission.abort()
+        draft_thread.join(); final_thread.join(); mt_thread.join()
         summary = dict(status='failed' if errors else 'degraded' if events.counts.get('translation_failed') else 'completed', errors=errors,
             translation_failed_groups=events.counts.get('translation_failed', 0),
             translation_rejections=events.counts.get('translation_error', 0),
@@ -338,7 +374,8 @@ def main():
             translation_drafts=a.translation_drafts,
             translation_group_policy=dict(pause_s=translation.pause,
                 max_seconds=translation.max_seconds, max_chars=translation.max_chars, draft_interval_s=translation.interval,
-                bounds='at final ASR boundaries; one segment may overshoot', context_groups_max=8, context_character_budget=2000,
+                bounds='at final ASR boundaries; one segment may overshoot', context_groups_max=8, context_character_budget=2000, context_kind="confirmed-source-only",
+                stage_admission="overlap" if admission.overlap else "oldest-translation-first",
                 sentence_lookahead_chars=8, commit_wait_after_qwen_s=translation.commit_wait),
             note='file-clock demo; first draft is not verified-word latency; translation groups revise independently of ASR segments')
         if a.output:
