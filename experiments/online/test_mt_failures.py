@@ -9,9 +9,30 @@ import _worker_path
 from online_worker.mt import HyMT2, TranslationError
 from online_worker.retranslation import Retranslation
 from online_worker.worker import Events, complete_translation
+from online_worker.drain_budget import DrainBudget
 
 
 class MTFailureTests(unittest.TestCase):
+    def test_request_uses_remaining_budget_and_late_response_cannot_commit(self):
+        now = [0]
+        budget = DrainBudget(monotonic=lambda: now[0])
+        budget.begin(3)
+        mt = Retranslation(lambda *_a, **_k: None)
+        self.source(mt, 'a', '原文', final=True)
+        mt.advance(1, eof=True)
+        class Late:
+            def translate(self, *args):
+                now[0] = 4
+                return '迟到译文'
+        translator = Late()
+        with redirect_stdout(io.StringIO()):
+            events = Events()
+            complete_translation(translator, mt, mt.take(0), events, budget=budget)
+        self.assertEqual(translator.timeout, 3)
+        self.assertNotIn('translation_final', events.counts)
+        self.assertEqual(events.counts['translation_error'], 1)
+        self.assertIsNone(mt.cache)
+
     def test_rejected_response_preserves_finish_reason_and_body(self):
         adapter = HyMT2('http://127.0.0.1:9/v1', 'local', 'Chinese')
         class Client:

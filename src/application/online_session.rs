@@ -60,6 +60,39 @@ fn enabled() -> bool {
 }
 
 type EventSink = Arc<dyn Fn(OnlineSessionEvent) + Send + Sync>;
+
+/// Metadata only. Published once by rename so the worker never reads a partial deadline.
+struct DrainControl(PathBuf);
+impl DrainControl {
+    fn new() -> Result<Self> {
+        let root = std::env::temp_dir().join(format!("atogaki-online-drain-{}", Uuid::new_v4()));
+        std::fs::create_dir(&root).context("create online stop control")?;
+        Ok(Self(root))
+    }
+    fn path(&self) -> PathBuf {
+        self.0.join("deadline")
+    }
+    fn begin(&self) -> Result<()> {
+        if !self.path().exists() {
+            let deadline = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs_f64()
+                + 30.0;
+            let pending = self.0.join("pending");
+            std::fs::write(&pending, deadline.to_string())?;
+            std::fs::rename(pending, self.path())?;
+        }
+        Ok(())
+    }
+}
+impl Drop for DrainControl {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.path());
+        let _ = std::fs::remove_file(self.0.join("pending"));
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
 struct ActiveSession {
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
@@ -213,6 +246,7 @@ async fn run_session(
             }
         }
     }
+    let drain_control = DrainControl::new()?;
     let mut command = Command::new(runtime.python);
     command
         .args([
@@ -239,6 +273,8 @@ async fn run_session(
         .arg(models.final_model)
         .arg("--vad-model")
         .arg(models.vad_model)
+        .arg("--drain-deadline")
+        .arg(drain_control.path())
         .env("PYTHONPATH", runtime.worker_root)
         .env("PYTHONNOUSERSITE", "1")
         .stdin(Stdio::piped())
@@ -330,6 +366,7 @@ async fn run_session(
                     stopping = true;
                     phase(status, "stopping");
                     drain_end = Instant::now()+Duration::from_secs(30);
+                    drain_control.begin()?;
                     // Helper destroys its tap, closes stdout; the pipe closes
                     // worker stdin, which flushes VAD, final ASR and MT.
                     if let Some(mut control) = capture_control.take() { let _ = control.write_all(&[0]).await; }
@@ -338,7 +375,10 @@ async fn run_session(
                     captured = true;
                     if !exit?.success() { bail!("system audio capture exited unsuccessfully"); }
                     phase(status, "draining");
-                    drain_end = Instant::now()+Duration::from_secs(30);
+                    if !stopping {
+                        drain_end = Instant::now()+Duration::from_secs(30);
+                        drain_control.begin()?;
+                    }
                 }
                 line = capture_events.next_line(), if capture_events_open => {
                     if let Some(line) = line? {
@@ -382,6 +422,20 @@ async fn run_session(
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn drain_deadline_is_published_once_and_control_is_removed() {
+        let control = DrainControl::new().unwrap();
+        let root = control.0.clone();
+        assert!(!control.path().exists());
+        control.begin().unwrap();
+        let first = std::fs::read_to_string(control.path()).unwrap();
+        assert!(first.parse::<f64>().unwrap().is_finite());
+        control.begin().unwrap();
+        assert_eq!(std::fs::read_to_string(control.path()).unwrap(), first);
+        drop(control);
+        assert!(!root.exists());
+    }
 
     #[test]
     fn translation_failures_are_relayed_without_aborting_the_session() {

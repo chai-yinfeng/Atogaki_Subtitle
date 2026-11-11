@@ -14,6 +14,7 @@ from .mt import HyMT2
 from .asr_models import zipformer
 from .retranslation import Retranslation
 from .stage_admission import StageAdmission
+from .drain_budget import DrainBudget
 from .pcm_input import PCMInput, AudioRing
 
 
@@ -74,9 +75,15 @@ def sense_text(model, samples):
     return stream.result.text
 
 
-def enqueue_final(jobs, job, errors):
+def enqueue_final(jobs, job, errors, budget=None):
     """Backpressure must release capture if its consumer has failed."""
     while not errors:
+        if budget is not None:
+            try:
+                budget.remaining()
+            except TimeoutError as error:
+                errors.append(str(error))
+                return False
         try:
             jobs.put(job, timeout=.05)
             return True
@@ -85,12 +92,16 @@ def enqueue_final(jobs, job, errors):
     return False
 
 
-def complete_translation(translator, translation, request, events, output=None):
+def complete_translation(translator, translation, request, events, output=None, *, budget=None):
     started = time.monotonic()
     try:
+        if budget is not None:
+            translator.timeout = min(120, budget.remaining())
         text = translation.cached(request)
         if text is None:
             text = translator.translate(request['source_text'], request['context'], request['lookahead_source'])
+        if budget is not None:
+            budget.remaining()
     except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
         terminal = translation.fail(request)
         events.emit('translation_error', request_id=request['request_id'], group_id=request['group_id'],
@@ -121,6 +132,7 @@ def main():
     p.add_argument('--final-model', type=Path, required=True)
     p.add_argument('--vad-model', type=Path, required=True)
     p.add_argument('--translation-url', help='Optional loopback llama-server /v1 URL')
+    p.add_argument('--drain-deadline', type=Path, help='Desktop-owned temporary stop deadline; no audio or text')
     p.add_argument('--translation-drafts', action=argparse.BooleanOptionalAction, default=True,
                    help='Retranslate active source drafts (disable to translate only closed groups)')
     a = p.parse_args()
@@ -144,6 +156,7 @@ def main():
     asr_done = threading.Event()
     session_started = threading.Event()
     errors, load_times = [], {}
+    budget = DrainBudget(a.drain_deadline)
     replaced, max_pending = 0, 0
     from contextlib import nullcontext
     with ((a.output / 'events.jsonl').open('w') if a.output else nullcontext()) as event_file:
@@ -209,7 +222,9 @@ def main():
                         continue
                     if job is None:
                         break
+                    budget.remaining()
                     with admission.asr():
+                        budget.remaining()
                         before = time.monotonic()
                         if a.final == 'qwen':
                             language = {'ja':'Japanese','zh':'Chinese','en':'English','ko':'Korean'}[a.language]
@@ -222,6 +237,7 @@ def main():
                             text = sense_text(model, job['samples'])
                         if not text.strip():
                             raise RuntimeError('empty final ASR output')
+                        budget.remaining()
                         final_event = events.emit('source_final', segment_id=job['segment_id'],
                             start_s=job['start_s'], end_s=job['end_s'], text=text,
                             compute_s=time.monotonic()-before,
@@ -247,11 +263,14 @@ def main():
                 mt_ready.set()
                 session_started.wait()
                 while not errors:
+                    budget.remaining()
+                    if budget.draining:
+                        translation.stop_drafts()
                     translation.advance(**audio_clock, now=time.monotonic()-events.started)
                     request = admission.take_mt() if translator else None
                     if request:
                         try:
-                            complete_translation(translator, translation, request, events, a.output)
+                            complete_translation(translator, translation, request, events, a.output, budget=budget)
                         finally:
                             admission.complete_mt()
                         continue
@@ -310,7 +329,7 @@ def main():
                                 start_s=job['start_s'], end_s=job['end_s'], reason=reason)
                     send_draft(job)
                     job['queued_at'] = time.monotonic()
-                    if not enqueue_final(finals, job, errors):
+                    if not enqueue_final(finals, job, errors, budget):
                         break
                     max_pending = max(max_pending, finals.qsize())
                     last_end = int(round(job['end_s']*16000))
@@ -341,6 +360,7 @@ def main():
                     send_draft(job)
                     last_snapshot = end/16000
         translation.stop_drafts()
+        budget.begin()
         vad.flush()
         close_segments(pcm.end, eof=True)
         audio_clock.update(seconds=pcm.end/16000, speech=False, eof=True)
@@ -353,7 +373,7 @@ def main():
                 pass
             drafts.put_nowait(None)
         if not errors:
-            enqueue_final(finals, None, errors)
+            enqueue_final(finals, None, errors, budget)
         else:
             admission.abort()
         draft_thread.join(); final_thread.join(); mt_thread.join()
