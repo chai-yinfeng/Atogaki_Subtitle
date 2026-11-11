@@ -1,6 +1,8 @@
 # 开发路线图历史快照（2026-10-22）
 
-> 来源：`b9c1fb8` 的 `docs/roadmap.md`。除标题与本说明外保留原文；这里的待确认、未发行、复选框和技术债表达当时状态，可能被后续实现取代。当前工作以[路线图](roadmap.md)、[产品方向](product-direction.md)和最新有效 ADR 为准。本文与原文位于同一目录，既有相对链接保持有效。
+> 历史归档（2026-11-11）：本文保留原始讨论／证据，不再作为当前计划。现状见[路线图](../../roadmap.md)、[架构](../../architecture.md)与[文档索引](../../README.md)。
+
+> 来源：`b9c1fb8` 的 `docs/roadmap.md`。除标题与本说明外保留原文；这里的待确认、未发行、复选框和技术债表达当时状态，可能被后续实现取代。当前工作以[路线图](../../roadmap.md)、[产品方向](../../product-direction.md)和最新有效 ADR 为准。本文与原文位于同一目录，既有相对链接保持有效。
 
 
 _最后更新：2026-10-22_
@@ -9,7 +11,7 @@ _最后更新：2026-10-22_
 
 当前推进顺序（2026-09-16 调整）：
 
-桌面 App 的能力范围已按 [稳定能力矩阵](app-capability-matrix.md) 冻结。下列尚未完成的模型、全任务云端 ASR、实时和 pipeline 研究默认在 CLI／evaluation harness 推进；通过质量与工作流门禁后再单独决定是否晋升桌面，见 [决策 0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)。
+桌面 App 的能力范围已按 [稳定能力矩阵](../../app-capability-matrix.md) 冻结。下列尚未完成的模型、全任务云端 ASR、实时和 pipeline 研究默认在 CLI／evaluation harness 推进；通过质量与工作流门禁后再单独决定是否晋升桌面，见 [决策 0044](../../decisions/0044-stable-desktop-scope-and-cli-experiments.md)。
 
 1. 以已有原视频建立代表性片段、完整长节目和少量人工参考，固定识别／翻译质量基线；不要求先收集大量完整标准字幕。
 2. 按 [管线演进计划](pipeline-evolution.md) 抽出 ASR run／artifact／细粒度时间数据，增量迁移并保护现有编辑、学习来源与导出。
@@ -34,22 +36,22 @@ _最后更新：2026-10-22_
 - [x] 127.0.0.1 会话媒体服务替代整片 Vec 响应，完整 GET 与 Range 均按 64 KiB 流式读取；随机 token／登记文件／Host 与 Origin 限制，支持 9.2 GB 文件与后段 seek。最终签名 App 隔离数据验证完整电影和 WAV 的后段播放及切源。
 - [x] 按试用反馈移除手动切源按钮，始终优先原素材，加载／解码错误自动回退一次；损坏视频→WAV、后段播放及双重损坏停止回退的签名窗口回归通过。
 - [ ] 真实云端吞吐／译文质量、用户听感及持续长时间压力后补。截图的提前翻译数是 ASR 期间缓存成果，不能当作最终总进度；新 journal 计数表示语义组尝试，不能再当作 HTTP 次数。流式服务解决整片读取风险，不扩展系统媒体解码能力。
-- 详细结构与边界见 [0054](decisions/0054-request-batching-and-loopback-media.md)。
-- 决策与边界见 [0053](decisions/0053-language-segmentation-and-long-editor.md)。
+- 详细结构与边界见 [0054](../../decisions/0054-request-batching-and-loopback-media.md)。
+- 决策与边界见 [0053](../../decisions/0053-language-segmentation-and-long-editor.md)。
 
 ## 2026-10-21：统一字幕编辑器
 
-按 [0055](decisions/0055-unified-subtitle-editor.md) 推进：面板 → 性能 → 模块拆分 → 文档与产物整理。继承 `df5aa24` 的原媒体自动恢复、loopback 流式播放和时间轴索引，不混入 online ASR 实验。
+按 [0055](../../decisions/0055-unified-subtitle-editor.md) 推进：面板 → 性能 → 模块拆分 → 文档与产物整理。继承 `df5aa24` 的原媒体自动恢复、loopback 流式播放和时间轴索引，不混入 online ASR 实验。
 
-- [x] 面板实现与工程验证：四区、视频／波形折叠、比例记忆、统一单段编辑、搜索筛选、编辑选择与播放分离；25 项前端测试、构建、隔离浏览器及原生保存验证通过，见 [面板验收](editor-workspace-validation.md)。
+- [x] 面板实现与工程验证：四区、视频／波形折叠、比例记忆、统一单段编辑、搜索筛选、编辑选择与播放分离；25 项前端测试、构建、隔离浏览器及原生保存验证通过，见 [面板验收](../../editor-workspace-validation.md)。
 - [x] 用户确认面板大体正常；统一「字幕编辑」名称、完整任务直达入口及内外间距。后续反馈将视频／时间轴并排置顶、当前句编辑居中，布局 v2 迁移与双窗口尺寸回归通过。
-- [x] 第二阶段实现与工程回归：虚拟列表、按 cue ID 更新文本／时间索引、轻量任务摘要与已完成任务停轮询；打开详情只同步当前任务。300／3,000／10,000 段同机 WebKit 前后 trace 已保留，10,000 段挂载行从 10,000 降为约 20，搜索约 122→6 ms。设计见 [0056](decisions/0056-editor-virtual-list-and-task-summary.md)，方法、原生三小时验收及局限见 [性能验证](editor-performance-validation.md)。
+- [x] 第二阶段实现与工程回归：虚拟列表、按 cue ID 更新文本／时间索引、轻量任务摘要与已完成任务停轮询；打开详情只同步当前任务。300／3,000／10,000 段同机 WebKit 前后 trace 已保留，10,000 段挂载行从 10,000 降为约 20，搜索约 122→6 ms。设计见 [0056](../../decisions/0056-editor-virtual-list-and-task-summary.md)，方法、原生三小时验收及局限见 [性能验证](../../editor-performance-validation.md)。
 - [ ] 第二阶段剩余项：滚动 P95 尚未改善，真实任务持续内存仍需专项复测；三小时 WAV 首次加载暂态在移出缓存复测后未复现，保留观察；当前结果不能标记所有性能门禁完成。Windows 独立实机验收后补。
 - [x] 第三阶段首条边界：当前句编辑视图接管输入／IME／按钮生命周期，直接使用既有 SubtitleDrafts；移除重复的 dirty／编辑 cue ID 状态。文字保存／恢复及时间保存通过集中适配层，未改变请求或事务。类型／构建与 WebKit 回归通过。
-- [x] 工具连接与焦点生命周期独立：翻译／导出区域及识别复核 dialog 按需连接，关闭后卸载；表单实例保留输入，复核条目关闭即释放。新增工具反复打开与未完成任务只读页回归通过；见 [0057](decisions/0057-editor-view-lifecycles.md)。
+- [x] 工具连接与焦点生命周期独立：翻译／导出区域及识别复核 dialog 按需连接，关闭后卸载；表单实例保留输入，复核条目关闭即释放。新增工具反复打开与未完成任务只读页回归通过；见 [0057](../../decisions/0057-editor-view-lifecycles.md)。
 - [x] 清除经编译器与调用搜索确认无使用的旧粗修保存／撤销入口、旧计时器和重复配置读取；开启 TypeScript noUnusedLocals／noUnusedParameters。波形 ResizeObserver 在页面退出时明确释放，29 项前端测试与生产构建通过。
 - [x] 按截图反馈将导航、起止时间与编辑操作集中到上方紧凑工具栏，正文双栏填满余下高度，保存状态独立保留；双窗口尺寸的 WebKit 回归通过。用户授权覆盖本机正式 App，完整四 sidecar release 包已安装，14 个任务／20 张数据表保持一致。
-- [x] 用户确认紧凑工作台与上下原译文，先修正跟随语义：默认显示播放句，手动编辑锁定，恢复跟随先检查草稿／IME／时间输入；列表浏览独立暂停自动滚动，Cut 统一作用于编辑段。决策见 [0058](decisions/0058-compact-editor-and-playback-follow.md)。
+- [x] 用户确认紧凑工作台与上下原译文，先修正跟随语义：默认显示播放句，手动编辑锁定，恢复跟随先检查草稿／IME／时间输入；列表浏览独立暂停自动滚动，Cut 统一作用于编辑段。决策见 [0058](../../decisions/0058-compact-editor-and-playback-follow.md)。
 - [x] 紧凑布局改为左侧大视频、右侧波形＋上下双语编辑、底部整宽 28 px 虚拟表格；布局 v3 迁移折叠状态并重置旧比例，三处分隔线支持鼠标与键盘。1180×760／960×640、大字号、主题隔离与 10,000 段后段跟随 WebKit 回归通过；原生隔离 WAV 已验证跟随、锁定、恢复、双折叠继续播放及菜单可访问性。
 - [x] 会话跟随协调已抽出 `editor-follow.ts`，集中恢复请求代次、编辑焦点锁定、时间输入保护与状态呈现；继续使用原草稿和播放器，跟随专项及 30 项前端测试通过。
 - [x] 时间轴绘制／静态缓存／ResizeObserver 抽到 `editor-timeline-view.ts`，保持播放头和播放段独立绘制；紧凑轨道与命中共用几何，相邻边界按最近距离选取，折叠波形停止多余请求。32 项前端测试与四组 WebKit 回归通过。
@@ -65,17 +67,17 @@ _最后更新：2026-10-22_
 - [x] WebKit 连续 seek 竞争已复现并修复：共享播放器串行定位、合并最新目标，元数据／回退／离页快照保留意图；相对步进和循环统一调用。61 项前端、九组 WebKit 通过，原失败手势另连续三次通过；原生包拖动、内存及 Windows 门禁仍待补。
 - [x] 模块合并后的隔离原生包验证任务位置、连续步进和实际播放头拖动；候选预览 AX 缺失已改为显式嵌套焦点区域。真实 revision 冲突→重新对照→采用→撤销通过，范围外与独立任务不变，40 段快照完整恢复；62 项前端与九组 WebKit 通过，证据见窗口验收。
 - [x] 候选清理确认改为处理工具的显式焦点区域，原生 AX 标题与按钮、点击取消、采用后历史自动保护和键盘返回通过；64 项前端、九组 WebKit 通过，40 段采用／撤销快照不变。原生未执行文件释放，浏览器合成 IPC 验证确认调用与迟到返回；通用模态框不作全局可用性声明。
-- [x] `86c46c8` 四 sidecar release 包已覆盖本机 App。启动及打开真实 3,089 段任务后，14 个任务／9,976 段和 20 表摘要不变；媒体与跟随正常，已暂停供用户验收。保留上一版＋稳定版，清理两份旧 App 约 168 MiB；新快照与上次完全重复，复用恢复路径而不新增约 33 MiB 副本，见 [本机试装](local-editor-installation.md)。
+- [x] `86c46c8` 四 sidecar release 包已覆盖本机 App。启动及打开真实 3,089 段任务后，14 个任务／9,976 段和 20 表摘要不变；媒体与跟随正常，已暂停供用户验收。保留上一版＋稳定版，清理两份旧 App 约 168 MiB；新快照与上次完全重复，复用恢复路径而不新增约 33 MiB 副本，见 [本机试装](../../local-editor-installation.md)。
 - [ ] 剩余处理工具继续渐进抽取；滚动 P95、长时内存与 Windows 验收仍不由本机试装替代。
-- [x] 2026-10-22：虚拟列表跳过未改变的行窗口，滚动只初始化新行，保留行不重复更新属性。三种规模连续滚动的已挂载属性更新每轮 12,147→0，10,000 段 RAF 累计耗时中位数 88→24 ms；固定窗口零变更、焦点、局部保存与筛选专项通过。帧间隔 P95 未证实改善，原生持续内存等门禁仍保留，见 [性能验证](editor-performance-validation.md#2026-10-22减少滚动中的重复行更新)。本机 App 未随此提交覆盖。
+- [x] 2026-10-22：虚拟列表跳过未改变的行窗口，滚动只初始化新行，保留行不重复更新属性。三种规模连续滚动的已挂载属性更新每轮 12,147→0，10,000 段 RAF 累计耗时中位数 88→24 ms；固定窗口零变更、焦点、局部保存与筛选专项通过。帧间隔 P95 未证实改善，原生持续内存等门禁仍保留，见 [性能验证](../../editor-performance-validation.md#2026-10-22减少滚动中的重复行更新)。本机 App 未随此提交覆盖。
 - [x] 2026-10-22：当前包隔离载入真实 3,089 段长视频，后段定位、双折叠、435 项复核与八轮工具开关、搜索清除／恢复和数据不变核验通过；增加显式 PID 的十分钟 RSS 原始采样。259.5→602.2 MiB 的变化跨越不同视频缓冲与工具负载，尚不能通过无持续增长门禁；原生滚动工具间歇失败与一次锁定触发未追溯继续保留，详见性能记录。
 - [ ] Rust 命令层与 repository 单独拆分；文档与产物整理继续按原边界推进。
-- [x] Rust 命令第一条边界：11 条工作区命令和 9 个 wire DTO 移到 `commands/editor.rs`，main 显式注册模块路径；函数体、IPC 名称与请求字段保持一致。33 项 Tauri、14 项共享工作区测试与编译／格式检查通过；隔离原生文字保存／撤回、时间保存／撤销、Cut／Join／双撤销实际落库并恢复 40 段完整快照，见 [0059](decisions/0059-desktop-command-and-repository-modules.md) 与窗口验收。repository 留待独立提交，正式 App 未覆盖。
+- [x] Rust 命令第一条边界：11 条工作区命令和 9 个 wire DTO 移到 `commands/editor.rs`，main 显式注册模块路径；函数体、IPC 名称与请求字段保持一致。33 项 Tauri、14 项共享工作区测试与编译／格式检查通过；隔离原生文字保存／撤回、时间保存／撤销、Cut／Join／双撤销实际落库并恢复 40 段完整快照，见 [0059](../../decisions/0059-desktop-command-and-repository-modules.md) 与窗口验收。repository 留待独立提交，正式 App 未覆盖。
 - [x] Repository 第一条边界：7 个人工字幕编辑方法与 5 个结构事务辅助函数抽到 `local_db/subtitle_edits.rs`，候选仍复用同一事务内实现，函数体及 SQL 不变。新增部分写入后故障回归，确认 Cut 与候选范围替换完整回滚字幕、revision、来源、依赖和学习引用；共享库 149 通过／5 忽略、Tauri 33 通过／4 忽略。其余查询／来源／任务等边界继续分批处理，未重装 App，见 0059。
 - [x] Repository 快照／采用边界：6 个方法及 2 个辅助函数进入 `subtitle_publication.rs`，任务同步借用原事务，候选替换和采用证据仍原子提交。函数体与公开方法合同不变；完整共享库 149 通过／5 忽略、桌面 33 通过／4 忽略，覆盖 revision 冲突、来源保护、历史重叠与写入失败回滚，见 0059。未重装 App。
 - [x] Repository 只读边界：5 个字幕查询方法进入 `subtitle_queries.rs`，revision 与字幕仍在同一事务读取，排序／错误／方法体不变。完整共享库 149 通过／5 忽略及 Tauri 编译检查通过；未新增缓存或数据库连接，见 0059。
-- [x] 用户授权的旧安装备份清理：记录版本、路径与校验和后移除 21 份旧 App，合并 3 份完全相同的 SQLite 副本为可追溯链接，减少约 1.93 GiB 副本内容；保留安装前 App、0.1.1 稳定回退与全部独立恢复点，见 [本机安装记录](local-editor-installation.md)。
-- [x] [Web Serve／Postgres 退役影响报告](legacy-web-retirement-impact.md)：核对 CLI／HTTP／公开 library／迁移兼容面和实际桌面依赖树；保留 SQLite、loopback 媒体服务与所有迁移。非默认 feature 或移除方案留待讨论，本轮没有退役代码或数据库。
+- [x] 用户授权的旧安装备份清理：记录版本、路径与校验和后移除 21 份旧 App，合并 3 份完全相同的 SQLite 副本为可追溯链接，减少约 1.93 GiB 副本内容；保留安装前 App、0.1.1 稳定回退与全部独立恢复点，见 [本机安装记录](../../local-editor-installation.md)。
+- [x] [Web Serve／Postgres 退役影响报告](../../legacy-web-retirement-impact.md)：核对 CLI／HTTP／公开 library／迁移兼容面和实际桌面依赖树；保留 SQLite、loopback 媒体服务与所有迁移。非默认 feature 或移除方案留待讨论，本轮没有退役代码或数据库。
 - [ ] 文档索引与历史归档及其余产物保留清单。未采用候选、正式数据库与来源证据不因 UI 整理而删除。
 
 ## 2026-10-20：候选试用反馈——计时与翻译进度
@@ -91,10 +93,10 @@ _最后更新：2026-10-22_
 - [x] 任务协调器与资源限额分离：默认 2 路 ASR，DeepSeek 分组最多 4 路，桌面手动及自动翻译共享云端请求预算；自动翻译不再占用已完成 ASR 名额。本地翻译独占设备名额。暂停等待旧执行收尾，排队暂停／继续保持原任务。
 - [x] 第一阶段故障回归：核心 134 通过／4 忽略；覆盖 2 ASR／4 云端请求独立限流、本地设备互斥、取消释放名额、DeepSeek 首组失败后其他三组落盘并只补译余下五组，以及排队暂停／恢复。格式、差异及 Tauri 编译检查通过。
 - [x] 同任务稳定前缀提前翻译：检查点校验通知、稳定 cue ID、完整语义 group／30 秒后文缓冲、按冻结输入校验的持久响应缓存及实际请求日志；完整发布后只复用匹配输入和初始 revision，SQLite 再做原子 revision 校验。翻译失败不停止 ASR，后续从缺失翻译继续。
-- [x] 核心 137 通过／5 忽略、Tauri 32 通过／4 忽略、前端 17 通过，格式、类型、生产构建和壳层编译检查通过。真实两份八分钟 medium／VAD 任务的 GPU 区间重叠，自身识别完成前触发本地模拟翻译，各完成 128 段；该显式测试另计 1 通过。完整签名 App 的隔离窗口验收通过。详细证据与短样本未满足提前触发断言的记录见 [阶段管线验证](staged-pipeline-validation.md)。
+- [x] 核心 137 通过／5 忽略、Tauri 32 通过／4 忽略、前端 17 通过，格式、类型、生产构建和壳层编译检查通过。真实两份八分钟 medium／VAD 任务的 GPU 区间重叠，自身识别完成前触发本地模拟翻译，各完成 128 段；该显式测试另计 1 通过。完整签名 App 的隔离窗口验收通过。详细证据与短样本未满足提前触发断言的记录见 [阶段管线验证](../../staged-pipeline-validation.md)。
 - [x] v0.1.2 候选 App／DMG／源码包已从固定提交完成，签名、挂载内容、Finder 左右布局与八项源码摘要通过；README 和候选发布说明已更新，四项资产留在本地。
 - [x] 用户确认发布；最终版本化 App 完成计时冻结／增长、列表与详情一致、翻译阶段文案、错误展开及只读预览回归。最终 DMG 的 Finder 左右布局和四项远端下载校验通过，已公开 [v0.1.2](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.2)，设为 latest；没有 Windows 资产。
-- [ ] 真实云端限流／断网样本、长时间双任务压力和人工接缝质量后续验证。设计见 [0052](decisions/0052-staged-concurrency-and-early-translation.md)。发行时《教父》仍在翻译，因此当时未覆盖应用；用户确认完成后已从正式 v0.1.2 DMG 备份覆盖并启动本机应用，14 个任务保留，《教父》3,089 段全部已翻译，字幕／学习／词表摘要不变。
+- [ ] 真实云端限流／断网样本、长时间双任务压力和人工接缝质量后续验证。设计见 [0052](../../decisions/0052-staged-concurrency-and-early-translation.md)。发行时《教父》仍在翻译，因此当时未覆盖应用；用户确认完成后已从正式 v0.1.2 DMG 备份覆盖并启动本机应用，14 个任务保留，《教父》3,089 段全部已翻译，字幕／学习／词表摘要不变。
 
 ## 2026-10-20：长电影转录边界失败（Issue #21）
 
@@ -130,7 +132,7 @@ _最后更新：2026-10-22_
 - [x] 核心 129 项、壳层 32 项、前端 17 项测试通过；各有需要外部资源的忽略项，未作为通过计算。前端类型检查和生产构建通过，许可证重新生成无变更。
 - [x] 最终签名窗口与带 Finder 布局 DMG 已核对，本机 `/Applications/Atogaki.app` 已更新并保留旧版；安装前后字幕表完全一致，13 个任务保留。
 - [x] 历史决定：用户于本地打包后要求暂不发布，等待亲自检查；`v0.1.0` tag 已推送但未创建 Release 或上传资产。未来如修改源码，使用新版本，不移动已推送 tag。不生成 Windows 包；人工接缝听审与译文质量门禁后补。
-- 决策见 [0051](decisions/0051-theme-color-roles-and-macos-stable-release.md)，发布边界见 [发布说明](release-notes/v0.1.0.md)。
+- 决策见 [0051](../../decisions/0051-theme-color-roles-and-macos-stable-release.md)，发布边界见 [发布说明](../../release-notes/v0.1.0.md)。
 
 ## 2026-10-20：字幕块增删的译文失效范围
 
@@ -158,7 +160,7 @@ _最后更新：2026-10-22_
 
 ## 2026-10-18：离线工作流与长节目恢复
 
-决策见 [0045](decisions/0045-resumable-offline-workflows.md)。实施顺序：
+决策见 [0045](../../decisions/0045-resumable-offline-workflows.md)。实施顺序：
 
 - [x] 冻结翻译执行配置，隔离 provider 密钥草稿。
 - [x] 约两分钟 ASR 检查点、同任务暂停／继续和只读部分结果；模拟一小时音频验证中断跳过完成块、单块损坏恢复和模型身份校验。62 分钟真实节目已验证单块故障和导出故障恢复；接缝听审及完整窗口回归仍待完成。
@@ -167,7 +169,7 @@ _最后更新：2026-10-22_
 - [x] 学习检索、任务筛选、完整来源例句、UTF-16 收藏高亮及文本 Anki TSV 导出。
 - [ ] MLX CLI 对照脚本与首轮报告已落地：ASR 跑通，Hy-MT2 MLX 未通过输出结构合同；人工盲评与完整验收待继续，不更改默认 runtime。
 
-2026-10-18 应用户要求在额度刷新前暂停。当前分支 `codex/offline-workflow-recovery`，实现、验证证据和继续顺序见 [离线工作流验收与 checkpoint](offline-workflow-validation.md)。上述勾选表示实现完成，尚未完成的真实交互／质量／跨平台验收以该文档为准。
+2026-10-18 应用户要求在额度刷新前暂停。当前分支 `codex/offline-workflow-recovery`，实现、验证证据和继续顺序见 [离线工作流验收与 checkpoint](../../offline-workflow-validation.md)。上述勾选表示实现完成，尚未完成的真实交互／质量／跨平台验收以该文档为准。
 
 2026-10-18 已从 checkpoint 恢复：补齐损坏块拼接缓存失效、GPU 回退证据、跨平台文件同步、后端配置卡片和就绪状态；真实多文件失败隔离、学习多来源／Anki、预设内容包恢复和 MLX 双块恢复验证通过。release CLI 与 Tauri release 编译阻塞已解决。人工接缝听审与盲评按用户确认后补；Windows CI 与剩余弹窗交互证据见验收文档。
 
@@ -181,7 +183,7 @@ _最后更新：2026-10-22_
 
 ## 2026-10-19：Gemini 翻译与待复核提示
 
-用户要求新增 Gemini 文本翻译；沿用 Google 官方兼容端点与字幕执行合同，ASR／翻译共用原有系统 Key，模型与授权边界分离，见 [0046](decisions/0046-gemini-text-translation-and-shared-credential.md)。待复核区明确说明自动检测来源，不再显示内部类型代码；范围按钮改为“选取此范围”，避免误以为已执行重跑。真实云端连接和翻译质量仍待授权样本验收。视觉继续只研究，官方两组参考见 [视觉参考笔记](visual-reference-notes.md)。
+用户要求新增 Gemini 文本翻译；沿用 Google 官方兼容端点与字幕执行合同，ASR／翻译共用原有系统 Key，模型与授权边界分离，见 [0046](../../decisions/0046-gemini-text-translation-and-shared-credential.md)。待复核区明确说明自动检测来源，不再显示内部类型代码；范围按钮改为“选取此范围”，避免误以为已执行重跑。真实云端连接和翻译质量仍待授权样本验收。视觉继续只研究，官方两组参考见 [视觉参考笔记](visual-reference-notes.md)。
 
 ## 2026-10-19：辅助审查入口与主题研究
 
@@ -189,7 +191,7 @@ _最后更新：2026-10-22_
 
 ## 本轮：处理管线与翻译质量
 
-- [x] 明确四层表示、两段式主路线、第一阶段 cue 对应和同任务独立 ASR runs；记录 [0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
+- [x] 明确四层表示、两段式主路线、第一阶段 cue 对应和同任务独立 ASR runs；记录 [0043](../../decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
 - [x] 只读盘点用户提供的原视频并读取时长，确认有 13 个原始 MP4；候选与参考策略见管线计划。尚未听审、冻结片段或建立 gold 文本。
 - [ ] P0：固定短片段和完整长节目清单、旧版结果、人工参考及未用于调参的样本。
   - [x] 建立 Git 忽略的本地 evaluation workspace、可移植 manifest／reference schema、日语 CER／英文 WER 命令，并冻结首批媒体摘要、旧任务产物和循环问题区间。
@@ -209,7 +211,7 @@ _最后更新：2026-10-22_
   - [x] CLI 与桌面共用 `TranslationPlanner`、`TranslationProvider` 和 stable cue ID 执行合同；CLI 不再直接调用 DeepL 批处理函数。
 - [ ] P3：由开发流程自动配置 llama.cpp／Hy-MT2 并验证质量与资源；再实现应用管理的模型／runtime 生命周期。
   - [x] 固定 llama.cpp `v0.4.1` 与官方 Hy-MT2 1.8B／7B `Q4_K_M` revision、文件大小和 SHA-256；提供一条命令完成源码／模型校验、runtime 构建、loopback 启动、合同检查和进程回收。
-  - [x] 在 Apple M4 24 GB 上跑通 1.8B Metal 链路：stable cue ID／JSON／术语占位符合同通过，约 60 output tokens/s，短请求后 RSS 约 1.67 GiB；详见 [Hy-MT2 验证记录](hy-mt2-validation.md)。
+  - [x] 在 Apple M4 24 GB 上跑通 1.8B Metal 链路：stable cue ID／JSON／术语占位符合同通过，约 60 output tokens/s，短请求后 RSS 约 1.67 GiB；详见 [Hy-MT2 验证记录](../../hy-mt2-validation.md)。
   - [x] 同机跑通 7B Metal 合同：约 21 output tokens/s，短请求后 RSS 约 5.44 GiB；两档均保持候选，尚未作质量推荐。
   - [ ] 用固定真实 source cues 对比 1.8B、7B 与现有云端基线，记录首次加载、完整任务峰值内存、ASR 并发竞争和人工盲评。
     - [x] 共用产品 `TranslationPlanner` 和 provider 合同完成《湖吉の庭 Vol.1》60 cue／31 group 全量运行；1.8B 为 83.6 s，7B 为 441.4 s，两档均通过结构门禁。生成了与历史云端 previous-output 的匿名评审材料；人工评分、完整任务峰值内存和 ASR 并发竞争仍待完成。
@@ -222,7 +224,7 @@ _最后更新：2026-10-22_
   - [x] 实现 Gemini 3.5 Transcribe Files + Interactions API provider，保存真实 word timestamps 和 speaker；缺失时间戳拒绝结果，上传后主动删除文件。
   - [x] Gemini Key 独立存入系统凭据库；保存 Key 不授予上传权限，每次 selected-range run 都必须确认 provider、范围和免费层数据使用说明，本地失败不自动切换云端。
   - [ ] 使用用户自己的 Gemini Key 完成日语／英语真实网络闭环、上传删除与 rate-limit 错误验收；把 VAD 区间接入“静音出字”检测，并补任务级完整候选 run 对照。
-  - [x] 完成 [Gemini 注册与验证说明](gemini-transcribe.md) 和 [Muse Voice Transcribe 流式机制研究](muse-voice-transcribe-research.md)；Muse 保持 P5 research provider，待官方协议与数据条款核实。
+  - [x] 完成 [Gemini 注册与验证说明](../../gemini-transcribe.md) 和 [Muse Voice Transcribe 流式机制研究](../../muse-voice-transcribe-research.md)；Muse 保持 P5 research provider，待官方协议与数据条款核实。
 - [ ] P5：录音流式回放、prefix 提交策略、真实采集／Live ASR；Gemini Live Translate 单列实验。
 
 具体接口、依赖、迁移与逐阶段完成条件以 [管线演进计划](pipeline-evolution.md) 为准；上列未完成项不能计入当前发行能力。
@@ -388,7 +390,7 @@ Windows 首版闭环后采用稳定候选同步节奏：日常核心开发继续
 - [x] 连续时间缩放与横向平移、独立波形显示增益，以及播放头 Cut／相接字幕 Join 命令。
 - [x] 将字幕编辑从顶层导航迁入任务字幕校对，调整任务模块顺序，并在进阶工作面加入当前字幕文字保存／放弃／撤销。
 - [ ] A/B 循环、连续打轴快捷键，以及悬浮字幕在其他 App 前台时无需回到主窗口的全局播放控制。
-- [ ] 按 [Aegisub 能力映射](aegisub-capability-map.md) 小步补齐高频精修：当前块／头尾试听、lead-in／lead-out、提交并下一句、多选整体平移、相邻边界吸附和时间质量检查；命名样式之后再绑定轨道／说话人。
+- [ ] 按 [Aegisub 能力映射](../../aegisub-capability-map.md) 小步补齐高频精修：当前块／头尾试听、lead-in／lead-out、提交并下一句、多选整体平移、相邻边界吸附和时间质量检查；命名样式之后再绑定轨道／说话人。
 - [x] 将修正过的人名和术语加入可复用词表。
 
 本阶段剩余项目是打轴和跨 App 收听效率增强，不等同于学习区本体。如果近期真实使用中没有形成高频痛点，可在 Windows 与学习区主线之间按小里程碑穿插，而不作为 Windows 首版门禁。

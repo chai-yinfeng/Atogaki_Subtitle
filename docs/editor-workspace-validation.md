@@ -619,7 +619,7 @@ QA 正常退出，启动会话 exit 0；integrity_check=ok、foreign_key_check �
 
 新增独立 test-only 模块 structure_undo_scope_tests，通过真实候选采用／删除／恢复 repository 方法刻画现状；只为非零 revision 和依赖边设置合成有效 fixture。三段字幕、一个采用 run、一个证据文件与学习收藏位于唯一临时目录，测试结束清理，不修改正式或 QA 数据，不调用模型／API。删除／撤销恢复所有 cue 字段，但被删 ASR cue 的 run／timed-unit 关系丢失、修订从 7／3 重置为 0／0，两条涉及该 cue 的依赖丢失，第三条无关依赖保留。随后修改恢复 cue 的上下文时，其原消费者既无 translation_dependency_stale 也无 translation_stale，确认不是只有显示标签变化。
 
-ASR run 和合成证据字节仍在，采用台账使 asr_run_is_protected 保持 true；学习收藏外键为空但文本／时间快照保留，符合已有不推测重连范围。完整结论、推荐的事务内来源／依赖快照与会话 token，以及较小的保守失效替代方案见[提案](structure-undo-metadata-proposal.md)。本轮没有改写运行时事务、schema 或 IPC；现状丢失断言不代表目标行为，实施修复时应替换。
+ASR run 和合成证据字节仍在，采用台账使 asr_run_is_protected 保持 true；学习收藏外键为空但文本／时间快照保留，符合已有不推测重连范围。完整结论、推荐的事务内来源／依赖快照与会话 token，以及较小的保守失效替代方案见[提案](archive/2026-11-11/structure-undo-metadata-proposal.md)。本轮没有改写运行时事务、schema 或 IPC；现状丢失断言不代表目标行为，实施修复时应替换。
 
 专项 1 passed，共享库全量 159 passed／5 环境依赖 ignored，两套 fmt／diff 检查通过。未改前端或桌面 Rust 运行时代码，因此未重跑前端／Tauri 全量、未打包或重装。日志和摘要在 `local-artifacts/editor-undo-scope-audit-20261025/`，正式仍为 1020e05，QA 为 2950a6d。方案待用户确认，其他原生性能、导航及平台门禁保持。
 
@@ -687,7 +687,7 @@ undo 只接受该任务最新 token，数据库失败保留记录；成功后消
 
 真实 CUA 窗口操作及只读 SQLite 核对：删除第一段 10→9，依赖 3→1、消费者过期；撤销回十段、三条依赖，所有 cue 字段与 ASR run／timed-unit／时间来源恢复，revision 单调且有效依赖映射到新 revision。接着 Cut→Join（移除实际 ASR 原块）→手动时间保存→三次撤销，各阶段 workspace revision 为 51→63→74→85→96→108→119；最终所有 cue 字段、来源及三条依赖与链前一致，过期标记恢复，integrity_check=ok。
 
-修改恢复的第一段原文后，真实数据库将第三段消费者标为上下文过期，三条边仍存在，证明恢复后的传播有效；但当前列表第三段仍显示已保存，重新打开才显示待重译，见[已定位缺口](editor-context-stale-display-bug.md)。此问题保留为优先修复项，不能把数据恢复通过外推成全部界面通过。
+修改恢复的第一段原文后，真实数据库将第三段消费者标为上下文过期，三条边仍存在，证明恢复后的传播有效；但当前列表第三段仍显示已保存，重新打开才显示待重译，见[已定位缺口](archive/2026-11-11/editor-context-stale-display-bug.md)。此问题保留为优先修复项，不能把数据恢复通过外推成全部界面通过。
 
 从历史 ASR 对照读取合成替换，通过正式采用事务 10→1、依赖 3→0；离开并重开任务后，后端 token 仍可用。撤销回十段／三条依赖，恢复包括已有 stale 引用的语义，不将过期边刷新为当前；新增采用台账保留。再保存第一段结束时间为 0.900 秒，退出前撤销可用；正常退出重启同一隔离目录后数据／来源／依赖／台账／revision 完全一致，撤销按钮禁用，证明 token 不跨 App 会话恢复。再次正常退出，未留下测试 App 进程。
 
@@ -697,7 +697,7 @@ package 文件 hash、build／seed 日志、阶段 JSON、只读 snapshot／comp
 
 ## 2026-10-26：文字保存后的轻量上下文状态回填
 
-c360cc9 原生显示缺口按[问题记录](editor-context-stale-display-bug.md)修复。get_translation_context_state 在 SQLite 同一读取事务返回 workspace revision／过期 cue ID，服务与 IPC 不加载完整 segments／run／证据。editor-context-status 在成功文字保存、撤回、单句翻译和词表修改后按需读取；串行合并最新待决请求，按任务／navigation／请求代次隔离，新完整／结构状态使旧读取失效。没有轮询或第二套草稿；读取失败独立提示，不把成功保存误报失败。
+c360cc9 原生显示缺口按[问题记录](archive/2026-11-11/editor-context-stale-display-bug.md)修复。get_translation_context_state 在 SQLite 同一读取事务返回 workspace revision／过期 cue ID，服务与 IPC 不加载完整 segments／run／证据。editor-context-status 在成功文字保存、撤回、单句翻译和词表修改后按需读取；串行合并最新待决请求，按任务／navigation／请求代次隔离，新完整／结构状态使旧读取失效。没有轮询或第二套草稿；读取失败独立提示，不把成功保存误报失败。
 
 只按集合差异刷新受影响行；过期筛选激活时重算同一虚拟列表与命中数，不替换当前输入框或草稿。当前编辑段的保存说明也考虑上下文过期。新增 WebKit 脚本在修复前以消费者标记 5 秒等待超时失败，修复后即时标记／清除、当前筛选、节点及输入保留、每次保存一次轻量读取、无完整任务重载均通过。三个既有 WebKit（结构输入保护／连续撤销、token 重开与预算、翻译流程）也通过。
 
@@ -995,7 +995,7 @@ launchctl procinfo 需要 root，保留阻挡日志，不据此认领直接内�
 
 0cf72c0 用户截图显示视窗已暂停。审计复现为 pointerdown／背景 click 无条件停止跟随，普通定位及播放头拖动均受影响。现仅在真实平移或改变字幕时间等操作时暂停，捕获手势中只阻止自动居中、不破坏跟随意图；波形状态新增独立恢复开关，保留锁定编辑和时间草稿。
 
-新增真实 WebKit wave-follow 修复前失败于普通定位后变为暂停，修复后通过：实际播放越过两秒窗产生新视窗、普通定位／选段／播放头保留跟随、捕获期间不换窗、平移暂停、独立恢复而不切段／提交时间。五组既有 gestures／timeline／follow／time-navigation／waveform-follow-boundaries 通过。前端 346 passed、类型／构建、两套 fmt／diff 通过；首次类型检查 Element.title 错误已改明确按钮类型并经构建验证。证据目录 local-artifacts/wave-follow-fix-20261028，详情见[缺陷记录](editor-waveform-follow-interaction-bug.md)。本段先对应源码／浏览器，安装与原生证据另补。
+新增真实 WebKit wave-follow 修复前失败于普通定位后变为暂停，修复后通过：实际播放越过两秒窗产生新视窗、普通定位／选段／播放头保留跟随、捕获期间不换窗、平移暂停、独立恢复而不切段／提交时间。五组既有 gestures／timeline／follow／time-navigation／waveform-follow-boundaries 通过。前端 346 passed、类型／构建、两套 fmt／diff 通过；首次类型检查 Element.title 错误已改明确按钮类型并经构建验证。证据目录 local-artifacts/wave-follow-fix-20261028，详情见[缺陷记录](archive/2026-11-11/editor-waveform-follow-interaction-bug.md)。本段先对应源码／浏览器，安装与原生证据另补。
 
 
 ## 2026-10-28：e8d9a8d 波形跟随原生复验与本机更新

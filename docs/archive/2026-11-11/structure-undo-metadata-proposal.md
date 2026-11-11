@@ -1,6 +1,8 @@
 # 结构撤销的元数据范围：审计与实施方案
 
-日期：2026-10-25。状态：用户已选择完整来源与翻译依赖恢复，学习收藏沿用既有快照规则；实施决策见 [0061](decisions/0061-transactional-structure-undo-metadata.md)。以下保留审计、推荐与替代方案的讨论背景，采纳不代表运行时已全部接入。继承 [0047](decisions/0047-ui-themes-and-candidate-retention.md) 的会话历史与学习快照边界。
+> 历史归档（2026-11-11）：本文保留原始讨论／证据，不再作为当前计划。现状见[路线图](../../roadmap.md)、[架构](../../architecture.md)与[文档索引](../../README.md)。
+
+日期：2026-10-25。状态：用户已选择完整来源与翻译依赖恢复，学习收藏沿用既有快照规则；实施决策见 [0061](../../decisions/0061-transactional-structure-undo-metadata.md)。以下保留审计、推荐与替代方案的讨论背景，采纳不代表运行时已全部接入。继承 [0047](../../decisions/0047-ui-themes-and-candidate-retention.md) 的会话历史与学习快照边界。
 
 ## 已确认的问题
 

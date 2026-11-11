@@ -1,250 +1,73 @@
 # 架构与目录约定
 
-_最后更新：2026-10-22_
+_核对日期：2026-11-11；主线基线：`cf23b87`。_
+
+本文描述当前系统边界。逐次模块抽取与旧状态移入[清理前快照](archive/2026-11-11/architecture-before-review.md)，跨分支评估、Graphify 结果和同类工具见[系统回顾](system-review-2026-11-11.md)。本次只整理文档，不实施新架构。
 
 ## 仓库组织
 
-`Atogaki_Sub` 保持为 Rust/Cargo 项目根目录。不要为了放置文档而把 `src/` 再嵌套一层：根目录的 `Cargo.toml` 与 `src/` 是标准 Rust 布局，移动它们会增加构建、编辑器和未来 Tauri 集成的复杂度。
-
 ```text
-Atogaki_Sub/
-├── Cargo.toml                 # Rust package 与依赖
-├── src/                       # 可复用的处理核心与当前 CLI
-│   ├── lib.rs                 # 供 CLI 与桌面 App 复用的库入口
-│   ├── application/           # 任务、工作区、学习、字幕样式与本地服务
-│   ├── domain/                # 字幕段、样式、词表、分段与导出规则
-│   ├── infrastructure/        # ffmpeg、Whisper、翻译 provider、SQLite 与文件适配器
-│   └── interface/             # CLI / HTTP 等输入适配层
-├── assets/                    # 版本化的示例和内置词表
-├── migrations/                # 现有 Postgres 实验性迁移；不作为桌面 MVP 依赖
-├── migrations/sqlite/         # 桌面本地 SQLite 迁移
-├── src-tauri/                 # Tauri 桌面壳；依赖根 Rust library
-│   ├── src/commands/          # 按用例组织的 IPC 命令与 wire DTO；渐进抽取
-│   ├── binaries/              # 构建时生成、按 target triple 命名的 sidecar
-│   └── third-party/           # sidecar 版本、构建清单与许可证
-├── scripts/                   # 固定版本 sidecar 构建与分发校验
-├── ui/                        # Tauri 内嵌的 TypeScript/Vite 前端
-├── docs/                      # 产品方向、路线图、架构与决策记录
-└── tests/                     # 跨模块集成测试（按需要新增）
+Cargo.toml / src/             Rust library 与 CLI
+  domain/                     字幕、语言、词表、样式与格式规则
+  application/                任务、识别编排、翻译计划、工作区、学习用例
+  infrastructure/             模型、媒体、SQLite、文件和网络适配器
+  interface/                  CLI 与早期 Web Serve
+src-tauri/                    桌面壳、IPC、平台凭据、下载、媒体传输
+ui/                           TypeScript / Vite 前端
+migrations/sqlite/            当前桌面数据库迁移
+migrations/*.sql              早期 Postgres 迁移
+scripts/ / examples/          构建、验证与诊断入口
+assets/                       版本化词表与素材
+docs/                        当前规范、验收、研究与历史
 ```
 
-当前 Tauri 桌面壳位于 `src-tauri/`，前端位于 `ui/`，并直接复用根 Rust library。后续平台适配继续保持这一边界，不把现有 `src/` 移入人为的子目录，也不让平台 UI 直接调用 sidecar 或具体 provider。
+保留标准 Cargo 根布局。Tauri 和 CLI 复用根 library；平台界面通过应用用例调用处理能力。应用层目前直接依赖部分 infrastructure 类型，这是现有实现边界，不是完全解耦的 ports/adapters 架构。
 
 ## 目标桌面架构
 
-```text
-桌面 UI（Tauri）
-  └─ application：导入、任务、编辑、翻译、学习、样式、导出用例
-       ├─ domain：时间轴字幕、任务级样式、词表、字幕格式
-       └─ infrastructure：文件系统、SQLite、ffmpeg、ASR、翻译与词典服务
+```mermaid
+flowchart TD
+    UI[桌面 UI / CLI] --> APP[application 用例与编排]
+    APP --> D[domain 字幕与格式规则]
+    APP --> DB[SQLite 工作区与索引]
+    APP --> ART[任务目录 / 不可变证据 / 检查点]
+    APP --> ASR[ASR provider / Whisper sidecar]
+    APP --> MT[本地或云端翻译 provider]
+    APP --> MEDIA[FFmpeg / libass]
+    DB --> LEARN[学习条目与来源快照]
 ```
 
-UI 不直接启动 ffmpeg、Whisper 或具体翻译服务。它只调用 `application` 中的用例并订阅任务状态。当前 CLI 同样是该应用层的一个适配器。
+`LocalTaskService` 管理任务与恢复，`JobRunner` 执行处理，`StageScheduler` 管理阶段资源；`LocalWorkspaceService` 管理字幕编辑、翻译写回与导出，`LocalRetranscriptionService` 管理候选，`LocalLearningService` 管理学习资料。样式、字体、烧录、词表分别由已有服务承担。`src-tauri/src/commands/` 只适配对应 IPC；桌面 `main.rs` 仍承担构造和部分命令，不能据已有拆分声称入口已完全收敛。
 
-Tauri 工作区命令已进入 `src-tauri/src/commands/editor.rs`，字幕文件、样式／字体和视频烧录分别进入同目录的 `subtitle_export.rs`、`subtitle_style.rs`、`video_render.rs`，合计 26 条；main 保留应用构造、共享状态与显式注册；命令只借用原服务，不持有另一份工作区或事务。其余命令与 SQLite repository 继续按 [0059](decisions/0059-desktop-command-and-repository-modules.md) 逐条抽取，不能把第一条边界视为整个 Rust 模块拆分已完成。
-
-`LocalDatabase` 的文字、时间与结构编辑进入 `infrastructure/local_db/subtitle_edits.rs`；父模块和该子模块仍使用同一连接池，候选采用继续复用同一结构事务辅助函数。数据记录、迁移与公开方法路径不变，辅助函数只在 repository 内可见；模块边界不能切开现有原子提交。
-
-`subtitle_publication.rs` 负责 ASR 来源恢复、快照发布和候选范围采用；`subtitle_queries.rs` 负责字幕只读查询与事务一致的 revision／字幕快照。任务元数据同步将原事务借给发布模块，候选采用也继续共用编辑模块的结构持久化函数，没有独立提交或复制证据保留逻辑。
-
-`LocalTaskService` 提交时创建 queued UUID 任务目录，后台由 `StageScheduler` 协调 ASR 与翻译资源，再调用应用层处理用例。桌面默认 2 路 ASR、最多 4 路云端翻译，本地翻译与 ASR 受设备互斥限制；烧录仍为独立单 worker。工作台读取轻量摘要，活动任务按需读取进度；完整任务编辑时停止全任务轮询，详情只同步当前任务。摘要不解析全部 segments 或重复校验原始 ASR 证据，恢复与采用仍执行完整校验。见 [0052](decisions/0052-staged-concurrency-and-early-translation.md) 与 [0056](decisions/0056-editor-virtual-list-and-task-summary.md)。
-
-当前 Tauri 壳共享一个 `LocalDatabase` 实例，并注册 `LocalTaskService`、`LocalWorkspaceService`、`LocalLearningService`、`SubtitleStyleService` 与 `LocalRenderService`：任务服务负责创建、排队、同步识别任务和持久化工作台顺序；工作区服务负责读取任务详情、保存编辑、调用注入的翻译 provider 和导出；学习服务负责收藏字幕选区、管理来源例句、简明译义与多 provider 结果；字幕样式服务通过 `SubtitleFontService` 枚举系统字体、检查任务文字覆盖，并调用与正式输出相同的 FFmpeg/libass 路径生成预览；烧录服务负责冻结 SQLite 字幕与样式快照、持久化输出任务、进度与取消。识别、翻译和烧录的状态与资源预算分别管理。界面通过原生文件选择器获取媒体、Whisper 模型和 Silero VAD 模型路径；也可由设置页下载官方模型到应用数据目录。VAD 默认开启但允许显式关闭。打开任务后，原媒体和任务音频通过 `PlaybackMediaRegistry` 登记，以随机 token 暴露给仅监听 127.0.0.1 随机端口的会话媒体服务。Host／Origin 与登记路径受限，完整 GET 和 Range 按 64 KiB 流式读取；优先原媒体，解码错误最多回退一次到任务音频并保留播放意图。该实现由 [0054](decisions/0054-request-batching-and-loopback-media.md) 取代旧自定义协议的传输路径，与早期 Web Serve 外壳独立。
-
-`DesktopSettingsService` 读取 SQLite 中的非敏感设置，并通过 `CredentialStore` 按 provider ID 访问平台系统密钥存储。`MutableTranslationProvider` 在不重建工作区服务的情况下原子替换当前翻译适配器。模型下载、词典包下载与云端 provider 共用可热切换的网络配置：跟随启动环境、强制直连或自定义 HTTP 代理；模型还可使用用户提供的 HTTPS 镜像根地址。DeepL、DeepSeek、自定义 OpenAI-compatible 与在线词典 provider 都延迟到首次实际请求才读取对应密钥，并在单个 App 进程内复用成功取得的值。`ModelDownloadService` 每次只运行一个下载，按镜像到官方源回退，写入应用管理目录中的 `.part` 文件；合法临时文件跨重启保留，后续请求只有在 HTTP Range／Content-Range 与本地边界一致时才追加，否则安全重启下载，最终通过固定 SHA-256 后原子安装。`DictionaryDownloadService` 在 `dictionaries/` 内按版本化临时文件边界工作，滚动发布包解析 GitHub Release 的 tag、资产与 SHA-256，ECDICT 固定文件校验精确字节数和 Git blob 对象摘要，更新失败时恢复旧包。`DictionaryLookupService` 隔离各来源错误，按需建立 JMdict／ECDICT 索引、读取 Tomoshi 数据库或调用 Merriam-Webster，并把结构化结果交给学习服务持久化。UI 只轮询进度，不直接访问网络、模型或词典文件。
-
-macOS 完整桌面 App 把固定版本的 `whisper-cli`、`ffmpeg`、`ffprobe` 和 `llama-server` 作为按平台／CPU 架构生成的 Tauri sidecar 放在主程序同目录；Finder 启动不依赖 shell、Homebrew 或用户 `PATH`。模型仍按设备下载到应用数据目录或由用户选择，不进入 Bundle。开发环境可用 `ATOGAKI_WHISPER_CLI`、`ATOGAKI_FFMPEG` 和 `ATOGAKI_FFPROBE` 覆盖 sidecar。macOS FFmpeg 从固定源码构建 libass 字体栈与 LGPL 配置，发布物附带许可证和构建清单，不包含 libx264。
-
-macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 已通过 `v0.1.0-alpha.10` 建立包含 CPU Whisper、Credential Manager、WebView2、平台应用数据目录、学习与词典、字幕样式、可恢复翻译、局部重新识别、Range 媒体播放和 LGPL MPEG-4 烧录的独立预发布基线；字幕样式预览已完成实机确认，其他未记录矩阵仍继续扩测。Windows 悬浮字幕不稳定且不建议使用。Windows sidecar、依赖声明和对应源码归档继续按目标平台独立构建与审计，不能把 macOS arm64 产物或验收结果直接视为跨平台结论。
-
-启动时核对数据库与任务目录，将遗留非终态任务标为中断并等待用户动作。具有合法检查点的任务可显式 resume，在原任务下保留关联尝试并只补算未完成范围；旧任务或无法恢复的配置仍可 retry，依据冻结参数创建新 UUID 任务，原目录保留证据。恢复校验不由轻量摘要代替，不反向补造旧任务缺失参数；ffmpeg／Whisper 子进程随异步任务销毁而终止。见 [0045](decisions/0045-resumable-offline-workflows.md)。
-
-`LocalGlossaryService` 管理 SQLite 词表、任务范围 prompt 预览、差异预览和对工作区的应用。词条分为始终提示的“核心”、按任务选择的“内容包”和不占 prompt 的“仅修正”。仓库 TXT 的 SHA-256 是内置词表版本：内容变化时启动流程完整刷新只读内置基线，用户保存内置词表则写时复制为独立自定义词表。新任务选择词表和内容包后，`LocalTaskService` 会在排队前把解析后的词条冻结为任务目录中的 `recognition-glossary.txt`，把最终 prompt 写入 `whisper-prompt.txt`，再将快照路径交给 Whisper。带规范写法的核心或内容词条会以类似 `スイ（表記: suis）` 的形式提示 Whisper，并在 ASR 后执行 `スイ → suis` 规范化；仅修正规则只执行后一阶段。SQLite 保存词表关联、名称和快照路径，因此以后编辑、升级或删除原词表不会改变旧任务实际使用的内容。
-
-任务显示名称只保存在 SQLite，不改变 UUID 任务目录和原媒体。任务删除仅允许 `done` 或 `failed` 状态：`LocalTaskService` 会校验目标确实是应用 `jobs` 根目录下与任务 ID 同名的目录，先将其原子移动为待删除目录，再删除 SQLite 记录和派生文件；数据库删除失败时恢复目录。任务记录中的原媒体路径永远不参与删除。
-
-字幕文件导出由 `subtitle-export.ts` 协调单次会话，`subtitle-export-view.ts` 管理按需连接的格式与覆盖确认节点，`subtitle-export-backend.ts` 适配原四条 Tauri IPC。请求绑定任务身份与 navigation，每次异步返回核对代次；离页释放等待和 busy，不把迟到的导出路径展示给另一任务。唯一草稿、播放器及后端导出服务保持原边界。
-
-全局配置保存由 `desktop-settings-save.ts` 协调冻结请求、访问代次与提交后刷新，原 IPC 经 `desktop-settings-backend.ts` 适配。字段和 provider 的单份 dirty registry 按版本确认，保留保存中新增输入；旧配置读取在保存开始和接受结果时失效。`desktop-settings-load.ts` 接管配置与词典只读请求：配置核对访问和代次，嵌套词典同时核对父请求，学习区词典刷新共享词典代次。模型 catalog 复用既有数据，不创建第二份配置存储或轮询。
-
-provider 卡片静态结构进入 `translation-provider-template.ts`，单个共享编辑框、模型选项和委托事件进入 `translation-provider-view.ts`，dispose 释放监听器并失效迟到动作；`translation-provider-actions.ts` 协调卡片操作，IPC 经独立 backend 接入；会话按访问、通知与 profile 代次校验返回，凭据写入与配置保存使相关旧读取失效。
-
-`desktop-settings-template.ts` 直接生成六分区最终结构，`desktop-settings-view.ts` 管理公共导航、开关、主题、表单事件与保存按钮焦点；dispose 释放监听器。`translation-provider-drafts.ts` 持有唯一非秘密草稿及每 provider 版本，`translation-provider-fields.ts` 负责共享字段和监听器；迟到默认读取不改绑未保存参数或 Key。`model-management-session.ts` 接管下载／取消／选择／卸载和可见设置下的串行观察，原六条 IPC 经独立 adapter 接入，复用既有 catalog／download 状态。关闭停止前端 timer，后台下载意图保留；`model-management-view.ts` 按 model ID 保留卡片／按钮／进度节点并差量呈现，委托事件调用原会话，焦点随同一模型状态保留且不抢占新输入。`model-picker-session.ts` 串行协调三个设置模型选择器，`model-picker-backend.ts` 复用原三条 IPC，`model-picker-view.ts` 管理委托监听器与焦点；回填核对设置访问、字段值及 dirty 版本，选择不直接保存配置。`network-test-session.ts` 按设置访问与网络字段快照协调只读诊断，参数变化后旧结果失效；`network-test-backend.ts` 复用原诊断 IPC，`network-test-view.ts` 呈现纯文本结果并管理事件／焦点，不保存网络配置。`asr-credential-session.ts`／backend／view 接管独立 Gemini Key 操作，检查不读取或清空输入，保存确认核对字段版本与值。`settings-mutation-gate.ts` 为全局保存、翻译卡片凭据和 ASR 凭据提供共享前端写入所有权，防止共用 Gemini Key 的入口交错；门闩只存 busy／revision，不缓存秘密或替代后端凭据存储。`dictionary-credential-session.ts`／backend／view 复用原词典凭据状态数组，检查不读取输入，写入加入同一个门闩并按字段版本确认；`desktop-settings-load.ts` 为词典读取提供独立失效代次与设置访问校验，阻止旧快照覆盖新操作。`dictionary-download-session.ts`／backend 接管词典下载预检、开始与可见设置下的串行观察，继续使用原 catalog／downloads 数组。关闭停止观察，已确认的下载意图继续；dispose 不补发请求。`dictionary-download-view.ts` 按 dictionary ID 保留卡片／按钮／进度与状态节点，差量更新 metadata 和下载呈现；委托事件复用原会话，dispose 释放事件和节点，操作禁用按钮时焦点留在同一词典状态。`task-file-picker-session.ts`／backend／view 管理新建任务的媒体多选、Whisper 和 VAD 选择；结果绑定导航访问和字段值／输入版本，取消保留原批量选择，预设与 VAD 意图变化使旧回执失效。主文件仍持有唯一 selectedMediaFiles 与提交逻辑，视图只持有控件及事件版本。`media-relink-session.ts`／backend／view 冻结原任务／导航／区域及工具页，复用原后端重定位命令；文字／时间草稿先保护，等待期间新修改保留，重载绑定自己的新导航。workspace busy 只释放一次，迟到回执不影响新任务。其余设置字段及 Rust 剩余命令继续按需收敛。
-
-任务后续翻译 provider 由 `task-translation-provider.ts` 管理任务／navigation 绑定的读取、在途保存与选择草稿，视图和原两条 IPC 适配独立；静态控件复用任务工具模板。旧访问返回不能更新当前状态，保存中新输入按版本保留；不增加凭据存储，也不自动翻译。模型卡片及设置模型路径选择器已分离；其余设置字段和 Rust 剩余边界继续按需收敛。
-
-Cut／Join 由 `editor-structure-actions.ts` 协调，原两条 IPC 进入既有 `editor-backend.ts`。准备阶段先预留单次操作，继续调用唯一草稿 flush 和时间保护；flush 后复核任务、navigation 与编辑选择。提交期间复用 workspace busy，成功记录同一份结构历史，只有原访问能应用结果或显示错误；dispose 释放自己的 busy 并忽略迟到呈现，不取消或重试已提交的 Rust 事务。插入范围建议与导航协调仍留在 main，继续逐用例收敛。
-
-`editor-block-actions.ts` 协调插入提交与删除确认，原 edit_subtitle_block 通过同一 editor-backend 接入；继续使用现有插入视图、公共确认框、唯一草稿和结构历史。删除确认绑定任务／navigation／选段及确认前的字幕快照，确认后与第二次草稿 flush 后都检查身份和内容；确认期间新输入或已保存内容变化时保留数据并要求重试。局部操作预留防止重复确认／提交，真正写入时才取得 workspace busy，dispose 只释放自己的所有权；迟到提交不向新访问应用结果、记录历史或定位播放。
-
-公共确认由 `action-confirmation.ts` 持有唯一视图和单个待决 Promise，复用原表单与 mountToolDialog 的具名区域、inert、焦点循环／返回和按需挂载；替代 main 中的 resolver 及追加式监听。新请求先取消旧请求，Escape／外部关闭／dispose 均返回 false，确认只结算一次。编辑页采用紧凑中性色，其余区域保留原主题。词表等原生 modal 内的确认挂到当前焦点所属 modal 内，防止非 modal 区域被系统隔离；关闭仅恢复其背景 inert 状态与原焦点，不关闭父 modal。
-
-`editor-structure-history.ts` 只缓存每任务最新的不透明 token／标签，不再持有 before／after 字幕数组；唯一完整历史由后端会话管理。文字撤回继续独立，结构提交清除该任务旧文字撤回记录。撤销先保护文字／时间输入，核对任务、navigation、选择及 token，再调用 undo_subtitle_structure；失败保留 token 以供显式重试，迟到返回不应用到新访问。提交与撤销结果同时更新字幕和上下文过期 ID。任务重开按需读取 state，只在字幕与当前界面匹配时恢复描述符；请求代次阻止旧读取覆盖新提交／文字保存。文字、翻译或词表改动使缓存描述符失效；dispose 释放前端描述符，不回放请求。
-
-`editor-structure-backend.ts` 集中全部结构 IPC，`editor-backend.ts` 保留文字保存／恢复及波形读取。Cut／Join 在草稿 flush 后持有前端 busy，按需获取同一事务读取的字幕与 workspace revision，核对当前字幕／选择／访问后才提交 expectedRevision；两次读取间的后台变更由 repository revision 拒绝。该读取只发生于打开任务及结构准备，不轮询原始证据。编辑提交返回同一收据内的字幕／revision／上下文过期 ID、预算淘汰结果与提交后 warning；超大项明确显示已保存但无法撤销。桌面注册表已移除旧数组恢复及旧结构写入命令，底层 legacy 服务仍供既有非 UI 调用者兼容。
-
-完整来源撤销按 [0061](decisions/0061-transactional-structure-undo-metadata.md) 迁移中。`local_db/subtitle_structure_undo.rs` 已提供插入／删除、Cut／Join、时间调整和候选采用的 opt-in 事务收据，均共用原事务内 helper 并捕获 cue／provenance／依赖／revision。候选替换、ASR 来源赋值及永久采用保护台账在同一事务，采用完成后才捕获 after；沿用旧 ID 时保留新 ASR 来源，撤销恢复旧来源且不删除采用台账。收据和恢复结果不支持反序列化，外部只能读取 token／任务／字幕及同一状态的 revision／上下文过期 ID。recorded 路径保护正向修订、手动来源与机器消费者过期，恢复严格比较完整 after 状态并重映射有效依赖，连续撤销验证收据边界及恢复身份。共享应用服务、有界会话、IPC 与前端 token 迁移已完成，原生元数据恢复与即时上下文回填主要路径已有证据；当前安装包版本与剩余恢复组合以[路线图](roadmap.md)及[验收清单](unified-editor-acceptance.md)为准。
-
-`editor-context-status.ts` 管理成功文字保存后的轻量上下文状态读取，read 通过 editor-backend 的 get_translation_context_state 接入。后端在一个读取事务返回 revision／过期 cue ID，不带字幕文本或证据；前端同一时刻仅一份读取，连续请求合并为最新待决项，任务／navigation／代次校验阻止旧返回覆盖新 detail／翻译／结构状态。仅对变更 ID 的可见行更新标记，过期筛选时重算同一虚拟列表；不改草稿或完整编辑框。状态读取失败独立呈现，不改变已保存结果；dispose 释放待决工作，无 timer 或轮询。
-
-`application/structure_undo_history.rs` 已实现独立的有界会话管理器，移动持有后端收据，以任务队列与全局队首索引限制最多十条／任务、96 MiB 核算预算。record 校验链连续性并报告淘汰／超大项；undo 验证最新 token 与任务，复用真实数据库恢复后重绑定前一项，错误时保留收据；forget_job／clear 释放记录和索引。对外只序列化描述符、字幕、revision 和过期 ID，原始元数据仍不接受 IPC 反序列化。容量测量见性能记录。`application/structure_edit_session.rs` 以同一个 Arc<Mutex<StructureUndoHistory>> 包住各结构操作的事务提交与同步 record、undo；工作区 clone／using_provider 和候选服务注入均保留同一会话。插入媒体边界检查复用旧入口的 helper；失败不发布 token，响应取自同一提交收据。候选服务沿用原验证及 artifact 锁，锁顺序为 artifact → session → SQLite；采用后辅助状态写入失败返回已提交结果／token 与 warning，永久保护以事务内台账为准。Tauri 删除任务成功后等待会话并释放历史，启动时为候选服务注入工作区会话。当前源码已切换 IPC／前端至同一 token 历史，旧数组历史不再启用。
-
-单句与批量字幕翻译通过 `subtitle-translation.ts` 协调，后端调用集中在 `subtitle-translation-backend.ts`；每任务活动独立、共享一个进度 timer，页面退出 dispose 释放 timer。调用绑定任务与 navigation，后台落库与视图呈现分开：旧视图返回不更新当前内容，失败仍读取先前成功批次。草稿 flush 和 revision 校验沿用原服务。
-
-任务样式的异步读取、保存与预览通过 `subtitle-style-session.ts` 协调，四条调用集中到 `subtitle-style-backend.ts`。每次打开绑定任务／导航代次，修改递增草稿版本，串行渲染只接受最新版本；关闭释放 debounce 和迟到呈现。字体、颜色与预览视图由 `subtitle-style-view.ts` 持有，模板独立；关闭即卸载节点，dispose 释放全局监听器，字体候选关闭即释放选项。具名 region 与显式焦点边界替代样式 showModal，FFmpeg/libass 与实际样式服务保持原实现。
-
-烧录工具通过 `video-render-session.ts` 管理访问状态和历史轮询，`video-render-backend.ts` 适配原七条 IPC。请求绑定任务与导航代次，覆盖确认冻结提交参数；关闭停止前端轮询，后端 worker 与冻结快照继续运行。规格、能力和历史结果不跨工具访问复用，烧录视图由 `video-render-view.ts` 持有，模板独立，关闭卸载控件，专用确认采用嵌套显式焦点边界；历史按 ID 保留节点，dispose 释放事件与引用。
-
-导出与烧录入口通过 `subtitle-translation-state.ts` 统计当前 cue 的文字过期与上下文依赖过期并去重，避免只看文字 flag 后才收到后端拒绝。仅原文 SRT 保持独立；预检不替代服务层 revision／过期校验，也不引入额外全任务轮询。
-
-播放时钟在同一编辑／播放 cue 内不重复写行标记，文字与草稿由显式 render／update 更新；静态段落标题仅在内容变化时更新，播放头与时间窗仍独立推进。相关合成 UI 回调测量与原生滚动／内存门禁分别记录。
+离线主链为媒体 → 音频块／检查点 → ASR run／timed units → 可编辑 cues → 翻译组／上下文 → 译文 → 回看／导出。音频块、字幕段、翻译组、HTTP batch 是不同对象。完整识别后发布人工工作区；云端可提前处理稳定前缀并保存私有结果，完整发布后核对输入和 revision 才复用。本地 Hy-MT2 在完整识别后独占设备阶段。默认 2 路 ASR、4 路云端请求，详见 [0052](decisions/0052-staged-concurrency-and-early-translation.md)。
 
 ## 数据边界
 
-- 媒体、模型、任务产物：默认本地文件系统。
-- 任务元数据（包括源语言和目标语言）、字幕段、带源语言的词表与编辑状态：桌面 MVP 使用 SQLite；生成快照首次导入后，人工编辑和 SQLite 生成的机器译文以 SQLite 为准，后续快照同步不会用旧 `segments.json` 清空它们。
-- 密钥：通过统一凭据接口按 provider ID 写入 macOS Keychain、Windows Credential Manager 或 Linux Secret Service，不写入 SQLite、任务 JSON 或日志；字幕翻译使用自身 provider ID，Merriam-Webster 使用 `dictionary:merriam-webster` 隔离命名。Collins 未取得可测试账户、Cambridge API 当前不可用，均已退出产品路径。`DEEPL_AUTH_KEY`／`DEEPSEEK_API_KEY` 仅作为兼容环境变量回退，且不会被自动迁移或回显。
-- 桌面设置：模型路径、翻译 provider ID、非敏感模型／端点／风格、引导状态、无凭据代理配置、可选镜像地址与“曾保存凭据”标记写入 SQLite；模型二进制位于用户选择的位置或应用数据目录的 `models/`，用户触发下载的词典归档与版本 sidecar 位于 `dictionaries/`，两者都不打入 App Bundle。
-- `status.json`：保留为任务产物与故障恢复副本，不作为唯一长期数据库。
+SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依赖、词表、学习资料与非敏感设置。UUID 任务目录保存媒体派生物、冻结参数、原始识别、run／artifact 和恢复检查点。原始输入不随删除任务而删除；旧 `segments.json` 不覆盖已经编辑的 SQLite 字幕。
+
+密钥保存在系统凭据库，不写入 SQLite、任务产物或文档。云端文本翻译和音频上传分别授权，本地失败不自动切换云端。模型与词典按需下载到设备，不打入 Bundle；macOS 完整包携带 FFmpeg、ffprobe、whisper-cli、llama-server。Windows 仍有独立打包／实机边界。
+
+桌面本地播放通过只监听 loopback 的 token／Host／Origin 受限 Range 服务传输，和早期 Web Serve 产品外壳独立。保留媒体流式读取、唯一播放器和音频按需加载；见 [0054](decisions/0054-request-batching-and-loopback-media.md) 与 [0062](decisions/0062-editor-audio-demand-loading.md)。
 
 ## 核心数据约定
 
-- 任务目录以 UUID 命名，避免并发任务冲突。
-- 新任务把 Whisper/VAD 模型路径、VAD 阈值、分段和运行选项写入 `recognition-options.json`。该文件是识别结果的可复现记录；既有任务不反向补造当时未记录的参数。
-- 字幕段拥有稳定 ID、开始与结束时间、原文、译文、来源编辑状态、时间轴编辑状态和翻译过期状态；读取旧 JSON 时会自动补齐 ID 并迁移写回。SQLite 是人工时间轴的主数据源，手动时间在任务快照再次同步时必须保留；时间改变不使译文过期，但后续字幕导出和烧录使用新时间。
-- 当前字幕段属于隐式单轨，同轨不允许新增重叠。多人同时发言出现真实需求后，先通过单独决策引入轨道实体和 `track_id`，再设计说话人样式；当前 schema 不提前加入未被使用的逐段排版字段。
-- 每个任务保存一份版本化的原文／译文 `SubtitleStyleSet`；字体、颜色、描边、背景、对齐、位置和边距先经过统一校验与 ASS 序列化，再供 libass 预览、双语 ASS 和烧录快照复用。SRT 不承诺保留视觉样式，系统字体文件不复制进 App 或任务目录。
-- `local_jobs.sort_position` 只表达用户任务顺序，不改写业务更新时间。尚未排序的旧数据库继续按更新时间展示；第一次排序在事务中保存当前完整 ID 顺序，新任务在下一次人工排序前默认置顶。
-- 每个任务用规范代码持久化源语言和目标语言；首批桌面组合为 `ja`、`en` 或 `ko` 到 `zh-Hans`，旧任务迁移为 `ja` 到 `zh-Hans`。Whisper 与翻译 provider 只在各自基础设施适配器中转换服务专用代码。
-- SQLite 另外记录译文是否人工编辑；只修改原文时保留旧译文并标记为过期，同时修改译文时视为已人工校正。
-- 学习资料使用 `local_learning_items`、`local_learning_occurrences` 和 `local_learning_lookup_results` 分层：第一层按语言对、类型和规范化原文合并词／短语／语法或整句条目，第二层保存每次出现的任务／字幕引用、UTF-16 选区、收藏时双语快照和整段时间范围，第三层按 provider 保存命中词形、读音、结构化义项、署名、数据版本和可选缓存期限。任务删除后来源外键置空而快照继续存在；媒体与音频不写入 SQLite。用户简明译义、字幕语境翻译和标准词典内容相互独立，不能把字幕翻译 provider 的结果标记为词典释义。
-- SQLite 词表是带源语言的可编辑主数据；每个转写任务只能选择同语言词表，并使用不可变文件快照。对已有字幕应用词表前先基于稳定段 ID 预览，确认后在单个事务中更新原文并把已有译文标记为过期。
-- 词表分类只存在于 SQLite 主数据和桌面应用层；处理核心读取已解析的文本快照，避免把 UI 的内容包概念耦合进 Whisper 适配器。
-- 翻译 provider 接收任务语言对、带稳定 ID 的目标字幕段、语义分离的前后文、风格提示和受保护术语，并返回带相同 ID 的结构化译文。应用层校验结果数量、重复／遗漏 ID，每个成功批次立即用带原文校验的 SQLite 事务写入；批次失败后再次执行只选择缺失或过期段。空译文单独补充请求一次，仍为空则保持待翻译并返回具体段落提醒。
-- `TranslationPlanner semantic-v1` 按连续性、句末、停顿与预算构造语义 group，稀疏目标保持各自上下文。DeepSeek 可将短 group 打包成一次请求，仍按 group 保存冻结输入、缓存、revision 和失败状态；HTTP 请求数与语义组数分别统计，不再把固定 12 段当作当前分组合同。
-- `local_subtitle_provenance` 保存来源／证据单元和 source／translation revision，translation dependency edges 保存实际上下文依赖。机器写回校验冻结输入、人工编辑与 revision；上下文变化可使消费者 dependency stale，已有人工译文不被后台响应覆盖。
-- SQLite 的 translation run 保存 provider／模型、grouping strategy、选项和 plan_json（冻结目标／上下文及 revision）、段数、可得用量与完成时间，不保存 API Key。这是运行来源与恢复依据，不等于完整可恢复的人工文字历史。详见 [0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)、[0048](decisions/0048-explicit-translation-scope.md) 与 [0054](decisions/0054-request-batching-and-loopback-media.md)。
-- 桌面 SRT/ASS 是 SQLite 工作区的派生输出。每次用户导出会先刷新任务目录内的 `source.srt`、`translation.srt` 等固定投影，再将原文、译文和双语 SRT/ASS 复制到用户选择的目录；单语文件以规范语言代码命名（如 `.en.srt`、`.zh-Hans.srt`）。目标文件使用经过文件系统安全化的任务显示名称作为前缀，已存在时必须由界面显式确认覆盖。存在过期译文时拒绝导出；缺失译文时允许导出并显式报告缺失段数。
-- 桌面视频烧录是独立派生任务。提交时把 SQLite 当前原文、译文或双语内容冻结到任务目录 `renders/` 的 ASS 快照，再写入 `local_render_jobs` 并交给单 worker；最终 MP4 写到用户选择的位置。进度、取消、VideoToolbox 回退原因和实际编码器均持久化，临时文件不会直接暴露为最终输出。导出提供省空间／均衡／高质量三档，保持源分辨率并分别把目标视频码率设为源码率约 75%／120%／180%；源流不报告码率时使用明确显示的分辨率基准。规格预览与实际任务复用同一计算函数，并以视频、音频码率和 2% 封装余量估算成品大小。
-- 应用层选项不得引用 `clap`、HTTP 或桌面框架类型。接口层负责转换。
-- 外部工具和 API 是可替换基础设施：ASR、翻译和媒体处理分别通过应用层选项接入。CLI 默认日语识别、简中翻译，但不将该默认值写死到应用层或 DeepL 适配器。
-- macOS 本地长任务采用硬件优先、显式回退：Whisper 请求 GPU device 0，GPU/Metal 失败才重试 CPU；硬字幕要求 libass，并优先用 VideoToolbox H.264 编码，失败后记录原因并回退 FFmpeg 原生 LGPL MPEG-4 软件编码；两层均失败才让任务失败并保留 ASS 快照。libass 字幕合成仍在 CPU 执行。
-- 收听区和任务工作区可按需打开独立的悬浮字幕 WebView 窗口。它由 Rust 主进程创建为无边框、置顶、可缩放的正常窗口，当前播放工作区按字幕段切换发送原文与译文；窗口本身不读取 SQLite、媒体或密钥。为维持公开 Tauri 配置，它不使用 macOS 私有 API，因此当前不支持透明背景和鼠标穿透。收听区同时承担学习采集的全文阅读器：文本选择与独立时间码跳转分离，学习区通过来源记录回到同一播放器，不复制第三套预览或播放器。
+- 每个任务只有一个人工工作区，可关联多个完整或局部 ASR run。候选完成不自动覆盖字幕；采用核对范围、版本并事务写入。
+- cue ID 稳定，原文、译文与来源关系分开。未知词时间不插值冒充精确时间；接缝处理见 [0060](decisions/0060-overlap-alignment-before-acoustic-selection.md)。
+- 翻译冻结实际目标、上下文、provider 与版本；目标／上下文变更使相关译文过期，人工译文受保护。源／译 cue 继续对应，不因网络打包变成多对多映射。
+- 结构编辑与撤销的来源、依赖、单调 revision 在同一事务恢复；会话 token 历史见 [0061](decisions/0061-transactional-structure-undo-metadata.md)。
+- 字幕样式共用于 ASS、libass 预览和烧录；SRT 不承诺视觉样式，烧录会重新编码。
+- 学习条目、来源例句和词典结果分层。任务删除后保留双语快照；查词／简明译义与字幕翻译、识别词表保持不同职责，见 [0032](decisions/0032-learning-reader-and-source-backed-collections.md)。
 
 <a id="下一阶段架构已决策尚未实现"></a>
 
 ## 管线演进与实验边界
 
-[0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md) 的 acoustic chunks、TimedUnit、subtitle cues、translation groups、任务内 run／artifact 与 provenance／revision 已分批实现，当前 SQLite 工作区仍是人工编辑主数据。候选采用独立于识别运行，继续核对范围、comparison 与 workspace revision，并保留采用来源。
+[0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md) 的数据分层、run／artifact、provenance／revision、语义组与依赖已经分批落地；旧[管线提案](archive/2026-11-11/pipeline-evolution.md)不再是待实施清单。当前主线仍含 Web Serve／Postgres 源码和默认依赖；[退役报告](legacy-web-retirement-impact.md)只完成分析，未执行隔离或删除。
 
-真实接缝与模型质量、盲评、完整资源压力、部分云端网络与 Windows 结果仍待补。实时 session、采集与 E2E 是研究路线，不能因离线 provider 已存在而直接晋升桌面。原[管线演进计划](pipeline-evolution.md)保留提案基线，当前完成度看[路线图](roadmap.md)与对应验收，不将旧的“尚未实现”描述用于全部现有能力。
+在线实现位于独立分支 `codex/online-desktop-integration`，本次审阅为 `e06a9c6`；它已含原生采集、Rust 会话、Python 推理 worker 与独立字幕显示。主线没有这些源文件，不把分支试装当稳定版已发布。在线采集 → CPU 草稿／Qwen 确认 → 独立翻译分组／修订 → 展示的时钟和状态，不等同离线任务的检查点／人工工作区。具体责任、性能证据和仍需讨论的选择见[系统回顾](system-review-2026-11-11.md)。
 
 ## 字幕编辑前端的渐进边界
 
-四区默认布局为左侧视频、右侧波形与上下双语编辑、下方整宽虚拟字幕列表。`editor-session` 区分跟随／锁定、编辑段、播放段与列表自动滚动；`editor-layout` 持有 v3 本机布局偏好，分别调整左右、工作区／列表、右侧波形／编辑比例，折叠只隐藏媒体预览；`editor-menus` 管理紧凑操作菜单的关闭和焦点生命周期；`editor-cue-list` 只呈现视口行。`media-player` 是编辑／收听共用的单一媒体所有者，管理回退、事件、RAF 与卸载，Tauri 资源 URL 解析通过回调注入；`editor-follow` 协调编辑锁定、恢复请求代次与时间输入保护；`editor-timeline-view` 持有静态波形缓存、播放头与播放段独立绘制及 ResizeObserver，绘制与拖动命中共用几何规则；`waveform-follow` 在播放边缘居中前判断限制后的起点是否能够移动，避免素材首尾逐帧读取同一窗口；`editor-waveform` 管理请求代次、窗口快照与 16 ms 合并定时器，新视窗意图立即失效旧返回，Tauri 请求经 `editor-backend`；`editor-timeline-gestures` 持有可取消的指针／平移／缩放预览，`timeline-timing` 限制时间边界，提交仍由会话 flush 和文本重基；`current-cue-editor` 使用原 SubtitleDrafts 管理输入交互，`editor-backend` 集中适配文字／时间持久化，`task-tools` 持有工具 DOM 的挂载与焦点生命周期。工具模板与视图逻辑独立于主入口，关闭工具不重建媒体或草稿。
+前端保留一个播放器、一份字幕草稿与导航身份。`editor-session`、`editor-follow` 管理编辑／播放／锁定，`editor-cue-list` 管理虚拟列表，`editor-timeline-*`／`editor-waveform` 管理绘制与交互，`*-navigation` 管理各入口访问，`*-view` 管理 DOM 生命周期，`*-backend` 适配 IPC。异步返回核对当前任务／访问／代次；视图销毁不取消已经提交的数据库事务。
 
-`insert-subtitle-block` 维护一个可关闭／释放的插入表单，复用具名工具区域和现有结构写入；任务／导航身份、IME、忙时关闭和失败保留输入在视图访问内管理，写入结果通过明确的成功／错误合同返回。它不持有第二套字幕草稿，主入口继续决定插入的 cue ID、范围和后端事务。
-
-主入口仍协调播放器、时间轴和部分处理用例，后续每次抽取一条边界，不能将当前结构写成已经完成全模块拆分。任务卡片通过 SQLite 摘要读取，恢复与采用仍完整验证来源证据；见 [0056](decisions/0056-editor-virtual-list-and-task-summary.md) 和 [0057](decisions/0057-editor-view-lifecycles.md)。
-
-前端类型检查启用 `noUnusedLocals`／`noUnusedParameters`，删除项先通过调用搜索确认。旧粗修保存／撤销入口已移除；现有两类历史继续由唯一字幕编辑工作面使用，不统一命令历史。
-
-
-### 编辑任务打开协调
-
-`editor-navigation.ts` 协调一次字幕编辑访问的离页预检、详情读取、进度页回退、界面应用、波形、处理选区、审查信号和翻译状态初始化。复用 main 的唯一 navigationRequestId 与 stopActivePlayback，不持有另一份 cue／草稿／播放器。编辑详情读取集中到 editor-backend；main 提供同步准备／呈现回调和既有服务，模块不操作 DOM 或导入 Tauri。读取详情核对 job ID；每个异步阶段之间核对导航代次与区域，pagehide 时 dispose 使迟到工作失效。保存失败或时间预检失败继续向原调用者返回，保持当前输入。
-
-此前仅在详情读取后检查导航，波形等待结束后仍可能为已经离开的访问设置处理选区、请求审查并刷新列表；现在在波形和审查等待后分别停止过期后续流程。收听／任务进度／顶层区域切换与全局初始化仍在 main，后续按用例抽取，不把本模块视为全部导航拆分完成。
-
-
-### 任务入口与进度页打开
-
-`task-navigation.ts` 接管任务卡片的默认路由、指定翻译／导出分区、离页预检、详情读取及进度页呈现。继续共享 navigationRequestId、stopActivePlayback 与 editor-backend.detail；main 只提供具体视图回调。默认先参考轻量卡片是否可编辑，拿到详情后以详情决定去向；编辑器发现任务不可编辑时，把同一份详情传回任务导航，绕过旧卡片并复用读取，防止编辑器／进度入口反复跳转。显式工具分区不会被默认编辑器路由替换。迟到详情／错误与 dispose 均受访问校验，不新增播放器、草稿或独立历史。
-
-收听、顶层区域切换、进度自动刷新及全局初始化仍由 main 协调，下一步逐用例抽取；本阶段只覆盖任务打开，不宣称所有后台刷新已经统一生命周期。
-
-
-### 进度页刷新生命周期
-
-`task-progress.ts` 持有仅在任务进度页挂载的 2 秒定时器，同一模块最多一份在途自动读取。main 通过 context 只提供当前 workspace 中尚未结束、没有未保存文字的任务身份与 navigation；读取复用 editor-backend.detail，模块在应用或显示错误前复核任务、navigation、挂载代次和资格。离页预检通过后 unmount，完成任务首次读取／刷新完成时也 unmount；pagehide dispose 释放 timer 并失效迟到返回。不能取消已发出的 Tauri 查询，新访问的显式打开不依赖这份自动读取。
-
-main 保留任务状态／段数变化的呈现回调：状态更新不重建整份列表，完成或段数变化才沿用原 renderWorkspace。新任务准备时清空旧 activeDetail，避免详情尚未读出时刷新上一任务。完成编辑器与按需工具不挂进度 timer；工作台卡片刷新和可见耗时 timer 仍属于后续初始化整理。
-
-
-### 收听任务打开协调
-
-`listening-navigation.ts` 协调离页预检、并行读取详情／恢复位置、准备收藏资料、挂载既有媒体与可选自动播放。继续共享 navigationRequestId、stopActivePlayback 和唯一 media-player；每次等待后复核访问与收听区域，详情校验 job ID，dispose 使未完成访问失效。显式 resumeOverrideMs（包括 0）优先于持久位置。main 提供具体标题／列表／媒体呈现回调，不新增播放器或位置状态副本。
-
-详情复用 editor-backend.detail；播放位置的读写 IPC 集中到 playback-position-backend，保存节流、取整及原失败处理保持不变。收藏列表仍通过既有全局 refreshLearningItems 更新，该全局缓存／视图生命周期未在本轮抽取；本模块只阻止其等待结束后旧访问继续挂载媒体。
-
-
-### 顶层区域切换
-
-`area-navigation.ts` 管理 workbench／listening／learning／karaoke 的离页预检、区域应用、资料准备和后续滚动。沿用 main 的唯一 navigationRequestId，main 只提供 DOM 呈现和现有服务回调。学习资料／词典并行读取结束后核对访问，旧访问不再额外呈现词典或重置滚动。编辑任务打开现在返回实际 navigation ID（未完成、回退或失效为 null），顶层等待子访问后核对该 ID，避免只凭同一区域名称授权迟到后续动作；没有新增导航时钟或持久化状态。
-
-pagehide dispose 使未完成的顶层后续动作失效，预检失败维持原输入。既有 refreshLearningItems／loadDictionarySettings 仍负责各自全局缓存与视图更新；顶层模块不宣称取消这些请求或解决其所有内部竞态。初始事件／定时器／资料加载的集中生命周期以及插入范围建议仍待抽取。
-
-
-### 桌面页常驻资源
-
-`desktop-runtime.ts` 持有工作台摘要刷新（2 秒）、可见任务耗时（1 秒）及悬浮字幕可见性／播放动作／窗口关闭三项异步订阅。main 注入现有刷新、动作和草稿关闭回调，模块 mount 幂等，dispose 取消 timer、调用已取得的 unlisten；若订阅在 dispose 后才完成，立即注销。保留回调在页面失效后不再进入业务处理，活跃页的订阅／回调异常可呈现，注销失败不阻断其他注销；不会取消已进入的保存回调或事务。
-
-关闭回调仍同步 preventDefault，然后 await 唯一 SubtitleDrafts.flushAll，成功后沿用 close-ready 递归关闭规则，失败保留窗口与提示。该模块不改变 Rust 退出事件或 Cmd+Q 行为。配置／主题／词表／预设等首次资料加载，以及其余 DOM 监听器仍需逐用例整理，不能将常驻资源收敛视为全部初始化完成。
-
-
-### 插入范围建议
-
-`subtitle-insertion-range.ts` 只读取字幕起止、播放位置和已知媒体时长，返回最多两秒的建议；10 ms 吸附后限制在媒体内，处于字幕时从该段结束开始，遇下一段截断，相邻无空白仍给空范围供原弹窗提示。未知时长／无效播放时间返回 null，不生成猜测时长或写入。main 仍先执行唯一结构草稿 flush／时间保护，再暂停播放器并打开同一个 insert-subtitle-block；提交、重叠验证、undo token 与后端事务不变。
-
-
-### 首次资料读取
-
-`desktop-startup.ts` 在页面就绪后幂等启动设置、翻译状态、词表、任务摘要和任务预设五组独立读取；失败互不阻断，不串行等待，也不增加轮询。数据目录读取进入 desktop-settings-backend，返回及失败提示受 startup 生命周期保护。main 的词表／预设读取增加代次，旧初始结果不能覆盖后续刷新；词表／预设／任务摘要在回填前检查同一 startup.active，常驻摘要读取也不会在页面销毁后回填。
-
-settingsLoad、taskProvider 等已有服务继续持有自己的请求代次和 dispose；startup 不取消已经发出的 Tauri 请求，不创建第二份缓存。主题图片初始化及其他 DOM 监听仍由原模块负责，后续按需收敛；不得把启动协调视为所有主题／词典／学习缓存竞态已解决。
-
-
-### 图片主题挂载与异步应用
-
-appearance 的 mountImageThemes 同步返回 ready／dispose，主入口立即持有控制器，不必等待图片读取才具备清理能力。窗口／内置主题按钮／字段监听由 AbortController 释放，销毁移除本模块的编辑区与署名节点、属性事件处理器，清空分析图片 src 并 revoke 所有在途 object URL；不删除导入文件或写回偏好。
-
-主题应用、预览与导入／重新提色分别校验代次、配置身份和 disposed。内置主题选择使旧应用失效；初始化恢复另外核对用户后续应用意图，旧初始化错误不能 clear 新主题。use／render 的迟到错误也按代次丢弃。已发出的 Tauri 请求不重放或取消，保存格式、调色算法、角色选择及编辑页中性色隔离保持不变。
-
-
-### 编辑控件与共享快捷键视图
-
-`editor-controls.ts` 持有搜索／筛选、data-editor-action 委托、播放／倍速／微调／波形强度、Cut／Join／插入／删除／撤销及任务工具入口的事件绑定，使用同一 AbortController；main 注入已有服务用例和呈现回调。没有新增字幕、播放或保存状态。波形增益标签由控件视图更新，真正绘制继续由原时间轴服务负责。
-
-`playback-shortcut-view.ts` 持有唯一文档 keydown 监听，读取是否有媒体、当前编辑区域及工具阻断状态；保留输入／contenteditable／按钮／分隔线、dialog、修饰键和重复切换键的原保护，以及编辑 100／10 ms 微调、Cut 与共享播放动作映射。pagehide 分别 dispose，两模块不取消已进入的后端操作；循环与重新识别控件的后续边界见下文。
-
-
-### 播放循环工具视图
-
-`playback-loop-view.ts` 创建各现有 playback-tools 后的循环／A–B／试听工具节点，持有点击监听、全局提示和仅当前工具的错误提示；show／reset 只呈现文字，dispose abort 监听并移除自己的节点。main 的 runPlaybackLoopAction 继续读取唯一 media-player、播放头所在 cue、playbackLoop／loopStartMs；原重复 seek、单次试听停止与离页状态清空保持，不增加第二份播放状态或计时器。
-
-循环按钮不再在 addOfflineTools 的尾部匿名追加。视图销毁不停止或重放后端任务，不修改字幕或保存偏好。
-
-
-### 重新识别控件视图
-
-`editor-repair-controls.ts` 以已有范围工具和候选弹窗节点为边界，持有当前句／可视窗口／范围扩展、预览／关闭／采用按钮、provider 呈现、手动范围输入的授权清理，以及采用中的 cancel 保护监听。main 注入原用例和 adopting 读取；节点仍由 task-tools 挂载／停放，视图不另建请求、候选状态或保存路径。
-
-pagehide dispose 通过 AbortController 释放监听，保留节点再挂载不会重复触发。程序填写范围时仍由原用例清理授权；实际上传授权、revision／任务代次、采用锁和 SQLite 事务继续由现有处理服务校验，视图销毁不取消已提交的采用。
-
-
-### 候选对照呈现
-
-`candidate-comparison-view.ts` 持有原字幕／候选摘要行、运行参数差异和重新对照按钮；show 替换本模块生成的节点，以根节点事件委托接入原 processing.refresh。文字以 textContent 写入，差异与配置沿用转义规则；禁用或脱离根节点的按钮不触发刷新。dispose 释放监听并清空生成内容，之后 show 不再打开工具或写入 DOM。候选任务身份／请求代次、revision 与采用事务仍由 editor-processing 负责，task-tools 继续管理弹窗节点及焦点。弹窗固定标题／操作栏，摘要、列表、差异、替换说明与错误状态放入可聚焦的独立滚动内容区；列表仍独立滚动，避免 sticky 操作栏覆盖说明。
-
-
-### ASR 审查记录 repository
-
-`infrastructure/local_db/asr_review.rs` 持有质量信号替换／列表、人工决定追加、修复尝试记录／状态更新／列表六个数据库方法。实现继续借用 LocalDatabase 的现有 pool，返回类型、错误、排序及同任务校验不变；信号替换事务始终在同一个方法内完成。来源采用、结构撤销、ASR run 生命周期与共享类型仍由各自既有边界持有，不将审查写入拆成第二个存储层。
-
-
-`infrastructure/local_db/asr_runs.rs` 集中 run 元数据记录、状态更新、列表、中断恢复和采用／来源保护读取五方法；与 asr_review 共用原 LocalDatabase，不增加 run 缓存或连接池。实际候选文件保留／清理与采用事务仍由现有服务及发布模块负责，保护读取的调用方与顺序保持。
-
-
-`infrastructure/local_db/subtitle_translations.rs` 持有机器翻译应用、原子分组回填与翻译运行记录写入。分组事务核对输入和 revision，写译文／依赖／过期状态后统一提交；运行记录保留原独立写入合同。翻译分组和请求组装仍属于应用／provider 层，repository 拆分不改变上下文长度、缓存身份或 API 消耗。
-
-编辑页音频依 [0062](decisions/0062-editor-audio-demand-loading.md) 采用按需加载，唯一 media-player 在未加载时继续通过 positionMs 暴露恢复／排队定位意图。视图与处理工具不从尚未就绪的 currentTime 反推零位置；首次定位显式加载，播放及回退复用既有媒体事件。视频预览、收听加载和波形窗口服务各保留既有边界。
+统一编辑器布局和交互以 [0058](decisions/0058-compact-editor-and-playback-follow.md) 为准；Rust 模块整理以 [0059](decisions/0059-desktop-command-and-repository-modules.md) 为准。`ui/src/main.ts`、Rust 服务与 `LocalDatabase` 仍集中较多协调，后续按真实变更和缺陷拆分，不以文件长度直接启动重构。各子模块历史说明与旧小节锚点见[原架构记录](archive/2026-11-11/architecture-before-review.md#字幕编辑前端的渐进边界)。

@@ -99,7 +99,7 @@
 
 ## 2026-10-28：波形定位跟随修复（e8d9a8d）
 
-0cf72c0 用户反馈普通波形定位后视窗停止跟随，已按[缺陷记录](editor-waveform-follow-interaction-bug.md)修复并经六组 WebKit、346 项前端、类型／构建及独立 QA 实际跨窗播放验证。旧正式 App 已退出，13 任务均 done，核对旧包完整清单后，以暂存／签名／原子重命名更新 /Applications/Atogaki.app。当前源码与本机 e8d9a8d 同步，版本号仍为 0.1.2，本次不更新公开发行。
+0cf72c0 用户反馈普通波形定位后视窗停止跟随，已按[缺陷记录](archive/2026-11-11/editor-waveform-follow-interaction-bug.md)修复并经六组 WebKit、346 项前端、类型／构建及独立 QA 实际跨窗播放验证。旧正式 App 已退出，13 任务均 done，核对旧包完整清单后，以暂存／签名／原子重命名更新 /Applications/Atogaki.app。当前源码与本机 e8d9a8d 同步，版本号仍为 0.1.2，本次不更新公开发行。
 
 一致性恢复点 SHA 与 20261027-unified 相同，使用相对符号链接复用，没有新增数据库副本。安装前和系统入口打开后的 20 表内容摘要一致，13 任务／6,887 段保留，integrity ok、foreign key 空；正式只启动任务页供用户继续验收，没有进行字幕写入、故障或模型请求。
 

@@ -1,10 +1,12 @@
 # 处理管线演进与质量验证计划
 
+> 历史归档（2026-11-11）：本文保留原始讨论／证据，不再作为当前计划。现状见[路线图](../../roadmap.md)、[架构](../../architecture.md)与[文档索引](../../README.md)。
+
 _最后更新：2026-09-16_
 
 ## 范围与当前基线
 
-架构方向见 [0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。第一阶段保持源／译 cue 对应，完整和局部 ASR 重跑作为同一任务下的独立 run；本文件描述待实现工作，不表示新模型、接口或迁移已交付。
+架构方向见 [0043](../../decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。第一阶段保持源／译 cue 对应，完整和局部 ASR 重跑作为同一任务下的独立 run；本文件描述待实现工作，不表示新模型、接口或迁移已交付。
 
 审阅基线为 `4b41597`，最近发行记录为 Windows `v0.1.0-alpha.10`。Rust library 回归 86 通过、3 忽略，格式和前端类型检查通过；这些检查不替代新模型质量、sidecar 或 Windows 实机验收。
 
