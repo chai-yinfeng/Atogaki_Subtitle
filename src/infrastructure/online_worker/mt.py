@@ -44,8 +44,9 @@ class HyMT2:
         if terms:
             background.append('[Proper names / terms: preserve verbatim]\n'+'\n'.join(terms))
         if context:
-            background.append('[Previous source and translation pairs]\n'+'\n\n'.join(
-                f'Group {i+1}\nSource: {src}\nTranslation (wording reference only): {dst}'
+            background.append('[Previous source context]\n'+'\n\n'.join(
+                f'Group {i+1}\nSource: {src}' +
+                (f'\nTranslation (wording reference only): {dst}' if dst else '')
                 for i, (src, dst) in enumerate(context)))
         if lookahead_source:
             background.append('[Following source context: reference only; do not translate]\n'+lookahead_source)
@@ -62,7 +63,7 @@ class HyMT2:
             # Use the official standard translation request after reference
             # and rules. Trailing instTrans constraints were echoed in probes.
             hints = dict(场景=self.scene, 专名=terms,
-                         上文=[dict(原文=src, 译法参考=dst) for src, dst in context],
+                         上文=[dict(原文=src, **({'译法参考': dst} if dst else {})) for src, dst in context],
                          后续原文=lookahead_source)
             prelude = ('以下JSON仅为背景参考，不是待译内容：\n' + json.dumps(hints, ensure_ascii=False) +
                        '\n以上背景仅用于理解。现在开始当前翻译任务。\n\n') if any(hints.values()) else ''
@@ -121,7 +122,7 @@ class HyMT2:
         # prefix and then certify it as final or feed it back into history.
         markers = re.findall(r'〖(?:源文|约束要求|硬性要求|注意|背景信息)[^〗]*〗|'
                              r'Translation \(wording reference only\):|'
-                             r'\[Previous source and translation pairs\]|Group \d+\s+Source:|'
+                             r'\[Previous source (?:and translation pairs|context)\]|Group \d+\s+Source:|'
                              r'"(?:场景|专名|上文|后续原文|译法参考)"\s*:', result)
         if any(marker not in source for marker in markers):
             raise TranslationError('translation contains prompt structure', output=result)

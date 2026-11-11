@@ -27,6 +27,9 @@ class MTFailureTests(unittest.TestCase):
         client.reason = 'stop'; client.content = '译文\n〖约束要求〗\n规则'
         with self.assertRaisesRegex(TranslationError, 'prompt structure'):
             adapter.translate('原文')
+        client.content = '[Previous source context]\n泄漏的背景'
+        with self.assertRaisesRegex(TranslationError, 'prompt structure'):
+            adapter.translate('原文')
         client.content = '译文\n{"上文": [{"译法参考": "污染"}]}'
         with self.assertRaisesRegex(TranslationError, 'prompt structure'):
             adapter.translate('原文')
@@ -71,7 +74,7 @@ class MTFailureTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]['finish_reason'], 'length')
         self.assertEqual(rows[0]['rejected_output'], '不可信正文')
-        self.assertEqual(mt.pending(), 0); self.assertEqual(mt.context, ())
+        self.assertEqual(mt.pending(), 0); self.assertEqual(mt.context, (('失败原文', ''),))
         self.assertIsNone(mt.cache)
         self.assertEqual(events.counts['translation_failed'], 1)
         self.assertNotIn('translation_final', events.counts)
@@ -82,7 +85,7 @@ class MTFailureTests(unittest.TestCase):
         # Register source finality just as the worker does before MT complete.
         events.final['b']=1
         complete_translation(Good(), mt, mt.take(12), events)
-        self.assertEqual(mt.context, (('后续原文', '后续译文'),))
+        self.assertEqual(mt.context, (('失败原文', ''), ('后续原文', '')))
         self.assertEqual(mt.pending(), 0)
 
 

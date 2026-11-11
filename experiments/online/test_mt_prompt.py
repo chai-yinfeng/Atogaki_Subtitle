@@ -6,6 +6,15 @@ from harness import HyMT2
 
 
 class PromptTests(unittest.TestCase):
+    def test_source_only_history_has_no_empty_target_instruction(self):
+        for backend in ('hy-mt2', 'index-translate'):
+            adapter = HyMT2('http://127.0.0.1:9999/v1', 'local', 'Chinese', backend=backend)
+            prompt = adapter._prompt('当前', (('确认的上文', ''),), '可能的后文')
+            self.assertIn('确认的上文', prompt)
+            self.assertIn('可能的后文', prompt)
+            self.assertNotIn('Translation (wording reference only):', prompt)
+            self.assertNotIn('"译法参考":', prompt)
+
     def test_prompt_budget_removes_whole_old_pairs(self):
         adapter = HyMT2('http://127.0.0.1:9999/v1', 'local', 'Chinese')
         prompt = adapter._prompt('当前原文。', (('古'*700, '旧'*700), ('新'*200, '译'*200)))

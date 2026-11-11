@@ -78,7 +78,7 @@ class RetranslationTests(unittest.TestCase):
         self.mt.complete(self.mt.take(1), '定稿')
         self.source('b', 'next', start=3, end=4)
         request = self.mt.take(2)
-        self.assertEqual(request['context'], (('final', '定稿'),))
+        self.assertEqual(request['context'], (('final', ''),))
         self.assertEqual(request['context_revision'], 1)
         self.assertNotEqual(request['group_id'], self.events[-1]['group_id'])
 
@@ -96,6 +96,20 @@ class RetranslationTests(unittest.TestCase):
         self.assertEqual(self.mt.pending(), 0)
         with self.assertRaisesRegex(ValueError, 'not in flight'):
             self.mt.complete(request, 'late')
+
+    def test_source_history_exists_before_mt_and_excludes_current_and_future(self):
+        self.source('a', '前文', final=True)
+        self.mt.advance(3)
+        self.source('b', '当前', final=True, start=3, end=4)
+        self.mt.advance(6)
+        self.source('c', '后文', final=True, start=6, end=7)
+        self.assertEqual(self.mt.context, (('前文', ''), ('当前', ''), ('后文', '')))
+        request = self.mt.take(0)
+        self.assertEqual(request['context'], ())
+        self.mt.fail(request)
+        self.mt.fail(self.mt.take(1))
+        request = self.mt.take(2)
+        self.assertEqual(request['context'], (('前文', ''),))
 
     def test_duration_bound_at_segment_boundary_and_final_only_mode(self):
         self.mt = Retranslation(lambda kind, **data: self.events.append(dict(kind=kind, **data)),
@@ -127,7 +141,7 @@ class RetranslationTests(unittest.TestCase):
         tail = self.mt.take(1)
         self.assertNotEqual(tail['group_id'], request['group_id'])
         self.assertEqual(tail['source_text'], 'そこで先生に会いました。')
-        self.assertEqual(tail['context'], (('昨日は駅に行きました。', '昨天去了车站。'),))
+        self.assertEqual(tail['context'], (('昨日は駅に行きました。', ''),))
         self.assertEqual(tail['source_revisions'], {'b': 2})
         self.mt.complete(tail, '在那里遇到了老师。')
         self.assertEqual(self.mt.pending(), 0)
@@ -280,19 +294,19 @@ class JapaneseBlockTests(unittest.TestCase):
         self.assertEqual(final['source_revisions'], {'a': 2})
         self.assertEqual(final['lookahead_source'], '')
 
-    def test_history_evicts_complete_aligned_pairs_and_ignores_drafts(self):
-        for i in range(5):
+    def test_history_evicts_whole_source_groups_and_ignores_translations(self):
+        for i in range(9):
             self.source(str(i), str(i)*250, i*4, i*4+1)
             self.mt.advance(i*4+1, eof=True)
             request = self.mt.take(i)
             self.mt.complete(request, f'译{i}'*125)
         self.assertLessEqual(sum(len(src)+len(dst) for src, dst in self.mt.context), 2000)
-        self.assertEqual(len(self.mt.context), 4)
-        self.assertEqual(self.mt.context[0], ('1'*250, '译1'*125))
-        self.assertEqual(self.mt.context[-1], ('4'*250, '译4'*125))
+        self.assertEqual(len(self.mt.context), 8)
+        self.assertEqual(self.mt.context[0], ('1'*250, ''))
+        self.assertEqual(self.mt.context[-1], ('8'*250, ''))
         before = self.mt.context
-        self.source('draft', '还在变化的原文', 22, 23, final=False)
-        self.mt.complete(self.mt.take(6), '草稿译文')
+        self.source('draft', '还在变化的原文', 40, 41, final=False)
+        self.mt.complete(self.mt.take(10), '草稿译文')
         self.assertEqual(self.mt.context, before)
 
 

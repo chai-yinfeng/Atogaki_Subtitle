@@ -38,7 +38,7 @@ class Retranslation:
         self.lock = threading.Lock()
         self.groups, self.segment_groups = [], {}
         self.active = None
-        self.context = ()
+        self.retired_sources = []
         self.context_revision = 0
         self.request_id = 0
         self.group_id = 0
@@ -94,6 +94,7 @@ class Retranslation:
                            final=event['kind'] == 'source_final')
             if segment['final']:
                 segment['finalized_at'] = self.audio_seconds
+                self.context_revision += 1
             group.revision += 1
             # A character bound closes at an acoustic boundary, never midway
             # through a segment whose final ASR still covers the entire range.
@@ -189,6 +190,38 @@ class Retranslation:
             texts.append(segment['text'])
         return self._join(texts)
 
+    def _source_history(self, before=float('inf')):
+        entries = list(self.retired_sources)
+        for group in self.groups:
+            prefix = []
+            for segment in group.segments.values():
+                if not segment['final']:
+                    break
+                prefix.append(segment)
+            if prefix:
+                entries.append(dict(start=group.start, end=prefix[-1]['end'],
+                                    text=self._join(s['text'] for s in prefix)))
+        entries = sorted((e for e in entries if e['end'] <= before), key=lambda e: e['start'])
+        while entries and (len(entries) > 8 or sum(len(e['text']) for e in entries) > 2000):
+            entries.pop(0)
+        # Keep the existing adapter interface; an empty target denotes source
+        # context only, never an empty translation that needs filling in.
+        return tuple((e['text'], '') for e in entries)
+
+    @property
+    def context(self):
+        with self.lock:
+            return self._source_history()
+
+    def _retire(self, group):
+        self.retired_sources.append(dict(start=group.start, end=group.end, text=self._text(group)))
+        while self.retired_sources and (len(self.retired_sources) > 8 or
+                sum(len(e['text']) for e in self.retired_sources) > 2000):
+            self.retired_sources.pop(0)
+        self.groups.remove(group)
+        for sid in group.segments:
+            del self.segment_groups[sid]
+
     @staticmethod
     def _japanese_sentence(text, following):
         """Conservative surface hints, not a semantic-completeness classifier.
@@ -229,7 +262,8 @@ class Retranslation:
                 group.lookahead = self._join(texts)[:500]
             final = group.reason is not None and all(s['final'] for s in group.segments.values())
             text = self._text(group)
-            signature = (group.revision, self.context_revision)
+            context = self._source_history(before=group.start)
+            signature = (group.revision, context)
             if not text or (not final and (not self.drafts or group.reason is not None
                     or now-group.last_request < self.interval
                     or getattr(group, 'requested_signature', None) == signature)):
@@ -238,7 +272,7 @@ class Retranslation:
             request = dict(request_id=self.request_id, group_id=group.id,
                            group_revision=group.revision,
                            source_revisions={sid: s['revision'] for sid, s in group.segments.items()},
-                           source_text=text, context=self.context, lookahead_source=group.lookahead,
+                           source_text=text, context=context, lookahead_source=group.lookahead,
                            context_revision=self.context_revision, final=final,
                            start_s=group.start, end_s=group.end,
                            first_source_end_s=next(iter(group.segments.values()))['end'],
@@ -271,17 +305,7 @@ class Retranslation:
                               stale_source=not current, provisional=not request['final'])
             if request['final']:
                 group.committed = True
-                # Evict complete aligned pairs, never independent half-sentence
-                # suffixes. Character budget is conservative, not token counting.
-                history = (*self.context, (request['source_text'], text))
-                while history and (len(history) > 8 or sum(len(src)+len(dst) for src, dst in history) > 2000):
-                    history = history[1:]
-                self.context = history
-                self.context_revision += 1
-                # Completed groups no longer retain all segment texts/revisions.
-                self.groups.remove(group)
-                for sid in group.segments:
-                    del self.segment_groups[sid]
+                self._retire(group)
             return event
 
     def pending(self):
@@ -308,7 +332,5 @@ class Retranslation:
                 return False
             data = {key: value for key, value in request.items() if key not in ('context', 'final')}
             self.emit('translation_failed', **data, provisional=False)
-            self.groups.remove(group)
-            for sid in group.segments:
-                del self.segment_groups[sid]
+            self._retire(group)
             return True
