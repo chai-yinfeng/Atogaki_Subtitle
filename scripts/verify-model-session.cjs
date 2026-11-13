@@ -29,7 +29,7 @@ const assert=require('node:assert/strict');
     return invoke(cmd,args);
    };
   });
-  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('#open-settings').click();await page.locator('[data-settings-tab="network"]').click();await page.locator('#settings-model-mirror').fill('https://first.invalid');await page.locator('[data-settings-tab="models"]').click();
+  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('#open-settings').click();await page.locator('[data-settings-tab="network"]').click();await page.locator('#settings-model-mirror').fill('https://first.invalid');await page.locator('[data-settings-tab="models"]').click();await page.locator('[data-model-group="transcription"] > summary').click();
   await page.locator('[data-model-action="download"][data-model-id="a"]').click();assert.equal(await page.locator('[data-model-action="select"][data-model-id="b"]').isDisabled(),true);
   await page.locator('[data-settings-tab="network"]').click();await page.locator('#settings-model-mirror').fill('https://second.invalid');await page.evaluate(()=>window.__models.releaseNetwork());await page.waitForFunction(()=>document.querySelector('#model-download-message').textContent.includes('新的网络输入尚未保存'));
   assert.equal(await page.evaluate(()=>window.__models.calls.find(c=>c.cmd==='save_download_network_settings').args.request.modelMirrorUrl),'https://first.invalid');

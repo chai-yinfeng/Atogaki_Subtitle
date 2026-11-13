@@ -33,7 +33,7 @@ export function desktopSettingsTemplate(): string {
           </details>
         </section>
 ${translationProviderTemplate()}
-<section data-settings-page="models" class="settings-section hidden"><h3>模型与存储</h3><p>统一下载、校验与卸载。模型按需安装。</p><span id="models-directory"></span>
+<section data-settings-page="models" class="settings-section hidden"><h3>模型与存储</h3><p>按用途展开模型，按需下载、校验与卸载。下载完成不代表在线运行环境已经就绪。</p><span id="models-directory"></span>
           <div id="model-catalog" class="model-catalog"></div>
           <p id="model-download-message" class="settings-message" role="status"></p>
           <div class="settings-path-row">

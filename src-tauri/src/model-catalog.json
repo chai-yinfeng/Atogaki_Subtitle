@@ -1,0 +1,686 @@
+[
+  {
+    "id": "whisper-small",
+    "kind": "whisper",
+    "name": "Whisper small（轻量）",
+    "fileName": "ggml-small.bin",
+    "sizeLabel": "约 466 MiB",
+    "recommendedFor": "8 GB 内存或希望更快完成；适合短媒体和初步识别。",
+    "sourceUrl": "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
+    "category": "transcription",
+    "family": "Whisper",
+    "optional": true,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "ggml-small.bin",
+        "downloadPath": "ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "whisper-medium",
+    "kind": "whisper",
+    "name": "Whisper medium（推荐）",
+    "fileName": "ggml-medium.bin",
+    "sizeLabel": "约 1.5 GiB",
+    "recommendedFor": "16 GB 及以上内存；适合作为日语节目的常用选择。",
+    "sourceUrl": "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
+    "category": "transcription",
+    "family": "Whisper",
+    "optional": false,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "ggml-medium.bin",
+        "downloadPath": "ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+        "sha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "whisper-large-v3-q5_0",
+    "kind": "whisper",
+    "name": "Whisper large-v3 q5",
+    "fileName": "ggml-large-v3-q5_0.bin",
+    "sizeLabel": "约 1.1 GiB",
+    "recommendedFor": "离线文件转录的可选模型；当前日语节目日常基线为 Medium，Large 的回环表现需按素材评估。",
+    "sourceUrl": "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
+    "category": "transcription",
+    "family": "Whisper",
+    "optional": true,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "ggml-large-v3-q5_0.bin",
+        "downloadPath": "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
+        "sha256": "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "whisper-large-v3-turbo-q5_0",
+    "kind": "whisper",
+    "name": "Whisper large-v3-turbo q5",
+    "fileName": "ggml-large-v3-turbo-q5_0.bin",
+    "sizeLabel": "约 547 MiB",
+    "recommendedFor": "离线文件转录的可选模型；当前日语节目日常基线为 Medium，Large 的回环表现需按素材评估。",
+    "sourceUrl": "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
+    "category": "transcription",
+    "family": "Whisper",
+    "optional": true,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "ggml-large-v3-turbo-q5_0.bin",
+        "downloadPath": "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "whisper-large-v3-turbo-q8_0",
+    "kind": "whisper",
+    "name": "Whisper large-v3-turbo q8",
+    "fileName": "ggml-large-v3-turbo-q8_0.bin",
+    "sizeLabel": "约 834 MiB",
+    "recommendedFor": "离线文件转录的可选模型；当前日语节目日常基线为 Medium，Large 的回环表现需按素材评估。",
+    "sourceUrl": "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
+    "category": "transcription",
+    "family": "Whisper",
+    "optional": true,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "ggml-large-v3-turbo-q8_0.bin",
+        "downloadPath": "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
+        "sha256": "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "vad-silero-v6.2.0",
+    "kind": "vad",
+    "name": "Silero VAD v6.2.0（推荐）",
+    "fileName": "ggml-silero-v6.2.0.bin",
+    "sizeLabel": "约 865 KiB",
+    "recommendedFor": "过滤静音、音乐和环境声，建议与任一 Whisper 模型配套。",
+    "sourceUrl": "https://github.com/ggml-org/whisper.cpp/blob/master/models/download-vad-model.sh",
+    "category": "vad",
+    "family": "Silero VAD",
+    "optional": false,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "ggml-silero-v6.2.0.bin",
+        "downloadPath": "ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
+        "sha256": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "index-translate-2b-q4-k-m",
+    "kind": "index-translate",
+    "name": "Index-Translate 2B Q4_K_M",
+    "fileName": "Index-Translate-2B.Q4_K_M.gguf",
+    "sizeLabel": "约 1.22 GiB",
+    "recommendedFor": "本地多语翻译；支持上下文与人名提示。",
+    "sourceUrl": "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF",
+    "category": "translation",
+    "family": "Index-Translate",
+    "optional": false,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "Index-Translate-2B.Q4_K_M.gguf",
+        "downloadPath": "IndexTeam/Index-Translate-2B-GGUF/resolve/3a0eca6ce931d88d00614d427ab3ed8ff0743902/Index-Translate-2B.Q4_K_M.gguf",
+        "sha256": "044b313d29342bd3b2c77cbb64023ca0d209bd9b3247763f9d162767ef2d746a",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "hy-mt2-1.8b-q4-k-m",
+    "kind": "hy-mt2",
+    "name": "Hy-MT2 1.8B Q4_K_M（本地翻译推荐）",
+    "fileName": "Hy-MT2-1.8B-Q4_K_M.gguf",
+    "sizeLabel": "约 1.06 GiB",
+    "recommendedFor": "速度较快，内存占用较低，适合日常本地翻译。",
+    "sourceUrl": "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF",
+    "category": "translation",
+    "family": "Hy-MT2",
+    "optional": false,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "Hy-MT2-1.8B-Q4_K_M.gguf",
+        "downloadPath": "tencent/Hy-MT2-1.8B-GGUF/resolve/a0c709d9fac510f2c807aa3af52872340dc37a4a/Hy-MT2-1.8B-Q4_K_M.gguf",
+        "sha256": "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "hy-mt2-7b-q4-k-m",
+    "kind": "hy-mt2",
+    "name": "Hy-MT2 7B Q4_K_M",
+    "fileName": "Hy-MT2-7B-Q4_K_M.gguf",
+    "sizeLabel": "约 4.31 GiB",
+    "recommendedFor": "内存占用较高，翻译耗时更长。",
+    "sourceUrl": "https://huggingface.co/tencent/Hy-MT2-7B-GGUF",
+    "category": "translation",
+    "family": "Hy-MT2",
+    "optional": false,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": true,
+    "files": [
+      {
+        "name": "Hy-MT2-7B-Q4_K_M.gguf",
+        "downloadPath": "tencent/Hy-MT2-7B-GGUF/resolve/ab8472660ac61fac25f1af43fac2599d52a8a775/Hy-MT2-7B-Q4_K_M.gguf",
+        "sha256": "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "id": "qwen-0.6b",
+    "kind": "qwen-asr",
+    "category": "transcription",
+    "family": "Qwen3-ASR",
+    "name": "Qwen3-ASR 0.6B（未量化 BF16）",
+    "fileName": "online/qwen-0.6b",
+    "sizeLabel": "约 1.88 GB",
+    "recommendedFor": "中日英等多语转录；当前用于在线确认识别，离线文件转录尚未接入。需要在线运行环境。",
+    "sourceUrl": "https://huggingface.co/Qwen/Qwen3-ASR-0.6B",
+    "optional": false,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "chat_template.json",
+        "downloadPath": "Qwen/Qwen3-ASR-0.6B/resolve/5eb144179a02acc5e5ba31e748d22b0cf3e303b0/chat_template.json",
+        "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+        "bytes": 1161
+      },
+      {
+        "name": "config.json",
+        "downloadPath": "Qwen/Qwen3-ASR-0.6B/resolve/5eb144179a02acc5e5ba31e748d22b0cf3e303b0/config.json",
+        "sha256": "76d3ae4601ce939830b2517f4a6cadb86cc51316c3900af6b020b051c21a478c",
+        "bytes": 6193
+      },
+      {
+        "name": "generation_config.json",
+        "downloadPath": "Qwen/Qwen3-ASR-0.6B/resolve/5eb144179a02acc5e5ba31e748d22b0cf3e303b0/generation_config.json",
+        "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c",
+        "bytes": 142
+      },
+      {
+        "name": "merges.txt",
+        "downloadPath": "Qwen/Qwen3-ASR-0.6B/resolve/5eb144179a02acc5e5ba31e748d22b0cf3e303b0/merges.txt",
+        "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+        "bytes": 1671853
+      },
+      {
+        "name": "model.safetensors",
+        "downloadPath": "Qwen/Qwen3-ASR-0.6B/resolve/5eb144179a02acc5e5ba31e748d22b0cf3e303b0/model.safetensors",
+        "sha256": "79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea",
+        "bytes": 1876091704
+      },
+      {
+        "name": "preprocessor_config.json",
+        "downloadPath": "Qwen/Qwen3-ASR-0.6B/resolve/5eb144179a02acc5e5ba31e748d22b0cf3e303b0/preprocessor_config.json",
+        "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+        "bytes": 330
+      },
+      {
+        "name": "tokenizer_config.json",
+        "downloadPath": "Qwen/Qwen3-ASR-0.6B/resolve/5eb144179a02acc5e5ba31e748d22b0cf3e303b0/tokenizer_config.json",
+        "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+        "bytes": 12487
+      },
+      {
+        "name": "vocab.json",
+        "downloadPath": "Qwen/Qwen3-ASR-0.6B/resolve/5eb144179a02acc5e5ba31e748d22b0cf3e303b0/vocab.json",
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "bytes": 2776833
+      }
+    ]
+  },
+  {
+    "id": "qwen-1.7b",
+    "kind": "qwen-asr",
+    "category": "transcription",
+    "family": "Qwen3-ASR",
+    "name": "Qwen3-ASR 1.7B（未量化 BF16）",
+    "fileName": "online/qwen-1.7b",
+    "sizeLabel": "约 4.70 GB",
+    "recommendedFor": "中日英等多语转录；当前用于在线确认识别，离线文件转录尚未接入。需要在线运行环境。",
+    "sourceUrl": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B",
+    "optional": true,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "chat_template.json",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/chat_template.json",
+        "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+        "bytes": 1161
+      },
+      {
+        "name": "config.json",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/config.json",
+        "sha256": "2e74a751548b8ad7d7526d29365ad8144c345d8b412b1152d25dc6698452712f",
+        "bytes": 6194
+      },
+      {
+        "name": "generation_config.json",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/generation_config.json",
+        "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c",
+        "bytes": 142
+      },
+      {
+        "name": "merges.txt",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/merges.txt",
+        "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+        "bytes": 1671853
+      },
+      {
+        "name": "model-00001-of-00002.safetensors",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model-00001-of-00002.safetensors",
+        "sha256": "a4cd1f1a04d90b757dc7f7dd26254e69a013b19e80efe590a83c6a3bde8608d6",
+        "bytes": 4220320824
+      },
+      {
+        "name": "model-00002-of-00002.safetensors",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model-00002-of-00002.safetensors",
+        "sha256": "6e0b9d9e09e2e0238e7ef3cc8a484ab387e91b90f1900bedf88bc92d7929ccfc",
+        "bytes": 478200688
+      },
+      {
+        "name": "model.safetensors.index.json",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model.safetensors.index.json",
+        "sha256": "f994739fe38e5210b9e3e8ce6c6307315e2ceac3cb630e7b7414d69dce520f60",
+        "bytes": 64821
+      },
+      {
+        "name": "preprocessor_config.json",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/preprocessor_config.json",
+        "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+        "bytes": 330
+      },
+      {
+        "name": "tokenizer_config.json",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/tokenizer_config.json",
+        "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+        "bytes": 12487
+      },
+      {
+        "name": "vocab.json",
+        "downloadPath": "Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/vocab.json",
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "bytes": 2776833
+      }
+    ]
+  },
+  {
+    "id": "draft-ja",
+    "kind": "online-draft",
+    "category": "draft",
+    "family": "SenseVoice",
+    "name": "SenseVoiceSmall（日语）",
+    "fileName": "online/ja",
+    "sizeLabel": "约 938 MB",
+    "recommendedFor": "在线草稿识别；当前随本机在线环境准备，尚未提供独立下载。",
+    "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
+    "optional": false,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": false,
+    "retired": false,
+    "files": [
+      {
+        "name": "model.onnx",
+        "downloadPath": "",
+        "sha256": "977016bd9c79f9eb343430b5cc305e07ab64d5212dff41b0dcfa1694bee9a8cb",
+        "bytes": 937617178
+      },
+      {
+        "name": "tokens.txt",
+        "downloadPath": "",
+        "sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
+        "bytes": 315894
+      }
+    ]
+  },
+  {
+    "id": "draft-zh",
+    "kind": "online-draft",
+    "category": "draft",
+    "family": "Zipformer",
+    "name": "Zipformer（中文）",
+    "fileName": "online/zh",
+    "sizeLabel": "约 167 MB",
+    "recommendedFor": "在线草稿识别；当前随本机在线环境准备，尚未提供独立下载。",
+    "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30.tar.bz2",
+    "optional": false,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": false,
+    "retired": false,
+    "files": [
+      {
+        "name": "encoder.int8.onnx",
+        "downloadPath": "",
+        "sha256": "5ac51e27981bb4dab01bb9be4958453ba50c3b61c063ddda0eab23fd3671aa4f",
+        "bytes": 161141793
+      },
+      {
+        "name": "decoder.onnx",
+        "downloadPath": "",
+        "sha256": "06522ad63cec0fdf6809f4e1db9bb4f7d710c34582e3b35db62ac60eccafac7e",
+        "bytes": 5165083
+      },
+      {
+        "name": "joiner.int8.onnx",
+        "downloadPath": "",
+        "sha256": "b34584dc6f561089e1d747fedebb3765f2caa72c927ef54d7ca55e5ae40a814b",
+        "bytes": 1033416
+      },
+      {
+        "name": "tokens.txt",
+        "downloadPath": "",
+        "sha256": "6193c7ea1c96d0d9a1e9652789b40d13a8a913b434a5451e93158f5a09fd6652",
+        "bytes": 20628
+      }
+    ]
+  },
+  {
+    "id": "draft-en",
+    "kind": "online-draft",
+    "category": "draft",
+    "family": "Zipformer",
+    "name": "Zipformer（英语）",
+    "fileName": "online/en",
+    "sizeLabel": "约 72 MB",
+    "recommendedFor": "在线草稿识别；当前随本机在线环境准备，尚未提供独立下载。",
+    "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
+    "optional": false,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": false,
+    "retired": false,
+    "files": [
+      {
+        "name": "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        "downloadPath": "",
+        "sha256": "5022b2eca5b19d1bc104fcf33e26bc32604b7df553cd2e1f62e31dc7b05e9c87",
+        "bytes": 70108816
+      },
+      {
+        "name": "decoder-epoch-99-avg-1-chunk-16-left-128.onnx",
+        "downloadPath": "",
+        "sha256": "85914f840b71110487ece7a30ebd0bd4b8fb5c2623215bba3aa5ab4c138fc591",
+        "bytes": 2093080
+      },
+      {
+        "name": "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        "downloadPath": "",
+        "sha256": "abd5e30f3f16fc510605c6029dba33f10e4386bd75c5bdc30cf94076864db10d",
+        "bytes": 259416
+      },
+      {
+        "name": "tokens.txt",
+        "downloadPath": "",
+        "sha256": "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb",
+        "bytes": 5048
+      }
+    ]
+  },
+  {
+    "id": "draft-ko",
+    "kind": "online-draft",
+    "category": "draft",
+    "family": "Zipformer",
+    "name": "Zipformer（韩语）",
+    "fileName": "online/ko",
+    "sizeLabel": "约 141 MB",
+    "recommendedFor": "在线草稿识别；当前随本机在线环境准备，尚未提供独立下载。",
+    "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2",
+    "optional": false,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": false,
+    "retired": false,
+    "files": [
+      {
+        "name": "encoder-epoch-99-avg-1.int8.onnx",
+        "downloadPath": "",
+        "sha256": "8d0b1aa24fbedd4e3948564ab7facd151b8ce9b0c48fc987c541de2de3af5697",
+        "bytes": 126968852
+      },
+      {
+        "name": "decoder-epoch-99-avg-1.onnx",
+        "downloadPath": "",
+        "sha256": "b29cfb4575141e50a30a22b2c4579934f3d4f45b83c9c8c08c3aef5a3fa7abfc",
+        "bytes": 11309084
+      },
+      {
+        "name": "joiner-epoch-99-avg-1.int8.onnx",
+        "downloadPath": "",
+        "sha256": "128b80a66a1f718488af8560f9d15895109b99ff3e573f0a0130e03774ef1ced",
+        "bytes": 2581421
+      },
+      {
+        "name": "tokens.txt",
+        "downloadPath": "",
+        "sha256": "016bdf0965029263b7ad01b742366ee542ef0bef38261510e8176ff6f2e9e668",
+        "bytes": 60246
+      }
+    ]
+  },
+  {
+    "id": "online-silero-v6.2.3",
+    "kind": "online-vad",
+    "category": "vad",
+    "family": "Silero VAD",
+    "name": "Silero VAD v6.2.3（在线 ONNX）",
+    "fileName": "online/silero_vad.onnx",
+    "sizeLabel": "约 2.33 MB",
+    "recommendedFor": "在线语音活动检测；当前随本机在线环境准备。不能替代 Whisper 的 GGML VAD。",
+    "sourceUrl": "https://github.com/snakers4/silero-vad",
+    "optional": false,
+    "bundle": false,
+    "selectable": false,
+    "downloadable": false,
+    "retired": false,
+    "files": [
+      {
+        "name": "silero_vad.onnx",
+        "downloadPath": "",
+        "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+        "bytes": 2327524
+      }
+    ]
+  },
+  {
+    "id": "qwen-0.6b-4bit",
+    "kind": "qwen-asr",
+    "category": "transcription",
+    "family": "Qwen3-ASR",
+    "name": "Qwen3-ASR 0.6B（MLX 4bit）",
+    "fileName": "online/qwen-0.6b-4bit",
+    "sizeLabel": "约 713 MB",
+    "recommendedFor": "按需测试的量化候选；当前用于在线确认识别，离线文件转录尚未接入。需要在线运行环境，准确率与延迟待对照。",
+    "sourceUrl": "https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-4bit",
+    "optional": false,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "chat_template.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/chat_template.json",
+        "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+        "bytes": 1161
+      },
+      {
+        "name": "config.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/config.json",
+        "sha256": "923618cf5ca452fda0253a6be5c1a17f94a2e4851d3b98beb45848565587bd72",
+        "bytes": 7187
+      },
+      {
+        "name": "generation_config.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/generation_config.json",
+        "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c",
+        "bytes": 142
+      },
+      {
+        "name": "merges.txt",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/merges.txt",
+        "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+        "bytes": 1671853
+      },
+      {
+        "name": "model.safetensors",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/model.safetensors",
+        "sha256": "70c7e67e588062adce4f10796e47ad42ead51c6671eda61a0987eae38ca95ddf",
+        "bytes": 708236945
+      },
+      {
+        "name": "model.safetensors.index.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/model.safetensors.index.json",
+        "sha256": "e3bb80ef0fd42a5be07b04e90c97d60460bbde8af3531e0bfe9100a61404d81a",
+        "bytes": 71814
+      },
+      {
+        "name": "preprocessor_config.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/preprocessor_config.json",
+        "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+        "bytes": 330
+      },
+      {
+        "name": "tokenizer_config.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/tokenizer_config.json",
+        "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+        "bytes": 12487
+      },
+      {
+        "name": "vocab.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-0.6B-4bit/resolve/313d850181767edf09f00a9c289becca70e58cd0/vocab.json",
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "bytes": 2776833
+      }
+    ]
+  },
+  {
+    "id": "qwen-1.7b-8bit",
+    "kind": "qwen-asr",
+    "category": "transcription",
+    "family": "Qwen3-ASR",
+    "name": "Qwen3-ASR 1.7B（MLX 8bit）",
+    "fileName": "online/qwen-1.7b-8bit",
+    "sizeLabel": "约 2.47 GB",
+    "recommendedFor": "按需测试的量化候选；当前用于在线确认识别，离线文件转录尚未接入。需要在线运行环境，准确率与延迟待对照。",
+    "sourceUrl": "https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit",
+    "optional": false,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "chat_template.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/chat_template.json",
+        "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+        "bytes": 1161
+      },
+      {
+        "name": "config.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/config.json",
+        "sha256": "1b76b3b6c655fc54595da025f7a96474ad9fa86363303fbdd61a7d8483ccfaf7",
+        "bytes": 7188
+      },
+      {
+        "name": "generation_config.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/generation_config.json",
+        "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c",
+        "bytes": 142
+      },
+      {
+        "name": "merges.txt",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/merges.txt",
+        "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+        "bytes": 1671853
+      },
+      {
+        "name": "model.safetensors",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/model.safetensors",
+        "sha256": "bf304b009cc7eca79283056f787b44c952d24ac22cec787b39732bba3c23c13c",
+        "bytes": 2463307541
+      },
+      {
+        "name": "model.safetensors.index.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/model.safetensors.index.json",
+        "sha256": "0a5d0ec11188602242ff81a9969883d0fdeb98cd5d85cd1413089d897c201af5",
+        "bytes": 78968
+      },
+      {
+        "name": "preprocessor_config.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/preprocessor_config.json",
+        "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+        "bytes": 330
+      },
+      {
+        "name": "tokenizer_config.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/tokenizer_config.json",
+        "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+        "bytes": 12487
+      },
+      {
+        "name": "vocab.json",
+        "downloadPath": "mlx-community/Qwen3-ASR-1.7B-8bit/resolve/a8379a2e2f9e313c9292cdf1af4055ab56d50d55/vocab.json",
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "bytes": 2776833
+      }
+    ]
+  }
+]

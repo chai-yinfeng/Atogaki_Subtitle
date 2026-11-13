@@ -33,12 +33,18 @@ export type SaveDesktopSettingsRequest = {
 
 export type ModelCatalogItem = {
   id: string;
-  kind: "whisper" | "vad" | "hy-mt2" | "index-translate";
+  kind: "whisper" | "vad" | "hy-mt2" | "index-translate" | "qwen-asr" | "online-draft" | "online-vad";
   name: string;
   fileName: string;
   sizeLabel: string;
   recommendedFor: string;
   sourceUrl: string;
+  category?: "transcription" | "draft" | "translation" | "vad";
+  family?: string;
+  optional?: boolean;
+  selectable?: boolean;
+  downloadable?: boolean;
+  retired?: boolean;
 };
 
 export type ModelDownloadState = {

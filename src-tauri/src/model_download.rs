@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use futures_util::StreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::{
     fs,
@@ -21,20 +21,60 @@ use tokio::{
 use crate::desktop_settings::DesktopSettingsService;
 use atogaki_subtitle::infrastructure::network::{NetworkClientConfig, normalize_https_endpoint};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCatalogItem {
-    pub id: &'static str,
-    pub kind: &'static str,
-    pub name: &'static str,
-    pub file_name: &'static str,
-    pub size_label: &'static str,
-    pub recommended_for: &'static str,
-    pub source_url: &'static str,
-    #[serde(skip)]
-    download_path: &'static str,
-    #[serde(skip)]
-    sha256: &'static str,
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub file_name: String,
+    pub size_label: String,
+    pub recommended_for: String,
+    pub source_url: String,
+    pub category: String,
+    pub family: String,
+    pub optional: bool,
+    pub selectable: bool,
+    pub downloadable: bool,
+    pub retired: bool,
+    #[serde(skip_serializing)]
+    bundle: bool,
+    #[serde(skip_serializing)]
+    files: Vec<ModelFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelFile {
+    name: String,
+    download_path: String,
+    sha256: String,
+    bytes: u64,
+}
+
+impl ModelCatalogItem {
+    fn total_bytes(&self) -> u64 {
+        self.files.iter().map(|file| file.bytes).sum()
+    }
+
+    fn file_path(&self, root: &Path, file: &ModelFile) -> PathBuf {
+        if self.bundle {
+            root.join(&file.name)
+        } else {
+            root.to_path_buf()
+        }
+    }
+
+    pub fn installed(&self, models_directory: &Path) -> bool {
+        self.installed_at(&models_directory.join(&self.file_name))
+    }
+
+    pub fn installed_at(&self, root: &Path) -> bool {
+        self.files.iter().all(|file| {
+            std::fs::metadata(self.file_path(root, file))
+                .is_ok_and(|m| m.is_file() && (file.bytes == 0 || m.len() == file.bytes))
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,30 +138,35 @@ impl ModelDownloadService {
     pub async fn states(&self) -> Result<Vec<ModelDownloadState>> {
         let mut states = self.states.lock().await.clone();
         for model in model_catalog() {
-            let path = self.models_directory.join(model.file_name);
-            let active = self
-                .settings
-                .downloaded_model_path(model.kind)
-                .await?
-                .as_deref()
-                == Some(path.as_path());
-            if path.is_file() {
-                let state =
-                    states
-                        .entry(model.id.to_string())
-                        .or_insert_with(|| ModelDownloadState {
-                            model_id: model.id.to_string(),
-                            status: "done".to_string(),
-                            downloaded_bytes: std::fs::metadata(&path)
-                                .map(|metadata| metadata.len())
-                                .unwrap_or_default(),
-                            total_bytes: None,
-                            path: Some(path.display().to_string()),
-                            error: None,
-                            source: Some("本地已安装".to_string()),
-                            active,
-                        });
+            let path = self.models_directory.join(&model.file_name);
+            let active = model.selectable
+                && self
+                    .settings
+                    .downloaded_model_path(&model.kind)
+                    .await?
+                    .as_deref()
+                    == Some(path.as_path());
+            if model.installed(&self.models_directory) {
+                let state = states
+                    .entry(model.id.clone())
+                    .or_insert_with(|| ModelDownloadState {
+                        model_id: model.id.clone(),
+                        status: "done".into(),
+                        downloaded_bytes: model
+                            .total_bytes()
+                            .max(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)),
+                        total_bytes: (model.total_bytes() > 0).then(|| model.total_bytes()),
+                        path: Some(path.display().to_string()),
+                        error: None,
+                        source: Some("本地已安装".into()),
+                        active,
+                    });
                 state.active = active;
+            } else if states
+                .get(&model.id)
+                .is_some_and(|state| state.status == "done")
+            {
+                states.remove(&model.id);
             }
         }
         let mut states = states.into_values().collect::<Vec<_>>();
@@ -135,6 +180,12 @@ impl ModelDownloadService {
             .find(|model| model.id == model_id)
             .cloned()
             .ok_or_else(|| anyhow!("unknown model: {model_id}"))?;
+        if !model.downloadable {
+            bail!("该模型当前随在线环境准备，尚不支持独立下载");
+        }
+        if model.retired && !model.installed(&self.models_directory) {
+            bail!("该模型已从常用目录退出，不再提供新下载");
+        }
         let mut states = self.states.lock().await;
         if states.values().any(|state| {
             matches!(
@@ -144,63 +195,60 @@ impl ModelDownloadService {
         }) {
             bail!("another model download is already running");
         }
-        let downloaded_bytes = fs::metadata(self.partial_path(&model))
-            .await
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
         let state = ModelDownloadState {
-            model_id: model.id.to_string(),
-            status: "queued".to_string(),
-            downloaded_bytes,
-            total_bytes: None,
+            model_id: model.id.clone(),
+            status: "queued".into(),
+            downloaded_bytes: 0,
+            total_bytes: (model.total_bytes() > 0).then(|| model.total_bytes()),
             path: None,
             error: None,
             source: None,
             active: false,
         };
-        states.insert(model.id.to_string(), state.clone());
+        let mut cancellations = self.cancellations.lock().await;
+        if !cancellations.is_empty() {
+            bail!("another model download is still finishing");
+        }
+        cancellations.insert(model.id.clone(), Arc::new(AtomicBool::new(false)));
+        drop(cancellations);
+        states.insert(model.id.clone(), state.clone());
         drop(states);
-        self.cancellations
-            .lock()
-            .await
-            .insert(model.id.to_string(), Arc::new(AtomicBool::new(false)));
-
         let service = self.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(error) = service.download(model.clone()).await {
-                let cancelled = service.is_cancelled(model.id).await;
+                let cancelled = service.is_cancelled(&model.id).await;
                 service
-                    .update_state(model.id, |state| {
-                        state.status = if cancelled { "cancelled" } else { "failed" }.to_string();
+                    .update_state(&model.id, |state| {
+                        state.status = if cancelled { "cancelled" } else { "failed" }.into();
                         state.error = (!cancelled).then(|| format!("{error:#}"));
                     })
                     .await;
             }
-            service.cancellations.lock().await.remove(model.id);
+            service.cancellations.lock().await.remove(&model.id);
         });
         Ok(state)
     }
 
     pub async fn cancel(&self, model_id: &str) -> Result<ModelDownloadState> {
-        let cancellation = self
-            .cancellations
-            .lock()
-            .await
+        let mut states = self.states.lock().await;
+        let state = states
+            .get_mut(model_id)
+            .ok_or_else(|| anyhow!("model download state disappeared: {model_id}"))?;
+        // Completion can win a race with the user's cancel click. Keep the terminal state.
+        if !matches!(
+            state.status.as_str(),
+            "queued" | "downloading" | "cancelling"
+        ) {
+            return Ok(state.clone());
+        }
+        let cancellations = self.cancellations.lock().await;
+        let cancellation = cancellations
             .get(model_id)
-            .cloned()
             .ok_or_else(|| anyhow!("model download is not active: {model_id}"))?;
         cancellation.store(true, Ordering::SeqCst);
-        self.update_state(model_id, |state| {
-            state.status = "cancelling".to_string();
-            state.error = None;
-        })
-        .await;
-        self.states
-            .lock()
-            .await
-            .get(model_id)
-            .cloned()
-            .ok_or_else(|| anyhow!("model download state disappeared: {model_id}"))
+        state.status = "cancelling".into();
+        state.error = None;
+        Ok(state.clone())
     }
 
     pub async fn uninstall(&self, model_id: &str) -> Result<()> {
@@ -211,21 +259,23 @@ impl ModelDownloadService {
             .iter()
             .find(|model| model.id == model_id)
             .ok_or_else(|| anyhow!("unknown model: {model_id}"))?;
-        let output_path = self.models_directory.join(model.file_name);
-        let partial_path = self.partial_path(model);
-        if output_path.is_file() {
-            fs::remove_file(&output_path)
-                .await
-                .with_context(|| format!("failed to uninstall {}", output_path.display()))?;
+        if !model.downloadable {
+            bail!("该模型由在线环境管理");
         }
-        if partial_path.is_file() {
-            fs::remove_file(&partial_path)
-                .await
-                .with_context(|| format!("failed to remove {}", partial_path.display()))?;
+        let output_path = self.models_directory.join(&model.file_name);
+        let staging_path = self.partial_path(model);
+        for path in [&output_path, &staging_path] {
+            if path.is_dir() && model.bundle {
+                fs::remove_dir_all(path).await?;
+            } else if path.is_file() {
+                fs::remove_file(path).await?;
+            }
         }
-        self.settings
-            .clear_downloaded_model(model.kind, &output_path)
-            .await?;
+        if model.selectable {
+            self.settings
+                .clear_downloaded_model(&model.kind, &output_path)
+                .await?;
+        }
         self.states.lock().await.remove(model_id);
         Ok(())
     }
@@ -235,19 +285,13 @@ impl ModelDownloadService {
             .iter()
             .find(|model| model.id == model_id)
             .ok_or_else(|| anyhow!("unknown model: {model_id}"))?;
-        let output_path = self.models_directory.join(model.file_name);
-        if !output_path.is_file() {
-            bail!("model is not installed: {}", output_path.display());
+        if !model.selectable {
+            bail!("请在在线控制面板选择识别模型；离线文件转录尚未接入此模型");
         }
-        let actual = sha256_file(&output_path).await?;
-        if actual != model.sha256 {
-            bail!(
-                "模型 SHA-256 校验失败，期望 {}，实际 {actual}",
-                model.sha256
-            );
-        }
+        let output_path = self.models_directory.join(&model.file_name);
+        self.verify_package(model, &output_path).await?;
         self.settings
-            .set_downloaded_model(model.kind, &output_path)
+            .set_downloaded_model(&model.kind, &output_path)
             .await?;
         self.states()
             .await?
@@ -256,67 +300,133 @@ impl ModelDownloadService {
             .ok_or_else(|| anyhow!("selected model state disappeared: {model_id}"))
     }
 
-    async fn download(&self, model: ModelCatalogItem) -> Result<()> {
-        let output_path = self.models_directory.join(model.file_name);
-        if output_path.is_file() {
-            if sha256_file(&output_path).await? == model.sha256 {
-                self.settings
-                    .set_downloaded_model(model.kind, &output_path)
-                    .await?;
-                self.update_state(model.id, |state| {
-                    state.status = "done".to_string();
-                    state.path = Some(output_path.display().to_string());
-                    state.source = Some("本地已校验文件".to_string());
-                    state.active = true;
-                })
-                .await;
-                return Ok(());
+    async fn verify_package(&self, model: &ModelCatalogItem, root: &Path) -> Result<()> {
+        for file in &model.files {
+            let path = model.file_path(root, file);
+            let actual = sha256_file(&path).await?;
+            if actual != file.sha256 {
+                bail!("{} SHA-256 校验失败", file.name);
             }
-            fs::remove_file(&output_path)
-                .await
-                .with_context(|| format!("failed to replace invalid {}", output_path.display()))?;
         }
+        Ok(())
+    }
 
-        let network = self.settings.download_network_settings().await?;
-        let client = build_download_client(&network.client)?;
-        let sources = download_sources(&model, network.model_mirror_url.as_deref());
-        self.update_state(model.id, |state| {
-            state.status = "downloading".to_string();
+    async fn complete(&self, model: &ModelCatalogItem, output_path: &Path) -> Result<()> {
+        self.ensure_not_cancelled(&model.id).await?;
+        if model.selectable {
+            self.settings
+                .set_downloaded_model(&model.kind, output_path)
+                .await?;
+        }
+        let bytes = if model.bundle {
+            model.total_bytes()
+        } else {
+            fs::metadata(output_path).await?.len()
+        };
+        self.update_state(&model.id, |state| {
+            state.downloaded_bytes = bytes;
+            if state.source.is_none() {
+                state.source = Some("本地已校验文件".into());
+            }
+            state.status = "done".into();
+            state.path = Some(output_path.display().to_string());
+            state.active = model.selectable;
+            state.error = None;
         })
         .await;
-        let mut failures = Vec::new();
-        for source in sources {
-            self.ensure_not_cancelled(model.id).await?;
-            self.update_state(model.id, |state| {
-                state.source = Some(source.label.to_string());
-                state.total_bytes = None;
-            })
-            .await;
-            match self
-                .download_from_source(&client, &model, &source, &output_path)
+        Ok(())
+    }
+
+    async fn download(&self, model: ModelCatalogItem) -> Result<()> {
+        let network = self.settings.download_network_settings().await?;
+        let client = build_download_client(&network.client)?;
+        self.download_package(model, &client, |file| {
+            download_sources(&file.download_path, network.model_mirror_url.as_deref())
+        })
+        .await
+    }
+
+    async fn download_package(
+        &self,
+        model: ModelCatalogItem,
+        client: &reqwest::Client,
+        sources: impl Fn(&ModelFile) -> Vec<DownloadSource>,
+    ) -> Result<()> {
+        let output_path = self.models_directory.join(&model.file_name);
+        if model.bundle && output_path.exists() {
+            // Imported packages remain in place. Never replace or merge an unverified directory.
+            self.verify_package(&model, &output_path)
                 .await
-            {
-                Ok(()) => return Ok(()),
-                Err(error) => {
-                    failures.push(format!("{}：{error:#}", source.label));
+                .context("现有模型包未通过校验，请先检查或卸载该模型包后重试")?;
+            return self.complete(&model, &output_path).await;
+        }
+        let root = if model.bundle {
+            self.partial_path(&model)
+        } else {
+            output_path.clone()
+        };
+        if model.bundle {
+            fs::create_dir_all(&root).await?;
+        } else if let Some(parent) = root.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        self.update_state(&model.id, |state| {
+            state.status = "downloading".into();
+        })
+        .await;
+        let mut completed_bytes = 0;
+        for file in &model.files {
+            self.ensure_not_cancelled(&model.id).await?;
+            let path = model.file_path(&root, file);
+            if path.is_file() && sha256_file(&path).await? == file.sha256 {
+                completed_bytes += fs::metadata(&path).await?.len();
+                self.update_state(&model.id, |state| state.downloaded_bytes = completed_bytes)
+                    .await;
+                continue;
+            }
+            let mut failures = Vec::new();
+            let mut installed = false;
+            for source in sources(file) {
+                self.ensure_not_cancelled(&model.id).await?;
+                match self
+                    .download_from_source(client, &model, file, &source, &path, completed_bytes)
+                    .await
+                {
+                    Ok(()) => {
+                        installed = true;
+                        break;
+                    }
+                    Err(error) => failures.push(format!("{}：{error:#}", source.label)),
                 }
             }
+            if !installed {
+                bail!("{} 所有下载来源均失败：{}", file.name, failures.join("；"));
+            }
+            completed_bytes += fs::metadata(&path).await?.len();
         }
-        bail!("所有模型下载来源均失败：{}", failures.join("；"))
+        self.ensure_not_cancelled(&model.id).await?;
+        if model.bundle {
+            fs::rename(&root, &output_path)
+                .await
+                .with_context(|| format!("failed to install {}", output_path.display()))?;
+        }
+        self.complete(&model, &output_path).await
     }
 
     async fn download_from_source(
         &self,
         client: &reqwest::Client,
         model: &ModelCatalogItem,
+        file: &ModelFile,
         source: &DownloadSource,
         output_path: &Path,
+        completed_bytes: u64,
     ) -> Result<()> {
-        let part_path = self.partial_path(model);
-        let existing_bytes = fs::metadata(&part_path)
-            .await
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
+        let part_path = output_path.with_file_name(format!(
+            "{}.part",
+            output_path.file_name().unwrap().to_string_lossy()
+        ));
+        let existing_bytes = fs::metadata(&part_path).await.map(|m| m.len()).unwrap_or(0);
         let mut request = client
             .get(&source.url)
             .header(reqwest::header::ACCEPT_ENCODING, "identity");
@@ -329,18 +439,13 @@ impl ModelDownloadService {
             .with_context(|| format!("无法连接 {}", source.label))?;
         let status = response.status();
         if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && existing_bytes > 0 {
-            if sha256_file(&part_path).await? == model.sha256 {
-                return self
-                    .install_verified_download(model, &part_path, output_path)
-                    .await;
+            if sha256_file(&part_path).await? == file.sha256 {
+                self.ensure_not_cancelled(&model.id).await?;
+                fs::rename(&part_path, output_path).await?;
+                return Ok(());
             }
-            fs::remove_file(&part_path).await.with_context(|| {
-                format!(
-                    "failed to discard invalid partial model {}",
-                    part_path.display()
-                )
-            })?;
-            bail!("服务器拒绝续传，且现有临时文件未通过完整校验；下次将重新下载");
+            fs::remove_file(&part_path).await?;
+            bail!("服务器拒绝续传，且临时文件未通过完整校验；下次将重新下载");
         }
         if !status.is_success() {
             bail!("服务器返回 {status}");
@@ -349,27 +454,25 @@ impl ModelDownloadService {
         if resumed {
             validate_content_range(response.headers(), existing_bytes)?;
         }
-        let resolved_host = response
-            .url()
-            .host_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| "未知主机".to_string());
-        self.update_state(model.id, |state| {
-            state.source = Some(format!("{} · {resolved_host}", source.label));
-        })
-        .await;
-        let total_bytes = if resumed {
-            content_range_total(response.headers()).or_else(|| {
-                response
-                    .content_length()
-                    .map(|remaining| existing_bytes.saturating_add(remaining))
-            })
+        let file_total = if resumed {
+            content_range_total(response.headers())
+                .or_else(|| response.content_length().map(|n| n + existing_bytes))
         } else {
             response.content_length()
         };
-        self.update_state(model.id, |state| state.total_bytes = total_bytes)
-            .await;
-
+        let resolved_host = response.url().host_str().unwrap_or("未知主机").to_string();
+        self.update_state(&model.id, |state| {
+            state.source = Some(format!(
+                "{} · {resolved_host} · {}",
+                source.label, file.name
+            ));
+            state.total_bytes = if model.bundle {
+                Some(model.total_bytes())
+            } else {
+                file_total
+            };
+        })
+        .await;
         let mut options = fs::OpenOptions::new();
         options.create(true).write(true);
         if resumed {
@@ -377,14 +480,11 @@ impl ModelDownloadService {
         } else {
             options.truncate(true);
         }
-        let mut output = options
-            .open(&part_path)
-            .await
-            .with_context(|| format!("failed to create {}", part_path.display()))?;
+        let mut output = options.open(&part_path).await?;
         let mut stream = response.bytes_stream();
         let mut downloaded_bytes = if resumed { existing_bytes } else { 0 };
-        self.update_state(model.id, |state| {
-            state.downloaded_bytes = downloaded_bytes;
+        self.update_state(&model.id, |state| {
+            state.downloaded_bytes = completed_bytes + downloaded_bytes
         })
         .await;
         let mut hasher = Sha256::new();
@@ -392,63 +492,32 @@ impl ModelDownloadService {
             update_sha256_from_file(&part_path, &mut hasher).await?;
         }
         while let Some(chunk) = stream.next().await {
-            self.ensure_not_cancelled(model.id).await?;
+            self.ensure_not_cancelled(&model.id).await?;
             let chunk = chunk.context("model download was interrupted")?;
-            output
-                .write_all(&chunk)
-                .await
-                .context("failed to write model download")?;
+            output.write_all(&chunk).await?;
             hasher.update(&chunk);
-            downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
-            self.update_state(model.id, |state| {
-                state.downloaded_bytes = downloaded_bytes;
+            downloaded_bytes += chunk.len() as u64;
+            self.update_state(&model.id, |state| {
+                state.downloaded_bytes = completed_bytes + downloaded_bytes
             })
             .await;
         }
-        output
-            .flush()
-            .await
-            .context("failed to flush model download")?;
+        output.flush().await?;
         drop(output);
-
-        if downloaded_bytes == 0 {
-            bail!("下载来源返回了空文件");
-        }
         let actual = format!("{:x}", hasher.finalize());
-        if actual != model.sha256 {
-            fs::remove_file(&part_path).await.with_context(|| {
-                format!(
-                    "failed to discard corrupt model download {}",
-                    part_path.display()
-                )
-            })?;
-            bail!("SHA-256 校验失败，期望 {}，实际 {actual}", model.sha256);
+        if downloaded_bytes == 0
+            || actual != file.sha256
+            || (file.bytes > 0 && downloaded_bytes != file.bytes)
+        {
+            fs::remove_file(&part_path).await?;
+            bail!(
+                "{} 大小或 SHA-256 校验失败，期望 {}，实际 {actual}",
+                file.name,
+                file.sha256
+            );
         }
-        self.ensure_not_cancelled(model.id).await?;
-        self.install_verified_download(model, &part_path, output_path)
-            .await
-    }
-
-    async fn install_verified_download(
-        &self,
-        model: &ModelCatalogItem,
-        part_path: &Path,
-        output_path: &Path,
-    ) -> Result<()> {
-        let downloaded_bytes = fs::metadata(part_path).await?.len();
-        fs::rename(part_path, output_path)
-            .await
-            .with_context(|| format!("failed to install {}", output_path.display()))?;
-        self.settings
-            .set_downloaded_model(model.kind, output_path)
-            .await?;
-        self.update_state(model.id, |state| {
-            state.status = "done".to_string();
-            state.downloaded_bytes = downloaded_bytes;
-            state.path = Some(output_path.display().to_string());
-            state.active = true;
-        })
-        .await;
+        self.ensure_not_cancelled(&model.id).await?;
+        fs::rename(&part_path, output_path).await?;
         Ok(())
     }
 
@@ -468,7 +537,7 @@ impl ModelDownloadService {
             .lock()
             .await
             .get(model_id)
-            .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
+            .is_some_and(|c| c.load(Ordering::SeqCst))
     }
 
     async fn ensure_not_cancelled(&self, model_id: &str) -> Result<()> {
@@ -492,7 +561,7 @@ pub async fn test_download_network(
         .find(|model| model.id == "vad-silero-v6.2.0")
         .expect("VAD model must remain in the catalog");
     let mut checks = Vec::new();
-    for source in download_sources(model, mirror.as_deref()) {
+    for source in download_sources(&model.files[0].download_path, mirror.as_deref()) {
         let result = client
             .get(&source.url)
             .header(reqwest::header::RANGE, "bytes=0-0")
@@ -533,14 +602,11 @@ fn build_download_client(network: &NetworkClientConfig) -> Result<reqwest::Clien
         .context("failed to build model download client")
 }
 
-fn download_sources(
-    model: &ModelCatalogItem,
-    model_mirror_url: Option<&str>,
-) -> Vec<DownloadSource> {
-    let official_url = format!("https://huggingface.co/{}", model.download_path);
+fn download_sources(download_path: &str, model_mirror_url: Option<&str>) -> Vec<DownloadSource> {
+    let official_url = format!("https://huggingface.co/{}", download_path);
     let mut sources = Vec::new();
     if let Some(mirror) = model_mirror_url {
-        let mirror_url = format!("{}/{}", mirror.trim_end_matches('/'), model.download_path);
+        let mirror_url = format!("{}/{}", mirror.trim_end_matches('/'), download_path);
         if mirror_url != official_url {
             sources.push(DownloadSource {
                 label: "自定义镜像",
@@ -620,114 +686,19 @@ fn content_range_total(headers: &reqwest::header::HeaderMap) -> Option<u64> {
         .ok()
 }
 
-fn model_catalog() -> &'static [ModelCatalogItem] {
-    &[
-        ModelCatalogItem {
-            id: "whisper-small",
-            kind: "whisper",
-            name: "Whisper small（轻量）",
-            file_name: "ggml-small.bin",
-            size_label: "约 466 MiB",
-            recommended_for: "8 GB 内存或希望更快完成；适合短媒体和初步识别。",
-            source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
-            download_path: "ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-            sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
-        },
-        ModelCatalogItem {
-            id: "whisper-medium",
-            kind: "whisper",
-            name: "Whisper medium（推荐）",
-            file_name: "ggml-medium.bin",
-            size_label: "约 1.5 GiB",
-            recommended_for: "16 GB 及以上内存；适合作为日语节目的常用选择。",
-            source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
-            download_path: "ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-            sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
-        },
-        ModelCatalogItem {
-            id: "whisper-large-v3-q5_0",
-            kind: "whisper",
-            name: "Whisper large-v3 q5",
-            file_name: "ggml-large-v3-q5_0.bin",
-            size_label: "约 1.1 GiB",
-            recommended_for: "现代 Apple Silicon；适合优先追求识别准确性。",
-            source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
-            download_path: "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
-            sha256: "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
-        },
-        ModelCatalogItem {
-            id: "whisper-large-v3-turbo-q5_0",
-            kind: "whisper",
-            name: "Whisper large-v3-turbo q5",
-            file_name: "ggml-large-v3-turbo-q5_0.bin",
-            size_label: "约 547 MiB",
-            recommended_for: "现代 Apple Silicon / GPU；速度与磁盘占用较低。",
-            source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
-            download_path: "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
-            sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
-        },
-        ModelCatalogItem {
-            id: "whisper-large-v3-turbo-q8_0",
-            kind: "whisper",
-            name: "Whisper large-v3-turbo q8",
-            file_name: "ggml-large-v3-turbo-q8_0.bin",
-            size_label: "约 834 MiB",
-            recommended_for: "turbo 的较高精度量化档；适合优先追求 turbo 的识别质量。",
-            source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
-            download_path: "ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
-            sha256: "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1",
-        },
-        ModelCatalogItem {
-            id: "vad-silero-v6.2.0",
-            kind: "vad",
-            name: "Silero VAD v6.2.0（推荐）",
-            file_name: "ggml-silero-v6.2.0.bin",
-            size_label: "约 865 KiB",
-            recommended_for: "过滤静音、音乐和环境声，建议与任一 Whisper 模型配套。",
-            source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/models/download-vad-model.sh",
-            download_path: "ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
-            sha256: "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
-        },
-        ModelCatalogItem {
-            id: "index-translate-2b-q4-k-m",
-            kind: "index-translate",
-            name: "Index-Translate 2B Q4_K_M",
-            file_name: "Index-Translate-2B.Q4_K_M.gguf",
-            size_label: "约 1.22 GiB",
-            recommended_for: "本地多语翻译；支持上下文与人名提示。",
-            source_url: "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF",
-            download_path: "IndexTeam/Index-Translate-2B-GGUF/resolve/3a0eca6ce931d88d00614d427ab3ed8ff0743902/Index-Translate-2B.Q4_K_M.gguf",
-            sha256: "044b313d29342bd3b2c77cbb64023ca0d209bd9b3247763f9d162767ef2d746a",
-        },
-        ModelCatalogItem {
-            id: "hy-mt2-1.8b-q4-k-m",
-            kind: "hy-mt2",
-            name: "Hy-MT2 1.8B Q4_K_M（本地翻译推荐）",
-            file_name: "Hy-MT2-1.8B-Q4_K_M.gguf",
-            size_label: "约 1.06 GiB",
-            recommended_for: "速度较快，内存占用较低，适合日常本地翻译。",
-            source_url: "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF",
-            download_path: "tencent/Hy-MT2-1.8B-GGUF/resolve/a0c709d9fac510f2c807aa3af52872340dc37a4a/Hy-MT2-1.8B-Q4_K_M.gguf",
-            sha256: "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
-        },
-        ModelCatalogItem {
-            id: "hy-mt2-7b-q4-k-m",
-            kind: "hy-mt2",
-            name: "Hy-MT2 7B Q4_K_M",
-            file_name: "Hy-MT2-7B-Q4_K_M.gguf",
-            size_label: "约 4.31 GiB",
-            recommended_for: "内存占用较高，翻译耗时更长。",
-            source_url: "https://huggingface.co/tencent/Hy-MT2-7B-GGUF",
-            download_path: "tencent/Hy-MT2-7B-GGUF/resolve/ab8472660ac61fac25f1af43fac2599d52a8a775/Hy-MT2-7B-Q4_K_M.gguf",
-            sha256: "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b",
-        },
-    ]
+pub fn model_catalog() -> &'static [ModelCatalogItem] {
+    static CATALOG: OnceLock<Vec<ModelCatalogItem>> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        serde_json::from_str(include_str!("model-catalog.json"))
+            .expect("bundled model catalog must be valid")
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
         fs,
+        path::Path,
         sync::Arc,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -747,7 +718,10 @@ mod tests {
     #[test]
     fn catalog_uses_unique_ids_and_https_downloads() {
         let catalog = model_catalog();
-        let mut ids = catalog.iter().map(|model| model.id).collect::<Vec<_>>();
+        let mut ids = catalog
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
         ids.sort_unstable();
         ids.dedup();
 
@@ -755,12 +729,14 @@ mod tests {
         assert!(
             catalog
                 .iter()
-                .all(|model| !model.download_path.starts_with('/') && model.sha256.len() == 64)
+                .flat_map(|model| &model.files)
+                .all(|file| !file.download_path.starts_with('/') && file.sha256.len() == 64)
         );
         assert!(
             catalog
                 .iter()
-                .all(|model| { model.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) })
+                .flat_map(|model| &model.files)
+                .all(|file| file.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()))
         );
         assert!(catalog.iter().any(|model| model.kind == "vad"));
     }
@@ -770,7 +746,7 @@ mod tests {
         let whisper_ids = model_catalog()
             .iter()
             .filter(|model| model.kind == "whisper")
-            .map(|model| model.id)
+            .map(|model| model.id.as_str())
             .collect::<Vec<_>>();
 
         assert_eq!(
@@ -795,22 +771,22 @@ mod tests {
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "hy-mt2-1.8b-q4-k-m");
         assert!(
-            models[0]
+            models[0].files[0]
                 .download_path
                 .contains("a0c709d9fac510f2c807aa3af52872340dc37a4a")
         );
         assert_eq!(
-            models[0].sha256,
+            models[0].files[0].sha256,
             "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699"
         );
         assert_eq!(models[1].id, "hy-mt2-7b-q4-k-m");
         assert!(
-            models[1]
+            models[1].files[0]
                 .download_path
                 .contains("ab8472660ac61fac25f1af43fac2599d52a8a775")
         );
         assert_eq!(
-            models[1].sha256,
+            models[1].files[0].sha256,
             "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b"
         );
     }
@@ -818,7 +794,10 @@ mod tests {
     #[test]
     fn custom_mirror_precedes_the_canonical_hugging_face_source() {
         let model = &model_catalog()[0];
-        let sources = download_sources(model, Some("https://mirror.example/hf"));
+        let sources = download_sources(
+            &model.files[0].download_path,
+            Some("https://mirror.example/hf"),
+        );
         assert_eq!(sources.len(), 2);
         assert_eq!(sources[0].label, "自定义镜像");
         assert!(sources[0].url.starts_with("https://mirror.example/hf/"));
@@ -886,6 +865,266 @@ mod tests {
                 .is_none()
         );
         assert!(service.states().await.unwrap().is_empty());
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn catalog_packages_have_safe_paths_and_pinned_qwen_variants() {
+        use std::path::Component;
+        let mut paths = std::collections::HashSet::new();
+        for item in model_catalog() {
+            assert!(paths.insert(&item.file_name));
+            assert!(
+                Path::new(&item.file_name)
+                    .components()
+                    .all(|c| matches!(c, Component::Normal(_)))
+            );
+            assert!(!item.files.is_empty());
+            let mut names = std::collections::HashSet::new();
+            for file in &item.files {
+                assert!(names.insert(&file.name));
+                assert!(
+                    Path::new(&file.name)
+                        .components()
+                        .all(|c| matches!(c, Component::Normal(_)))
+                );
+                if item.downloadable {
+                    assert!(file.download_path.contains("/resolve/"));
+                }
+                if item.bundle && item.downloadable {
+                    assert!(file.bytes > 0);
+                    let revision = file
+                        .download_path
+                        .split("/resolve/")
+                        .nth(1)
+                        .unwrap()
+                        .split('/')
+                        .next()
+                        .unwrap();
+                    assert_eq!(revision.len(), 40);
+                }
+            }
+        }
+        for id in ["qwen-0.6b", "qwen-0.6b-4bit", "qwen-1.7b-8bit", "qwen-1.7b"] {
+            let item = model_catalog().iter().find(|m| m.id == id).unwrap();
+            assert_eq!(item.category, "transcription");
+            assert!(item.downloadable && !item.selectable && item.bundle);
+        }
+        assert!(
+            model_catalog()
+                .iter()
+                .find(|m| m.id == "hy-mt2-7b-q4-k-m")
+                .unwrap()
+                .retired
+        );
+    }
+
+    #[tokio::test]
+    async fn package_download_rejects_corruption_resumes_and_publishes_only_complete_packages() {
+        use super::{DownloadSource, ModelFile};
+        use axum::{
+            Router,
+            body::Body,
+            extract::{Path as UrlPath, State},
+            http::{HeaderMap, Response, StatusCode},
+            routing::get,
+        };
+        use sha2::{Digest, Sha256};
+        use std::sync::{
+            Mutex as StdMutex,
+            atomic::{AtomicBool, Ordering},
+        };
+        #[derive(Clone)]
+        struct Server {
+            bad: Arc<AtomicBool>,
+            ranges: Arc<StdMutex<Vec<String>>>,
+        }
+        async fn serve(
+            State(server): State<Server>,
+            UrlPath(name): UrlPath<String>,
+            headers: HeaderMap,
+        ) -> Response<Body> {
+            let range = headers
+                .get("range")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("");
+            server
+                .ranges
+                .lock()
+                .unwrap()
+                .push(format!("{name}:{range}"));
+            let bytes: &[u8] = if server.bad.load(Ordering::SeqCst) {
+                b"bad-weights"
+            } else {
+                b"goodweights"
+            };
+            let start = range
+                .strip_prefix("bytes=")
+                .and_then(|n| n.strip_suffix('-'))
+                .and_then(|n| n.parse::<usize>().ok())
+                .unwrap_or(0);
+            let mut response = Response::builder().status(if start > 0 {
+                StatusCode::PARTIAL_CONTENT
+            } else {
+                StatusCode::OK
+            });
+            if start > 0 {
+                response = response.header(
+                    "content-range",
+                    format!("bytes {start}-{}/{}", bytes.len() - 1, bytes.len()),
+                );
+            }
+            response.body(Body::from(bytes[start..].to_vec())).unwrap()
+        }
+        let nonce = uuid::Uuid::new_v4();
+        let root = std::env::temp_dir().join(format!("atogaki-package-test-{nonce}"));
+        let models = root.join("models");
+        fs::create_dir_all(&models).unwrap();
+        let database = LocalDatabase::open(root.join("db.sqlite")).await.unwrap();
+        let settings = DesktopSettingsService::new(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            models.clone(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let whisper_path = models.join("my-whisper.bin");
+        fs::write(&whisper_path, b"existing selection").unwrap();
+        settings
+            .set_downloaded_model("whisper", &whisper_path)
+            .await
+            .unwrap();
+        let service = ModelDownloadService::new(models.clone(), settings).unwrap();
+        let mut model = model_catalog()
+            .iter()
+            .find(|m| m.id == "qwen-0.6b-4bit")
+            .unwrap()
+            .clone();
+        model.files = [
+            ("config.json", b"config".as_slice()),
+            ("model.safetensors", b"goodweights".as_slice()),
+        ]
+        .into_iter()
+        .map(|(name, bytes)| ModelFile {
+            name: name.into(),
+            bytes: bytes.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+            download_path: name.into(),
+        })
+        .collect();
+        service.states.lock().await.insert(
+            model.id.clone(),
+            super::ModelDownloadState {
+                model_id: model.id.clone(),
+                status: "queued".into(),
+                downloaded_bytes: 0,
+                total_bytes: Some(model.total_bytes()),
+                path: None,
+                error: None,
+                source: None,
+                active: false,
+            },
+        );
+        let stage = service.partial_path(&model);
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("config.json"), b"config").unwrap();
+        let output = models.join(&model.file_name);
+        let server = Server {
+            bad: Arc::new(AtomicBool::new(true)),
+            ranges: Arc::default(),
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/{name}", get(serve))
+            .with_state(server.clone());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let sources = |file: &ModelFile| {
+            vec![DownloadSource {
+                label: "fixture",
+                url: format!("http://{address}/{}", file.name),
+            }]
+        };
+        let error = service
+            .download_package(model.clone(), &client, sources)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("SHA-256"));
+        assert!(!output.exists() && !model.installed(&models));
+        assert!(stage.join("config.json").is_file());
+        assert!(!stage.join("model.safetensors.part").exists());
+        server.bad.store(false, Ordering::SeqCst);
+        fs::write(stage.join("model.safetensors.part"), b"goo").unwrap();
+        service
+            .download_package(model.clone(), &client, sources)
+            .await
+            .unwrap();
+        assert!(output.is_dir() && !stage.exists() && model.installed(&models));
+        let done = service.states.lock().await.get(&model.id).unwrap().clone();
+        assert_eq!(done.status, "done");
+        assert!(!done.active);
+        assert_eq!(done.downloaded_bytes, model.total_bytes());
+        let finishing = Arc::new(AtomicBool::new(false));
+        service
+            .cancellations
+            .lock()
+            .await
+            .insert(model.id.clone(), finishing.clone());
+        assert_eq!(service.cancel(&model.id).await.unwrap().status, "done");
+        assert!(!finishing.load(Ordering::SeqCst));
+        service.cancellations.lock().await.remove(&model.id);
+
+        assert_eq!(
+            server.ranges.lock().unwrap().as_slice(),
+            ["model.safetensors:", "model.safetensors:bytes=3-"]
+        );
+        assert_eq!(
+            service
+                .settings
+                .downloaded_model_path("whisper")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(whisper_path.as_path())
+        );
+        // Re-opening model management uses required files, never mere directory presence.
+        fs::remove_file(output.join("config.json")).unwrap();
+        assert!(!model.installed(&models));
+        fs::write(output.join("keep-user-data"), b"keep").unwrap();
+        assert!(
+            service
+                .download_package(model.clone(), &client, sources)
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(output.join("keep-user-data")).unwrap(), b"keep");
+        // Cancellation leaves a resumable staging directory and cannot publish it.
+        fs::remove_dir_all(&output).unwrap();
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("config.json"), b"config").unwrap();
+        service
+            .cancellations
+            .lock()
+            .await
+            .insert(model.id.clone(), Arc::new(AtomicBool::new(true)));
+        assert!(
+            service
+                .download_package(model.clone(), &client, sources)
+                .await
+                .is_err()
+        );
+        assert!(!output.exists() && stage.join("config.json").exists());
+        service.cancellations.lock().await.remove(&model.id);
+        assert!(service.select(&model.id).await.is_err());
+        service.uninstall(&model.id).await.unwrap();
+        assert!(!stage.exists() && whisper_path.exists());
+        task.abort();
+        drop(service);
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

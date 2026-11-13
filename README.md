@@ -27,7 +27,7 @@ macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`
 
 本版包含两分钟识别检查点、同任务暂停／继续和只读部分原文；任务可明确选择仅转录或 Hy-MT2／DeepSeek／DeepL／Gemini 翻译，完整识别后自动进入独立翻译阶段。翻译中断只补未完成或过期部分。设置、任务级后端、持久候选、全文检索、循环试听、批量导入、预设、学习来源和 Anki TSV 一并整理。
 
-Hy-MT2 1.8B 是日常本地翻译推荐，7B 需要更多内存与处理时间；两者使用官方 GGUF Q4_K_M 量化权重，模型另行下载。MLX 暂缓，桌面继续使用 C++ / Metal。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
+Hy-MT2 1.8B 是日常本地翻译推荐，采用官方 GGUF Q4_K_M 权重，模型另行下载。开发主线已将 7B 收出新下载目录，保留已安装模型的管理。离线桌面继续使用 C++ / Metal；在线 Qwen 使用 MLX worker，普通用户的 runtime 分发仍待补齐。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
 
 v0.1.2 已接入阶段队列：默认同时识别两个任务，DeepSeek 文本翻译最多四个请求并发，并可在同一任务的稳定原文前缀上提前进行；成功结果持久保存，完整识别后核对并复用。局部本地识别共享设备限额，Hy-MT2 在完整识别后独占设备翻译。修复长电影在 VAD 右上下文末尾时间轻微越界时无法继续的问题，并显示失败块与产物位置。新增累计执行计时，排除中断等待，并按成功分组更新提前翻译进度。发行说明见 [v0.1.2](docs/release-notes/v0.1.2.md)；设计与验证见 [0052](docs/decisions/0052-staged-concurrency-and-early-translation.md) 和 [阶段管线验证](docs/staged-pipeline-validation.md)。
 

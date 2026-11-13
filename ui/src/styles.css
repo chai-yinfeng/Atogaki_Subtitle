@@ -400,6 +400,13 @@ h2 { font-family: Georgia, "Songti SC", serif; font-size: 28px; font-weight: 500
 .settings-section input:not([type="checkbox"]), .settings-section select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: var(--ink); background: var(--surface); }
 .settings-path-row button { align-self: end; }
 .model-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+#model-catalog { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.model-group { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.model-group > summary { cursor: pointer; color: var(--ink); font-size: 13px; font-weight: 700; }
+.model-group-list { display: grid; gap: 9px; }
+.model-group:not([open]) > .model-group-list { display: none; }
+.model-group[open] > .model-group-list { margin-top: 10px; }
+.model-group .model-group { background: var(--surface); }
 .model-card { min-width: 0; display: grid; gap: 8px; border: 1px solid #ddd5c7; border-radius: 10px; padding: 11px; background: var(--surface); }
 .model-card > div:first-child { display: grid; gap: 4px; }
 .model-card strong { font-size: 13px; }

@@ -114,10 +114,59 @@ async fn index_model(
         .unwrap_or_else(|| state.data_dir.join("models/Index-Translate-2B.Q4_K_M.gguf")))
 }
 fn assets(state: &DesktopOnlineSession) -> Result<Assets, String> {
-    let bytes = std::fs::read(state.data_dir.join("models/online/manifest.json"))
-        .map_err(|_| "在线模型尚未准备好，请先准备本机测试模型包。".to_string())?;
-    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+    let models = state.data_dir.join("models");
+    let manifest = models.join("online/manifest.json");
+    let mut assets = match std::fs::read(&manifest) {
+        Ok(bytes) => serde_json::from_slice::<Assets>(&bytes).map_err(|e| e.to_string())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Assets {
+            drafts: HashMap::new(),
+            finals: vec![],
+            vad: models.join("online/silero_vad.onnx"),
+            hy_mt2: None,
+        },
+        Err(error) => return Err(error.to_string()),
+    };
+    // Managed packages augment the local preview manifest. Partial downloads are never marked ready.
+    for item in crate::model_download::model_catalog() {
+        let path = models.join(&item.file_name);
+        let model = Model {
+            id: item.id.clone(),
+            name: item.name.clone(),
+            path,
+        };
+        if item.kind == "qwen-asr" {
+            if let Some(existing) = assets.finals.iter_mut().find(|m| m.id == item.id) {
+                if item.installed(&models) {
+                    *existing = model;
+                }
+            } else {
+                assets.finals.push(model);
+            }
+        } else if item.category == "draft" {
+            let lang = item.id.trim_start_matches("draft-");
+            if item.installed(&models) || !assets.drafts.contains_key(lang) {
+                assets.drafts.insert(
+                    lang.into(),
+                    Model {
+                        id: lang.into(),
+                        ..model
+                    },
+                );
+            }
+        }
+    }
+    Ok(assets)
 }
+fn model_ready(model: &Model, catalog_id: &str) -> bool {
+    crate::model_download::model_catalog()
+        .iter()
+        .find(|m| m.id == catalog_id)
+        .map_or_else(
+            || model.path.is_dir(),
+            |item| item.installed_at(&model.path),
+        )
+}
+
 fn runtime(app: &AppHandle, state: &DesktopOnlineSession) -> Result<OnlineRuntime, String> {
     let directory = std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -137,7 +186,13 @@ pub async fn online_choices(
     state: State<'_, DesktopOnlineSession>,
     desktop: State<'_, crate::DesktopState>,
 ) -> Result<Choices, String> {
-    let a = assets(&state)?;
+    let mut a = assets(&state)?;
+    a.hy_mt2 = desktop
+        .settings_service
+        .downloaded_model_path("hy-mt2")
+        .await
+        .map_err(|e| e.to_string())?
+        .or(a.hy_mt2);
     let r = runtime(&app, &state)?;
     let translators = vec![
         Choice {
@@ -164,14 +219,17 @@ pub async fn online_choices(
         .map(|(id, name)| Choice {
             id: id.into(),
             name: name.into(),
-            ready: a.drafts.get(id).is_some_and(|m| m.path.is_dir()),
+            ready: a
+                .drafts
+                .get(id)
+                .is_some_and(|m| model_ready(m, &format!("draft-{id}"))),
         })
         .collect(),
         finals: a
             .finals
             .into_iter()
             .map(|m| Choice {
-                ready: m.path.is_dir(),
+                ready: model_ready(&m, &m.id),
                 id: m.id,
                 name: m.name,
             })
@@ -240,7 +298,13 @@ pub async fn start_online_session(
             return Err("系统音频采集需要 macOS 14.2+".into());
         }
     }
-    let a = assets(&state)?;
+    let mut a = assets(&state)?;
+    a.hy_mt2 = desktop
+        .settings_service
+        .downloaded_model_path("hy-mt2")
+        .await
+        .map_err(|e| e.to_string())?
+        .or(a.hy_mt2);
     let mut r = runtime(&app, &state)?;
     let draft = a
         .drafts
@@ -251,6 +315,11 @@ pub async fn start_online_session(
         .iter()
         .find(|m| m.id == options.final_model)
         .ok_or("未安装所选定稿模型")?;
+    if !model_ready(draft, &format!("draft-{}", options.language))
+        || !model_ready(final_model, &final_model.id)
+    {
+        return Err("所选识别模型包不完整，请先在模型与存储中准备模型。".into());
+    }
     if options.scene.chars().count() > 1000 {
         return Err("场景提示最多1000字符".into());
     }
@@ -504,4 +573,51 @@ pub fn set_online_caption_locked(
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+    use atogaki_subtitle::application::stage_scheduler::StageScheduler;
+
+    #[test]
+    fn model_choices_exist_without_a_private_manifest_and_reject_incomplete_packages() {
+        let root =
+            std::env::temp_dir().join(format!("atogaki-online-assets-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let state = DesktopOnlineSession::new(
+            OnlineSessionService::new(StageScheduler::new(2)),
+            root.clone(),
+        );
+        let available = assets(&state).unwrap();
+        assert_eq!(available.drafts.len(), 4);
+        assert_eq!(available.finals.len(), 4);
+        assert!(available.finals.iter().all(|m| !model_ready(m, &m.id)));
+        let candidate = available
+            .finals
+            .iter()
+            .find(|m| m.id == "qwen-0.6b-4bit")
+            .unwrap();
+        std::fs::create_dir_all(&candidate.path).unwrap();
+        std::fs::write(candidate.path.join("config.json"), b"partial config").unwrap();
+        assert!(!model_ready(candidate, &candidate.id));
+        // A valid legacy manifest still supplies its paths; catalog variants augment it once.
+        let legacy = serde_json::json!({"drafts": {}, "finals": [{"id":"qwen-0.6b", "name":"Existing", "path":root.join("legacy-qwen")}], "vad":root.join("legacy-vad.onnx"), "hyMt2": null});
+        std::fs::write(root.join("models/online/manifest.json"), legacy.to_string()).unwrap();
+        let merged = assets(&state).unwrap();
+        assert_eq!(merged.finals.len(), 4);
+        assert_eq!(
+            merged
+                .finals
+                .iter()
+                .find(|m| m.id == "qwen-0.6b")
+                .unwrap()
+                .path,
+            root.join("legacy-qwen")
+        );
+        assert_eq!(merged.vad, root.join("legacy-vad.onnx"));
+        std::fs::write(root.join("models/online/manifest.json"), b"invalid JSON").unwrap();
+        assert!(assets(&state).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

@@ -76,7 +76,7 @@ Atogaki 是一个本地优先的个人工具，帮助中文使用者理解、定
 
 ASR 可疑信号、人工／自动审查和修复尝试进入正式数据模型。词级时间只保存实际可得精度，不能用插值或旧字幕反推值冒充精确时间。先用现有原视频及少量人工复核参考建立基线，不以大量完整标准字幕作为启动条件。
 
-本地／云端 ASR 与本地／云端翻译独立组合：Whisper 保留本地识别基线，Hy-MT2 已接入本地翻译（日常推荐 1.8B，7B 供资源更充足的设备选择），Gemini 支持需要确切范围授权的局部识别及独立的文本翻译。macOS 已由应用管理本地模型下载和 runtime 生命周期，普通用户不需要手动编译或维护 llama.cpp；Windows runtime 与真实体验仍单独验收。Muse Voice Transcribe、SeamlessStreaming 和 SimulStreaming 作为分别研究的线索；Gemini Live Translate 仅设 E2E experimental 路线，不改变正式资料的两段式结构。
+本地／云端 ASR 与本地／云端翻译独立组合：Whisper 保留本地识别基线，Hy-MT2 已接入本地翻译（日常使用 1.8B，7B 已退出新下载目录，保留已有模型的管理），Gemini 支持需要确切范围授权的局部识别及独立的文本翻译。macOS 已由应用管理本地模型下载和 runtime 生命周期，普通用户不需要手动编译或维护 llama.cpp；Windows 维护与验收已暂停。Muse Voice Transcribe、SeamlessStreaming 和 SimulStreaming 作为分别研究的线索；Gemini Live Translate 仅设 E2E experimental 路线，不改变正式资料的两段式结构。
 
 实时 candidate、stable、committed 与离线精修结果分开。模型、算法、部署细节和质量结论按阶段验证，不因记录方向而视为已经实现。详见 [管线演进计划](archive/2026-11-11/pipeline-evolution.md) 与 [决策 0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md)。
 
@@ -88,11 +88,15 @@ ASR 可疑信号、人工／自动审查和修复尝试进入正式数据模型�
 
 2026-10-20 用户确认按 [0052](decisions/0052-staged-concurrency-and-early-translation.md) 调整执行顺序：Whisper 默认 2 路，云端文本翻译独立限流，DeepSeek 分组最多并发 4 路。云端可在稳定原文前缀上提前翻译，结果先保存在任务私有产物中；完整识别后核对输入与 revision 再写入工作区。部分原文继续只读，本地 Hy-MT2 保持完整识别后翻译并独占设备资源，识别／翻译各自恢复。
 
-配置按转录、翻译、模型与存储、词典、网络与高级组织；支持任务级后端、批量导入和命名预设。学习闭环扩展为检索、全部来源例句、已收藏词高亮及文本 Anki TSV 导出，不在本轮建设内建复习系统。MLX 继续只在 CLI 验证；JSON／cue ID 合同失败不能降低验收标准或晋升桌面。
+配置按转录、翻译、模型与存储、词典、网络与高级组织；支持任务级后端、批量导入和命名预设。学习闭环扩展为检索、全部来源例句、已收藏词高亮及文本 Anki TSV 导出，不在本轮建设内建复习系统。离线 MLX provider 继续只在 CLI 验证；在线 Qwen 已在开发主线通过 MLX worker 接入。JSON／cue ID 合同失败不能降低验收标准或晋升桌面。
 
 ## 2026-11-12 执行范围
 
 用户确认在线实验与集成为一条开发线，整合到 main 后清理已合并引用。现有 two-pass、源时钟分组、revision、重译与阶段调度保持；本轮先修正在线控制语义和阅读界面，不新增顶层 pipeline，不改变模型／提示／等待默认值。runtime／模型准备闭环留待单独确认。
+
+## 2026-11-13 模型入口整理
+
+模型按转录、草稿识别、翻译、VAD 管理，Whisper／Qwen 作为转录系列。Whisper Medium 保留为日常基线，其他档折叠；Qwen 增加原始 0.6B、MLX 0.6B 4bit 和 1.7B 8bit 按需候选，保留原始 1.7B，不据此改变在线默认。Qwen 的多文件下载与在线选择共用目录，离线任务 provider 仍未接入。草稿和在线 VAD 先显示随本机环境准备的状态，runtime 分发与新机完整闭环仍未完成。详情见[0078](decisions/0078-model-categories-and-qwen-packages.md)。
 
 ## 当前核心闭环
 
