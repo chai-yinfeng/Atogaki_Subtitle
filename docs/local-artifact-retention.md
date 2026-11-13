@@ -221,3 +221,10 @@ c360cc9 QA 主程序 hash 与上一清单一致且已退出后，将 App 迁到�
 用户明确要求本机体验后，正式路径`/Applications/Atogaki.app`已覆盖为`aa6bd89`的完整构建，版本仍0.1.3，不是新Release。37文件／9个worker模块与构建源码核对一致、签名通过；原生控制面板已打开但未采集音频。当前默认为任务交错，不带本次诊断的实验提示。打包模块导入与`--drain-deadline`检查通过；不把它描述为已跑真实音频链路。
 
 `local-artifacts/online/runtime-app-install-20261111/Atogaki-before-runtime.app`保留被替换的de2c368，完整内容与此前安装收据一致。该目录另存构建日志、安装脚本、37文件／旧版摘要、安装收据、只读数据库前后摘要和SHA清单。没有创建新数据库副本：18/20表摘要未变，仅内置词表版本更新导致两表变化，270→269条，匹配此前授权停用歧义别名`すい → suis`；本机仅有两份内置词表，无自建词表，任务／字幕保持。既有稳定恢复点、模型、媒体与研究失败证据不清理。
+
+
+## 2026-11-12 已合并分支与工作区保留
+
+main 已包含在线实验 `11d2847`、在线集成 `e06a9c6` 和文档整理 `8fbac12`；整合提交为 `e085fa8`。按用户授权清理上述三个本地／远端分支引用，b432 和 e3a1 工作区在原提交 detach；没有删除目录或忽略文件。3d0a／7646 的原有 detached 工作区继续保留。旧提交由 main 历史可达，不能把删引用等同删除实验依据或释放工作区空间。
+
+本轮 UI 生产 WebKit 截图位于 `/tmp/atogaki-online-controls.png`、`/tmp/atogaki-online-controls-small.png`、`/tmp/atogaki-online-caption.png`，仅含合成字幕。现有前端依赖以 APFS clone 复用；测试用 WebKit 下载到 `/tmp/atogaki-webkit-tools`，属于可重新获取的测试浏览器，不是待确认的在线推理 runtime。没有下载 ASR／MT 模型或复制正式数据库。本轮不覆盖 App，不新增安装回退副本。

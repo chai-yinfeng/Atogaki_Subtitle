@@ -27,3 +27,19 @@ body[data-view=caption][data-locked=true] header button{pointer-events:none}
 .configuration textarea{font:inherit;border:1px solid #a8b7bb;border-radius:7px;padding:8px;resize:vertical;min-height:48px}
 
 .track .omitted{color:#839199}
+
+/* Controls stay available while optional configuration and diagnostics are folded. */
+.session-controls{padding:14px 16px;background:white;border:1px solid #d3dddf;border-radius:10px}
+.session-options{display:flex;align-items:center;flex-wrap:wrap;gap:14px 24px;margin-bottom:12px}
+.session-options label:first-child{min-width:200px}
+.session-controls .help{margin-top:10px}
+.online-settings{margin:12px 0;border:1px solid #d3dddf;border-radius:10px;background:white}
+.online-settings summary,.timing-details summary{padding:12px 16px;cursor:pointer;font-size:14px}
+.online-settings .configuration{border:0;border-top:1px solid #d3dddf;border-radius:0 0 10px 10px}
+.configuration .wide{grid-column:1/-1}
+.track-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.track-state{font-size:12px;color:#536575;white-space:nowrap}
+.timing-details summary{padding:4px 0;color:#536575;font-size:13px}
+body[data-view=caption] .track-state{font-size:10px;line-height:14px;color:#c8d0d6}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid #2877b8;outline-offset:3px}
+@media(max-width:560px){body[data-view=control]{padding:12px}.configuration{grid-template-columns:minmax(0,1fr)}.session-options{align-items:stretch;flex-direction:column}.session-options label:first-child{min-width:0}.actions{flex-wrap:wrap}.track p{font-size:19px}}
