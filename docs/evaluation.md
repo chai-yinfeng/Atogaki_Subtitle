@@ -1,8 +1,10 @@
 # 识别与翻译质量基线
 
-_最后更新：2026-11-08_
+_最后更新：2026-11-13；下文逐次实验保留各自日期与证据边界。_
 
 评估使用用户有权处理的本机媒体。媒体、裁剪、人工参考和运行结果放在 Git 忽略的 `local-artifacts/evaluation/`，仓库不保存私人绝对路径或媒体内容。公开的格式示例见 [`evaluation-manifest.example.json`](evaluation-manifest.example.json) 和 [`evaluation-reference.example.json`](evaluation-reference.example.json)。
+
+2026-11-13 已按用户确认的分阶段设计完成[四档 Qwen 电台候选的同输入 ASR 筛选](qwen-radio-candidate-screen-2026-11-13.md)：6 分钟、63 个固定 VAD 输入、两轮共 504 次调用，失败保留，另有 Medium 辅助参考和首批 10 段匿名听审。数值只用于计算／资源比较与差异定位；文字一致不等于语义正确，尚未生成 CER、质量胜者或正确可读延迟结论。连续在线回放等候听审后的两档选择，旧样本角色和既有人工参考状态不重置。
 
 ## 固定角色
 
