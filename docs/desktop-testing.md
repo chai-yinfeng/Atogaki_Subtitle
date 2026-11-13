@@ -1,5 +1,8 @@
 # 桌面界面测试
 
+> 2026-11-13 平台范围：Windows 开发、自动 CI 与打包／验收已暂停；下文涉及 Windows 的技术边界或测试流程保留为历史／恢复参考。当前执行范围见[0077](decisions/0077-pause-windows-development.md)。
+
+
 统一编辑器的实际通过／未通过范围以[窗口验收](editor-workspace-validation.md)和[性能记录](editor-performance-validation.md)为准。下方核心工作区清单使用统一编辑器入口；“最近一次打包窗口回归”保留各历史版本现场，不代表当前候选已通过全部场景。
 
 

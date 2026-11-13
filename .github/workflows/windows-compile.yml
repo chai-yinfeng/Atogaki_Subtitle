@@ -1,50 +1,7 @@
 name: Windows compile baseline
 
+# Windows maintenance is paused. Re-enable the workflow explicitly before a manual run.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/windows-compile.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "src/**"
-      - "src-tauri/Cargo.lock"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/build.rs"
-      - "src-tauri/icons/**"
-      - "src-tauri/src/**"
-      - "src-tauri/tauri*.json"
-      - "scripts/verify-windows-tauri-config.mjs"
-      - "ui/index.html"
-      - "ui/overlay.html"
-      - "ui/package-lock.json"
-      - "ui/package.json"
-      - "ui/src/**"
-      - "ui/tests/**"
-      - "ui/tsconfig.json"
-      - "ui/vite.config.ts"
-  pull_request:
-    paths:
-      - ".github/workflows/windows-compile.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "src/**"
-      - "src-tauri/Cargo.lock"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/build.rs"
-      - "src-tauri/icons/**"
-      - "src-tauri/src/**"
-      - "src-tauri/tauri*.json"
-      - "scripts/verify-windows-tauri-config.mjs"
-      - "ui/index.html"
-      - "ui/overlay.html"
-      - "ui/package-lock.json"
-      - "ui/package.json"
-      - "ui/src/**"
-      - "ui/tests/**"
-      - "ui/tsconfig.json"
-      - "ui/vite.config.ts"
   workflow_dispatch:
 
 permissions:

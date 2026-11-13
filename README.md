@@ -2,7 +2,7 @@
 
 Atogaki 是一个面向中文使用者的、本地优先的外语音视频理解与学习工作台。它通过识别、翻译、字幕校对、词典与可回看的媒体时间轴，把用户本机已有的节目整理成可以理解、复习和导出的双语资料。项目最初用于整理ヨルシカ「後書き」电台；字幕编辑、样式和烧录是建立可信资料的基础能力，但 Atogaki 目前不以替代完整视频字幕制作软件为目标。
 
-macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`v0.1.3`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.3)，采用 ad-hoc 签名且尚未公证，最低声明 macOS 12.0。本次不提供 Windows 更新；Windows 11 x86_64 继续使用未签名的 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`v0.1.3`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.3)，采用 ad-hoc 签名且尚未公证，最低声明 macOS 12.0。Windows 开发、自动 CI 与后续打包已从 2026-11-13 暂停；既有 Windows 11 x86_64 未签名历史基线为 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
 ## 能做什么
 

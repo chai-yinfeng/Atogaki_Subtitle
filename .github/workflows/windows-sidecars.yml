@@ -1,42 +1,7 @@
 name: Windows sidecars
 
+# Windows maintenance is paused. Re-enable the workflow explicitly before a manual run.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".gitattributes"
-      - ".github/workflows/windows-sidecars.yml"
-      - "LICENSE"
-      - "about.hbs"
-      - "about.toml"
-      - "scripts/build-whisper-windows.ps1"
-      - "scripts/build-ffmpeg-windows.sh"
-      - "scripts/generate-frontend-licenses.mjs"
-      - "scripts/package-sidecar-sources-windows.ps1"
-      - "scripts/generate-rust-licenses-windows.ps1"
-      - "scripts/smoke-test-nsis-windows.ps1"
-      - "scripts/verify-windows-tauri-config.mjs"
-      - "scripts/sidecar-versions.zsh"
-      - "src-tauri/icons/**"
-      - "src-tauri/tauri.windows.conf.json"
-  pull_request:
-    paths:
-      - ".gitattributes"
-      - ".github/workflows/windows-sidecars.yml"
-      - "LICENSE"
-      - "about.hbs"
-      - "about.toml"
-      - "scripts/build-whisper-windows.ps1"
-      - "scripts/build-ffmpeg-windows.sh"
-      - "scripts/generate-frontend-licenses.mjs"
-      - "scripts/package-sidecar-sources-windows.ps1"
-      - "scripts/generate-rust-licenses-windows.ps1"
-      - "scripts/smoke-test-nsis-windows.ps1"
-      - "scripts/verify-windows-tauri-config.mjs"
-      - "scripts/sidecar-versions.zsh"
-      - "src-tauri/icons/**"
-      - "src-tauri/tauri.windows.conf.json"
   workflow_dispatch:
     inputs:
       release_tag:

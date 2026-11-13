@@ -2,7 +2,10 @@
 
 _最后更新：2026-10-30_
 
-macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 已建立未签名预发布基线，按选定稳定候选集中构建和实机回归；两个平台共享产品代码，但不要求每次 macOS 开发提交都同步生成 Windows 安装包。
+macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 只保留既有未签名预发布历史基线，当前不构建或验收 Windows。
+
+
+2026-11-13 起暂停 Windows 开发与发行维护；Windows workflow 在仓库端停用，源码仅保留手动入口，无 push／PR 自动触发。以下 Windows 流程是历史／恢复时参考，不是当前发布门禁。macOS Release／DMG 及 ad-hoc 签名分发流程保持。恢复 Windows 见[0077](decisions/0077-pause-windows-development.md)。
 
 ## macOS Apple Silicon
 

@@ -1,6 +1,6 @@
 # 文档索引
 
-_更新：2026-11-12。_
+_更新：2026-11-13。_
 
 当前行为看产品方向、能力矩阵、有效 ADR；当前进度看路线图；实验结论看对应提交和环境。在线实现已整合到开发主线，已发布稳定版仍为 v0.1.3；代码合入不等于在线质量验收或发布。
 
@@ -12,7 +12,7 @@ _更新：2026-11-12。_
 - [2026-11-11 系统回顾](system-review-2026-11-11.md)：跨分支事实、Graphify 实测、在线瓶颈证据和同类工具调研；建议尚未实施。
 - [稳定能力矩阵](app-capability-matrix.md)：主线桌面能力及研究晋升边界。
 - [开发协作](development-workflow.md)、[桌面测试](desktop-testing.md)、[发布流程](releasing.md)、[许可证审计](third-party-license-audit.md)。
-- [Windows 计划](windows-porting.md)与[实机记录](windows-testing.md)：平台结果单独阅读；本轮不更新 Windows。
+- [Windows 计划](windows-porting.md)与[实机记录](windows-testing.md)：Windows 已暂停维护，以下仅保留历史与恢复参考，见[0077](decisions/0077-pause-windows-development.md)。
 - [主题资产](theme-material-assets.md)、[本机产物保留](local-artifact-retention.md)：来源与清理边界，未知数据不自动删除。
 
 ## 当前决策与实现依据
