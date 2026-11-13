@@ -1,0 +1,239 @@
+{
+  "version": 2,
+  "created_at": "2026-11-08",
+  "dataset_id": "japanese-radio",
+  "selection_status": "paired_asr_candidates_prepared_review_pending",
+  "core_total_s": 1440,
+  "cases": [
+    {
+      "id": "radio-01",
+      "source_id": "atogaki-vol01",
+      "start_ms": 10000,
+      "end_ms": 190000,
+      "topic": "专辑感想与创作意图",
+      "target_phenomena": [
+        "album_discussion",
+        "intent_and_completion",
+        "fillers",
+        "speaker_turns"
+      ],
+      "screening_method": "local_contact_sheet",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "model_reference_unreviewed",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "audio_status": "prepared",
+      "approximate_frame_offsets_s": [
+        40,
+        100,
+        160
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-03",
+      "source_id": "atogaki-vol02",
+      "start_ms": 45000,
+      "end_ms": 225000,
+      "topic": "生活经历、引语与人物互动",
+      "target_phenomena": [
+        "daily_life",
+        "reported_speech",
+        "speaker_roles"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "evaluation_candidate",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "model_reference_unreviewed",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "audio_status": "prepared",
+      "approximate_frame_offsets_s": [
+        93,
+        186
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-05",
+      "source_id": "atogaki-vol33",
+      "start_ms": 210000,
+      "end_ms": 390000,
+      "topic": "视觉共享、知识与假设性讨论",
+      "target_phenomena": [
+        "abstract_reasoning",
+        "hypothetical_statements",
+        "long_context"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "model_reference_unreviewed",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "audio_status": "prepared",
+      "approximate_frame_offsets_s": [
+        247,
+        307,
+        366
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-06",
+      "source_id": "atogaki-vol33",
+      "start_ms": 600000,
+      "end_ms": 780000,
+      "topic": "身体动作与刷屏日常话题",
+      "target_phenomena": [
+        "topic_shift",
+        "colloquial_expression",
+        "context_dependent_reference"
+      ],
+      "screening_method": "browser_burned_subtitle_spotcheck",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "model_reference_unreviewed",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "audio_status": "prepared",
+      "approximate_frame_offsets_s": [
+        666,
+        723
+      ],
+      "frame_offsets_precision": "approximate_screening_only"
+    },
+    {
+      "id": "radio-09",
+      "source_id": "atogaki-vol03",
+      "start_ms": 360000,
+      "end_ms": 540000,
+      "topic": "方言误听与生活态度",
+      "target_phenomena": [
+        "dialect",
+        "phonetic_ambiguity",
+        "self_correction",
+        "daily_life"
+      ],
+      "screening_method": "local_explicit_frame_spotcheck",
+      "approximate_frame_offsets_s": [
+        390,
+        450
+      ],
+      "frame_offsets_precision": "explicit_ffmpeg_seek",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "model_reference_unreviewed",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "audio_status": "prepared"
+    },
+    {
+      "id": "radio-10",
+      "source_id": "atogaki-vol04",
+      "start_ms": 120000,
+      "end_ms": 300000,
+      "topic": "虚构世界、角色设定与假设",
+      "target_phenomena": [
+        "hypothetical_statements",
+        "named_entities",
+        "negation",
+        "extended_context"
+      ],
+      "screening_method": "local_explicit_frame_spotcheck",
+      "approximate_frame_offsets_s": [
+        150,
+        210,
+        270
+      ],
+      "frame_offsets_precision": "explicit_ffmpeg_seek",
+      "proposed_role": "evaluation_candidate",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "model_reference_unreviewed",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "audio_status": "prepared"
+    },
+    {
+      "id": "radio-11",
+      "source_id": "atogaki-vol34",
+      "start_ms": 180000,
+      "end_ms": 360000,
+      "topic": "人名、饭局回忆与转述",
+      "target_phenomena": [
+        "proper_names",
+        "reported_speech",
+        "speaker_roles",
+        "past_experience"
+      ],
+      "screening_method": "local_explicit_frame_spotcheck",
+      "approximate_frame_offsets_s": [
+        240
+      ],
+      "frame_offsets_precision": "explicit_ffmpeg_seek",
+      "proposed_role": "development",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "model_reference_unreviewed",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "audio_status": "prepared"
+    },
+    {
+      "id": "radio-12",
+      "source_id": "atogaki-vol35",
+      "start_ms": 1200000,
+      "end_ms": 1380000,
+      "topic": "饮食习惯与文化差异",
+      "target_phenomena": [
+        "daily_life",
+        "food_terms",
+        "cultural_context",
+        "topic_shift"
+      ],
+      "screening_method": "local_explicit_frame_spotcheck",
+      "approximate_frame_offsets_s": [
+        1320
+      ],
+      "frame_offsets_precision": "explicit_ffmpeg_seek",
+      "proposed_role": "evaluation_candidate",
+      "status": "screened_candidate",
+      "boundary_status": "approximate_window_not_sentence_verified",
+      "full_audio_review": false,
+      "reference_status": "model_reference_unreviewed",
+      "context_before_ms": 30000,
+      "context_after_ms": 30000,
+      "audio_status": "prepared"
+    }
+  ],
+  "reserve_case_ids": [
+    "radio-02",
+    "radio-04"
+  ],
+  "deferred_case_ids": [
+    "radio-07",
+    "radio-08"
+  ],
+  "notes": [
+    "Eight 180-second core clips from seven local episodes; original case IDs retained.",
+    "Initial selection and case assets preserved; long-radio samples deferred, not required.",
+    "Sparse visual subtitle screening, not full listening or gold; core boundaries remain provisional.",
+    "Reference context includes up to 30 seconds before and after. Score core only; online input must stay causal.",
+    "Split by episode, preserve old exposure; evaluation candidates are visually screened, not blind.",
+    "All offsets refer to frozen local files; web versions and old raw recordings may differ."
+  ]
+}

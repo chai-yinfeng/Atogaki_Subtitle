@@ -1,0 +1,29 @@
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#202d37;background:#eef2f3}*{box-sizing:border-box}body{margin:0;padding:18px}.online-card{max-width:980px;margin:auto}header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}button,select{font:inherit;border:1px solid #a8b7bb;border-radius:7px;padding:8px 12px}button{cursor:pointer;background:#247664;color:white}button.secondary,button.quiet{background:transparent;color:inherit}button:disabled{opacity:.5;cursor:default}.configuration{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px;background:white;border:1px solid #d3dddf;border-radius:10px}label{display:flex;flex-direction:column;gap:6px}.check{flex-direction:row;align-items:center}.help,.actions{grid-column:1/-1}.help{font-size:13px;color:#536575;margin:5px 0}.actions{display:flex;gap:10px}#online-status{font-size:14px;color:#48615b;min-height:20px}.track{margin:12px 0;padding:14px 16px;background:white;border-radius:9px;border:1px solid #d8e0e2}.badge{font-size:12px;color:#5d727f}.track p{font-size:21px;line-height:1.55;white-space:pre-wrap;margin:6px 0;overflow-wrap:anywhere}.track p.draft{color:#4672a2}[hidden]{display:none!important}.track p{max-height:30vh;overflow-y:auto}.track .draft{color:#4672a2}
+
+/* Fixed overlay geometry: transcript revisions never resize either track. */
+html[data-view=caption],body[data-view=caption]{height:100%;overflow:hidden;background:transparent;color:#f0f3f5}
+body[data-view=caption]{padding:0}
+body[data-view=caption] #online-root{height:100%}
+body[data-view=caption] .online-card{position:relative;display:grid;grid-template-rows:32px minmax(0,1fr) minmax(0,1fr);gap:6px;width:100%;height:100%;max-width:none;margin:0;padding:8px 14px;background:rgba(35,35,38,.74);border:1px solid rgba(255,255,255,.14);border-radius:8px}
+body[data-view=caption] header{height:32px;margin:0;font-size:12px;opacity:0;cursor:grab;user-select:none}
+body[data-view=caption] header strong{pointer-events:none}
+body[data-view=caption] header button{padding:3px 8px;font-size:12px;pointer-events:auto}
+body[data-view=caption] .online-card:hover header,body[data-view=caption] .online-card:focus-within header{opacity:1}
+body[data-view=caption] #online-status{position:absolute;top:15px;left:170px;right:84px;height:18px;margin:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;pointer-events:none;font-size:11px;color:#b5d5ca;opacity:0}
+body[data-view=caption] .online-card:hover #online-status,body[data-view=caption] .online-card:focus-within #online-status{opacity:1}
+body[data-view=caption] .track{display:grid;grid-template-rows:14px minmax(0,1fr);row-gap:2px;min-height:0;overflow:hidden;background:transparent;border:0;border-radius:0;margin:0;padding:2px 0}
+body[data-view=caption] .track+.track{border-top:1px solid rgba(255,255,255,.12);padding-top:6px}
+body[data-view=caption] .badge{font-size:10px;line-height:14px;color:#c8d0d6}
+body[data-view=caption] .track p{min-height:0;height:100%;max-height:none;margin:0;font-size:24px;line-height:1.35;overflow-y:auto;scrollbar-gutter:stable;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+body[data-view=caption] #source-text{font-size:21px}
+body[data-view=caption] .track .draft{color:#99c6f4}
+
+.overlay-lock{margin:12px 0;font-size:14px}.overlay-lock input{accent-color:#247664}
+body[data-view=caption] .online-card::before,body[data-view=caption] .online-card::after{content:"";position:absolute;left:12px;right:12px;height:8px;z-index:3;cursor:ns-resize}
+body[data-view=caption] .online-card::before{top:0}body[data-view=caption] .online-card::after{bottom:0}
+body[data-view=caption][data-locked=true] header,body[data-view=caption][data-locked=true] #online-status{opacity:0!important;pointer-events:none!important}
+body[data-view=caption][data-locked=true] header button{pointer-events:none}
+
+.configuration textarea{font:inherit;border:1px solid #a8b7bb;border-radius:7px;padding:8px;resize:vertical;min-height:48px}
+
+.track .omitted{color:#839199}

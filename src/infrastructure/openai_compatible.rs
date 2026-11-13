@@ -201,6 +201,15 @@ impl OpenAiCompatibleTranslationProvider {
         if self.disable_deepseek_thinking {
             body["thinking"] = json!({"type": "disabled"});
         }
+        if self.provider_id == "index-translate-local" {
+            // Index's training-aligned instruction format uses one user turn.
+            // Keep the existing stable-ID JSON schema and reference boundaries.
+            body["messages"] = json!([{"role":"user", "content":format!(
+                "请将以下{}字幕翻译成{}，并且严格遵循所有约束要求。\n\n〖源文与上下文〗\n{}\n\n〖约束要求〗\n{}\n\n只输出符合指定结构的JSON翻译结果，不要有任何额外说明。",
+                request.options.source_language.display_name_zh(),
+                request.options.target_language.display_name_zh(), user_payload, system_prompt)}]);
+            body["chat_template_kwargs"] = json!({"enable_thinking":false});
+        }
         if let Some(value) = self.generation.temperature {
             body["temperature"] = json!(value);
         }
@@ -822,5 +831,12 @@ mod tests {
         assert_eq!(body["top_k"], 20);
         assert!((body["repeat_penalty"].as_f64().unwrap() - 1.05).abs() < 0.000_001);
         assert_eq!(body["max_tokens"], 2_048);
+        let mut index = provider.clone();
+        index.provider_id = "index-translate-local".into();
+        let wire = index.build_request_body(&request, &prepared);
+        assert_eq!(wire["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(wire["messages"][0]["role"], "user");
+        assert_eq!(wire["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(wire["response_format"], body["response_format"]);
     }
 }

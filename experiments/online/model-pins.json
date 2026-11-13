@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "large-v3": {
+    "architecture": "Whisper large-v3",
+    "torch": {
+      "url": "https://openaipublic.azureedge.net/main/whisper/models/e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb/large-v3.pt",
+      "sha256": "e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb"
+    },
+    "mlx": {
+      "repository": "mlx-community/whisper-large-v3-mlx",
+      "revision": "49e6aa286ad60c14352c404340ded53710378a11",
+      "weights_sha256": "05ff791ce3630fae47e7c51004e9666204d786246ec07cac6110af768099b40d",
+      "config_sha256": "34982ce6ae286095000f82ae9583b3431639e8b092bf60c961f203745e6500e3"
+    }
+  },
+  "qwen3-asr": {
+    "runtime": "mlx-qwen3-asr",
+    "runtime_commit": "41878a11cf338c59e13edc84bf4cb35f4b0f3ff6",
+    "activation_dtype": "float16",
+    "models": {
+      "0.6B": {
+        "repository": "Qwen/Qwen3-ASR-0.6B",
+        "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+        "files": {
+          "chat_template.json": {
+            "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+            "bytes": 1161
+          },
+          "config.json": {
+            "sha256": "76d3ae4601ce939830b2517f4a6cadb86cc51316c3900af6b020b051c21a478c",
+            "bytes": 6193
+          },
+          "generation_config.json": {
+            "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c",
+            "bytes": 142
+          },
+          "merges.txt": {
+            "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+            "bytes": 1671853
+          },
+          "model.safetensors": {
+            "sha256": "79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea",
+            "bytes": 1876091704
+          },
+          "preprocessor_config.json": {
+            "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+            "bytes": 330
+          },
+          "tokenizer_config.json": {
+            "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+            "bytes": 12487
+          },
+          "vocab.json": {
+            "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+            "bytes": 2776833
+          }
+        }
+      },
+      "1.7B": {
+        "repository": "Qwen/Qwen3-ASR-1.7B",
+        "revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+        "files": {
+          "chat_template.json": {
+            "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+            "bytes": 1161
+          },
+          "config.json": {
+            "sha256": "2e74a751548b8ad7d7526d29365ad8144c345d8b412b1152d25dc6698452712f",
+            "bytes": 6194
+          },
+          "generation_config.json": {
+            "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c",
+            "bytes": 142
+          },
+          "merges.txt": {
+            "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+            "bytes": 1671853
+          },
+          "model-00001-of-00002.safetensors": {
+            "sha256": "a4cd1f1a04d90b757dc7f7dd26254e69a013b19e80efe590a83c6a3bde8608d6",
+            "bytes": 4220320824
+          },
+          "model-00002-of-00002.safetensors": {
+            "sha256": "6e0b9d9e09e2e0238e7ef3cc8a484ab387e91b90f1900bedf88bc92d7929ccfc",
+            "bytes": 478200688
+          },
+          "model.safetensors.index.json": {
+            "sha256": "f994739fe38e5210b9e3e8ce6c6307315e2ceac3cb630e7b7414d69dce520f60",
+            "bytes": 64821
+          },
+          "preprocessor_config.json": {
+            "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+            "bytes": 330
+          },
+          "tokenizer_config.json": {
+            "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+            "bytes": 12487
+          },
+          "vocab.json": {
+            "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+            "bytes": 2776833
+          }
+        }
+      }
+    }
+  },
+  "sensevoice-small": {
+    "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
+    "archive_sha256": "f6b2a72ebcb1ac7a764d4cfccd886e6bcb2a95c4657c2199d0ba95ed4b9ea71a",
+    "runtime": "sherpa-onnx",
+    "runtime_version": "2.0.1",
+    "tested_model": "model.onnx",
+    "precision": "float32",
+    "provider": "cpu",
+    "num_threads": 1,
+    "language": "ja",
+    "use_itn": true,
+    "files": {
+      "model.onnx": {
+        "sha256": "977016bd9c79f9eb343430b5cc305e07ab64d5212dff41b0dcfa1694bee9a8cb",
+        "bytes": 937617178
+      },
+      "model.int8.onnx": {
+        "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+        "bytes": 239233841
+      },
+      "tokens.txt": {
+        "sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
+        "bytes": 315894
+      }
+    }
+  },
+  "streaming-zipformer": {
+    "runtime": "sherpa-onnx",
+    "runtime_version": "2.0.1",
+    "provider": "cpu",
+    "num_threads": 1,
+    "languages": {
+      "zh": {
+        "model_directory": "sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30",
+        "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30.tar.bz2",
+        "sha256": "5a2832047ea1f97dd0dc595b816c230c4bafad65cfc0341fa57517cadc50afd0",
+        "bytes": 132634597,
+        "files_used": {
+          "encoder.int8.onnx": {
+            "sha256": "5ac51e27981bb4dab01bb9be4958453ba50c3b61c063ddda0eab23fd3671aa4f",
+            "bytes": 161141793
+          },
+          "decoder.onnx": {
+            "sha256": "06522ad63cec0fdf6809f4e1db9bb4f7d710c34582e3b35db62ac60eccafac7e",
+            "bytes": 5165083
+          },
+          "joiner.int8.onnx": {
+            "sha256": "b34584dc6f561089e1d747fedebb3765f2caa72c927ef54d7ca55e5ae40a814b",
+            "bytes": 1033416
+          },
+          "tokens.txt": {
+            "sha256": "6193c7ea1c96d0d9a1e9652789b40d13a8a913b434a5451e93158f5a09fd6652",
+            "bytes": 20628
+          }
+        }
+      },
+      "en": {
+        "model_directory": "sherpa-onnx-streaming-zipformer-en-2023-06-26",
+        "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
+        "sha256": "639e25b578e9e997131402199419c13a941f8e4e198e2da1ce57dbf5cf401282",
+        "bytes": 310414022,
+        "files_used": {
+          "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx": {
+            "sha256": "5022b2eca5b19d1bc104fcf33e26bc32604b7df553cd2e1f62e31dc7b05e9c87",
+            "bytes": 70108816
+          },
+          "decoder-epoch-99-avg-1-chunk-16-left-128.onnx": {
+            "sha256": "85914f840b71110487ece7a30ebd0bd4b8fb5c2623215bba3aa5ab4c138fc591",
+            "bytes": 2093080
+          },
+          "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx": {
+            "sha256": "abd5e30f3f16fc510605c6029dba33f10e4386bd75c5bdc30cf94076864db10d",
+            "bytes": 259416
+          },
+          "tokens.txt": {
+            "sha256": "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb",
+            "bytes": 5048
+          }
+        }
+      },
+      "ko": {
+        "model_directory": "sherpa-onnx-streaming-zipformer-korean-2024-06-16",
+        "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2",
+        "sha256": "e346a5882a409650472be17326237e24df7bf409db6b4a8a52e1a61422bf2500",
+        "bytes": 418218652,
+        "files_used": {
+          "encoder-epoch-99-avg-1.int8.onnx": {
+            "sha256": "8d0b1aa24fbedd4e3948564ab7facd151b8ce9b0c48fc987c541de2de3af5697",
+            "bytes": 126968852
+          },
+          "decoder-epoch-99-avg-1.onnx": {
+            "sha256": "b29cfb4575141e50a30a22b2c4579934f3d4f45b83c9c8c08c3aef5a3fa7abfc",
+            "bytes": 11309084
+          },
+          "joiner-epoch-99-avg-1.int8.onnx": {
+            "sha256": "128b80a66a1f718488af8560f9d15895109b99ff3e573f0a0130e03774ef1ced",
+            "bytes": 2581421
+          },
+          "tokens.txt": {
+            "sha256": "016bdf0965029263b7ad01b742366ee542ef0bef38261510e8176ff6f2e9e668",
+            "bytes": 60246
+          }
+        }
+      }
+    }
+  },
+  "online-silero-onnx": {
+    "source_package": "silero-vad==6.2.3",
+    "asset": "data/silero_vad.onnx",
+    "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+    "bytes": 2327524,
+    "runtime": "sherpa-onnx==2.0.1"
+  }
+}

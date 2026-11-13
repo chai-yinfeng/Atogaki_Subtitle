@@ -23,10 +23,12 @@ if pgrep -x atogaki-desktop >/dev/null; then
   exit 1
 fi
 
+"$PROJECT_DIR/scripts/prepare-online-capture.sh" "$TAURI_DIR/binaries/atogaki-audio-tap-aarch64-apple-darwin"
+
 cd "$TAURI_DIR"
 cargo tauri build --config tauri.macos-complete.conf.json --bundles app
 
-for SIDECAR in ffmpeg ffprobe whisper-cli llama-server; do
+for SIDECAR in ffmpeg ffprobe whisper-cli llama-server atogaki-audio-tap; do
   if [[ ! -x "$SOURCE_APP/Contents/MacOS/$SIDECAR" ]]; then
     print -u2 "Packaged App is missing sidecar: $SIDECAR"
     exit 1

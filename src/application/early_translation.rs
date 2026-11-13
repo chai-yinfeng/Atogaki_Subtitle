@@ -213,7 +213,9 @@ impl EarlyTranslationSession {
     pub fn new(job: Job, provider: Arc<dyn TranslationProvider>) -> Result<Option<Self>> {
         let provider = provider.execution_snapshot().unwrap_or(provider);
         let status = provider.status();
-        if !status.configured || status.id == "hy-mt2-local" {
+        if !status.configured
+            || matches!(status.id.as_str(), "hy-mt2-local" | "index-translate-local")
+        {
             return Ok(None);
         }
         let transcription = job.read_recognition_options()?;

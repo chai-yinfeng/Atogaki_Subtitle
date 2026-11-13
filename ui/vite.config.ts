@@ -16,6 +16,8 @@ export default defineConfig({
       input: {
         main: "index.html",
         overlay: "overlay.html",
+        online: "online.html",
+        onlineCaptions: "online-captions.html",
       },
     },
   },

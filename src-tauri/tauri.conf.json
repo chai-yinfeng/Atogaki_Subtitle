@@ -11,6 +11,7 @@
     "frontendDist": "../ui/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Atogaki",
@@ -57,7 +58,16 @@
     ],
     "resources": {
       "../LICENSE": "LICENSE",
-      "third-party/": "third-party/"
+      "third-party/": "third-party/",
+      "../src/infrastructure/online_worker/__init__.py": "online_worker/__init__.py",
+      "../src/infrastructure/online_worker/__main__.py": "online_worker/__main__.py",
+      "../src/infrastructure/online_worker/worker.py": "online_worker/worker.py",
+      "../src/infrastructure/online_worker/pcm_input.py": "online_worker/pcm_input.py",
+      "../src/infrastructure/online_worker/asr_models.py": "online_worker/asr_models.py",
+      "../src/infrastructure/online_worker/mt.py": "online_worker/mt.py",
+      "../src/infrastructure/online_worker/retranslation.py": "online_worker/retranslation.py",
+      "../src/infrastructure/online_worker/stage_admission.py": "online_worker/stage_admission.py",
+      "../src/infrastructure/online_worker/drain_budget.py": "online_worker/drain_budget.py"
     }
   }
 }

@@ -1,8 +1,8 @@
 # 架构与目录约定
 
-_核对日期：2026-11-11；主线基线：`cf23b87`。_
+_核对日期：2026-11-12；离线基线 `cf23b87`，在线整合基线 `e06a9c6`。_
 
-本文描述当前系统边界。逐次模块抽取与旧状态移入[清理前快照](archive/2026-11-11/architecture-before-review.md)，跨分支评估、Graphify 结果和同类工具见[系统回顾](system-review-2026-11-11.md)。本次只整理文档，不实施新架构。
+本文描述当前系统边界。逐次模块抽取与旧状态移入[清理前快照](archive/2026-11-11/architecture-before-review.md)，跨分支评估、Graphify 结果和同类工具见[系统回顾](system-review-2026-11-11.md)。2026-11-12 整合现有在线实现，不引入新的处理架构。
 
 ## 仓库组织
 
@@ -64,7 +64,7 @@ SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依�
 
 [0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md) 的数据分层、run／artifact、provenance／revision、语义组与依赖已经分批落地；旧[管线提案](archive/2026-11-11/pipeline-evolution.md)不再是待实施清单。当前主线仍含 Web Serve／Postgres 源码和默认依赖；[退役报告](legacy-web-retirement-impact.md)只完成分析，未执行隔离或删除。
 
-在线实现位于独立分支 `codex/online-desktop-integration`，本次审阅为 `e06a9c6`；它已含原生采集、Rust 会话、Python 推理 worker 与独立字幕显示。主线没有这些源文件，不把分支试装当稳定版已发布。在线采集 → CPU 草稿／Qwen 确认 → 独立翻译分组／修订 → 展示的时钟和状态，不等同离线任务的检查点／人工工作区。具体责任、性能证据和仍需讨论的选择见[系统回顾](system-review-2026-11-11.md)。
+在线实现从 `codex/online-desktop-integration`（`e06a9c6`）整合进入开发主线，包含原生采集、Rust 会话、Python 推理 worker 与独立字幕显示。稳定发行仍为 v0.1.3，不能把源码整合和已有试装当成新版已发布。在线采集 → CPU 草稿／Qwen 确认 → 独立翻译分组／修订 → 展示的时钟和状态，不等同离线任务的检查点／人工工作区。具体责任、性能证据和仍需讨论的选择见[系统回顾](system-review-2026-11-11.md)。
 
 ## 字幕编辑前端的渐进边界
 

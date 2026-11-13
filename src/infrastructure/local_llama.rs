@@ -29,6 +29,7 @@ const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone)]
 pub struct LocalLlamaConfig {
+    pub provider_id: String,
     pub runtime_path: PathBuf,
     pub model_path: PathBuf,
     pub model_id: String,
@@ -36,6 +37,7 @@ pub struct LocalLlamaConfig {
     pub style_instruction: String,
     pub context_size: u32,
     pub gpu_layers: u32,
+    pub parallel_slots: Option<u32>,
 }
 
 impl LocalLlamaConfig {
@@ -46,6 +48,7 @@ impl LocalLlamaConfig {
             .unwrap_or("Hy-MT2")
             .to_string();
         Self {
+            provider_id: "hy-mt2-local".to_string(),
             runtime_path,
             model_path,
             model_id,
@@ -53,7 +56,19 @@ impl LocalLlamaConfig {
             style_instruction,
             context_size: 8_192,
             gpu_layers: 99,
+            parallel_slots: None,
         }
+    }
+
+    pub fn index_translate(
+        runtime_path: PathBuf,
+        model_path: PathBuf,
+        style_instruction: String,
+    ) -> Self {
+        let mut config = Self::hy_mt2(runtime_path, model_path, style_instruction);
+        config.provider_id = "index-translate-local".into();
+        config.provider_name = "Index-Translate 2B（本地翻译）".into();
+        config
     }
 }
 
@@ -103,7 +118,7 @@ impl LocalLlamaRuntime {
 
     async fn ensure_started(&self) -> Result<()> {
         validate_runtime_file(&self.config.runtime_path, "llama-server runtime")?;
-        validate_runtime_file(&self.config.model_path, "Hy-MT2 model")?;
+        validate_runtime_file(&self.config.model_path, "local translation model")?;
 
         let mut child_guard = self.child.lock().await;
         let address = if let Some(address) = self.address.get() {
@@ -146,6 +161,9 @@ impl LocalLlamaRuntime {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true);
+        if let Some(slots) = self.config.parallel_slots {
+            command.arg("--parallel").arg(slots.to_string());
+        }
         let child = command.spawn().with_context(|| {
             format!(
                 "failed to start managed llama-server at {}",
@@ -229,9 +247,10 @@ impl LocalLlamaTranslationProvider {
     }
 
     fn request_provider(&self) -> Result<OpenAiCompatibleTranslationProvider> {
+        let index = self.runtime.config.provider_id == "index-translate-local";
         OpenAiCompatibleTranslationProvider::with_network_config(
             OpenAiCompatibleConfig {
-                provider_id: "hy-mt2-local".to_string(),
+                provider_id: self.runtime.config.provider_id.clone(),
                 provider_name: self.runtime.config.provider_name.clone(),
                 api_key: Some(self.runtime.api_key.clone()),
                 base_url: self.runtime.base_url()?,
@@ -239,16 +258,29 @@ impl LocalLlamaTranslationProvider {
                 style_instruction: self.runtime.config.style_instruction.clone(),
                 disable_deepseek_thinking: false,
                 generation: OpenAiGenerationConfig {
-                    temperature: Some(0.7),
-                    top_p: Some(0.6),
-                    top_k: Some(20),
-                    repetition_penalty: Some(1.05),
+                    temperature: Some(
+                        if self.runtime.config.provider_id == "index-translate-local" {
+                            0.0
+                        } else {
+                            0.7
+                        },
+                    ),
+                    top_p: (!index).then_some(0.6),
+                    top_k: (!index).then_some(20),
+                    repetition_penalty: (!index).then_some(1.05),
                     max_tokens: Some(2_048),
                     strict_json_schema: true,
                 },
             },
             &NetworkClientConfig::new("direct", None)?,
         )
+    }
+
+    /// Start the existing managed service for the local online worker. The
+    /// credential stays inside the backend and is never sent to a WebView.
+    pub async fn online_connection(&self) -> Result<(String, String)> {
+        self.runtime.ensure_started().await?;
+        Ok((self.runtime.base_url()?, self.runtime.api_key.clone()))
     }
 
     pub async fn shutdown(&self) -> Result<()> {
@@ -270,7 +302,7 @@ impl TranslationProvider for LocalLlamaTranslationProvider {
         let runtime_ready = self.runtime.config.runtime_path.is_file();
         let model_ready = self.runtime.config.model_path.is_file();
         TranslationProviderStatus {
-            id: "hy-mt2-local".to_string(),
+            id: self.runtime.config.provider_id.clone(),
             name: self.runtime.config.provider_name.clone(),
             configured: runtime_ready && model_ready,
             model: Some(self.runtime.config.model_id.clone()),
@@ -279,7 +311,7 @@ impl TranslationProvider for LocalLlamaTranslationProvider {
                 if !runtime_ready {
                     "当前版本缺少内置 llama-server runtime。".to_string()
                 } else {
-                    "请先下载一个 Hy-MT2 模型。".to_string()
+                    format!("请先下载 {} 模型。", self.runtime.config.provider_name)
                 }
             }),
         }
@@ -319,6 +351,48 @@ mod tests {
         },
         domain::LanguageCode,
     };
+
+    #[tokio::test]
+    #[ignore = "requires ATOGAKI_TEST_LLAMA_SERVER and ATOGAKI_TEST_INDEX_MODEL"]
+    async fn index_runtime_preserves_offline_ids_and_proper_names() {
+        let provider = LocalLlamaTranslationProvider::new(LocalLlamaConfig::index_translate(
+            std::env::var("ATOGAKI_TEST_LLAMA_SERVER").unwrap().into(),
+            std::env::var("ATOGAKI_TEST_INDEX_MODEL").unwrap().into(),
+            "准确的中文口语字幕，不补足未完成的句子".into(),
+        ))
+        .unwrap();
+        assert_eq!(provider.status().id, "index-translate-local");
+        let response = provider
+            .translate(TranslationRequest {
+                semantic_groups: vec![],
+                options: TranslationOptions::new(
+                    LanguageCode::Japanese,
+                    LanguageCode::SimplifiedChinese,
+                )
+                .with_protected_terms(["n-buna".into()]),
+                before_context: vec![],
+                targets: vec![
+                    TranslationTargetSegment {
+                        segment_id: "cue-a".into(),
+                        source_text: "n-bunaさんにこの場所を作ってもらいました。".into(),
+                    },
+                    TranslationTargetSegment {
+                        segment_id: "cue-b".into(),
+                        source_text: "彼が来ると思っていたわけではありません。".into(),
+                    },
+                ],
+                after_context: vec![],
+                style_instruction: None,
+            })
+            .await;
+        provider.shutdown().await.unwrap();
+        let response = response.unwrap();
+        assert_eq!(response.translations.len(), 2);
+        assert_eq!(response.translations[0].segment_id, "cue-a");
+        assert!(response.translations[0].translated_text.contains("n-buna"));
+        assert_eq!(response.translations[1].segment_id, "cue-b");
+        assert!(!response.translations[1].translated_text.trim().is_empty());
+    }
 
     #[test]
     fn missing_managed_files_leave_local_provider_unconfigured() {

@@ -2,7 +2,7 @@ export type TranslationStatus = {
   provider_id: string; provider: string; configured: boolean; model: string | null;
   endpoint_kind: string; configuration_hint: string | null;
 };
-export const taskProviders = ["none", "deepseek", "gemini", "deepl", "hy-mt2-local", "openai-compatible"] as const;
+export const taskProviders = ["none", "deepseek", "gemini", "deepl", "hy-mt2-local", "index-translate-local", "openai-compatible"] as const;
 export type TaskProvider = typeof taskProviders[number];
 type Context = { jobId: string | null; navigation: number };
 export type ProviderBackend = {

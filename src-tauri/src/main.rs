@@ -7,6 +7,9 @@ mod dictionary_download;
 mod dictionary_lookup;
 mod media_server;
 mod model_download;
+#[cfg(target_os = "macos")]
+mod online_panel;
+mod online_session;
 mod theme_artwork;
 
 use std::{
@@ -88,7 +91,7 @@ struct SubtitleOverlayPayload {
 struct SubtitleOverlayState {
     current: Mutex<Option<SubtitleOverlayPayload>>,
     #[cfg(target_os = "macos")]
-    native_panel: Mutex<Option<usize>>,
+    native_panel: Arc<Mutex<Option<usize>>>,
 }
 
 #[tauri::command]
@@ -159,6 +162,23 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
     app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
+    show_caption_panel(
+        app,
+        window,
+        app.state::<SubtitleOverlayState>().native_panel.clone(),
+        "Atogaki 悬浮字幕",
+        false,
+    )
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn show_caption_panel<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+    panel_store: Arc<Mutex<Option<usize>>>,
+    title: &'static str,
+    focus: bool,
+) -> Result<(), String> {
     use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
     use objc2_app_kit::{
         NSBackingStoreType, NSPanel, NSScreenSaverWindowLevel, NSWindow, NSWindowButton,
@@ -166,20 +186,35 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
     };
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
 
-    let app = app.clone();
+    let online = window.label() == "online-captions";
+    let caption_locked = online.then(|| {
+        app.state::<online_session::DesktopOnlineSession>()
+            .caption_locked
+            .clone()
+    });
+    let reference_window = online
+        .then(|| {
+            app.get_webview_window("online-control")
+                .or_else(|| app.get_webview_window("main"))
+        })
+        .flatten();
     let window = window.clone();
     window
         .clone()
         .run_on_main_thread(move || {
-            if let Some(panel_pointer) = app
-                .state::<SubtitleOverlayState>()
-                .native_panel
-                .lock()
-                .ok()
-                .and_then(|panel| *panel)
-            {
+            let locked = caption_locked
+                .as_ref()
+                .is_some_and(|value| value.load(std::sync::atomic::Ordering::Relaxed));
+            if let Some(panel_pointer) = panel_store.lock().ok().and_then(|panel| *panel) {
                 let panel: &NSPanel = unsafe { &*(panel_pointer as *const NSPanel) };
-                panel.orderFrontRegardless();
+                if online {
+                    panel.setIgnoresMouseEvents(locked);
+                }
+                if focus && !locked {
+                    panel.makeKeyAndOrderFront(None);
+                } else {
+                    panel.orderFrontRegardless();
+                }
                 return;
             }
             let Ok(native_window) = window.ns_window() else {
@@ -192,16 +227,25 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
             let Some(main_thread) = MainThreadMarker::new() else {
                 return;
             };
-            let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
-                NSPanel::alloc(main_thread),
-                native_window.frame(),
-                NSWindowStyleMask::Titled
-                    | NSWindowStyleMask::Resizable
-                    | NSWindowStyleMask::UtilityWindow
-                    | NSWindowStyleMask::NonactivatingPanel,
-                NSBackingStoreType::Buffered,
-                false,
-            );
+            let panel = if online {
+                let screen = reference_window
+                    .as_ref()
+                    .and_then(|w| w.ns_window().ok())
+                    .and_then(|pointer| unsafe { &*pointer.cast::<NSWindow>() }.screen())
+                    .or_else(|| native_window.screen());
+                online_panel::new(native_window.frame(), screen.as_deref(), main_thread)
+            } else {
+                NSPanel::initWithContentRect_styleMask_backing_defer(
+                    NSPanel::alloc(main_thread),
+                    native_window.frame(),
+                    NSWindowStyleMask::Titled
+                        | NSWindowStyleMask::Resizable
+                        | NSWindowStyleMask::UtilityWindow
+                        | NSWindowStyleMask::NonactivatingPanel,
+                    NSBackingStoreType::Buffered,
+                    false,
+                )
+            };
             let mut behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::Stationary
                 | NSWindowCollectionBehavior::FullScreenAuxiliary;
@@ -213,7 +257,7 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
             }) {
                 behavior |= NSWindowCollectionBehavior::CanJoinAllApplications;
             }
-            panel.setTitle(&NSString::from_str("Atogaki 悬浮字幕"));
+            panel.setTitle(&NSString::from_str(title));
             panel.setContentView(Some(&content_view));
             // The WebView was created for Tauri's hidden NSWindow, but its
             // window delegate must not be reused by this separately allocated
@@ -228,7 +272,12 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
                     button.setHidden(true);
                 }
             }
-            panel.setMinSize(NSSize::new(360.0, 120.0));
+            panel.setMinSize(if online {
+                NSSize::new(420.0, 200.0)
+            } else {
+                NSSize::new(360.0, 120.0)
+            });
+            panel.setMovableByWindowBackground(!online);
             panel.setFloatingPanel(true);
             // Keep the panel non-activating when it is shown, but allow an
             // intentional click inside it to make its WebView key so the
@@ -239,10 +288,17 @@ fn show_subtitle_overlay_macos<R: tauri::Runtime>(
             panel.setLevel(NSScreenSaverWindowLevel);
             unsafe { panel.setReleasedWhenClosed(false) };
             native_window.orderOut(None);
-            panel.orderFrontRegardless();
+            if online {
+                panel.setIgnoresMouseEvents(locked);
+            }
+            if focus && !locked {
+                panel.makeKeyAndOrderFront(None);
+            } else {
+                panel.orderFrontRegardless();
+            }
 
             let panel_pointer = Retained::into_raw(panel) as usize;
-            if let Ok(mut stored) = app.state::<SubtitleOverlayState>().native_panel.lock() {
+            if let Ok(mut stored) = panel_store.lock() {
                 *stored = Some(panel_pointer);
             }
         })
@@ -920,6 +976,7 @@ async fn translation_profiles(
         "gemini",
         "deepl",
         "hy-mt2-local",
+        "index-translate-local",
         "openai-compatible",
     ] {
         let mut profile = state
@@ -2131,6 +2188,12 @@ fn main() {
                 learning_service.clone(),
                 settings_service.clone(),
             );
+            app.manage(online_session::DesktopOnlineSession::new(
+                atogaki_subtitle::application::online_session::OnlineSessionService::new(
+                    task_service.stage_scheduler(),
+                ),
+                data_dir.clone(),
+            ));
             app.manage(DesktopState {
                 data_dir,
                 task_service,
@@ -2156,7 +2219,15 @@ fn main() {
                         {
                             let _ = overlay.destroy();
                         }
-                        app_handle.exit(0);
+                        let closing_app = app_handle.clone();
+                        let service = closing_app
+                            .state::<online_session::DesktopOnlineSession>()
+                            .service
+                            .clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = service.stop().await;
+                            closing_app.exit(0);
+                        });
                     }
                     #[cfg(target_os = "macos")]
                     WindowEvent::Focused(focused) => {
@@ -2181,6 +2252,16 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            online_session::online_session_status,
+            online_session::online_choices,
+            online_session::online_snapshot,
+            online_session::open_online_control,
+            online_session::open_online_captions,
+            online_session::toggle_online_captions,
+            online_session::hide_online_captions,
+            online_session::set_online_caption_locked,
+            online_session::start_online_session,
+            online_session::stop_online_session,
             asr_credential_status,
             cancel_model_download,
             check_asr_credential,
@@ -2295,8 +2376,27 @@ fn main() {
             commands::editor::save_subtitle_timing_recorded,
             commands::editor::undo_subtitle_structure,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run Atogaki desktop application");
+        .build(tauri::generate_context!())
+        .expect("failed to build Atogaki desktop application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                let service = app
+                    .state::<online_session::DesktopOnlineSession>()
+                    .service
+                    .clone();
+                if matches!(
+                    service.status().phase.as_str(),
+                    "loading" | "requesting_audio" | "running" | "stopping" | "draining"
+                ) {
+                    api.prevent_exit();
+                    let closing_app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = service.stop().await;
+                        closing_app.exit(0);
+                    });
+                }
+            }
+        });
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ export type DesktopSettings = {
   hyMt2ModelPath: string | null;
   hyMt2ModelReady: boolean;
   localTranslationRuntimeReady: boolean;
-  translationProviderId: "none" | "deepl" | "deepseek" | "gemini" | "openai-compatible" | "hy-mt2-local";
+  translationProviderId: "none" | "deepl" | "deepseek" | "gemini" | "openai-compatible" | "hy-mt2-local" | "index-translate-local";
   translationModel: string | null;
   translationBaseUrl: string | null;
   translationStyleInstruction: string;
@@ -33,7 +33,7 @@ export type SaveDesktopSettingsRequest = {
 
 export type ModelCatalogItem = {
   id: string;
-  kind: "whisper" | "vad" | "hy-mt2";
+  kind: "whisper" | "vad" | "hy-mt2" | "index-translate";
   name: string;
   fileName: string;
   sizeLabel: string;

@@ -1,8 +1,8 @@
 # 文档索引
 
-_更新：2026-11-11。_
+_更新：2026-11-12。_
 
-当前行为看产品方向、能力矩阵、有效 ADR；当前进度看路线图；实验结论看对应提交和环境。在线实现仍在独立分支，不用主线文档否认其存在，也不把分支试装当作稳定发行。
+当前行为看产品方向、能力矩阵、有效 ADR；当前进度看路线图；实验结论看对应提交和环境。在线实现已整合到开发主线，已发布稳定版仍为 v0.1.3；代码合入不等于在线质量验收或发布。
 
 ## 当前规范与开发入口
 
@@ -30,6 +30,14 @@ _更新：2026-11-11。_
 | 学习来源与词典 | [0032](decisions/0032-learning-reader-and-source-backed-collections.md)–[0036](decisions/0036-ecdict-pinned-base-data.md) |
 | 研究晋升 | [0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)；在线分支的后继接入与限制见[系统回顾](system-review-2026-11-11.md#审阅范围与分支事实) |
 
+## 在线实现与研究入口
+
+- [在线处理计划](online-asr-plan.md)：当前 F／H／G／R、源时钟分组与阶段调度；早期提案按后继记录阅读。
+- [0065 接入边界](decisions/0065-online-desktop-integration.md)、[0067 会话与采集](decisions/0067-online-session-owner-and-system-audio.md)、[0074 关联阅读](decisions/0074-paired-caption-reading-and-window-toggle.md)、[0075 失败隔离](decisions/0075-online-mt-validation-and-group-failure.md)、[0076 原文驱动调度](decisions/0076-source-driven-retranslation-and-stage-admission.md)。0076 取代早期历史／后文／调度的冲突部分。
+- [在线分支整合前完整记录](archive/2026-11-12/online-roadmap-before-integration.md)、[two-pass 回放](two-pass-smoke-validation.md)、[Qwen MLX](qwen-mlx-smoke-validation.md)、[SenseVoice](sensevoice-smoke-validation.md)。
+- [旧研究 0045](research/decisions/0045-independent-online-experiments.md)、[旧研究 0046](research/decisions/0046-controlled-online-asr-performance.md)：与主线同号不同决策，继续分目录保留。
+- runtime／多文件模型的普通用户准备流程待单独确认；当前本机导入脚本不等于已经完成分发。
+
 ## 验收与质量证据
 
 - [统一编辑器验收](unified-editor-acceptance.md)、[窗口／交互](editor-workspace-validation.md)、[性能](editor-performance-validation.md)、[本机安装](local-editor-installation.md)。旧未证明项不自动重开为当前待办。
@@ -37,7 +45,7 @@ _更新：2026-11-11。_
 - [离线工作流](offline-workflow-validation.md)、[阶段管线](staged-pipeline-validation.md)。
 - [评测方法与记录](evaluation.md)、[Hy-MT2](hy-mt2-validation.md)、[Gemini](gemini-transcribe.md)、[《教父》短片段](godfather-short-baseline.md)、[翻译消耗](translation-usage-observation.md)：工程合同、人工语义、时间与成本不能互相代替。
 
-模型输出、媒体、数据库、截图与 trace 通常保存在忽略目录，文档归档不授权删除这些产物。在线最新评测在集成分支，本次主线回顾仅引用其已记录结果，未复跑。
+模型输出、媒体、数据库、截图与 trace 通常保存在忽略目录，文档归档不授权删除这些产物。在线评测和实现随整合进入主线；本次不重新运行模型质量实验。
 
 ## 仍可参考的研究
 

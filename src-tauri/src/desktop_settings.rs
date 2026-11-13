@@ -30,6 +30,7 @@ const ONBOARDING_COMPLETED: &str = "desktop.onboarding_completed";
 const WHISPER_MODEL_PATH: &str = "recognition.whisper_model_path";
 const VAD_MODEL_PATH: &str = "recognition.vad_model_path";
 const HY_MT2_MODEL_PATH: &str = "translation.hy_mt2_model_path";
+const INDEX_MODEL_PATH: &str = "translation.index_translate_model_path";
 const TRANSLATION_PROVIDER: &str = "translation.provider";
 const DEEPL_KEY_SAVED: &str = "translation.deepl_key_saved";
 const DEEPSEEK_KEY_SAVED: &str = "translation.deepseek_key_saved";
@@ -53,6 +54,7 @@ const DEEPL_PROVIDER_ID: &str = "deepl";
 const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 const OPENAI_COMPATIBLE_PROVIDER_ID: &str = "openai-compatible";
 const HY_MT2_LOCAL_PROVIDER_ID: &str = "hy-mt2-local";
+const INDEX_LOCAL_PROVIDER_ID: &str = "index-translate-local";
 const DEFAULT_DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
 const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -529,6 +531,7 @@ impl DesktopSettingsService {
                         | GEMINI_PROVIDER_ID
                         | OPENAI_COMPATIBLE_PROVIDER_ID
                         | HY_MT2_LOCAL_PROVIDER_ID
+                        | INDEX_LOCAL_PROVIDER_ID
                 )
             })
             .unwrap_or_else(|| "none".to_string());
@@ -546,6 +549,7 @@ impl DesktopSettingsService {
                     .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.into()),
             ),
             OPENAI_COMPATIBLE_PROVIDER_ID => self.database.get_setting(OPENAI_MODEL).await?,
+            INDEX_LOCAL_PROVIDER_ID => Some("Index-Translate-2B.Q4_K_M".into()),
             HY_MT2_LOCAL_PROVIDER_ID => hy_mt2_model
                 .as_ref()
                 .and_then(|path| path.file_stem())
@@ -583,20 +587,22 @@ impl DesktopSettingsService {
             DEEPSEEK_PROVIDER_ID => self.environment_deepseek_key.as_ref(),
             _ => None,
         };
-        let (translation_api_key_configured, translation_api_key_source) =
-            if translation_provider_id == HY_MT2_LOCAL_PROVIDER_ID {
-                (true, Some("local".to_string()))
-            } else if stored_key.is_some() {
-                (true, Some("system".to_string()))
-            } else if environment_key.is_some() {
-                (true, Some("environment".to_string()))
-            } else if key_saved {
-                (true, Some("saved".to_string()))
-            } else if translation_provider_id != "none" && !credential_loaded {
-                (false, Some("deferred".to_string()))
-            } else {
-                (false, None)
-            };
+        let (translation_api_key_configured, translation_api_key_source) = if matches!(
+            translation_provider_id.as_str(),
+            HY_MT2_LOCAL_PROVIDER_ID | INDEX_LOCAL_PROVIDER_ID
+        ) {
+            (true, Some("local".to_string()))
+        } else if stored_key.is_some() {
+            (true, Some("system".to_string()))
+        } else if environment_key.is_some() {
+            (true, Some("environment".to_string()))
+        } else if key_saved {
+            (true, Some("saved".to_string()))
+        } else if translation_provider_id != "none" && !credential_loaded {
+            (false, Some("deferred".to_string()))
+        } else {
+            (false, None)
+        };
         let whisper_model_ready = whisper_model.as_ref().is_some_and(|path| path.is_file());
         let vad_model_ready = vad_model.as_ref().is_some_and(|path| path.is_file());
         let download_network = self.download_network_settings().await?;
@@ -736,7 +742,7 @@ impl DesktopSettingsService {
         if request.clear_api_key
             && !matches!(
                 request.translation_provider_id.as_str(),
-                "none" | HY_MT2_LOCAL_PROVIDER_ID
+                "none" | HY_MT2_LOCAL_PROVIDER_ID | INDEX_LOCAL_PROVIDER_ID
             )
         {
             self.save_translation_credential(&request.translation_provider_id, None, true)
@@ -766,7 +772,10 @@ impl DesktopSettingsService {
         provider_id: &str,
     ) -> Result<TranslationCredentialCheck> {
         validate_provider_id(provider_id)?;
-        if matches!(provider_id, "none" | HY_MT2_LOCAL_PROVIDER_ID) {
+        if matches!(
+            provider_id,
+            "none" | HY_MT2_LOCAL_PROVIDER_ID | INDEX_LOCAL_PROVIDER_ID
+        ) {
             bail!("select a translation provider before checking its API key");
         }
         let secret = match self.credentials.get(credential_id(provider_id)) {
@@ -979,12 +988,13 @@ impl DesktopSettingsService {
             "whisper" => WHISPER_MODEL_PATH,
             "vad" => VAD_MODEL_PATH,
             "hy-mt2" => HY_MT2_MODEL_PATH,
+            "index-translate" => INDEX_MODEL_PATH,
             _ => bail!("unsupported model kind: {kind}"),
         };
         self.database
             .set_setting(key, &path.display().to_string())
             .await?;
-        if kind == "hy-mt2" {
+        if matches!(kind, "hy-mt2" | "index-translate") {
             self.refresh_active_provider().await?;
         }
         Ok(())
@@ -995,6 +1005,7 @@ impl DesktopSettingsService {
             "whisper" => WHISPER_MODEL_PATH,
             "vad" => VAD_MODEL_PATH,
             "hy-mt2" => HY_MT2_MODEL_PATH,
+            "index-translate" => INDEX_MODEL_PATH,
             _ => bail!("unsupported model kind: {kind}"),
         };
         Ok(self.database.get_setting(key).await?.map(PathBuf::from))
@@ -1005,6 +1016,7 @@ impl DesktopSettingsService {
             "whisper" => WHISPER_MODEL_PATH,
             "vad" => VAD_MODEL_PATH,
             "hy-mt2" => HY_MT2_MODEL_PATH,
+            "index-translate" => INDEX_MODEL_PATH,
             _ => bail!("unsupported model kind: {kind}"),
         };
         if self
@@ -1016,7 +1028,7 @@ impl DesktopSettingsService {
         {
             self.database.delete_setting(key).await?;
         }
-        if kind == "hy-mt2" {
+        if matches!(kind, "hy-mt2" | "index-translate") {
             self.refresh_active_provider().await?;
         }
         Ok(())
@@ -1089,8 +1101,25 @@ impl DesktopSettingsService {
         } else {
             None
         };
+        let local_model = if id == HY_MT2_LOCAL_PROVIDER_ID {
+            settings.hy_mt2_model_path
+        } else if id == INDEX_LOCAL_PROVIDER_ID {
+            Some(
+                self.database
+                    .get_setting(INDEX_MODEL_PATH)
+                    .await?
+                    .unwrap_or_else(|| {
+                        self.models_directory
+                            .join("Index-Translate-2B.Q4_K_M.gguf")
+                            .display()
+                            .to_string()
+                    }),
+            )
+        } else {
+            None
+        };
         Ok(
-            serde_json::json!({"provider_id":id,"model":model,"base_url":base_url,"style":self.database.get_setting(&format!("translation.{id}.style")).await?.unwrap_or(settings.translation_style_instruction),"local_model":if id==HY_MT2_LOCAL_PROVIDER_ID {settings.hy_mt2_model_path}else{None},"automatic":id!="none"}),
+            serde_json::json!({"provider_id":id,"model":model,"base_url":base_url,"style":self.database.get_setting(&format!("translation.{id}.style")).await?.unwrap_or(settings.translation_style_instruction),"local_model":local_model,"automatic":id!="none"}),
         )
     }
 
@@ -1154,7 +1183,17 @@ impl DesktopSettingsService {
         if id == "none" {
             return Ok("disabled");
         }
-        if id == HY_MT2_LOCAL_PROVIDER_ID {
+        if id == INDEX_LOCAL_PROVIDER_ID {
+            let path = self
+                .database
+                .get_setting(INDEX_MODEL_PATH)
+                .await?
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.models_directory.join("Index-Translate-2B.Q4_K_M.gguf"));
+            if !path.is_file() || !self.llama_server_path.is_file() {
+                return Ok("resources_missing");
+            }
+        } else if id == HY_MT2_LOCAL_PROVIDER_ID {
             let settings = self.load().await?;
             if !settings.hy_mt2_model_ready || !settings.local_translation_runtime_ready {
                 return Ok("resources_missing");
@@ -1251,6 +1290,25 @@ impl DesktopSettingsService {
                     style_instruction: style_instruction.to_string(),
                     disable_deepseek_thinking: false,
                 })
+            }
+            INDEX_LOCAL_PROVIDER_ID => {
+                let model_path = local_model
+                    .map(PathBuf::from)
+                    .or(self
+                        .database
+                        .get_setting(INDEX_MODEL_PATH)
+                        .await?
+                        .map(PathBuf::from))
+                    .unwrap_or_else(|| {
+                        self.models_directory.join("Index-Translate-2B.Q4_K_M.gguf")
+                    });
+                Arc::new(LocalLlamaTranslationProvider::new(
+                    LocalLlamaConfig::index_translate(
+                        self.llama_server_path.clone(),
+                        model_path,
+                        style_instruction.to_string(),
+                    ),
+                )?)
             }
             HY_MT2_LOCAL_PROVIDER_ID => {
                 let model_path = if let Some(path) = local_model {
@@ -1386,6 +1444,7 @@ fn validate_provider_id(provider_id: &str) -> Result<()> {
             | GEMINI_PROVIDER_ID
             | OPENAI_COMPATIBLE_PROVIDER_ID
             | HY_MT2_LOCAL_PROVIDER_ID
+            | INDEX_LOCAL_PROVIDER_ID
     ) {
         Ok(())
     } else {
@@ -1418,6 +1477,7 @@ fn provider_display_name(provider_id: &str) -> &'static str {
         GEMINI_PROVIDER_ID => "Gemini",
         OPENAI_COMPATIBLE_PROVIDER_ID => "OpenAI-compatible",
         HY_MT2_LOCAL_PROVIDER_ID => "Hy-MT2（本地）",
+        INDEX_LOCAL_PROVIDER_ID => "Index-Translate 2B（本地）",
         _ => "翻译服务",
     }
 }
@@ -1747,6 +1807,29 @@ mod tests {
             Some("Hy-MT2-1.8B-Q4_K_M")
         );
         assert!(!provider.status().configured);
+
+        let index_model = root.join("models/Index-Translate-2B.Q4_K_M.gguf");
+        fs::write(&index_model, b"model placeholder").unwrap();
+        service
+            .set_downloaded_model("index-translate", &index_model)
+            .await
+            .unwrap();
+        let profile = service
+            .translation_profile("index-translate-local")
+            .await
+            .unwrap();
+        assert_eq!(profile["local_model"].as_str(), index_model.to_str());
+        let selected = service.task_provider(&profile).await.unwrap();
+        assert_eq!(selected.status().id, "index-translate-local");
+        assert_eq!(
+            selected.status().model.as_deref(),
+            Some("Index-Translate-2B.Q4_K_M")
+        );
+        assert_eq!(*credentials.reads.lock().unwrap(), 0);
+        assert_eq!(
+            service.load().await.unwrap().translation_provider_id,
+            "hy-mt2-local"
+        );
 
         drop(service);
         drop(database);
