@@ -35,7 +35,7 @@ _更新：2026-11-13。_
 - [在线处理计划](online-asr-plan.md)：当前 F／H／G／R、源时钟分组与阶段调度；早期提案按后继记录阅读。
 - [0065 接入边界](decisions/0065-online-desktop-integration.md)、[0067 会话与采集](decisions/0067-online-session-owner-and-system-audio.md)、[0074 关联阅读](decisions/0074-paired-caption-reading-and-window-toggle.md)、[0075 失败隔离](decisions/0075-online-mt-validation-and-group-failure.md)、[0076 原文驱动调度](decisions/0076-source-driven-retranslation-and-stage-admission.md)。0076 取代早期历史／后文／调度的冲突部分。
 - [在线分支整合前完整记录](archive/2026-11-12/online-roadmap-before-integration.md)、[two-pass 回放](two-pass-smoke-validation.md)、[Qwen MLX](qwen-mlx-smoke-validation.md)、[SenseVoice](sensevoice-smoke-validation.md)。
-- [2026-11-13 Qwen 电台候选筛选](qwen-radio-candidate-screen-2026-11-13.md)：四档同输入计算／资源结果与匿名听审交付；语义质量待核对，未选定在线默认。
+- [2026-11-13 Qwen 电台候选筛选](qwen-radio-candidate-screen-2026-11-13.md)：四档同输入计算／资源结果及首批可用性反馈；建议以 1.7B 8bit 作为工作基线，完整在线质量未验收，App 默认未变。
 - [旧研究 0045](research/decisions/0045-independent-online-experiments.md)、[旧研究 0046](research/decisions/0046-controlled-online-asr-performance.md)：与主线同号不同决策，继续分目录保留。
 - [模型分类与 Qwen 多文件管理](decisions/0078-model-categories-and-qwen-packages.md)已进入开发主线；runtime 分发、草稿独立准备和新机完整在线闭环仍未完成。
 
