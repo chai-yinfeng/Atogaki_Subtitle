@@ -104,7 +104,7 @@ async fn index() -> Html<&'static str> {
   <body>
     <main>
       <h1>Atogaki Subtitle</h1>
-      <p>The Web API shell is running. The next batches will add Postgres, background jobs, authentication, and the subtitle editor.</p>
+      <p>This legacy compatibility server provides this page and a health endpoint. It does not provide background jobs, authentication, or a subtitle editor. Use the desktop app for the supported product workflow.</p>
       <p>Health check: <code>/api/health</code></p>
     </main>
   </body>

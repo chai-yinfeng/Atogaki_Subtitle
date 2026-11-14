@@ -9,9 +9,9 @@ macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`
 当前模块边界与开发状态见[架构](docs/architecture.md)和[路线图](docs/roadmap.md)；[2026-11-11 系统回顾](docs/system-review-2026-11-11.md)区分稳定离线能力、在线集成分支及学习闭环，并记录同类工具与在线正确性／延迟的评估依据。
 
 - 导入本机音频或视频，用内置 `whisper-cli` 和用户下载的 Whisper 模型在本地识别日语、英语或韩语。
-- 使用 Silero VAD 过滤静音、音乐和环境声，并通过词表提高人名与作品名的一致性。
+- 使用 Silero VAD 检测语音活动、减少静音段识别，并通过词表提高人名与作品名的一致性；VAD 不保证排除所有音乐或环境声。
 - 在播放器中按时间轴查看、跳转和编辑字幕；原文修改后会标记对应译文为待重译。
-- 可选使用 Hy-MT2 本地翻译、DeepL、DeepSeek 或 Gemini 将日语、英语或韩语翻译为简体中文；也可填写自定义 OpenAI-compatible Base URL 与模型。
+- 可选使用 Hy-MT2 本地翻译、DeepL、DeepSeek 或 Gemini 将日语、英语或韩语翻译为简体中文；也可填写自定义 OpenAI-compatible Base URL 与模型。开发主线另有 Index-Translate 2B 本地翻译，未随 v0.1.3 发行。
 - 在任务内字幕编辑器中用波形调整时间、插入／删除、切分／合并字幕；文字自动保存，多个字幕草稿互不覆盖，并可撤销。
 - 为原文和译文设置字体、字号、颜色、描边、背景、位置与边距；FFmpeg/libass 真实预览、双语 ASS 和视频烧录共享同一套样式。
 - 在“收听”中连续阅读并按当前句跟随播放；选择词、短语、语法或整句保存到按语言分册的“学习”区域，并返回原节目时间。
@@ -22,6 +22,8 @@ macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`
 - 使用月夜／来信主题，或导入本机 PNG、JPEG、WebP。提取最多 12 个代表色，通过共享色盘分别设置场景底色、阅读面色与按钮强调色，预览后应用；图片不上传、不随软件分发。
 
 媒体、模型、词典包、任务、学习资料和编辑结果默认保留在设备上。只有启用云端字幕翻译时，待翻译的原文字幕及有限的相邻上下文会发送给所选 provider；Gemini 局部识别需另行确认确切音频上传范围；只有用户主动查询在线词典时，所选文本才会发送给对应词典 API。
+
+开发主线已整合在线采集、控制面板和可修订字幕：日语 SenseVoice 草稿 → Qwen3-ASR 1.7B 8bit 确认 → Hy-MT2／Index-Translate 本地翻译。它仍未通过在线语义验收，新机 runtime／草稿准备闭环也未完成；不属于 v0.1.3 的稳定安装能力。在线面板尚无云端翻译入口。当前合同与实际边界见[在线计划](docs/online-asr-plan.md)，不要用早期分支报告判断今天是否已接入。
 
 ## v0.1.3 统一字幕编辑与收听
 
@@ -73,7 +75,7 @@ Finder 启动的 App 不会执行 `.zshrc`，因此终端中的 `proxy_on` 不�
 1. 在“设置”中选好或下载 Whisper 模型，建议同时启用 VAD；需要中文时再配置一个翻译 provider。
 2. 在首页选择节目语言、本地媒体、识别模型，以及同语言的可选词表，创建转写任务。
    随 App 提供的内置词表会按仓库 TXT 内容自动升级；第一次编辑内置词表时，App 会创建独立的自定义副本，后续升级不会覆盖该副本或旧任务的词表快照。
-3. 等待任务完成后进入任务详情，在“翻译与词表／字幕校对／导出成品”之间工作；需要精确时间和结构编辑时进入任务内字幕编辑器。
+3. 完整识别且已有字幕的任务直接进入统一字幕编辑器；翻译、词表、候选复核和导出按需打开，共用播放器和当前编辑位置。处理中任务保留只读进度与部分原文。
 4. 单段重译或批量翻译，也可以直接人工编辑简体中文译文；在导出区调整字幕样式并查看真实渲染预览。
 5. 进入“收听”连续阅读和播放；选择内容保存到“学习”，按词典来源查看释义并可返回原句。
 6. 按需导出原文、译文、双语 SRT/ASS，或选择原文、译文、双语字幕烧录视频。
@@ -130,6 +132,12 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 完整打包还要求 `src-tauri/binaries/llama-server-aarch64-apple-darwin`。固定 runtime 版本与构建参数见 [`hy-mt2-versions.zsh`](scripts/hy-mt2-versions.zsh) 和 [`validate-hy-mt2.zsh`](scripts/validate-hy-mt2.zsh)；后者是会下载模型并执行本地推理的开发验证脚本，普通安装用户无需运行。
 
+开发主线的 complete 配置另包含系统音频采集 helper；手工打包前在仓库根目录运行以下命令。`build-sidecars-macos.sh` 只准备 FFmpeg／FFprobe／whisper-cli，不会自动生成 llama-server 或采集 helper。打包 helper 也不等于已分发 Python／MLX 在线运行环境。
+
+```bash
+./scripts/prepare-online-capture.sh src-tauri/binaries/atogaki-audio-tap-aarch64-apple-darwin
+```
+
 构建 ad-hoc 签名、未公证的 App 或 DMG：
 
 ```bash
@@ -137,7 +145,7 @@ cd src-tauri
 cargo tauri build --config tauri.macos-complete.conf.json --bundles app,dmg
 ```
 
-产物位于 `src-tauri/target/release/bundle/`。详细窗口回归见 [`docs/desktop-testing.md`](docs/desktop-testing.md)，发布资产和 LGPL 源码归档见 [`docs/releasing.md`](docs/releasing.md)，下一阶段的 Windows 工作分解见 [`docs/windows-porting.md`](docs/windows-porting.md)。
+产物位于 `src-tauri/target/release/bundle/`。详细窗口回归见 [`docs/desktop-testing.md`](docs/desktop-testing.md)，发布资产和 LGPL 源码归档见 [`docs/releasing.md`](docs/releasing.md)。[`Windows 记录`](docs/windows-porting.md)仅保留为将来恢复参考。
 
 根目录和 Tauri 目录各有一个 Cargo package，因此会出现两个构建目录：
 
@@ -181,10 +189,10 @@ Atogaki_Sub/
 
 ## 开发准则与当前边界
 
-- 正确性、可编辑性和可回看性优先于实时性；实时辅助属于后续阶段。
+- 正确性、可编辑性和可回看性优先于实时性；实时辅助已在开发主线接入，质量及稳定发行仍未验收。
 - 时间轴和人工修正是一等数据；识别候选明确比较后采用，任务恢复复用已提交检查点。
 - 首批语言组合是日语、英语或韩语识别、简体中文翻译；任务会持久化语言对，provider 与领域接口不写死某一种组合。
-- macOS Apple Silicon 是当前主要质量基线；Windows 11 x86_64 已通过独立许可证审计、安装门禁和选定候选实机回归发布 `alpha.10`，后续仍按稳定候选集中更新。Windows 悬浮字幕不稳定且不建议使用；x86_64 macOS 尚未列入当前主线。
+- macOS Apple Silicon 是当前主要质量基线；Windows `alpha.10` 及其源码／验证材料保留为历史，开发、自动 CI 和后续打包已暂停。Windows 悬浮字幕不稳定且不建议使用；x86_64 macOS 尚未列入当前主线。
 - 当前没有账号、云端文件托管、跨设备同步或自动媒体下载。
 
 文档入口见[文档索引](docs/README.md)，项目方向见 [`docs/product-direction.md`](docs/product-direction.md)，当前进度和待验收项见 [`docs/roadmap.md`](docs/roadmap.md)。逐次提交与历史技术债保留在路线图历史快照，研究提案和验收证据分别索引。

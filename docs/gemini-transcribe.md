@@ -2,6 +2,8 @@
 
 _核对日期：2026-09-17_
 
+2026-11-14 维护核对：下文 API 合同描述现有 `gemini_asr.rs` 的 selected-range 转录实现，价格／免费层／条款仅为 2026-09-17 的历史查询，未在本轮重新验价或调用。它不是 Gemini 音频端到端翻译入口；文本翻译与音频参考的比较方向见[评测合同](evaluation.md#整套产品对比方向2026-11-14尚未运行)。
+
 Atogaki 将 Gemini 作为可选的云端文件 ASR provider。它与云端翻译授权分开：保存 Gemini Key 只表示凭据可用，每次局部重识别仍需对界面显示的音频范围单独勾选上传授权。本地 Whisper 失败不会自动改走 Gemini。
 
 ## 注册免费层 API Key
@@ -15,9 +17,9 @@ Atogaki 将 Gemini 作为可选的云端文件 ASR provider。它与云端翻译
 
 ## 免费层和数据边界
 
-官方价格页当前将 `gemini-3.5-transcribe` 和 `gemini-3.5-transcribe-live` 的 free tier 输入、输出都列为免费。免费不等于无限：rate limit 按 Cloud project 计算，包含 RPM、TPM 和 RPD 等维度，RPD 在太平洋时间午夜重置；Google 要求在 AI Studio 查看项目当前的 active rate limits，因此仓库不冻结一个可能失效的具体数字。
+2026-09-17 核对时，官方价格页将 `gemini-3.5-transcribe` 和 `gemini-3.5-transcribe-live` 的 free tier 输入、输出列为免费；这不是当前免费额度保证。运行前重新查看官方价格、数据条款及项目 active rate limits，仓库不冻结一个可能失效的具体限额。
 
-免费层的内容会用于改进 Google 产品，付费层价格表则标为不会用于此用途。用户必须在上传前看到这一差异。参考：[价格与数据使用](https://ai.google.dev/gemini-api/docs/pricing)、[Rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)。
+当时条款区分免费／付费层的数据使用；上传前须展示实际所用服务当前适用的差异，不能沿用旧查询作为今日承诺。参考：[价格与数据使用](https://ai.google.dev/gemini-api/docs/pricing)、[Rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)。
 
 ## 当前实现合同
 

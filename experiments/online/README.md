@@ -1,10 +1,19 @@
-# Online CLI 实验
+# Online 回放、诊断与历史实验
 
-2026-11-13：新增有限的 [Qwen 同输入筛选](screen_qwen_candidates.py)、[Medium 辅助参考](screen_whisper_reference.py)及[完整性核对／首批听审材料](audit_qwen_screen.py)，复用已有模型目录、runtime 和在线 PCM 规则。[实测与复现](../../docs/qwen-radio-candidate-screen-2026-11-13.md)记录四档候选的资源结果和质量待核对边界；不运行翻译、不改变 App 默认，也不由字符串一致数自动推荐模型。下文旧批次按各自日期阅读。
+_核对：2026-11-14。生产实现已整合 main；本目录不是另一套待合并的在线产品。_
 
-> 2026-11-02 当前入口：[模型清单与two-pass计划](../../docs/online-asr-plan.md)、[0063](../../docs/decisions/0063-online-two-pass-model-selection.md)。本目录现有代码仍是旧WS／SS／CPP回放与串行MT实验；Qwen MLX整段识别与本地MT已由 `run_qwen_mlx.py` 跑通，见[命令与实测](../../docs/qwen-mlx-smoke-validation.md)；SenseVoiceSmall也已由 `run_sensevoice.py` 跑通，见[记录](../../docs/sensevoice-smoke-validation.md)；本地two-pass已由 `run_two_pass.py` 接通，Zipformer流式入口为 `run_zipformer.py`，见[链路／价格记录](../../docs/two-pass-smoke-validation.md)；桌面会话／采集底座进度见[0067](../../docs/decisions/0067-online-session-owner-and-system-audio.md)，完整App与云端在线链路未验收，vLLM继续搁置。独立翻译组／re-translation已移至共享 `src/infrastructure/online_worker/`，`run_two_pass.py`为回放薄入口；支持`--pcm-stdin`且默认不写音频或事件文件。旧`retranslation.py`保留研究导入入口，默认显示译文草稿，`--no-translation-drafts`仅翻译收口组，见[0066](../../docs/decisions/0066-online-retranslation-groups.md)。下文命令保留供复现旧实验，不是新方案的安装／运行说明。
+当前合同见[在线计划](../../docs/online-asr-plan.md)、[0076](../../docs/decisions/0076-source-driven-retranslation-and-stage-admission.md)和[0079](../../docs/decisions/0079-qwen-17b-8bit-online-baseline.md)。桌面与回放共用 `src/infrastructure/online_worker/`，`run_two_pass.py` 是薄入口；`retranslation.py` 是仍被研究工具和测试使用的导入桥，不是第二份生产实现。`--pcm-stdin` 不默认保存音频／事件，文件回放输出需使用新的私有目录。
 
-此目录独立于 offline 两段式业务与 GUI。第一轮 ASR 比较 Whisper-Streaming／LocalAgreement 与 SimulStreaming／AlignAtt；翻译固定 Hy-MT2。当前是上游 ASR 回放 + **串行翻译策略重放**，不是并发实时系统。
+| 用途 | 现有入口 | 证据及边界 |
+| --- | --- | --- |
+| 当前 worker 因果回放 | `run_two_pass.py`、`summarize_two_pass.py`、`replay_presentation.mjs` | [13 分钟回归](../../docs/qwen8-online-regression-2026-11-14.md)；不含系统采集／原生上屏 |
+| Qwen 候选与听审 | `screen_qwen_candidates.py`、`screen_whisper_reference.py`、`audit_qwen_screen.py` | [同输入筛选与首批反馈](../../docs/qwen-radio-candidate-screen-2026-11-13.md)；已选 1.7B 8bit，不默认扩大矩阵 |
+| ASR／MT 定位 | `compare_japanese_mt.py`、`source_clock_reference.py`、`qwen_context_recovery.py`、`draft_anchor_review.py` | 固定输入、源时钟、有限恢复与语义时间线；研究结果不自动进入生产 |
+| 参考证据 | `burned_reference.py`、`reference_ledger.py`、`make_gemini_review.py` | OCR／旧字幕／模型结果保留来源与核准状态，不自动作为 gold |
+| 音频上传转录参考 | `gemini_reference_batch.py` | 需确切范围及 authorization；仅转录，不是音频直译／E2E 翻译 runner；本次未调用 |
+| 历史 WS／SS／CPP 对照 | `run_asr.py`、`run_asr_suite.py`、`replay_controlled.py`、各环境 pin／lock | 复现既有研究及共用诊断，非当前 App ASR，也非回归必跑矩阵 |
+
+本目录输出独立于正式离线任务／SQLite 人工工作区。下文旧批次的“当前”“后续”和计数只描述该批次，不能覆盖上述状态；环境、模型和日志是否清理由用途／引用决定，不由文件日期决定。
 
 ## 后续研究约束与产物管理（2026-11-09）
 

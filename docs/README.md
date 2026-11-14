@@ -33,6 +33,7 @@ _更新：2026-11-14。_
 ## 在线实现与研究入口
 
 - [在线处理计划](online-asr-plan.md)：当前 F／H／G／R、源时钟分组与阶段调度；早期提案按后继记录阅读。
+- [早期在线选型与结构提案归档](archive/2026-11-14/online-asr-proposals-before-baseline.md)：旧分支、量化候选、安装顺序及完整事件流提案，保留历史，不再作为当前待实施清单。
 - [0065 接入边界](decisions/0065-online-desktop-integration.md)、[0067 会话与采集](decisions/0067-online-session-owner-and-system-audio.md)、[0074 关联阅读](decisions/0074-paired-caption-reading-and-window-toggle.md)、[0075 失败隔离](decisions/0075-online-mt-validation-and-group-failure.md)、[0076 原文驱动调度](decisions/0076-source-driven-retranslation-and-stage-admission.md)。0076 取代早期历史／后文／调度的冲突部分。
 - [在线分支整合前完整记录](archive/2026-11-12/online-roadmap-before-integration.md)、[two-pass 回放](two-pass-smoke-validation.md)、[Qwen MLX](qwen-mlx-smoke-validation.md)、[SenseVoice](sensevoice-smoke-validation.md)。
 - [2026-11-13 Qwen 电台候选筛选](qwen-radio-candidate-screen-2026-11-13.md)：四档同输入计算／资源结果及首批可用性反馈。

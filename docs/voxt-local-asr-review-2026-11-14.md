@@ -30,6 +30,8 @@ Voxt 是 App，SGLang Omni 提供其内部本地语音 runtime。Go 应用管理
 
 用户进一步提出用投机解码加速的 Qwen 替代 SenseVoice 预览，作为待评估方案保留。准确地说，是在一次 Qwen 请求内部进行 draft／verify，不是让投机 token 成为产品第一遍字幕；同一加速机制也可以用于确认 pass。若用 Qwen 做短窗口预览、长窗口确认，产品仍可保持 two-pass，但会改变现有 CPU 草稿与 GPU 确认／MT 的资源分工，不能只看解码 tokens/s 就认定更快。音频编码、prefill、重复窗口及 GPU 排队仍需计量。
 
+后续澄清：用户指向的是取消独立 SenseVoice，单路 Qwen 内部通过 DFlash／DSpark 的 draft／verify 加速；短窗口预览再长窗口确认只是可能的产品组织，不是已经选定的新两遍方案。Voxt 的录音中 partial 显示本身可以直接参考，不因其最终听写交付而排除实时字幕对照。
+
 2026-11-14 另查到社区 [Qwen3-ASR-1.7B DSpark 辅助模型](https://huggingface.co/mattymchen/Qwen3-ASR-1.7B-speculator.dspark)，其模型卡提供 vLLM 调用；[vLLM Metal 文档](https://docs.vllm.ai/projects/vllm-metal/en/latest/dspark/)则将 DSpark 标为实验能力，并要求匹配目标／辅助模型，披露输出一致性尚未完全验证。两项信息不足以证明这对 ASR 权重可直接接入本项目 MLX worker 或 Voxt native runtime。本轮未下载／运行，兼容性、数值一致性和端到端收益留待具体实验，不扩大本轮 ASR 基线矩阵。
 
 Qwen 1.7B 的词表提示最多 500 个 term／8000 字符，0.6B 最多 30 个；不无限累加历史全文。[echo.go](https://github.com/sgl-project/sglang-omni/blob/4e03928295bba17c8196644f50d69e58facff6ea/Voxt/internal/omni/echo.go#L161)发现疑似提示词表尾部回显时，会用同一音频、空 context 重跑作证据，再决定是否裁掉尾部。部分“确定回显”分支在重跑失败时也会裁剪，因此不能将它当无风险的正确性保证。我们目前 Qwen worker 未接入这套词表提示，本轮回归词表为空；它只为未来有依据地加入 ASR 提示提供参考，不会解决已经发生的 MT 错译。
