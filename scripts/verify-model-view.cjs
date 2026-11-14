@@ -38,6 +38,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
   assert.equal(await page.locator('[data-model-card="hy-mt2-7b-q4-k-m"]').count(),0);
   const qwen=page.locator('[data-model-group="transcription/Qwen3-ASR"]');
   assert.equal(await primary('qwen-0.6b').isVisible(),false);await qwen.locator(':scope > summary').click();
+  assert.equal(await primary('qwen-1.7b-8bit').isVisible(),true);
+  assert.equal(await primary('qwen-0.6b').isVisible(),false);
+  await page.locator('[data-model-group="transcription/Qwen3-ASR/other"] > summary').click();
   for(const id of ['qwen-0.6b','qwen-0.6b-4bit','qwen-1.7b-8bit'])assert.equal(await primary(id).isVisible(),true);
   await primary('qwen-0.6b-4bit').click();assert.deepEqual(await page.evaluate(()=>window.__grouped.calls),[['start','qwen-0.6b-4bit']]);
   await page.evaluate(()=>{window.__grouped.downloads=[{modelId:'qwen-0.6b-4bit',status:'done',active:false}];window.__grouped.view.render()});

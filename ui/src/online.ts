@@ -110,7 +110,7 @@ async function loadChoices():Promise<void>{
  const [loaded,glossaries]=await Promise.all([invoke<Choices>("online_choices"),invoke<Glossary[]>("list_glossaries")]);
  if(disposed)return;
  choices=loaded;
- for(const [id,list,fallback] of [["online-language",choices.languages,"ja"],["online-model",choices.finals,"qwen-1.7b"],["online-translator",choices.translators,"hy-mt2"]] as const){
+ for(const [id,list,fallback] of [["online-language",choices.languages,"ja"],["online-model",choices.finals,"qwen-1.7b-8bit"],["online-translator",choices.translators,"hy-mt2"]] as const){
   const select=find<HTMLSelectElement>(id), previous=select.value||fallback;
   select.replaceChildren(...list.map(c=>{const option=document.createElement("option");option.value=c.id;option.textContent=c.name+(c.ready?"":" · 未就绪");option.disabled=!c.ready;return option;}));
   select.value=list.some(c=>c.id===previous&&c.ready)?previous:list.find(c=>c.ready)?.id??"";

@@ -1,6 +1,6 @@
 # 文档索引
 
-_更新：2026-11-13。_
+_更新：2026-11-14。_
 
 当前行为看产品方向、能力矩阵、有效 ADR；当前进度看路线图；实验结论看对应提交和环境。在线实现已整合到开发主线，已发布稳定版仍为 v0.1.3；代码合入不等于在线质量验收或发布。
 
@@ -35,7 +35,9 @@ _更新：2026-11-13。_
 - [在线处理计划](online-asr-plan.md)：当前 F／H／G／R、源时钟分组与阶段调度；早期提案按后继记录阅读。
 - [0065 接入边界](decisions/0065-online-desktop-integration.md)、[0067 会话与采集](decisions/0067-online-session-owner-and-system-audio.md)、[0074 关联阅读](decisions/0074-paired-caption-reading-and-window-toggle.md)、[0075 失败隔离](decisions/0075-online-mt-validation-and-group-failure.md)、[0076 原文驱动调度](decisions/0076-source-driven-retranslation-and-stage-admission.md)。0076 取代早期历史／后文／调度的冲突部分。
 - [在线分支整合前完整记录](archive/2026-11-12/online-roadmap-before-integration.md)、[two-pass 回放](two-pass-smoke-validation.md)、[Qwen MLX](qwen-mlx-smoke-validation.md)、[SenseVoice](sensevoice-smoke-validation.md)。
-- [2026-11-13 Qwen 电台候选筛选](qwen-radio-candidate-screen-2026-11-13.md)：四档同输入计算／资源结果及首批可用性反馈；建议以 1.7B 8bit 作为工作基线，完整在线质量未验收，App 默认未变。
+- [2026-11-13 Qwen 电台候选筛选](qwen-radio-candidate-screen-2026-11-13.md)：四档同输入计算／资源结果及首批可用性反馈。
+- [0079 在线确认基线](decisions/0079-qwen-17b-8bit-online-baseline.md)、[2026-11-14 完整链路回归](qwen8-online-regression-2026-11-14.md)：开发默认收敛到 1.7B 8bit，13 分钟运行与结构检查通过，语义质量仍未验收，已安装 App 未覆盖。
+- [Voxt 本地 ASR 源码评审](voxt-local-asr-review-2026-11-14.md)：发行版本的同权重核验、预览／确认、可选 DFlash、解码／资源限制、恢复与分发；只读调查，未迁移 runtime。
 - [旧研究 0045](research/decisions/0045-independent-online-experiments.md)、[旧研究 0046](research/decisions/0046-controlled-online-asr-performance.md)：与主线同号不同决策，继续分目录保留。
 - [模型分类与 Qwen 多文件管理](decisions/0078-model-categories-and-qwen-packages.md)已进入开发主线；runtime 分发、草稿独立准备和新机完整在线闭环仍未完成。
 
@@ -46,7 +48,7 @@ _更新：2026-11-13。_
 - [离线工作流](offline-workflow-validation.md)、[阶段管线](staged-pipeline-validation.md)。
 - [评测方法与记录](evaluation.md)、[Hy-MT2](hy-mt2-validation.md)、[Gemini](gemini-transcribe.md)、[《教父》短片段](godfather-short-baseline.md)、[翻译消耗](translation-usage-observation.md)：工程合同、人工语义、时间与成本不能互相代替。
 
-模型输出、媒体、数据库、截图与 trace 通常保存在忽略目录，文档归档不授权删除这些产物。在线评测和实现随整合进入主线；本次不重新运行模型质量实验。
+模型输出、媒体、数据库、截图与 trace 通常保存在忽略目录，文档归档不授权删除这些产物。实验是否实际运行及其口径，以各条带日期的记录为准。
 
 ## 仍可参考的研究
 
