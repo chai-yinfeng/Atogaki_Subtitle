@@ -13,7 +13,7 @@ _核对：2026-11-14。当前开发主线，不等于 v0.1.3 稳定发行。_
 | 确认 ASR | Qwen3-ASR 1.7B MLX 8bit 为默认，其他 Qwen 可选 | Qwen 离线文件 provider、native runtime 迁移未实施 |
 | 在线 MT | Hy-MT2 1.8B Q4_K_M 默认；Index-Translate 2B Q4 可选，均由 App 管理本地 llama-server | 在线面板没有 DeepSeek／Gemini 云端入口；离线已有云端文本 provider 不等于在线已接入 |
 | 状态与调度 | F／H／G／R、源时钟分组、源 revision、需求合并、阶段交错、共同停止预算 | 原生采集到上屏的完整质量验收；内存／重算专项和新加速机制待评估 |
-| 保存 | 在线事件在会话内显示，不写入离线人工工作区，默认不录音 | 会话录音、失败音频持久恢复、自动离线精修均为待讨论能力 |
+| 保存 | 在线事件在会话内显示，不写入离线人工工作区，当前无录音入口 | 显式开启录音、结束后手动离线精修是 0065 已确认方向，尚未实现；自动校正触发和失败音频持久恢复仍待设计 |
 
 模型下载、固定 revision、逐文件大小和 SHA-256 以[模型目录](../src-tauri/src/model-catalog.json)为准；分类与下载见[0078](decisions/0078-model-categories-and-qwen-packages.md)，默认选择见[0079](decisions/0079-qwen-17b-8bit-online-baseline.md)。不在本文维护另一份可能漂移的型号／量化清单。
 
