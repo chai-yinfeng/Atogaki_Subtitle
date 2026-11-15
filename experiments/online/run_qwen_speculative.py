@@ -15,10 +15,8 @@ import wave
 import mlx.core as mx
 import numpy as np
 from mlx_qwen3_asr import Session
-from mlx_qwen3_asr.audio import compute_features
-from mlx_qwen3_asr.tokenizer import parse_asr_output
 
-from qwen_speculative import Target, Draft, decode
+from qwen_speculative import Target, Draft, transcribe
 
 
 def main():
@@ -90,20 +88,12 @@ def main():
                 result = session.transcribe(audio[row['id']], language='Japanese', max_new_tokens=512, return_chunks=True)
                 output = dict(text=result.text, finish_reason=result.finish_reason, original=asdict(result))
             else:
-                mel, lengths = compute_features(audio[row['id']])
-                features, _ = session.model.audio_tower(mel.astype(session.dtype), lengths)
-                prompt = session.tokenizer.build_prompt_tokens(n_audio_tokens=features.shape[1], language='Japanese', context='')
-                prompt_ids = mx.array([prompt], dtype=mx.int32)
-                embeddings = session.model._embed_tokens(prompt_ids)
-                embeddings = session.model._inject_audio_features(embeddings, features, prompt_ids == session.model.audio_token_id)
                 try:
-                    result = decode(target, embeddings, 512, draft)
+                    output = transcribe(session, target, draft, audio[row['id']])
                 except FloatingPointError as error:
                     (args.output / 'failure.json').write_text(json.dumps(dict(
                         id=row['id'], round=repeat, error_type=type(error).__name__, reason=str(error)), indent=2) + '\n')
                     raise
-                _, text = parse_asr_output(session.tokenizer.decode(result.tokens), user_language='Japanese')
-                output = dict(text=text, **asdict(result))
             mx.synchronize()
             output.update(id=row['id'], round=repeat, seconds=time.monotonic() - before,
                           peak_active_bytes=mx.get_peak_memory(), active_bytes=mx.get_active_memory(),
@@ -113,8 +103,6 @@ def main():
             print(json.dumps({k: output[k] for k in ['id', 'round', 'seconds', 'finish_reason']}), flush=True)
             if output['finish_reason'] == 'length' or not output['text'].strip():
                 raise RuntimeError('ASR empty or token budget exhausted; inspect saved evidence')
-            if args.mode != 'original':
-                del features, mel, embeddings
             mx.clear_cache()
 
 

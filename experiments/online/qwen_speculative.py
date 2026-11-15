@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Experimental Qwen ASR block drafting; never imported by the production worker."""
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import json
 from pathlib import Path
 
 import mlx.core as mx
 import mlx.nn as nn
+from mlx_qwen3_asr.audio import compute_features
 from mlx_qwen3_asr.config import TextDecoderConfig
+from mlx_qwen3_asr.tokenizer import parse_asr_output
 from mlx_qwen3_asr.decoder import KVCache, TextDecoderLayer, _create_causal_mask_with_prefix
 from mlx_qwen3_asr.generate import detect_repetition
 from mlx_qwen3_asr.mrope import InterleavedMRoPE, apply_rotary_pos_emb
@@ -259,3 +261,16 @@ def decode(target, prompt_embeddings, max_new_tokens, draft=None, *, eos_token_i
                         cache.offset, draft_cache.offset if draft_cache else 0, rejected_rounds,
                         min(confidence_values) if confidence_values else None,
                         max(confidence_values) if confidence_values else None)
+
+
+def transcribe(session, target, draft, samples, max_new_tokens=512):
+    """Run the unchanged short-crop audio path with the experimental decoder."""
+    mel, lengths = compute_features(samples)
+    features, _ = session.model.audio_tower(mel.astype(session.dtype), lengths)
+    prompt = session.tokenizer.build_prompt_tokens(n_audio_tokens=features.shape[1], language='Japanese', context='')
+    ids = mx.array([prompt], dtype=mx.int32)
+    embeddings = session.model._embed_tokens(ids)
+    embeddings = session.model._inject_audio_features(embeddings, features, ids == session.model.audio_token_id)
+    result = decode(target, embeddings, max_new_tokens, draft)
+    _, text = parse_asr_output(session.tokenizer.decode(result.tokens), user_language='Japanese')
+    return dict(text=text, **asdict(result))
