@@ -16,7 +16,7 @@ _最后更新：2026-11-15。开发主线与稳定发行分别记录。_
 
 macOS 已发布版本仍为 v0.1.3（tag `9a187f7`）。2026-11-12 按用户授权将在线集成 `e06a9c6` 与文档整理 `8fbac12` 收拢；实验分支 `11d2847` 已被集成分支完整包含，无需再复制一份实现。整合前在线执行、验证与本机试装原文见[归档](archive/2026-11-12/online-roadmap-before-integration.md)。代码合入不代表新 Release 或在线语义验收。
 
-## 当前优先：native DFlash 结果与 Python 适配缺口
+## 当前优先：Python DFlash 已验证，整链晋升待验收
 
 2026-11-15 用户确认五段校正文本的 H/G 按标点切分保留意思，九次 Hy-MT2 中文结果总体可接受；指出「オイラン」未译成「花魁」。加入确认前文总体略有帮助、影响较小，很多结果一致。按整体反馈记录，不编造逐项评分或总体准确率，不再沿用助手此前更严格的待核对判断。R/F 仍为空，原输入和输出不改写，反馈绑定原结果摘要留在私有目录。
 
@@ -26,7 +26,11 @@ macOS 已发布版本仍为 v0.1.3（tag `9a187f7`）。2026-11-12 按用户授�
 
 后继已按用户要求完成 native DFlash：同一主模型／MLX／停止规则，每种布局重跑 baseline 与原始 BF16 draft，四臂各三轮共 60 次正常结束。voxt_swift 后两轮五段总计算时间均值 4.449 → 3.050 s，MLX peak active 3.295 → 4.021 GB，两段文字变化；reference 为 4.335 → 2.949 s、3.291 → 4.016 GB，五段文字相同。它证明该小样本有约 1.46–1.47× 计算加速，不证明在线字幕延迟或语义质量通过。
 
-Python 兼容性探针确认现有包不能直接加载专用 DFlash，实际报参数结构不匹配；DSpark 配置也不是当前 ASR 模型格式。固定源码的 vLLM Metal STT 路线不执行 speculative decoding，普通文本 DSpark 支持也不等于这套 ASR head 支持。Python 两项尚无性能结果；下一步需要先讨论并确认实验目标适配、hidden-state taps、block verify／KV 回退及 DSpark 词表映射，不能仅改模型路径或更新包来冒充完成。实验和边界见[第三阶段](evaluation.md#第三阶段native-dflash-与-python-兼容性)。生产链路与录音保留项不变。
+初次 Python 兼容性探针确认现有包不能直接加载专用 DFlash／DSpark；用户随后明确确认隔离适配，先 DFlash、再 DSpark，并保留 Python 路线。已在 experiments/online 增加目标 taps、专用 head、词表映射、block verify／KV 回退、confidence 记录和有限性拒绝，复用原音频处理及模型层，不修改生产包。实验和边界见[第四阶段](evaluation.md#第四阶段python-专用-head-适配2026-11-15)。生产链路与录音保留项不变。
+
+最终同五段裁片、两套 target 条件、原接口／无 draft／DFlash／DSpark 各三轮，共 120 次均 EOS。当前 MLX 0.32.4／target FP16 条件下，无 draft 总计算均值 4.619 s，DFlash BF16 2.870 s，DSpark BF16 5.607 s；MLX peak active 为 2.829／3.555／3.583 GB，五段文字均与原接口一致。0.32.3／target BF16 控制复现 DFlash 加速，DSpark 较慢且一段文字变化，不据此宣称质量改善。DFlash 值得进入后继链路验证，DSpark 暂不晋升，不切换 C++／Rust／Go。
+
+首次将 DSpark head 转成 FP16 导致输入 FC 溢出；失败及数值审计保留，最终保留原始 BF16 head，并对进入 head 的 target 激活显式转换。真实失败回归确认非有限 head 会中止，而非静默逐 token 兜底后冒称成功。新增合同验证与现有 Python 回归共 177 项通过；这不等于实时字幕、取消、长时内存或 ASR／MT 竞争验收。oMLX 前缀复用、缓存观测和内存管理仍为用户确认的后置研究，先验证已有 llama-server 能力，不在本轮增加另一套服务。
 
 原 evaluation 页面及素材角色／离线／runtime 提案已[整体归档](archive/2026-11-14/evaluation-before-confirmed-text.md)，引用保留；screening 只解释历史候选，不再决定当前名单。
 
@@ -118,7 +122,7 @@ Graphify CLI 已完成在线集成分支纯本地 AST 扫描与查询；当前�
 
 ## 下一步与验收门禁
 
-1. **先确认 Python 专用 draft 的实验适配。** native 无投机／DFlash 对照已完成；Python DFlash／DSpark 尚缺音频目标适配与校验／回退合同，先讨论范围并验证正确性，再跑同裁片计时。生产 SenseVoice／Qwen、MT、分组和调度保持；R、整链优化与生产迁移不由实验结果自动启动。
+1. **先验收 Python DFlash 的链路收益。** 隔离适配与固定裁片计时已完成；后续另固定实时输入／预览和确认合同，检查错误传播、取消、MT 竞争与长时资源。DSpark 暂留实验，不因有实现而进入生产。现有 SenseVoice／Qwen、MT、分组、调度和 R 保持，不由短裁片加速自动启动迁移。
 2. **按反馈维护在线 UI。** 已完成主线收拢和控制语义／布局修正；具体阅读问题再修正，不把源码与 WebKit 验证当已完成原生使用验收，也不以新 UI 扩大当前质量测试范围。
 3. **补齐 runtime／模型准备。** Qwen 多文件管理已实现；本机导入脚本仍不能代替新机器安装闭环。Python runtime 分发、草稿独立准备或 native MLX 替换仍需按各自方案推进，不能由本次目录整理视为完成。
 4. **离线与学习维持使用闭环。** 根据具体反馈改善收藏、回原句、Anki 及日常交互；不自动建设内建复习系统。

@@ -1,13 +1,14 @@
 # Online 回放、诊断与历史实验
 
-_核对：2026-11-14。生产实现已整合 main；本目录不是另一套待合并的在线产品。_
+_核对：2026-11-15。生产实现已整合 main；本目录不是另一套待合并的在线产品。_
 
-当前语义正确性测试只采用[用户校正文本名单](datasets/japanese-radio/confirmed-text-baseline.json)和[评测合同](../../docs/evaluation.md)：固定待译文字／确认前文，后文为空，不运行 ASR 或比较 runtime。下表的 ASR／离线／参考台账／历史回放仍可解释旧结果，但不参与这轮质量统计；`screening.json` 的候选角色已标为历史，不能因音频已准备就自动加入。
+当前测试只采用[用户校正文本名单](datasets/japanese-radio/confirmed-text-baseline.json)及绑定裁片，条件见[评测合同](../../docs/evaluation.md)。校正文本 MT 阶段固定 G/H、后文为空，已收用户反馈；后继用户已授权在同五段裁片做 native／Python 与 DFlash／DSpark 实验，分别保存结果，不把新 ASR 输出反写人工原文。下表的 ASR／离线／参考台账／历史回放仍可解释旧结果，但不参与这轮质量统计；`screening.json` 的候选角色已标为历史，不能因音频已准备就自动加入。
 
 当前合同见[在线计划](../../docs/online-asr-plan.md)、[0076](../../docs/decisions/0076-source-driven-retranslation-and-stage-admission.md)和[0079](../../docs/decisions/0079-qwen-17b-8bit-online-baseline.md)。桌面与回放共用 `src/infrastructure/online_worker/`，`run_two_pass.py` 是薄入口；`retranslation.py` 是仍被研究工具和测试使用的导入桥，不是第二份生产实现。`--pcm-stdin` 不默认保存音频／事件，文件回放输出需使用新的私有目录。
 
 | 用途 | 现有入口 | 证据及边界 |
 | --- | --- | --- |
+| Python 专用 draft 实验 | `run_qwen_speculative.py`、`qwen_speculative.py`、`test_qwen_speculative.py` | 固定包／主模型／已核准裁片，原接口／新封装无 draft／DFlash／DSpark；不导入生产 worker |
 | 当前 worker 因果回放 | `run_two_pass.py`、`summarize_two_pass.py`、`replay_presentation.mjs` | [13 分钟回归](../../docs/qwen8-online-regression-2026-11-14.md)；不含系统采集／原生上屏 |
 | Qwen 候选与听审 | `screen_qwen_candidates.py`、`screen_whisper_reference.py`、`audit_qwen_screen.py` | [同输入筛选与首批反馈](../../docs/qwen-radio-candidate-screen-2026-11-13.md)；已选 1.7B 8bit，不默认扩大矩阵 |
 | ASR／MT 定位 | `compare_japanese_mt.py`、`source_clock_reference.py`、`qwen_context_recovery.py`、`draft_anchor_review.py` | 固定输入、源时钟、有限恢复与语义时间线；研究结果不自动进入生产 |
@@ -16,6 +17,25 @@ _核对：2026-11-14。生产实现已整合 main；本目录不是另一套待�
 | 历史 WS／SS／CPP 对照 | `run_asr.py`、`run_asr_suite.py`、`replay_controlled.py`、各环境 pin／lock | 复现既有研究及共用诊断，非当前 App ASR，也非回归必跑矩阵 |
 
 本目录输出独立于正式离线任务／SQLite 人工工作区。下文旧批次的“当前”“后续”和计数只描述该批次，不能覆盖上述状态；环境、模型和日志是否清理由用途／引用决定，不由文件日期决定。
+
+## Python DFlash／DSpark 实验
+
+用户于 2026-11-15 确认先适配 DFlash、通过后接 DSpark。实验复用 `mlx-qwen3-asr==0.4.4` 的音频处理、模型层和 KVCache，增加进入指定层之前的 hidden-state taps、专用 draft head、因果 block verify 与拒绝回退。每请求新建缓存；保留原 EOS／循环／token 上限规则。两种算法的 anchor 对齐不同：DFlash 从 mask 位置提议，DSpark 也使用 anchor 位置，并加 reduced-vocabulary Markov bias。confidence head 实际计算并记录原始 logits，本轮固定整块长度，不发明阈值或自适应截断。
+
+目标适配与草稿语义参考 Apache-2.0 上游：[SGLang Omni DFlash](https://github.com/sgl-project/sglang-omni/blob/4e03928295bba17c8196644f50d69e58facff6ea/sglang_omni_mlx/native/src/qwen3_asr/dflash_draft.cpp)及 [Speculators DSpark](https://github.com/vllm-project/speculators/tree/05f9ba2324fef505cef8700669f2bdc20f8ae219/src/speculators/models/dspark)。不修改已安装 ASR 包，不加载 Hugging Face 的远程 Python 代码，也不将小模型自回归投机当作专用 head。
+
+CLI 只接受当前正向名单的冻结输入 JSON，校验输入与裁片摘要；输出目录必须不存在。主模型／draft 及现成 runtime 路径由本机提供，不从本入口自动下载。`original` 走原 Session，`plain` 走新封装但不使用 draft；`dflash`／`dspark` 需要 `--draft-dir`，并校验其算法。每个环境分别比较，量化主权重不变，target 与 draft 的计算精度分别记录；draft 默认保持 BF16，`--draft-dtype` 仅供显式诊断。FP16 target 的隐藏状态进入 draft 前转换到 BF16；发现非有限 logits 时明确失败，不把零接受率降级冒充有效加速。不要把精度差异归因于算法。
+
+```sh
+/path/to/isolated/python experiments/online/run_qwen_speculative.py \
+  --inputs /path/to/private/frozen-inputs.json --input-sha256 <frozen-sha256> \
+  --model-dir /path/to/qwen-17b-8bit --mode dflash \
+  --draft-dir /path/to/pinned-dflash --dtype bfloat16 \
+  --repeat 3 --output /path/to/new-private-output
+/path/to/isolated/python -m unittest discover -s experiments/online -p test_qwen_speculative.py -v
+```
+
+本轮仅支持固定 causal Speculators head、短裁片、greedy、无 context、无流式。超过 draft 滑动窗口的输入明确拒绝，不借用这条短裁片实现宣称长录音、滑动窗口驱逐、取消、增量音频 KV 或生产在线服务已完成。真实测试结果、权重 pins、失败尝试及内存／延迟口径见[评测记录](../../docs/evaluation.md)。
 
 ## 后续研究约束与产物管理（2026-11-09）
 

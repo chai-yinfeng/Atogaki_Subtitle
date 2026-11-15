@@ -89,4 +89,4 @@ SGLang 确实已有 Rust server 和部分 Rust 扩展，但其 [non-GPU Rust mig
 
 音频 ASR 另有输入约束：即使音频占位 token 相同，真实音频 embedding 也可能已经变化，不能仅以文本 token 的相同前缀复用其后 KV。native realtime 的保留文字前缀也不等于已经复用音频 encoder／KV。移植优化应分别保留输入依赖和拒绝／取消／缓存失效合同，不为共享服务再增加一个并存的模型副本。
 
-已授权的 native DFlash 实测与 Python 加载探针见[第三阶段](evaluation.md#第三阶段native-dflash-与-python-兼容性)。本次没有修改生产 server、模型执行代码或语言选择。
+已授权的 native DFlash 实测与最初 Python 加载探针见[第三阶段](evaluation.md#第三阶段native-dflash-与-python-兼容性)；后继用户确认实验适配，Python DFlash／DSpark 已在[第四阶段](evaluation.md#第四阶段python-专用-head-适配2026-11-15)完成固定裁片计时。用户确认保留 Python 路线，oMLX 前缀／内存能力留待后续验证；没有修改生产 server／模型执行代码或语言选择。

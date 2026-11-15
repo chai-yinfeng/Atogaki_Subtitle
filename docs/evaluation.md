@@ -79,7 +79,7 @@ DFlash 使用 Voxt 固定的 `wilsonzheng0327/Qwen3-ASR-1.7B-dflash`，revision 
 
 每轮 voxt_swift 生成 157 tokens／42 次 verify，reference 为 153／40；它们可描述每轮完成的 token 数与校验次数，不是 proposal 接受率。MLX peak active 不等于整机内存、RSS 或 ASR＋MT 总量。本轮只测完整裁片计算，未验证在线首次正确上屏、音频滚动重算、MT 竞争或长时内存。
 
-### Python 的实际缺口与后续边界
+### 初次 Python 兼容性调查（后继适配见第四阶段）
 
 当前 `mlx-qwen3-asr 0.4.4` 的 `draft_model` 走完整小 Qwen ASR 提议、自带音频编码和自回归解码，不是专用 DFlash／DSpark head。隔离 Python 3.11.16／MLX 0.32.3 的实际 DFlash 加载尝试报 `ValueError: Received 60 parameters not in model`。两种专用 draft 配置经过当前解析器都会落到默认 28 层完整 ASR，而非其真实 5 层结构；不能把这种默认配置解析视为兼容。
 
@@ -87,9 +87,50 @@ DSpark 候选 `mattymchen/Qwen3-ASR-1.7B-speculator.dspark` 固定 revision `89a
 
 核对替代实现：`mlx-qwen3-asr` main `41878a11` 仍为完整 draft ASR；`mlx-audio` `b5fcbe96` 的 Qwen ASR 未发现专用 draft 接入；`mlx-dspark` `b4a40fb2` 提供文本／视觉目标的隐藏层提取与回退包装，未接 Qwen ASR 音频 prefill；`vllm-metal` `baf8a0c8` 的 STT runner 明确声明不运行 speculative decoding，其普通 Qwen3 DSpark loader 还要求完整目标词表，不能直接套用这个 32,000 词表候选。这些是固定源码下的兼容性结论，不是对未来支持或所有 MLX 实现的否定，也不是 Python 性能分数。
 
-因此 Python 两项性能测试尚未完成，缺口是实现合同，不是本机缺 GPU。继续需要先确认实验适配范围：保持原主模型和音频处理，增加指定隐藏层提取、专用 draft 加载、block verify 与拒绝后的 KV 回退；先验证 DFlash，再复用目标适配层评估 DSpark 的词表映射及附加 head。应先通过无 draft 输出、被拒绝路径、EOS／循环／token 上限和重复调用的验证，再计时。不能把小模型自回归投机当作 DFlash，也不能从 Python 调 C++ 子进程后称作 Python／MLX 实现。
+初次调查时 Python 两项性能测试尚未完成，缺口是实现合同，不是本机缺 GPU。后继用户已确认先 DFlash、再 DSpark 的实验适配，见第四阶段；当时提出的范围是：保持原主模型和音频处理，增加指定隐藏层提取、专用 draft 加载、block verify 与拒绝后的 KV 回退；先验证 DFlash，再复用目标适配层评估 DSpark 的词表映射及附加 head。应先通过无 draft 输出、被拒绝路径、EOS／循环／token 上限和重复调用的验证，再计时。不能把小模型自回归投机当作 DFlash，也不能从 Python 调 C++ 子进程后称作 Python／MLX 实现。
 
 私有计划、命令、完整输出、逐段 `review.md`、兼容性探针和摘要位于 `local-artifacts/evaluation/speculative-asr-20261115/`；下载与固定源码证据位于 `local-artifacts/research/speculative-asr-20261115/`。没有修改生产依赖、解码器、pipeline、模型默认或安装包，没有云端调用和素材上传。
+
+## 第四阶段：Python 专用 head 适配（2026-11-15）
+
+用户确认在隔离实验目录先适配 DFlash、通过后接 DSpark，并进一步确认保留 Python 路线，不因 native 小样本结果切换语言。实现位于 `experiments/online/qwen_speculative.py`，入口 `run_qwen_speculative.py`；没有修改生产 worker、安装包或已安装 ASR 包。复用原模型的音频处理、层、MRoPE 和 KVCache，仅封装进入指定层前的 taps，并加载固定的专用 head。
+
+DFlash 复用 native 的 context-fusion／causal-block 组织；DSpark 参照 Speculators `05f9ba2324fef505cef8700669f2bdc20f8ae219` 的 reduced-vocabulary 映射、anchor sampling、vanilla Markov 与 confidence head。两者均由目标模型逐块验证，拒绝尾部从所有目标 KV 层回退，draft 只追加已提交前缀的隐藏状态；EOS、循环与长度预算单独停止，每请求新建缓存。confidence 原始 logits 实际计算、记录并检查有限性，本轮不使用阈值或自适应缩块。
+
+DSpark 使用第三阶段固定 revision 的 754,200,578 bytes BF16 权重，SHA-256 `1b68cb103639861bb78aa99baa067bc8553197c0ba4281f836af83c80bbe378c`，下载与摘要已核验。DFlash 仍用同一固定包，未再量化。入口严格限定当前五个校正裁片及输入／音频摘要，固定 ASR 包 0.4.4，原接口与新封装无 draft 分别保留为控制，不拿新 ASR 输出替代校正原文。
+
+适配门禁覆盖：原层 forward 等价、拒绝回退后与干净前缀一致、首个／部分／全部提议接受、EOS 在初次预测或块内出现、最后一个 token 的预算、循环与预算同时触发、词表映射加载／不一致拒绝、DSpark Markov／confidence 数值输出，以及非有限 draft 拒绝。五段真实裁片的新封装无 draft 也与原 Session 逐字一致。首次 DFlash 加载因额外 `t2d` 元数据失败，补齐校验后使用新目录重跑，旧失败保留。
+
+首次计时中，将 DSpark head 随 target 一并转换为 FP16 后出现 NaN 和零接受率。定位发现权重转换本身均有限，目标 taps 也有限，但 draft 输入 FC 的 FP16 输出溢出到 Inf，后续 context KV／block 成为 NaN；这组耗时作废，不当成 DSpark 性能分数。最终保留 checkpoint 的 BF16 draft，进入 head 的 target 隐藏状态／embedding 显式转换为 BF16；target 仍按各自 FP16／BF16 条件运行。对 logits／confidence 增加有限性检查，失败明确中止，避免靠逐个目标 token 兜底后冒称成功投机解码。
+
+### 最终 v2：同裁片、同条件的 Python 结果
+
+执行私有 `run_benchmark_v2.py`，调用公开实验入口；M4／24 GiB、macOS 27.0.1，Python 3.11.16、ASR 包 0.4.4、NumPy 2.4.6。当前 runtime 条件为 MLX 0.32.4／target FP16，控制为 MLX 0.32.3／target BF16；两边 draft 均保持 BF16。每环境分别运行原 Session、新封装无 draft、DFlash、DSpark，各三轮，第二轮倒序，共 120 次；固定五个输入、日语、无 context、512 token、512,000,000 bytes allocator cache，每请求清 cache，无云端或 MT。
+
+| target 条件／路径 | 后两轮五段总计算时间均值 | 最大单请求 MLX peak active | 与同条件无 draft 的文字差异 |
+| --- | --- | --- | --- |
+| 0.32.4 FP16，原 Session | 4.745 s | 2.829 GB | 0 / 5 |
+| 0.32.4 FP16，新封装无 draft | 4.619 s | 2.829 GB | — |
+| 0.32.4 FP16，DFlash BF16 | 2.870 s | 3.555 GB | 0 / 5 |
+| 0.32.4 FP16，DSpark BF16 | 5.607 s | 3.583 GB | 0 / 5 |
+| 0.32.3 BF16，原 Session | 4.724 s | 2.817 GB | 0 / 5 |
+| 0.32.3 BF16，新封装无 draft | 4.575 s | 2.817 GB | — |
+| 0.32.3 BF16，DFlash BF16 | 3.049 s | 3.542 GB | 0 / 5 |
+| 0.32.3 BF16，DSpark BF16 | 5.685 s | 3.570 GB | 1 / 5 |
+
+120 次均 EOS，未截断，draft logits／confidence 有限，目标与 draft 提交前缀长度一致；各臂内部三轮文本稳定。新封装无 draft 在两环境均逐字等于原 Session。DFlash 相对新封装无 draft 的总计算耗时减少约 37.9%／33.4%（约 1.61×／1.50×），额外峰值约 0.725 GB；没有观察到本样本文字偏离。两个无 draft 入口几个百分点的差异也说明小样本计时存在实现／系统波动，不能由此宣布另一种语言更快。
+
+DSpark 在当前 checkpoint、固定整块和参考适配下反而多花约 21.4%／24.3% 时间。提交接受的提议／送验提议比例约 9.2%，DFlash 约 40%–42%；这些是该实验的算法计数，不是识别准确率。BF16 target 的 radio-11-020 出现词形变化，未获人工复核，不标为改善；FP16 target 的五段文字一致。没有运行 confidence 自适应截断、宽度遍历或 fused Markov kernel，因此不能据此判断所有 DSpark 实现和主模型搭配的上限。
+
+数据来自新冻结的 `benchmark-v2/`，未筛掉其中的慢样本。第一次计时及首轮／失败尝试全部保留，不参与本表。v1 的 control-plain 首轮与一次约两秒合同回归重叠，也只作为历史；最终 v2 计时期间未并行运行测试。原始输入、权重、适配器／脚本摘要、命令、环境、逐次结果和 `review.md` 保存于忽略的 `local-artifacts/evaluation/python-speculative-asr-20261115/`。FP16 draft 溢出的真实拒绝另存 `expected-fp16-rejection/`，返回 FloatingPointError 而非成功结果。
+
+新增四项测试（含多组接受／拒绝／停止边界）与现有实验回归合计 177 项通过，两套 cargo fmt 和 diff 检查通过。三轮同裁片的 allocator active 变化有记录，但这不是长时内存或并行 ASR＋MT 验收。本轮只支持继续评估 Python DFlash，生产迁移、实时音频前缀、取消和端到端上屏仍需各自验证。
+
+### 布局含义与后置工程
+
+`reference`／`voxt_swift` 是 native 音频输入兼容路径，不是两份主模型或 UI 布局。固定源码的 `qwen3_audio.cpp` 中 reference 去掉最后一个 centered STFT 帧，按 checkpoint processor 的整块／卷积输出计算音频 token；Swift 路径保留最后一帧，token 长度公式使用 float32 true division，并按旧公式保留 padded convolution 的行。它可能预留更多 audio placeholder；`BuildPrompt` 对超出 encoder 行数的位置保留 audio_pad embedding，不是自动补真实音频。因此输入内容与长度均可能不同，不能把它们当成单纯的内存排布开关或必然等价的优化。
+
+这五段中 reference 略快，不能据此认定所有录音都更快或更准。本轮 Python 保留自己的 reference 音频处理，以减少与原接口比较的输入差异，不改变生产默认。oMLX 前缀复用、缓存观测和总内存预算按用户补充继续作为后续研究／验证项；先测已内置 llama-server 的命中与 prefill，再决定是否需要新的缓存机制，此轮不迁移服务或改变资源调度。
 
 ## 已停用的历史入口
 
