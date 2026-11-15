@@ -38,6 +38,7 @@ _更新：2026-11-14。_
 - [在线分支整合前完整记录](archive/2026-11-12/online-roadmap-before-integration.md)、[two-pass 回放](two-pass-smoke-validation.md)、[Qwen MLX](qwen-mlx-smoke-validation.md)、[SenseVoice](sensevoice-smoke-validation.md)。
 - [2026-11-13 Qwen 电台候选筛选](qwen-radio-candidate-screen-2026-11-13.md)：四档同输入计算／资源结果及首批可用性反馈。
 - [0079 在线确认基线](decisions/0079-qwen-17b-8bit-online-baseline.md)、[2026-11-14 完整链路回归](qwen8-online-regression-2026-11-14.md)：开发默认收敛到 1.7B 8bit，13 分钟运行与结构检查通过，语义质量仍未验收，已安装 App 未覆盖。
+- [同模型离线诊断与材料导出](evaluation.md#同模型离线诊断与在线材料导出2026-11-14)：同输入补齐 41 个离线源块／译文，保留 repetition 与诊断 runner 失败；不是 native／投机解码收益或全片质量排名。下一项先收敛候选结构及验证合同。
 - [Voxt 本地 ASR 源码评审](voxt-local-asr-review-2026-11-14.md)：发行版本的同权重核验、预览／确认、可选 DFlash、解码／资源限制、恢复与分发；只读调查，未迁移 runtime。
 - [旧研究 0045](research/decisions/0045-independent-online-experiments.md)、[旧研究 0046](research/decisions/0046-controlled-online-asr-performance.md)：与主线同号不同决策，继续分目录保留。
 - [模型分类与 Qwen 多文件管理](decisions/0078-model-categories-and-qwen-packages.md)已进入开发主线；runtime 分发、草稿独立准备和新机完整在线闭环仍未完成。
