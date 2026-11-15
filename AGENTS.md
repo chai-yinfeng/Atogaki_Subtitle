@@ -21,6 +21,11 @@
 - Add a dated record in `docs/decisions/` for durable architectural choices with meaningful alternatives.
 - Raise possible new product scenarios, meaningful expansion opportunities, and consequential design choices with the user before committing to them.
 
+## Quality evaluation materials
+
+- Read `docs/evaluation.md` and the current `experiments/online/datasets/japanese-radio/confirmed-text-baseline.json` before a semantic quality run. Current inputs must be user-corrected text bound to existing audio crops; model output, acceptable-only ratings, or prepared audio alone do not qualify.
+- The current fixed-text MT test uses only the explicit approved set, fixed current text and confirmed history, with no following reference. Historical English/other-program roles, uncorrected ASR and earlier offline/runtime comparisons are archived evidence, not active defaults. Do not mix them into a new score or silently expand approval to an entire clip.
+
 ## Handoff
 
 At the end of a coherent work segment, report the design structure, implementation highlights, verification results, remaining risks, and the recommended next direction. Link to the changed files.

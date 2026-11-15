@@ -2,6 +2,8 @@
 
 _核对：2026-11-14。生产实现已整合 main；本目录不是另一套待合并的在线产品。_
 
+当前语义正确性测试只采用[用户校正文本名单](datasets/japanese-radio/confirmed-text-baseline.json)和[评测合同](../../docs/evaluation.md)：固定待译文字／确认前文，后文为空，不运行 ASR 或比较 runtime。下表的 ASR／离线／参考台账／历史回放仍可解释旧结果，但不参与这轮质量统计；`screening.json` 的候选角色已标为历史，不能因音频已准备就自动加入。
+
 当前合同见[在线计划](../../docs/online-asr-plan.md)、[0076](../../docs/decisions/0076-source-driven-retranslation-and-stage-admission.md)和[0079](../../docs/decisions/0079-qwen-17b-8bit-online-baseline.md)。桌面与回放共用 `src/infrastructure/online_worker/`，`run_two_pass.py` 是薄入口；`retranslation.py` 是仍被研究工具和测试使用的导入桥，不是第二份生产实现。`--pcm-stdin` 不默认保存音频／事件，文件回放输出需使用新的私有目录。
 
 | 用途 | 现有入口 | 证据及边界 |
@@ -38,7 +40,7 @@ python3 experiments/online/burned_reference.py \
 python3 -m unittest discover -s experiments/online -p test_burned_reference.py
 ```
 
-输入selection保存本机媒体路径、摘要和范围；输出目录必须不存在。帧时间取ffmpeg实际PTS，不按帧号推算；保存全部采样图、原始OCR、连续显示文字候选及开放的边界。文字框从Vision裁区坐标转换回原图后测量颜色；日中双语、左右双侧、右面板和灰色上下文分别处理。只合并连续同位的相同文字，不模糊合并否定差异，也不把真正分开的重复发言全局去重。双侧同时可见的文字不能证明谁正在发声。采样显示时间不代替声学时间，OCR置信度不代表语义正确，不直接导出gold／用于CER。正式参考冻结前仍需核验、对齐，详见[评测记录](../../docs/evaluation.md#烧录字幕候选与重复复核2026-11-08)。
+输入selection保存本机媒体路径、摘要和范围；输出目录必须不存在。帧时间取ffmpeg实际PTS，不按帧号推算；保存全部采样图、原始OCR、连续显示文字候选及开放的边界。文字框从Vision裁区坐标转换回原图后测量颜色；日中双语、左右双侧、右面板和灰色上下文分别处理。只合并连续同位的相同文字，不模糊合并否定差异，也不把真正分开的重复发言全局去重。双侧同时可见的文字不能证明谁正在发声。采样显示时间不代替声学时间，OCR置信度不代表语义正确，不直接导出gold／用于CER。正式参考冻结前仍需核验、对齐，详见[评测记录](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#烧录字幕候选与重复复核2026-11-08)。
 
 ## 参考台账与two-pass延迟诊断（2026-11-08）
 
@@ -57,7 +59,7 @@ node --experimental-strip-types experiments/online/replay_presentation.mjs \
 node --experimental-strip-types --test experiments/online/test_presentation_replay.mjs
 ```
 
-这些命令只整理已有输出，不调用模型。台账保持原文声学估计、OCR显示时间与人工核准各自独立，关联是N:M时间候选而非gold字幕；核心交集不插值。统计失败／未完成组不丢弃，EOF单列，距首段与距末段延迟分别报告；未核验语义及时间不进入有效延迟。显示回放执行生产状态／节流逻辑并模拟500ms轮询，包含跳过版本，排除真实IPC和绘制时间。详见[实测边界与记录](../../docs/evaluation.md#参考证据台账与当前链路基线2026-11-08)。本轮实际回放命令、模型摘要、固定词表和运行状态在私有批次目录，不将私人源路径或完整转录提交Git。
+这些命令只整理已有输出，不调用模型。台账保持原文声学估计、OCR显示时间与人工核准各自独立，关联是N:M时间候选而非gold字幕；核心交集不插值。统计失败／未完成组不丢弃，EOF单列，距首段与距末段延迟分别报告；未核验语义及时间不进入有效延迟。显示回放执行生产状态／节流逻辑并模拟500ms轮询，包含跳过版本，排除真实IPC和绘制时间。详见[实测边界与记录](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#参考证据台账与当前链路基线2026-11-08)。本轮实际回放命令、模型摘要、固定词表和运行状态在私有批次目录，不将私人源路径或完整转录提交Git。
 
 `compare_two_pass.py`用于完整固定批次对照，读取每例原始事件并复用统计器；核对有序音频摘要、冻结词表／场景、服务与模型命令、MT权重／二进制摘要及ASR／分组参数，允许临时端口不同。缺少任何一例summary会失败，不把正在运行的批次写成完整结果：
 
@@ -289,7 +291,7 @@ python3 experiments/online/source_clock_reference.py \
 - 沿用录制capture范围重建语音／静音，不是新VAD或ASR设备竞争实验；虚拟完成时刻不是真实延迟，参考消费者也未模拟生产MT缓存复用。
 - 草稿请求和呈现时刻仍可因负载不同而变化。真实MT会改变自身历史译文，参考输入稳定不证明真实语义稳定。
 
-正式矩阵与回归范围见[评测记录](../../docs/evaluation.md#原文时钟分组的调度不变性参考2026-11-09)。
+正式矩阵与回归范围见[评测记录](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#原文时钟分组的调度不变性参考2026-11-09)。
 
 ## Qwen context 有限恢复（实验）
 
@@ -301,7 +303,7 @@ python3 experiments/online/source_clock_reference.py \
 python3 -B -m unittest discover -s experiments/online -p test_qwen_context_recovery.py
 ```
 
-实际PCM恢复与固定MT分组对照见[评测记录](../../docs/evaluation.md#qwen提示复述的有限恢复与固定mt对照2026-11-09)。不因正常EOS或词形命中把结果认证为正确原文，不将离线固定组的耗时当作桌面E2E。
+实际PCM恢复与固定MT分组对照见[评测记录](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#qwen提示复述的有限恢复与固定mt对照2026-11-09)。不因正常EOS或词形命中把结果认证为正确原文，不将离线固定组的耗时当作桌面E2E。
 
 ## 可见草稿的语义时间线（实验）
 
@@ -313,7 +315,7 @@ python3 -B -m unittest discover -s experiments/online -p test_qwen_context_recov
 python3 -B -m unittest discover -s experiments/online -p test_draft_anchor_review.py
 ```
 
-首次正确不等于稳定、可安全锁定或整组都正确。严格局部事实与部分因果线索分别标注；同一锚点的相同关联文字共享判断，不认证跨屏隐含语境，依赖隐含指代的版本需保守评审。语义评审仍需人或明确身份的评审者。带符号的时间差允许为负，端点敏感范围不是置信区间；原生IPC、绘制和真实用户阅读均未测量。实际生产回放检查见[评测记录](../../docs/evaluation.md#可见草稿与定稿退化检查2026-11-09)。
+首次正确不等于稳定、可安全锁定或整组都正确。严格局部事实与部分因果线索分别标注；同一锚点的相同关联文字共享判断，不认证跨屏隐含语境，依赖隐含指代的版本需保守评审。语义评审仍需人或明确身份的评审者。带符号的时间差允许为负，端点敏感范围不是置信区间；原生IPC、绘制和真实用户阅读均未测量。实际生产回放检查见[评测记录](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#可见草稿与定稿退化检查2026-11-09)。
 
 ## 词表输入与规范化预览
 
@@ -334,17 +336,17 @@ cargo run --offline --example glossary_probe < private-input.json > NEW-private-
 }
 ```
 
-输出分别保留原文／规范后文本、Whisper提示预览及保护词集合。提示预览不表示在线ASR已经使用它；同一词表的替换规则与MT保护范围也不同。重复源文ID或变体名会失败。私有输入／输出不可提交；字面命中只作候选，实际替换必须以原库边界规则执行结果为准。五段实际输入审计与既有歧义规则风险见[评测记录](../../docs/evaluation.md#离线与在线词表输入审计2026-11-09)。
+输出分别保留原文／规范后文本、Whisper提示预览及保护词集合。提示预览不表示在线ASR已经使用它；同一词表的替换规则与MT保护范围也不同。重复源文ID或变体名会失败。私有输入／输出不可提交；字面命中只作候选，实际替换必须以原库边界规则执行结果为准。五段实际输入审计与既有歧义规则风险见[评测记录](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#离线与在线词表输入审计2026-11-09)。
 
-`summarize_two_pass.py`的v2输出另将每段最终ASR的推导排队区间分解为已接受MT草稿／定稿、带时间记录的拒绝MT、其他最终ASR计算和未解释时间。不同类别重叠标为ambiguous，不重复计时；原`returned_mt_overlap_s`仍只计已接受MT。缺少返回／时间的请求不补造，单独报告无时间拒绝数。全局合计是逐段等待之和，不是墙钟占用、GPU计算或拆线程后的预计收益；详见[排队审计](../../docs/evaluation.md#qwen排队区间与在途mt阻塞审计2026-11-09)。
+`summarize_two_pass.py`的v2输出另将每段最终ASR的推导排队区间分解为已接受MT草稿／定稿、带时间记录的拒绝MT、其他最终ASR计算和未解释时间。不同类别重叠标为ambiguous，不重复计时；原`returned_mt_overlap_s`仍只计已接受MT。缺少返回／时间的请求不补造，单独报告无时间拒绝数。全局合计是逐段等待之和，不是墙钟占用、GPU计算或拆线程后的预计收益；详见[排队审计](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#qwen排队区间与在途mt阻塞审计2026-11-09)。
 
 ## 单次MT取消能力探针
 
 `mt_deadline_probe.request(base_url, payload, budget_s=..., stop_after_content=...)`仅接受无凭据的回环HTTP和`stream=true`，直接用标准库HTTP连接，不继承代理。它在SSE读取时按总预算缩短socket timeout，也可在指定数量的非空content事件后主动关闭双向连接。返回原始wire记录与`completed`／`deadline`／`cancelled_after_content`／`unexpected_eof`状态，不提供可直接采用的译文；传输完成也不等于通过生产MT校验。心跳不重置预算，截止后收到的完成标记不算成功。
 
-该探针不是生产adapter、调度器或硬实时保证；连接、I/O与本机调度可能使观测晚于预算。必须对自己启动的服务另外观察slot忙→空闲及任务取消日志，随后执行正常短请求，不能以客户端返回推断服务端GPU已停止。当前`/slots`与任务日志核验属于已固定llama-server的能力，不假设云端或其他provider也支持。实际合成探针结果见[取消能力记录](../../docs/evaluation.md#本地mt单请求取消能力验证2026-11-09)；不将压力测试的强制长输出用于语义评分。
+该探针不是生产adapter、调度器或硬实时保证；连接、I/O与本机调度可能使观测晚于预算。必须对自己启动的服务另外观察slot忙→空闲及任务取消日志，随后执行正常短请求，不能以客户端返回推断服务端GPU已停止。当前`/slots`与任务日志核验属于已固定llama-server的能力，不假设云端或其他provider也支持。实际合成探针结果见[取消能力记录](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#本地mt单请求取消能力验证2026-11-09)；不将压力测试的强制长输出用于语义评分。
 
 
 `source_clock_reference.consume_requests(plan, execute, interval=.8)`允许用实测请求替代纯虚拟cost。回调只接收当时快照、尝试次数及已接受完整历史，返回`seconds`／`fails`／`text`；包含HTTP取消后slot释放的实测时间应由调用者计入seconds。虚拟时钟跳过空闲，原计划不随耗时改组；只有非过期成功草稿可发出，定稿最多两次，失败不入历史。`consume`与CLI仍为合成cost入口，不自动运行模型。完整计划是研究离线数据结构，不是有界实时队列，compile_plan仍使用既有日语基线启发式；消费者把文本视为不透明数据的测试不证明跨语言分组质量。此处严格过期规则与生产stale蓝字不同，结果不得冒称生产优化。
 
-2026-11-09固定源钟草稿预算回放完成后，用户要求先进行结构与系统设计分析，停止在结构未收敛时继续大量实验或参数搜索。后续先明确生产／研究差异、状态所有权、三类时间语义、资源／取消／历史提交契约，再为具体结构假设安排最小验证；不因现有工具方便就扩充参数矩阵。详见[本轮结果及顺序调整](../../docs/evaluation.md#固定源钟的草稿预算回放与结构分析优先2026-11-09)。
+2026-11-09固定源钟草稿预算回放完成后，用户要求先进行结构与系统设计分析，停止在结构未收敛时继续大量实验或参数搜索。后续先明确生产／研究差异、状态所有权、三类时间语义、资源／取消／历史提交契约，再为具体结构假设安排最小验证；不因现有工具方便就扩充参数矩阵。详见[本轮结果及顺序调整](../../docs/archive/2026-11-14/evaluation-before-confirmed-text.md#固定源钟的草稿预算回放与结构分析优先2026-11-09)。

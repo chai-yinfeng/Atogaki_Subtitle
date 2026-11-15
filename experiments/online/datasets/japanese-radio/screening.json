@@ -2,7 +2,7 @@
   "version": 2,
   "created_at": "2026-11-08",
   "dataset_id": "japanese-radio",
-  "selection_status": "paired_asr_candidates_prepared_review_pending",
+  "selection_status": "historical_candidates_not_current_quality_baseline",
   "core_total_s": 1440,
   "cases": [
     {
@@ -235,5 +235,7 @@
     "Reference context includes up to 30 seconds before and after. Score core only; online input must stay causal.",
     "Split by episode, preserve old exposure; evaluation candidates are visually screened, not blind.",
     "All offsets refer to frozen local files; web versions and old raw recordings may differ."
-  ]
+  ],
+  "current_quality_baseline": "confirmed-text-baseline.json",
+  "scope_note": "Prepared audio and historical proposed roles do not imply user-corrected source; only the positive confirmed-text list is active."
 }

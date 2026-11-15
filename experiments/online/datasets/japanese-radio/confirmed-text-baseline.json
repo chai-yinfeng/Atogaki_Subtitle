@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "updated_at": "2026-11-14",
+  "scope": "current_confirmed_text_mt_baseline",
+  "source_kind": "user_corrected_semantic_text_with_existing_audio_crop",
+  "active_segment_ids": [
+    "radio-01-012",
+    "radio-11-008",
+    "radio-11-012",
+    "radio-11-018",
+    "radio-11-020"
+  ],
+  "conditions": {
+    "asr_in_test": false,
+    "runtime_comparison": false,
+    "scene": "",
+    "protected_terms": [],
+    "lookahead_source": "",
+    "source_text": "exact slices of the user's corrected text; never a candidate ASR output",
+    "history": "only a preceding slice of the same corrected item, or empty; never fill gaps from model text",
+    "grouping": "fixed character ranges recorded before MT; no dynamic regrouping",
+    "comparison": "same G with no H versus reviewed H; skip the duplicate arm when H is empty"
+  },
+  "excluded_from_current_baseline": {
+    "radio-01-016": "user correction includes an unresolved question mark",
+    "radio-01-029": "user explicitly marks an uncertain reading",
+    "radio-01-013": "user notes an uncertain opening; keep pending for a fully explicit source",
+    "radio-01-028": "ratings only; no corrected source text supplied",
+    "radio-11-007": "ratings only; no corrected source text supplied",
+    "H02": "user could not resolve speech under laughter",
+    "uncorrected_whisper_or_other_model_outputs": "not user-corrected source",
+    "historical_english_and_tsukiyoshi_materials": "retired from the current quality baseline",
+    "full_radio_cases_and_recent_offline_model_outputs": "preparation or inference does not imply whole-case human approval"
+  },
+  "retained_reference_only": {
+    "H01": "user approved only the missing middle span; do not promote its complete clip or surrounding model text"
+  },
+  "required_private_provenance": [
+    "immutable user-export JSON and SHA-256",
+    "original crop manifest and SHA-256",
+    "per-clip audio SHA-256",
+    "exact corrected source hash and H/G character ranges",
+    "actual MT prompt, model, parameters and output"
+  ],
+  "scoring": "manual semantic review; no aggregate accuracy or CER from these selected examples",
+  "notes": [
+    "The corrected text is a semantic MT input, not a claim of verbatim acoustic gold.",
+    "H/G splits are text offsets inside an existing crop, not new word timestamps.",
+    "No raw private correction text, media path or audio is stored in this public profile.",
+    "screening.json and earlier role assignments are historical records, not active test membership."
+  ]
+}
