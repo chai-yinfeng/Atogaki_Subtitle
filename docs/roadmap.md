@@ -16,13 +16,17 @@ _最后更新：2026-11-15。开发主线与稳定发行分别记录。_
 
 macOS 已发布版本仍为 v0.1.3（tag `9a187f7`）。2026-11-12 按用户授权将在线集成 `e06a9c6` 与文档整理 `8fbac12` 收拢；实验分支 `11d2847` 已被集成分支完整包含，无需再复制一份实现。整合前在线执行、验证与本机试装原文见[归档](archive/2026-11-12/online-roadmap-before-integration.md)。代码合入不代表新 Release 或在线语义验收。
 
-## 当前优先：文本基线反馈与 native MLX 对照
+## 当前优先：native DFlash 结果与 Python 适配缺口
 
 2026-11-15 用户确认五段校正文本的 H/G 按标点切分保留意思，九次 Hy-MT2 中文结果总体可接受；指出「オイラン」未译成「花魁」。加入确认前文总体略有帮助、影响较小，很多结果一致。按整体反馈记录，不编造逐项评分或总体准确率，不再沿用助手此前更严格的待核对判断。R/F 仍为空，原输入和输出不改写，反馈绑定原结果摘要留在私有目录。
 
 用户确认后续顺序：先对照现有 Python／MLX 和 Voxt native MLX，不开投机解码，再评估 DFlash；DSpark／Metal 支持仍待单独核验。第二阶段只用[校正文本基线](../experiments/online/datasets/japanese-radio/confirmed-text-baseline.json)中的五个既有裁片，不恢复未校正模型结果、英语／湖吉或整段候选池，不新增录音功能。原文本测试条件继续单独保留，ASR 输出不反写人工原文。
 
-已固定 Voxt 2.0.3 的发行源码，按官方脚本在忽略目录完成 native runtime 构建，原 App／Python 环境保留。对照控制 MLX 0.32.3／0.32.4、FP16／BF16、reference／voxt_swift 布局；不将不同计算精度、预处理与停止规则的差异全部归因于应用语言。实验边界、结果与后继门禁见[当前评测合同](evaluation.md)。五臂各三轮共 75 次全部完成；native reference 与同版本 Python BF16 的五段文字完全相同，后两轮总计算时间均值约低 8.7%，但 MLX 峰值分配更高。voxt_swift 布局引入三段文字变化，关键误听仍存在；小样本不能推导准确率、稳定提速或字幕 SLO。没有开启 DFlash／DSpark。这不是生产 runtime 迁移，也没有运行 Voxt App 或云端请求。
+已固定 Voxt 2.0.3 的发行源码，按官方脚本在忽略目录完成 native runtime 构建，原 App／Python 环境保留。对照控制 MLX 0.32.3／0.32.4、FP16／BF16、reference／voxt_swift 布局；不将不同计算精度、预处理与停止规则的差异全部归因于应用语言。实验边界、结果与后继门禁见[当前评测合同](evaluation.md)。五臂各三轮共 75 次全部完成；native reference 与同版本 Python BF16 的五段文字完全相同，后两轮总计算时间均值约低 8.7%，但 MLX 峰值分配更高。voxt_swift 布局引入三段文字变化，关键误听仍存在；小样本不能推导准确率、稳定提速或字幕 SLO。该无投机阶段没有开启 DFlash／DSpark。这不是生产 runtime 迁移，也没有运行 Voxt App 或云端请求。
+
+后继已按用户要求完成 native DFlash：同一主模型／MLX／停止规则，每种布局重跑 baseline 与原始 BF16 draft，四臂各三轮共 60 次正常结束。voxt_swift 后两轮五段总计算时间均值 4.449 → 3.050 s，MLX peak active 3.295 → 4.021 GB，两段文字变化；reference 为 4.335 → 2.949 s、3.291 → 4.016 GB，五段文字相同。它证明该小样本有约 1.46–1.47× 计算加速，不证明在线字幕延迟或语义质量通过。
+
+Python 兼容性探针确认现有包不能直接加载专用 DFlash，实际报参数结构不匹配；DSpark 配置也不是当前 ASR 模型格式。固定源码的 vLLM Metal STT 路线不执行 speculative decoding，普通文本 DSpark 支持也不等于这套 ASR head 支持。Python 两项尚无性能结果；下一步需要先讨论并确认实验目标适配、hidden-state taps、block verify／KV 回退及 DSpark 词表映射，不能仅改模型路径或更新包来冒充完成。实验和边界见[第三阶段](evaluation.md#第三阶段native-dflash-与-python-兼容性)。生产链路与录音保留项不变。
 
 原 evaluation 页面及素材角色／离线／runtime 提案已[整体归档](archive/2026-11-14/evaluation-before-confirmed-text.md)，引用保留；screening 只解释历史候选，不再决定当前名单。
 
@@ -114,7 +118,7 @@ Graphify CLI 已完成在线集成分支纯本地 AST 扫描与查询；当前�
 
 ## 下一步与验收门禁
 
-1. **先解释 native MLX 差异，再测投机解码。** 已收五段 G/H、R 为空的文本反馈；同裁片执行无 draft 的 Python／native 对照。正确性、计算精度、音频布局、耗时与内存分开判断，再决定 DFlash 对照。生产 SenseVoice／Qwen、MT、分组和调度保持；DSpark、R 和整链优化不由旧提案自动启动。
+1. **先确认 Python 专用 draft 的实验适配。** native 无投机／DFlash 对照已完成；Python DFlash／DSpark 尚缺音频目标适配与校验／回退合同，先讨论范围并验证正确性，再跑同裁片计时。生产 SenseVoice／Qwen、MT、分组和调度保持；R、整链优化与生产迁移不由实验结果自动启动。
 2. **按反馈维护在线 UI。** 已完成主线收拢和控制语义／布局修正；具体阅读问题再修正，不把源码与 WebKit 验证当已完成原生使用验收，也不以新 UI 扩大当前质量测试范围。
 3. **补齐 runtime／模型准备。** Qwen 多文件管理已实现；本机导入脚本仍不能代替新机器安装闭环。Python runtime 分发、草稿独立准备或 native MLX 替换仍需按各自方案推进，不能由本次目录整理视为完成。
 4. **离线与学习维持使用闭环。** 根据具体反馈改善收藏、回原句、Anki 及日常交互；不自动建设内建复习系统。

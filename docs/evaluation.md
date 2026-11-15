@@ -62,6 +62,35 @@ GB 为十进制字节。MLX peak active 不是 RSS 或整个 App 总内存，不
 
 voxt_swift 相比 reference 有三段文字变化：radio-01-012 含关键误听词变化，radio-11-008 是标点／句界变化，radio-11-012 有句尾变化。关键误听并未因 native 自动解决，不能由五段输出差异得出质量更高的结论；逐段人工原文及五臂文本见私有 `review.md`。后继若测试 DFlash，先固定同一个 native 布局、主模型、token 预算和停止规则，只改变 draft，并再次检查输出、耗时和额外内存；生产迁移、实时前缀保留及长时稳态各需另行验证。
 
+## 第三阶段：native DFlash 与 Python 兼容性
+
+2026-11-15 用户要求先测 native DFlash，再看当前 Python／MLX 配合 DSpark 和 DFlash。native 部分只用原五个裁片、同一主模型与已构建二进制，MLX 0.32.3，日语、无 context、512 token 上限、greedy、相同停止规则、512,000,000 bytes allocator cache 和请求间清 cache；分别固定 voxt_swift／reference 布局，每种布局对照无 draft／有 DFlash，各三轮、第二轮倒序。此轮重新运行无 draft 对照，不拿前一天或另一精度的性能数字直接作分母。
+
+DFlash 使用 Voxt 固定的 `wilsonzheng0327/Qwen3-ASR-1.7B-dflash`，revision `23a0db8ae3f0724ccb7227c969a57651ddade2e0`。下载并核验 config 与 BF16 权重：权重 725,684,336 bytes，SHA-256 `00c32b078e3613073c0437e69519eb7811cbf97fcbd0066d05d62be7273670b8`；不额外量化 draft，不改变 App 模型目录。执行 `python3 local-artifacts/evaluation/speculative-asr-20261115/run_native.py`。四臂共 60 次均正常 stop，无截断；baseline 的 verify_rounds 全为 0，draft 全大于 0，各臂内部三轮文字一致。
+
+| native 配置 | 后两轮五段总计算时间均值 | 最大单请求 MLX peak active | 相对同布局 baseline 的文字差异 |
+| --- | --- | --- | --- |
+| voxt_swift，无 draft | 4.449 s | 3.295 GB | — |
+| voxt_swift，DFlash BF16 | 3.050 s | 4.021 GB | 2 / 5 段不同 |
+| reference，无 draft | 4.335 s | 3.291 GB | — |
+| reference，DFlash BF16 | 2.949 s | 4.016 GB | 0 / 5 段不同 |
+
+耗时分别减少 31.5%／32.0%，对应约 1.46×／1.47×；这与“速度增加 31%”不是同一口径。首轮四臂总时间依次为 4.623／3.492／4.365／3.018 s。voxt_swift 的 radio-01-012 有词句变化，radio-11-018 有用词／书写变化，原关键误听仍在；不将此当作纠错或准确率提升。reference 五段逐字相同，也只证明本样本没有观察到文字偏离。batch verify 与逐 token 的低精度数值路径可能不同，不能用算法层面的等价性替代输出检查。
+
+每轮 voxt_swift 生成 157 tokens／42 次 verify，reference 为 153／40；它们可描述每轮完成的 token 数与校验次数，不是 proposal 接受率。MLX peak active 不等于整机内存、RSS 或 ASR＋MT 总量。本轮只测完整裁片计算，未验证在线首次正确上屏、音频滚动重算、MT 竞争或长时内存。
+
+### Python 的实际缺口与后续边界
+
+当前 `mlx-qwen3-asr 0.4.4` 的 `draft_model` 走完整小 Qwen ASR 提议、自带音频编码和自回归解码，不是专用 DFlash／DSpark head。隔离 Python 3.11.16／MLX 0.32.3 的实际 DFlash 加载尝试报 `ValueError: Received 60 parameters not in model`。两种专用 draft 配置经过当前解析器都会落到默认 28 层完整 ASR，而非其真实 5 层结构；不能把这种默认配置解析视为兼容。
+
+DSpark 候选 `mattymchen/Qwen3-ASR-1.7B-speculator.dspark` 固定 revision `89a931a76b25764cb00fba0c5b4a6e8ac2604d93`，本次只获取配置／模型卡；未下载权重、未运行推理。模型卡给的是 vLLM 调用，包含缩小到 32,000 的 draft 词表映射、Markov 与 confidence head。其存在不证明现有 MLX ASR 可以加载。
+
+核对替代实现：`mlx-qwen3-asr` main `41878a11` 仍为完整 draft ASR；`mlx-audio` `b5fcbe96` 的 Qwen ASR 未发现专用 draft 接入；`mlx-dspark` `b4a40fb2` 提供文本／视觉目标的隐藏层提取与回退包装，未接 Qwen ASR 音频 prefill；`vllm-metal` `baf8a0c8` 的 STT runner 明确声明不运行 speculative decoding，其普通 Qwen3 DSpark loader 还要求完整目标词表，不能直接套用这个 32,000 词表候选。这些是固定源码下的兼容性结论，不是对未来支持或所有 MLX 实现的否定，也不是 Python 性能分数。
+
+因此 Python 两项性能测试尚未完成，缺口是实现合同，不是本机缺 GPU。继续需要先确认实验适配范围：保持原主模型和音频处理，增加指定隐藏层提取、专用 draft 加载、block verify 与拒绝后的 KV 回退；先验证 DFlash，再复用目标适配层评估 DSpark 的词表映射及附加 head。应先通过无 draft 输出、被拒绝路径、EOS／循环／token 上限和重复调用的验证，再计时。不能把小模型自回归投机当作 DFlash，也不能从 Python 调 C++ 子进程后称作 Python／MLX 实现。
+
+私有计划、命令、完整输出、逐段 `review.md`、兼容性探针和摘要位于 `local-artifacts/evaluation/speculative-asr-20261115/`；下载与固定源码证据位于 `local-artifacts/research/speculative-asr-20261115/`。没有修改生产依赖、解码器、pipeline、模型默认或安装包，没有云端调用和素材上传。
+
 ## 已停用的历史入口
 
 旧素材角色、CER／WER 方法、ASR 实验、未校正模型参照、离线诊断、runtime 候选和时钟／资源验证均见[历史归档](archive/2026-11-14/evaluation-before-confirmed-text.md)。它们只解释当时工作，不是当前待跑任务；恢复旧实验需要重新明确范围，不能通过旧状态自动混入当前结果。

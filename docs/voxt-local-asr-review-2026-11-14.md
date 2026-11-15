@@ -67,3 +67,26 @@ GPU 服务器上的 SGLang／vLLM 更接近模型服务与调度层，PyTorch �
 固定发行的 [Voxt README](https://github.com/sgl-project/sglang-omni/blob/4e03928295bba17c8196644f50d69e58facff6ea/Voxt/README.md#L33)确实同时宣传从 Swift 重建为 Go、长听写停止后等待缩短 92%，但紧接着把 32.3 s → 2.6 s 归因于录音期间处理已完成部分。Go 管理 App／会话，C++／MLX 承担模型推理；不能把后台处理收益当成 Go 对 GPU 推理的加速，也不能据此认定本项目 Rust／Tauri 需要重写。
 
 当前没有唯一的 Voxt 翻译权重可作为第三个本地 MT。比较 Hy-MT2／Index 与 Voxt 所选 API 模型时，固定校正 G/H、目标语言、R/F 和实际 prompt，分别记录模型、版本／量化及服务；这回答模型或提示效果。若要比较本项目自管 llama-server 和 Ollama 的 runtime，必须另固定同一模型权重、模板和解码条件，并确认双方支持该模型；换大模型或云端服务的质量差异不能计作 Ollama／Go 本身的收益。
+
+## 2026-11-15：语言选择、现有服务与可借鉴工程
+
+Rust 与 C++ 都可以实现高效的原生主机代码，无法仅按语言判断哪套推理更快。二者若调用同一 MLX 算子，GPU 工作仍由算子实现、形状、精度、带宽与同步决定。MLX 官方直接提供 C++ API，Voxt native 也直接链接其库；这是减少绑定／移植工作的合理工程解释，不是已查到的作者选型动机。调查没有找到能证明“C++ 比 Rust 快所以选 C++”或“Go 对模型计算更快”的说明。
+
+SGLang 确实已有 Rust server 和部分 Rust 扩展，但其 [non-GPU Rust migration RFC](https://github.com/sgl-project/sglang/issues/23206)把请求前半段迁出 Python，明确不在该计划重写 model kernels／attention backends，保留 Python scheduler／GPU worker。[kernel 目录说明](https://github.com/sgl-project/sglang/blob/main/python/sglang/kernels/README.md)仍包含 CUDA、Triton、CuTe DSL 等实现。因此不能将 Rust serving／缓存组件称为已经用 Rust 取代 C++ 的 GPU 内核路线。Voxt 的 [Go 架构记录](https://github.com/sgl-project/sglang-omni/blob/4e03928295bba17c8196644f50d69e58facff6ea/Voxt/docs/architecture.md#L5)还说明其复用了作者既有 Auralink／AudioSmith 的 MyGo 应用结构；这是代码复用的事实，不能扩写成作者明确给出的语言性能结论。
+
+本项目当前是 **App 自管的上游 llama-server**，没有部署或 fork Ollama。`scripts/hy-mt2-versions.zsh` 与 `src-tauri/third-party/llama-server-build-manifest.txt` 固定 llama.cpp `391fac16460f15233a7740550d858ac96df3419d`；`scripts/validate-hy-mt2.zsh` 从校验过的源包构建官方 llama-server，没有本地推理内核 patch。`src/infrastructure/local_llama.rs` 增加的是 Rust 进程／模型管理：loopback 动态端口、临时 API key、健康检查、异常服务重启、退出回收，以及 GGUF／上下文／GPU／slot 参数。`src-tauri/src/online_session.rs` 为在线固定一个 slot；Python `online_worker/mt.py` 负责 Hy-MT2／Index prompt 与结果约束。这些应用层逻辑不是自研模型执行引擎。
+
+当前 pinned [llama-server 文档](https://github.com/ggml-org/llama.cpp/blob/391fac16460f15233a7740550d858ac96df3419d/tools/server/README.md)已提供 prompt KV cache，`cache_prompt` 默认 true，另有 `tokens_cached`、`--cache-ram`、idle-slot cache 和 `--cache-reuse`。不能因为本地适配器没有显式缓存代码就断言每次完整重算，也不应从 oMLX 再实现一遍已有能力。目前在线适配器没有保存这些服务端性能字段，真实命中和容量影响尚未实测。
+
+可借鉴的 [oMLX 固定快照](https://github.com/jundot/omlx/tree/624cff0e23519ba46a4d5ed2802c2c236ad1a9ac)包括分块前缀共享／copy-on-write、RAM／SSD 分层 KV cache、模型驻留／TTL／按压力驱逐及连续批处理。对本项目的优先判断如下；均为后续候选，没有迁入实现：
+
+| 候选 | 先确认的本项目条件 |
+| --- | --- |
+| 缓存观测与前缀复用 | 先读取 llama-server 已有命中／prefill 数据，测量相同规则、场景及 H/G 请求实际共享多少 token 前缀；滚动删除旧 H 会缩短匹配，语义相近不等于可复用 KV |
+| 总内存预算与压力响应 | 联合观察 ASR 主模型、DFlash、MT、allocator cache、进程 footprint 与系统压力；512 MB freed-buffer cache 不能代替总预算，不能靠反复卸载活跃模型维持表面低占用 |
+| 连续批处理 | 现有在线是单 slot，且 ASR／MT 已有阶段交错及旧需求合并；先看用户实际等待，再判断并行是否有用，不能拿多请求吞吐替代一条字幕延迟 |
+| SSD KV 分层 | 先证明较长、重复前缀和 RAM 驱逐确实造成重算；短 MT 请求不必照搬面向长 coding 会话的磁盘缓存 |
+
+音频 ASR 另有输入约束：即使音频占位 token 相同，真实音频 embedding 也可能已经变化，不能仅以文本 token 的相同前缀复用其后 KV。native realtime 的保留文字前缀也不等于已经复用音频 encoder／KV。移植优化应分别保留输入依赖和拒绝／取消／缓存失效合同，不为共享服务再增加一个并存的模型副本。
+
+已授权的 native DFlash 实测与 Python 加载探针见[第三阶段](evaluation.md#第三阶段native-dflash-与-python-兼容性)。本次没有修改生产 server、模型执行代码或语言选择。
