@@ -1,10 +1,10 @@
-# 当前翻译正确性基线：校正原文与确认前文
+# 当前评测：校正文本基线与 native MLX 对照
 
-_更新：2026-11-14。此页及当前素材配置取代此前混合 ASR／离线／runtime 对比入口。_
+_更新：2026-11-15。文本基线已收用户反馈；下一阶段仅在同一正向名单的裁片上比较 runtime，不恢复历史候选池。_
 
 ## 本轮只验证什么
 
-固定用户已经校正的待译文字 G，以及明确的确认前文 H，先检查现有翻译是否忠实。参考后文 R 始终为空，场景／术语 F 也保持空；不运行 ASR，不比较 Whisper／Qwen、native／Python、DFlash／DSpark，不做整套离线／在线排名或录音功能。
+第一阶段固定用户已经校正的待译文字 G，以及明确的确认前文 H，检查现有翻译是否忠实。参考后文 R 始终为空，场景／术语 F 也保持空；该阶段不运行 ASR，不混入 runtime 对比。2026-11-15 用户确认这轮结果后，授权先比较现有 Python／MLX 与 Voxt native MLX，再看投机解码；两个阶段分别保存输入、结果及结论，不做整套离线／在线排名或录音功能。
 
 H/G 是同一份校正文本的两个用途，不是两组音频。由于相邻未校正句子不能补入，这轮仅在同一校正段内按明确字符位置切出前文和待译文字；两者拼接逐字等于用户原文。音频仍为原听审裁片，时间只描述整个裁片，不伪造 H/G 的词级声学边界。
 
@@ -30,13 +30,37 @@ H/G 是同一份校正文本的两个用途，不是两组音频。由于相邻�
 
 沿用生产 `online_worker.mt.HyMT2`，Hy-MT2 1.8B Q4_K_M、8192 context、单 slot／Metal，原模型／server 和适配器摘要冻结。实际只调用现有 MT 适配器，不经动态分组、预译／提交调度；因此这轮先验证文本条件下的翻译与上下文组织，尚未证明完整流式状态机或最终阅读正确率。没有合成暖机句、ASR、参考后文或云端调用。
 
-2026-11-14 完成五项／九次本地请求，九次均正常返回，未发生 MT 拒绝，R 与实际后文块均为空，自启服务已回收。正常返回不是九次语义全对：输出仍有广播惯用表达误解、术语／比喻处理不足和措辞变化，需要对照校正原文逐项复核，不以小样本自动算百分比。加入 H 是否帮助或伤害按相同 G 比较，不能把与旧实验不同的校正源文也归因于关闭 R。
+2026-11-14 完成五项／九次本地请求，九次均正常返回，未发生 MT 拒绝，R 与实际后文块均为空，自启服务已回收。2026-11-15 用户确认：按标点切分的 H/G 没有切断意思，中文结果总体可接受；指出的例外是「オイラン」保留片假名，未译成「花魁」。加入 H 总体略有帮助但影响不大，很多结果一致，小场景集合不足以证明长期收益。该反馈取代此前助手较严格的待核对判断，不擅自生成逐项评分或总体准确率，也不改变原 prompt 或补入词表重跑。
 
 输入／实际 prompt／结果和清理记录保存于忽略的 `local-artifacts/evaluation/confirmed-text-no-lookahead-20261114/`；`inputs.json` 绑定用户导出、裁片和 H/G 字符范围，`inputs.md`、`review.md` 可直接核对；旧实验不参与这份结果。执行命令为私有 runtime 的 `python3 local-artifacts/evaluation/confirmed-text-no-lookahead-20261114/run_mt.py`，模型和 API 鉴权仍由本机临时服务管理，不记录密钥。工作树父提交为 `987a1b0`，环境沿用同机 Python／MLX／llama-server；具体摘要与版本见私有 metadata。
 
-## 下一步的判断方式
+## 第二阶段：同裁片、无投机的 runtime 对照
 
-先逐项判断 G 的事实、否定、指代、遗漏和增添是否保留，再看同一 G 加 H 后的变化。有明确错误时只定位当前翻译输入／提示和所选 MT；本轮不以更换 ASR 或投机解码解释结果。R、动态分组、在线执行成本与新 runtime 的验证均后置，录音继续保留。
+只读取上述五个已裁切 WAV；不从旧候选池补音频，不把模型新输出升为标准答案。沿用同一 Qwen3-ASR 1.7B 8bit checkpoint，日语、无 context、greedy、512 token 上限，无 draft。完整裁片推理只回答实现栈的文字／耗时／内存差异，不能证明实时预览、ASR／MT 资源竞争、字幕上屏或长时内存稳定性。
+
+Voxt 2.0.3 固定提交 `4e03928295bba17c8196644f50d69e58facff6ea` 的 native 依赖 MLX 0.32.3，本机原 runtime 为 0.32.4。隔离构建上游原代码，保留原安装环境；另建相同 Python 3.11.16、ASR 包 0.4.4 的 MLX 0.32.3 对照。除当前 FP16 和同版本 FP16 外，加入同版本 BF16 对照，以及 native reference／voxt_swift 两种布局，区分版本、计算精度与音频布局。native 直接保留 checkpoint 的 BF16 浮点张量，不能将它与现有 FP16 的全部差异归给 C++。
+
+每臂三轮，第二轮倒序，首轮与后两轮分别保留；不额外加入暖机语料。两边设置 512,000,000 bytes allocator cache 上限并在请求间清 cache，但这不是总内存上限。Python 使用预载入 PCM，native CLI 的计时包含 WAV 解码、排除文件读取；循环／EOS 规则仍分别沿用各实现并记录，不能称为纯语言开销或逐 bit 等价测试。采样量小且执行臂串行，耗时只作同机诊断，不计算代表产品 SLO 的 p95。
+
+计划、命令、环境与完整输出留在忽略的 `local-artifacts/evaluation/native-mlx-baseline-20261115/`；源码、构建日志与隔离 runtime 位于 `local-artifacts/research/voxt-native-20261115/`。DFlash／DSpark、R、动态分组和录音尚不进入本阶段；生产识别与翻译默认值保持。
+
+### 2026-11-15 执行结果
+
+同机 M4／24 GiB、macOS 27.0.1，使用上游 `sglang_omni_mlx/native/scripts/build_runtime.sh <isolated-runtime> <isolated-build>` 原样构建成功，构建时 Python 3.12；推理对照的两套 Python 均为 3.11.16、mlx-qwen3-asr 0.4.4、NumPy 2.4.6。执行 `python3 local-artifacts/evaluation/native-mlx-baseline-20261115/run_all.py`，编排器顺序启动隔离子进程；全部五臂各 15 次完成，Python 均 EOS 且不截断，native 均 stop 且 `verify_rounds=0`。原始命令、二进制／脚本摘要、每轮结果和输入摘要保留，运行期间没有 MT、网络推理或 App 安装。
+
+| 配置 | 第二／三轮五段总计算时间均值 | 最大单请求 MLX peak active |
+| --- | --- | --- |
+| 当前 Python／MLX 0.32.4，FP16 | 5.059 s | 2.829 GB |
+| 隔离 Python／MLX 0.32.3，FP16 | 4.785 s | 2.809 GB |
+| 隔离 Python／MLX 0.32.3，BF16 | 4.847 s | 2.817 GB |
+| native／MLX 0.32.3，reference | 4.423 s | 3.291 GB |
+| native／MLX 0.32.3，voxt_swift | 4.571 s | 3.295 GB |
+
+GB 为十进制字节。MLX peak active 不是 RSS 或整个 App 总内存，不能相加；native 的 `/usr/bin/time -l` footprint 与 RSS、Python `ru_maxrss` 另存，不混成统一内存排名。首轮分别为 4.641／5.564／5.532／5.948／4.711 s；各臂先后执行，首轮包含不同的 kernel／系统缓存状态，不能从它推导冷启动排名。每臂仅两轮后续耗时且各段生成长度可能不同，表格不是显著性检验或稳定提速保证。
+
+两套 FP16 的五段输出完全一致。BF16 相比 FP16 有一段措辞／标点变化；native reference 的五段则与同版本 Python BF16 逐字相同。各臂内部三轮文字均稳定。在此条件下，reference native 的总计算时间比同版本 BF16 Python 约低 8.7%，但 MLX 峰值分配更高；尚不能证明端到端字幕收益或将差异全部归给去掉 Python。
+
+voxt_swift 相比 reference 有三段文字变化：radio-01-012 含关键误听词变化，radio-11-008 是标点／句界变化，radio-11-012 有句尾变化。关键误听并未因 native 自动解决，不能由五段输出差异得出质量更高的结论；逐段人工原文及五臂文本见私有 `review.md`。后继若测试 DFlash，先固定同一个 native 布局、主模型、token 预算和停止规则，只改变 draft，并再次检查输出、耗时和额外内存；生产迁移、实时前缀保留及长时稳态各需另行验证。
 
 ## 已停用的历史入口
 

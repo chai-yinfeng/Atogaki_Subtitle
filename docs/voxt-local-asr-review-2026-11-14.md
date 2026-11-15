@@ -4,7 +4,7 @@
 
 ## 调查版本与模型
 
-发行依据为 [Voxt 2.0.3](https://github.com/sgl-project/sglang-omni/releases/tag/voxt-v2.0.3)，发布于 2026-11-10，tag 解析到 `4e03928295bba17c8196644f50d69e58facff6ea`。同时冻结 main 快照 `13364eb45fd2ff09393fb0031576b2783a0edcf8` 用于参考，以下行为链接均钉在发行提交，不把 main 当成已发布实现。没有安装、构建或运行 Voxt；本轮没有 native 与 Python 的速度／质量对照。
+发行依据为 [Voxt 2.0.3](https://github.com/sgl-project/sglang-omni/releases/tag/voxt-v2.0.3)，发布于 2026-11-10，tag 解析到 `4e03928295bba17c8196644f50d69e58facff6ea`。同时冻结 main 快照 `13364eb45fd2ff09393fb0031576b2783a0edcf8` 用于参考，以下行为链接均钉在发行提交，不把 main 当成已发布实现。11 月 14 日只读调查时没有安装、构建或运行 Voxt；11 月 15 日后继隔离构建／对照见[当前评测](evaluation.md#第二阶段同裁片无投机的-runtime-对照)，没有安装或运行 Voxt App。
 
 发行[模型目录](https://github.com/sgl-project/sglang-omni/blob/4e03928295bba17c8196644f50d69e58facff6ea/Voxt/internal/models/catalog.go#L182)默认 `asr.accurate` 为 `mlx-community/Qwen3-ASR-1.7B-8bit`，revision `a8379a2e2f9e313c9292cdf1af4055ab56d50d55`。9 个文件的大小与 SHA-256 都和本项目目录及本机已安装包一致，权重文件为 2,463,307,541 bytes。没有发现一个专用于 Voxt、质量不同的 1.7B 主模型。相同权重不保证不同特征布局、MLX 版本或解码规则输出逐字一致。
 
@@ -54,6 +54,16 @@ MLX freed-buffer cache 明确设为 512 MB；请求限长与 cache 上限各自�
 
 上游[评测说明](https://github.com/sgl-project/sglang-omni/blob/4e03928295bba17c8196644f50d69e58facff6ea/Voxt/docs/eval.md#L5)写明主要语料为 Qwen3-TTS 生成的中英文短句及拼接长句，缺少真实噪声、口音和自然犹豫；没有提供我们所需的日语多人电台到中文语义验收。其[长录音实验](https://github.com/sgl-project/sglang-omni/blob/4e03928295bba17c8196644f50d69e58facff6ea/Voxt/docs/eval.md#L249)在同一 4 分 46 秒合成输入上，用录音中后台确认将停止后等待从 32.3 秒降至 2.6 秒；这两个值指 Stop 之后，并非整段从说话开始到翻译交付，且文档披露交换内存压力和预览卡顿。它证明有可执行的产品工程路径，不证明日语语义已经解决。
 
-对本项目的建议顺序：继续固定本次 1.7B 8bit 工作基线，先从已发现的两类语义错误定位边界；runtime 准备闭环时参考其模型清单、就绪检查、进程退出／重试和限期音频恢复；需要进一步节省算力时，再以同输入实验评估 native MLX 与可选 DFlash，而不是先重写整个 pipeline。cache、停止规则或 ASR 词表防回显也要分别测量，不将多项改动绑成一个无法归因的“优化”。这些是后续候选方案，本轮未迁移其代码或引入新模型。
+11 月 14 日调查建议继续固定 1.7B 8bit 工作基线，区分 ASR 与 MT 语义问题，并参考其模型清单、就绪检查、进程退出／重试和恢复；后继用户已完成校正文本 MT 复核，并于 11 月 15 日确认先做无投机 native 对照、再看 DFlash，实际进度以[当前评测](evaluation.md)为准。cache、停止规则或 ASR 词表防回显也要分别测量，不将多项改动绑成一个无法归因的“优化”。这些是后续候选方案，本轮未迁移其代码或引入新模型。
 
 源文件只读快照、逐文件摘要和 9 个模型文件的匹配结果保存在忽略的 `local-artifacts/research/voxt-20261114/provenance.json`，公共文档只保留固定版本链接和结论。
+
+## 2026-11-15：MLX、Metal 与 Go 的边界
+
+[MLX](https://ml-explore.github.io/mlx/build/html/index.html)提供数组运算、自动微分、惰性求值和 CPU／GPU 执行，包含原生计算库及 Python／C++ API。在这台 Mac 上，Metal 是它访问 Apple GPU 的底层计算接口；模型实现则在 MLX 上组织 encoder、prefill、decode 和 KV cache。现有 Python 不是逐个用解释器执行矩阵乘法，native 路径也仍依赖 MLX 的库与 Metal 资源。因此移除 Python 可能改变调用开销、调度和分发依赖，但不能预设模型计算会大幅加速。
+
+GPU 服务器上的 SGLang／vLLM 更接近模型服务与调度层，PyTorch 是计算框架，CUDA 是 NVIDIA 的底层 GPU 平台；这些名称不都属于同一层。llama.cpp 则包含自己的模型执行实现，也可选择 Metal 后端；同用 Metal 不意味着同用 MLX。官方 [MLX 路线](https://sgl-project.github.io/sglang-omni/developer_reference/mlx/index.html)也明确将原生 MLX 与 CUDA 路线分开，只在 HTTP API 处相接。
+
+固定发行的 [Voxt README](https://github.com/sgl-project/sglang-omni/blob/4e03928295bba17c8196644f50d69e58facff6ea/Voxt/README.md#L33)确实同时宣传从 Swift 重建为 Go、长听写停止后等待缩短 92%，但紧接着把 32.3 s → 2.6 s 归因于录音期间处理已完成部分。Go 管理 App／会话，C++／MLX 承担模型推理；不能把后台处理收益当成 Go 对 GPU 推理的加速，也不能据此认定本项目 Rust／Tauri 需要重写。
+
+当前没有唯一的 Voxt 翻译权重可作为第三个本地 MT。比较 Hy-MT2／Index 与 Voxt 所选 API 模型时，固定校正 G/H、目标语言、R/F 和实际 prompt，分别记录模型、版本／量化及服务；这回答模型或提示效果。若要比较本项目自管 llama-server 和 Ollama 的 runtime，必须另固定同一模型权重、模板和解码条件，并确认双方支持该模型；换大模型或云端服务的质量差异不能计作 Ollama／Go 本身的收益。
