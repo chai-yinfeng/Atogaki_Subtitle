@@ -568,6 +568,7 @@ const onlineView=document.querySelector<HTMLElement>("#online-view")!;
 const taskDrawer=document.querySelector<HTMLDialogElement>("#recent-jobs-drawer")!;
 document.getElementById("open-recent-jobs")!.onclick=()=>{taskDrawer.showModal();taskDrawer.querySelector<HTMLInputElement>('input[type="search"]')?.focus();};
 document.getElementById("close-recent-jobs")!.onclick=()=>taskDrawer.close();
+taskDrawer.addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();event.stopPropagation();taskDrawer.close();}});
 taskDrawer.addEventListener("close",()=>{if(currentArea==="workbench"&&!document.querySelector("dialog[open]"))document.getElementById("open-recent-jobs")!.focus();});
 taskDrawer.addEventListener("click",event=>{if(event.target===taskDrawer){const rect=taskDrawer.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)taskDrawer.close();}});
 const homeView = document.querySelector<HTMLDivElement>("#home-view");
