@@ -682,5 +682,35 @@
         "bytes": 2776833
       }
     ]
+  },
+  {
+    "id": "qwen-dflash-1.7b",
+    "kind": "qwen-dflash",
+    "category": "transcription",
+    "family": "Qwen3-ASR",
+    "name": "DFlash 1.7B 转录加速包",
+    "fileName": "online/qwen-dflash-1.7b",
+    "sizeLabel": "约 726 MB",
+    "recommendedFor": "配合在线日语 Qwen3-ASR 1.7B 8bit，提供可回改预览和确认识别；本地试用配置，不是独立识别模型。",
+    "sourceUrl": "https://huggingface.co/wilsonzheng0327/Qwen3-ASR-1.7B-dflash",
+    "optional": true,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "config.json",
+        "downloadPath": "wilsonzheng0327/Qwen3-ASR-1.7B-dflash/resolve/23a0db8ae3f0724ccb7227c969a57651ddade2e0/config.json",
+        "sha256": "890b34fd509f74fa8aeceaaea921d5d9a7110f177b75185aa54d4edb9f6af4e1",
+        "bytes": 1858
+      },
+      {
+        "name": "model.safetensors",
+        "downloadPath": "wilsonzheng0327/Qwen3-ASR-1.7B-dflash/resolve/23a0db8ae3f0724ccb7227c969a57651ddade2e0/model.safetensors",
+        "sha256": "00c32b078e3613073c0437e69519eb7811cbf97fcbd0066d05d62be7273670b8",
+        "bytes": 725684336
+      }
+    ]
   }
 ]

@@ -67,7 +67,10 @@
       "../src/infrastructure/online_worker/mt.py": "online_worker/mt.py",
       "../src/infrastructure/online_worker/retranslation.py": "online_worker/retranslation.py",
       "../src/infrastructure/online_worker/stage_admission.py": "online_worker/stage_admission.py",
-      "../src/infrastructure/online_worker/drain_budget.py": "online_worker/drain_budget.py"
+      "../src/infrastructure/online_worker/drain_budget.py": "online_worker/drain_budget.py",
+      "../src/infrastructure/online_worker/qwen_speculative.py": "online_worker/qwen_speculative.py",
+      "../src/infrastructure/online_worker/qwen_prefix_cache.py": "online_worker/qwen_prefix_cache.py",
+      "../src/infrastructure/online_worker/speculative_asr.py": "online_worker/speculative_asr.py"
     }
   }
 }

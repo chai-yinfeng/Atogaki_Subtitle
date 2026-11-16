@@ -130,6 +130,7 @@ def main():
     p.add_argument('--draft-model', type=Path, required=True)
     p.add_argument('--final', choices=['qwen', 'sensevoice'], default='qwen')
     p.add_argument('--final-model', type=Path, required=True)
+    p.add_argument('--speculative-model', type=Path, help='Japanese Qwen 1.7B DFlash local trial profile')
     p.add_argument('--vad-model', type=Path, required=True)
     p.add_argument('--translation-url', help='Optional loopback llama-server /v1 URL')
     p.add_argument('--drain-deadline', type=Path, help='Desktop-owned temporary stop deadline; no audio or text')
@@ -138,6 +139,9 @@ def main():
     a = p.parse_args()
     if a.draft == 'zipformer' and a.language == 'ja':
         p.error('no verified Japanese Zipformer checkpoint; use a local rolling draft')
+    single_asr = a.speculative_model is not None
+    if single_asr and (a.language != 'ja' or a.final != 'qwen'):
+        p.error('the DFlash trial profile requires Japanese Qwen recognition')
     if a.output:
         a.output.mkdir(parents=True, exist_ok=False)
     import numpy as np
@@ -208,43 +212,86 @@ def main():
                 t = time.monotonic()
                 if a.final == 'qwen':
                     import mlx.core as mx
-                    from mlx_qwen3_asr import Session
-                    model = Session(model=str(a.final_model.resolve()), dtype=mx.float16)
+                    if single_asr:
+                        from .speculative_asr import SpeculativeASR
+                        model = SpeculativeASR.load(a.final_model, a.speculative_model)
+                    else:
+                        from mlx_qwen3_asr import Session
+                        model = Session(model=str(a.final_model.resolve()), dtype=mx.float16)
                     mx.synchronize()
                 else:
                     model = sensevoice(a.final_model, a.language)
                 load_times['final_s'] = time.monotonic() - t
                 final_ready.set()
                 while not errors:
-                    try:
-                        job = finals.get(timeout=.02)
-                    except queue.Empty:
-                        continue
-                    if job is None:
-                        break
+                    if single_asr:
+                        if finals.empty() and drafts.empty():
+                            time.sleep(.01)
+                            continue
+                    else:
+                        try:
+                            job = finals.get(timeout=.02)
+                        except queue.Empty:
+                            continue
+                        if job is None:
+                            break
                     budget.remaining()
                     with admission.asr():
                         budget.remaining()
+                        if single_asr:
+                            from .speculative_asr import take_asr_job
+                            try:
+                                job = take_asr_job(finals, drafts)
+                            except queue.Empty:
+                                continue
+                            if job is None:
+                                break
+                            if not job['closed'] and job['segment_id'] in events.final:
+                                continue
                         before = time.monotonic()
+                        detail = {}
                         if a.final == 'qwen':
-                            language = {'ja':'Japanese','zh':'Chinese','en':'English','ko':'Korean'}[a.language]
-                            result = model.transcribe((job['samples'], 16000), language=language)
+                            if single_asr:
+                                mx.reset_peak_memory()
+                                result = model.transcribe(job)
+                                text = result['text']
+                                if result['finish_reason'] == 'length' or not text.strip():
+                                    if job['closed']:
+                                        raise RuntimeError('final DFlash ASR was empty or hit token limit')
+                                    events.emit('preview_rejected', segment_id=job['segment_id'],
+                                                reason=result['finish_reason'])
+                                    mx.clear_cache()
+                                    continue
+                                detail = dict(mode='qwen-dflash-cache', reused=result['reused'],
+                                              audio_cache=result['audio_cache'],
+                                              verify_rounds=result['verify_rounds'],
+                                              proposed_tokens=result['proposed_tokens'],
+                                              accepted_tokens=result['accepted_tokens'],
+                                              peak_active_bytes=mx.get_peak_memory())
+                            else:
+                                language = {'ja':'Japanese','zh':'Chinese','en':'English','ko':'Korean'}[a.language]
+                                result = model.transcribe((job['samples'], 16000), language=language)
+                                if result.truncated:
+                                    raise RuntimeError('final ASR hit token limit')
+                                text = result.text
                             mx.synchronize()
-                            if result.truncated:
-                                raise RuntimeError('final ASR hit token limit')
-                            text = result.text
                         else:
                             text = sense_text(model, job['samples'])
                         if not text.strip():
                             raise RuntimeError('empty final ASR output')
                         budget.remaining()
-                        final_event = events.emit('source_final', segment_id=job['segment_id'],
+                        final = not single_asr or job['closed']
+                        source_event = events.emit('source_final' if final else 'source_draft', segment_id=job['segment_id'],
                             start_s=job['start_s'], end_s=job['end_s'], text=text,
                             compute_s=time.monotonic()-before,
                             queue_wait_s=before-job['queued_at'],
                             after_audio_end_s=time.monotonic()-events.started-events.audio_offset_s-job['end_s'],
-                            completion_reason=job['reason'], model_final=True, human_verified=False)
-                        translation.update(final_event)
+                            completion_reason=job['reason'], model_final=final, human_verified=False,
+                            provisional=not final, **detail)
+                        if source_event is not None:
+                            translation.update(source_event)
+                        if single_asr:
+                            mx.clear_cache()
             except Exception as error:
                 errors.append(repr(error))
                 admission.abort()
@@ -286,13 +333,19 @@ def main():
         draft_thread = threading.Thread(target=draft_worker, name='local-draft', daemon=True)
         final_thread = threading.Thread(target=final_worker, name='segment-final', daemon=True)
         mt_thread = threading.Thread(target=mt_worker, name='local-translation', daemon=True)
-        draft_thread.start(); final_thread.start(); mt_thread.start()
+        if single_asr:
+            draft_ready.set()
+        else:
+            draft_thread.start()
+        final_thread.start(); mt_thread.start()
         draft_ready.wait(); final_ready.wait(); mt_ready.wait()
         if errors:
             session_started.set()
             raise RuntimeError('; '.join(errors))
         events.started = time.monotonic()
-        events.emit('session_ready', sample_rate=16000, channels=1, sample_format='s16le')
+        events.emit('session_ready', sample_rate=16000, channels=1, sample_format='s16le',
+                    asr_profile='qwen-dflash-cache' if single_asr else 'two-pass',
+                    source_refresh_s=1.0 if single_asr else None)
         session_started.set()
         starts, last_end, last_snapshot = {}, 0, -1.0
 
@@ -308,6 +361,7 @@ def main():
 
         def send_draft(job):
             nonlocal replaced
+            job.setdefault('queued_at', time.monotonic())
             try:
                 drafts.put_nowait(job)
             except queue.Full:
@@ -327,7 +381,8 @@ def main():
                 if len(job['samples']):
                     events.emit('segment_closed', segment_id=job['segment_id'],
                                 start_s=job['start_s'], end_s=job['end_s'], reason=reason)
-                    send_draft(job)
+                    if not single_asr:
+                        send_draft(job)
                     job['queued_at'] = time.monotonic()
                     if not enqueue_final(finals, job, errors, budget):
                         break
@@ -376,7 +431,9 @@ def main():
             enqueue_final(finals, None, errors, budget)
         else:
             admission.abort()
-        draft_thread.join(); final_thread.join(); mt_thread.join()
+        if not single_asr:
+            draft_thread.join()
+        final_thread.join(); mt_thread.join()
         summary = dict(status='failed' if errors else 'degraded' if events.counts.get('translation_failed') else 'completed', errors=errors,
             translation_failed_groups=events.counts.get('translation_failed', 0),
             translation_rejections=events.counts.get('translation_error', 0),
@@ -385,6 +442,8 @@ def main():
             input_mode="wav-replay" if a.audio else "pcm-pipe", audio_ring_seconds=30,
             audio_clock_offset_s=events.audio_offset_s,
             draft=a.draft, final=a.final, language=a.language,
+            asr_profile='qwen-dflash-cache' if single_asr else 'two-pass',
+            speculative_model=str(a.speculative_model.resolve()) if single_asr else None,
             draft_model=str(a.draft_model.resolve()), final_model=str(a.final_model.resolve()),
             vad_model_sha256=hashlib.sha256(a.vad_model.read_bytes()).hexdigest(),
             vad_config=str(config), pre_roll_s=.2, max_segment_s=12,

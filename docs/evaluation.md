@@ -252,6 +252,26 @@ Typeless 的[官方说明](https://www.typeless.com/data-controls)明确音频�
 
 [DeepSeek](https://api-docs.deepseek.com/api/create-chat-completion/)支持 SSE 流式响应及思考模式开关；首 token 可早于整句完成，响应模式本身不证明延迟更低。应选择并记录适合延迟目标的模型／思考配置，不把默认行为当固定性能。Gemini 另有[音频理解](https://ai.google.dev/gemini-api/docs/audio)和[Live 音频翻译](https://ai.google.dev/gemini-api/docs/live-api/live-translate)路线；后者可连续接收音频并输出翻译语音／转写，与纯文本 MT 的计算、上传和计费边界不同，需作为独立候选，不在本轮接入或计量。
 
+## 第八阶段：本地 DFlash 预译链路与 App 试用（2026-11-16）
+
+用户授权暂缓云端，固定本地配置并编译安装。按[0080](decisions/0080-local-dflash-app-trial.md)，原实验 decoder／音频缓存迁入共享 `online_worker`，实验只作导入桥；新 `speculative_asr` 负责一条 Qwen owning thread、VAD 回退重置和同完整输入复用。显式 `--speculative-model` 才选择单路模式，桌面仅在日语／1.7B 8bit／完整受管 DFlash 包时传参。没有从源码自动下载、会话中静默降级或启用文字强制前缀。模型目录固定两文件的 revision／大小／SHA，App 打包共享模块。
+
+本轮首次把加速预览送入真实 Retranslation，而非 EOF 后只翻译一次。只使用同五个已核准裁片，每段独立上下文、1× PCM，真实生产 VAD／pre-roll；旧 SenseVoice preview＋Qwen final 与单路 Qwen＋DFlash 各两轮，第二轮反序。两者均用 Hy-MT2 1.8B Q4_K_M、8192 context、单 slot、预译开启、空场景词表、既有确认原文 H／当前 G／已到达可选 R，维持 GPU 互斥。不同于固定校正 G/H、R 为空的 MT 忠实度对照，不混入该项的质量评分。
+
+20 次回放全部 completed，MT 拒绝／失败和 worker error 均为 0；两种模式的 6 个 VAD 定稿范围和文字在两轮都相同，最终译文逐项绑定确认 revision，无迟到原文覆盖。新模式共 84 次原文预览、80 次中文预览、12 条原文定稿和 12 条最终译文；旧路径为 88／84／12／12。四个实验 server 已退出。当前命令、源码快照、输入／主模型／draft 摘要、原始事件和审计保存在忽略的 `local-artifacts/evaluation/local-dflash-app-20261116/worker-attempt01/`。
+
+| 指标 | 原双模型 | 单路 DFlash＋音频缓存 |
+| --- | ---: | ---: |
+| 首次原文，中位数／最大 | 0.644／0.705 s | 0.768／1.015 s |
+| 首次非空中文，中位数／最大 | 0.760／0.913 s | 0.884／1.145 s |
+| 中文可见文本变化间隔，中位数／最大 | 1.070／1.912 s | 1.093／1.556 s |
+| 原文定稿距对应音频末尾，中位数／最大 | 1.065／1.582 s | 0.577／1.175 s |
+| 最终译文距请求音频末尾，中位数／最大 | 1.434／2.196 s | 0.924／2.272 s |
+
+首次指标有两轮十个裁片观测，final 有十二个 VAD 段／译组；不是相同条目的字词级时钟。首次非空可能很短，文字变化间隔也受内容重复影响；请求音频范围可能先于／晚于语义所需内容，不能当作持续正确中文的滞后。新模式并非所有指标更快，更不是质量分数改善；它避免 CPU 草稿到 Qwen 定稿的模型切换，在本批保持最终原文一致并缩短中位定稿尾部，是否改善阅读由本机试用确认。Qwen allocator peak 约 3.508 GB，旧路径未计相同 allocator 指标，不提供错误的 0 GB 对照或长时内存保证。
+
+189 项 Python（含同坐标复用、较短 VAD final 清缓存和 final／preview 取序）、4 项 Rust owner／参数／停止测试、372 项前端、TypeScript／生产构建和 Tauri offline check 通过。本机安装前还需核对完整 bundle 资源、签名及 App 就绪；实际安装记录写入[本机安装文档](local-editor-installation.md)，不以回放代替真实捕获／原生上屏或长期质量验收。
+
 ## 已停用的历史入口
 
 旧素材角色、CER／WER 方法、ASR 实验、未校正模型参照、离线诊断、runtime 候选和时钟／资源验证均见[历史归档](archive/2026-11-14/evaluation-before-confirmed-text.md)。它们只解释当时工作，不是当前待跑任务；恢复旧实验需要重新明确范围，不能通过旧状态自动混入当前结果。

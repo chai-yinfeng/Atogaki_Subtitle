@@ -6,11 +6,13 @@ _核对：2026-11-15。生产实现已整合 main；本目录不是另一套待�
 
 当前合同见[在线计划](../../docs/online-asr-plan.md)、[0076](../../docs/decisions/0076-source-driven-retranslation-and-stage-admission.md)和[0079](../../docs/decisions/0079-qwen-17b-8bit-online-baseline.md)。桌面与回放共用 `src/infrastructure/online_worker/`，`run_two_pass.py` 是薄入口；`retranslation.py` 是仍被研究工具和测试使用的导入桥，不是第二份生产实现。`--pcm-stdin` 不默认保存音频／事件，文件回放输出需使用新的私有目录。
 
+2026-11-16 按用户要求接入本地 App 试用：`qwen_speculative.py`／`qwen_prefix_cache.py` 已改为共享 worker 模块的导入桥，旧实验不再持有另一份解码源码；相同 patch／测试目标指向共享模块。正式 worker 显式传 `--speculative-model /path/to/managed/dflash` 才采用单路日语 DFlash＋音频缓存，并使用现有 Retranslation 预译；默认 CLI 保留原双模型，实验的强制文字前缀选项不进入桌面配置。试用范围见[0080](../../docs/decisions/0080-local-dflash-app-trial.md)。
+
 | 用途 | 现有入口 | 证据及边界 |
 | --- | --- | --- |
 | 单路实时路径验证 | `replay_single_qwen.py`、`live_asr_schedule.py` | 已到达 PCM 前缀、1× 时钟、有界最新需求、裁片 EOF 锁定、可选现有 MT；不是原生 App 验收 |
-| 音频前缀缓存 | `qwen_prefix_cache.py`、`test_qwen_prefix_cache.py` | 复用已装包完整音频块，target／DFlash KV 对齐；生成文字不保留，不导入生产 |
-| Python 专用 draft 实验 | `run_qwen_speculative.py`、`qwen_speculative.py`、`test_qwen_speculative.py` | 固定包／主模型／已核准裁片，原接口／新封装无 draft／DFlash／DSpark；不导入生产 worker |
+| 音频前缀缓存 | `qwen_prefix_cache.py`、`test_qwen_prefix_cache.py` | 共享实现的导入桥；复用完整音频块，target／DFlash KV 对齐；桌面试用不固定文字 |
+| Python 专用 draft 实验 | `run_qwen_speculative.py`、`qwen_speculative.py`、`test_qwen_speculative.py` | 固定包／主模型／已核准裁片的隔离比较；共享 decoder，桌面只启用指定 DFlash profile |
 | 当前 worker 因果回放 | `run_two_pass.py`、`summarize_two_pass.py`、`replay_presentation.mjs` | [13 分钟回归](../../docs/qwen8-online-regression-2026-11-14.md)；不含系统采集／原生上屏 |
 | Qwen 候选与听审 | `screen_qwen_candidates.py`、`screen_whisper_reference.py`、`audit_qwen_screen.py` | [同输入筛选与首批反馈](../../docs/qwen-radio-candidate-screen-2026-11-13.md)；已选 1.7B 8bit，不默认扩大矩阵 |
 | ASR／MT 定位 | `compare_japanese_mt.py`、`source_clock_reference.py`、`qwen_context_recovery.py`、`draft_anchor_review.py` | 固定输入、源时钟、有限恢复与语义时间线；研究结果不自动进入生产 |

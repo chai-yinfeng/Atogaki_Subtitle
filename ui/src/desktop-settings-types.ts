@@ -33,7 +33,7 @@ export type SaveDesktopSettingsRequest = {
 
 export type ModelCatalogItem = {
   id: string;
-  kind: "whisper" | "vad" | "hy-mt2" | "index-translate" | "qwen-asr" | "online-draft" | "online-vad";
+  kind: "whisper" | "vad" | "hy-mt2" | "index-translate" | "qwen-asr" | "online-draft" | "online-vad" | "qwen-dflash";
   name: string;
   fileName: string;
   sizeLabel: string;

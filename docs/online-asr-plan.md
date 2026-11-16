@@ -1,29 +1,29 @@
 # Online 当前实现、模型与待验证边界
 
-_核对：2026-11-14。当前开发主线，不等于 v0.1.3 稳定发行。_
+_核对：2026-11-16。当前开发主线，不等于 v0.1.3 稳定发行。_
 
 ## 当前状态
 
-当前生产合同与本轮质量测试分开：生产仍按下文处理后文；用户当前要求先固定已校正的待译文字与确认前文、参考后文为空，只验证 MT 忠实度，不比较新 runtime。唯一测试集合及排除规则见[当前评测合同](evaluation.md)。
+当前运行合同与固定文本质量测试分开：桌面仍按下文处理后文；固定校正 G/H、R 为空的 MT 忠实度结果单独保留，后继 runtime／DFlash 及预译接入另有实验合同。当前仅用五个已核准裁片回归，集合及排除规则见[当前评测](evaluation.md)。2026-11-16 用户授权固定本地 DFlash 配置并编译试装，云端后置，见[0080](decisions/0080-local-dflash-app-trial.md)。
 
 在线实验与桌面接入已于 2026-11-12 整合到 main，旧分支计数和早期“尚未接入 App”不再描述当前状态。已有系统音频采集、控制面板、可修订原译文字幕和本机试装；新机 runtime／草稿模型准备、语义质量及稳定发行仍未交付。
 
 | 层级 | 当前开发实现 | 仍未实现或未验证 |
 | --- | --- | --- |
 | 输入 | macOS 系统音频或同 worker 的因果 WAV 回放 | 实际整链最低系统版本需随选定 runtime 核验；采集 14.2+ 不代表 MLX 全链兼容 |
-| 草稿 | 日语 SenseVoice CPU 滚动重识别；已有中／英／韩 Zipformer 适配 | 独立下载／新机安装闭环；Qwen 配 DFlash／DSpark 替代 SenseVoice 尚未测试 |
-| 确认 ASR | Qwen3-ASR 1.7B MLX 8bit 为默认，其他 Qwen 可选 | Qwen 离线文件 provider、native runtime 迁移未实施 |
+| 草稿 | 日语 1.7B 8bit＋完整 DFlash 包时单路 Qwen 预览；其他配置沿用 SenseVoice／Zipformer | 新机 runtime 安装闭环；DSpark 不作为试用配置 |
+| 确认 ASR | Qwen3-ASR 1.7B MLX 8bit 默认；DFlash 路径沿用 VAD 定稿，其他 Qwen 可选 | Qwen 离线文件 provider、native runtime 迁移未实施 |
 | 在线 MT | Hy-MT2 1.8B Q4_K_M 默认；Index-Translate 2B Q4 可选，均由 App 管理本地 llama-server | 在线面板没有 DeepSeek／Gemini 云端入口；离线已有云端文本 provider 不等于在线已接入 |
-| 状态与调度 | F／H／G／R、源时钟分组、源 revision、需求合并、阶段交错、共同停止预算 | 原生采集到上屏的完整质量验收；内存／重算专项和新加速机制待评估 |
+| 状态与调度 | F／H／G／R、源时钟分组、revision、需求合并、阶段交错、共同停止预算；DFlash 音频块／target／draft KV 复用 | 原生采集到上屏的完整质量验收、连续正确中文两秒及长时资源 |
 | 保存 | 在线事件在会话内显示，不写入离线人工工作区，当前无录音入口 | 显式开启录音、结束后手动离线精修是 0065 已确认方向，尚未实现；自动校正触发和失败音频持久恢复仍待设计 |
 
 模型下载、固定 revision、逐文件大小和 SHA-256 以[模型目录](../src-tauri/src/model-catalog.json)为准；分类与下载见[0078](decisions/0078-model-categories-and-qwen-packages.md)，默认选择见[0079](decisions/0079-qwen-17b-8bit-online-baseline.md)。不在本文维护另一份可能漂移的型号／量化清单。
 
-[13 分钟回归](qwen8-online-regression-2026-11-14.md)证明当前 worker 在两段开发材料上完成运行与关联完整性检查，仍发现语义错误，不代表准确率或真实上屏验收。[Voxt 调查](voxt-local-asr-review-2026-11-14.md)提供实时预览、资源约束和交付参考，尚未迁移其实现。后续整套产品对比、内存观测及单路 Qwen 配投机解码的候选方向见[路线图](roadmap.md)及[评测合同](evaluation.md)。
+[13 分钟回归](qwen8-online-regression-2026-11-14.md)证明当时双模型 worker 在两段开发材料上完成运行与关联完整性检查，仍发现语义错误，不代表准确率或真实上屏验收。[Voxt 调查](voxt-local-asr-review-2026-11-14.md)提供实时预览、资源约束和交付参考；后继 Python DFlash 适配、音频缓存及本地试用接入见[路线图](roadmap.md)及[评测合同](evaluation.md)，没有迁移其 native runtime。
 
 ## 有效合同与历史入口
 
-以 [0076](decisions/0076-source-driven-retranslation-and-stage-admission.md)及下文合同为准，0079 只更新默认确认模型。0076 已取代 0072／0073／0075 中冲突的历史、后文和调度规则；0074 的原译文关联显示继续有效。
+以 [0076](decisions/0076-source-driven-retranslation-and-stage-admission.md)及下文合同为准，0079 更新默认确认模型，0080 更新指定本地试用配置的 ASR 执行器；MT 输入、分组与资源互斥不因此改变。0076 已取代 0072／0073／0075 中冲突的历史、后文和调度规则；0074 的原译文关联显示继续有效。
 
 2026-11-02 至 11-09 的旧分支事实、Whisper／Qwen 候选清单、runtime 试跑顺序和事件流提案已[归档](archive/2026-11-14/online-asr-proposals-before-baseline.md)。WS／SS／CPP 工具仍供历史复现及共用诊断；不是当前生产 provider，也不是每轮回归的前置矩阵。旧模型、锁文件、私人媒体和人工证据不因归档而删除。
 
@@ -39,7 +39,7 @@ _核对：2026-11-14。当前开发主线，不等于 v0.1.3 稳定发行。_
 
 ### 技术边界
 
-- 保留当前本地第一遍、Qwen整段第二遍及已选择的MT后端，优先重用现有接口；首版不接Qwen流式窗口、不训练同传模型、不改模型解码器。
+- 0076 首版保留本地第一遍、Qwen整段第二遍及已选MT；0080 指定试用配置由同一 Qwen＋DFlash 执行器产生可回改预览／VAD 定稿，其他配置延续双模型。没有训练同传模型或迁移 native runtime。
 - 支持增量解码不等于需要更强算力：状态复用可能减少重复工作，但能力、质量和资源占用取决于模型／实现。KV由runtime管理；跨轮检查点、回退等能力是否可用由backend决定，应用不手工拼接Qwen与MT的KV，更不能在不同模型间共享它们。
 - 本机mlx-qwen3-asr 0.4.4已有Session.init_streaming／feed_audio／finish_streaming及transcribe_async。这是将来的接口候选，不是本版前置；async只解决阻塞调用组织，不保证GPU推理加速。
 - 保留现有采集、模型生命周期、会话级设备许可、失败隔离和双框。只拆开已有阻塞调用的执行责任，不建设新的provider框架、Agent记忆系统或大型消息总线。

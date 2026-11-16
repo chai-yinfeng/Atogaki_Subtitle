@@ -167,6 +167,14 @@ fn model_ready(model: &Model, catalog_id: &str) -> bool {
         )
 }
 
+fn speculative_model(state: &DesktopOnlineSession) -> Option<PathBuf> {
+    crate::model_download::model_catalog()
+        .iter()
+        .find(|m| m.id == "qwen-dflash-1.7b")
+        .filter(|m| m.installed(&state.data_dir.join("models")))
+        .map(|m| state.data_dir.join("models").join(&m.file_name))
+}
+
 fn runtime(app: &AppHandle, state: &DesktopOnlineSession) -> Result<OnlineRuntime, String> {
     let directory = std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -210,7 +218,14 @@ pub async fn online_choices(
     ];
     Ok(Choices {
         languages: [
-            ("ja", "日语 · SenseVoice"),
+            (
+                "ja",
+                if speculative_model(&state).is_some() {
+                    "日语 · Qwen＋DFlash"
+                } else {
+                    "日语 · SenseVoice"
+                },
+            ),
             ("en", "英语 · Zipformer"),
             ("zh", "中文 · Zipformer"),
             ("ko", "韩语 · Zipformer"),
@@ -219,10 +234,10 @@ pub async fn online_choices(
         .map(|(id, name)| Choice {
             id: id.into(),
             name: name.into(),
-            ready: a
-                .drafts
-                .get(id)
-                .is_some_and(|m| model_ready(m, &format!("draft-{id}"))),
+            ready: (id == "ja" && speculative_model(&state).is_some())
+                || a.drafts
+                    .get(id)
+                    .is_some_and(|m| model_ready(m, &format!("draft-{id}"))),
         })
         .collect(),
         finals: a
@@ -315,7 +330,10 @@ pub async fn start_online_session(
         .iter()
         .find(|m| m.id == options.final_model)
         .ok_or("未安装所选定稿模型")?;
-    if !model_ready(draft, &format!("draft-{}", options.language))
+    let acceleration = (options.language == "ja" && final_model.id == "qwen-1.7b-8bit")
+        .then(|| speculative_model(&state))
+        .flatten();
+    if (acceleration.is_none() && !model_ready(draft, &format!("draft-{}", options.language)))
         || !model_ready(final_model, &final_model.id)
     {
         return Err("所选识别模型包不完整，请先在模型与存储中准备模型。".into());
@@ -359,6 +377,7 @@ pub async fn start_online_session(
         language: options.language,
         draft_model: draft.path.clone(),
         final_model: final_model.path.clone(),
+        speculative_model: acceleration,
         vad_model: a.vad,
         translation_url: None,
         translation_drafts: options.translation_drafts,

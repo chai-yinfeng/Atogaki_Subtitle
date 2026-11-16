@@ -30,6 +30,8 @@ pub struct OnlineModels {
     pub language: String,
     pub draft_model: PathBuf,
     pub final_model: PathBuf,
+    #[serde(default)]
+    pub speculative_model: Option<PathBuf>,
     pub vad_model: PathBuf,
     /// The current worker only accepts loopback text translation. No cloud fallback.
     pub translation_url: Option<String>,
@@ -143,7 +145,6 @@ impl OnlineSessionService {
             }
         }
         for path in [
-            &models.draft_model,
             &models.final_model,
             &runtime.worker_root.join("online_worker"),
         ] {
@@ -151,8 +152,21 @@ impl OnlineSessionService {
                 bail!("online model/package is not ready: {}", path.display());
             }
         }
+        let auxiliary = models
+            .speculative_model
+            .as_ref()
+            .unwrap_or(&models.draft_model);
+        if !auxiliary.is_dir() {
+            bail!(
+                "online auxiliary model is not ready: {}",
+                auxiliary.display()
+            );
+        }
         if !["ja", "en", "zh", "ko"].contains(&models.language.as_str()) {
             bail!("unsupported online source language");
+        }
+        if models.speculative_model.is_some() && models.language != "ja" {
+            bail!("the DFlash local trial profile currently supports Japanese only");
         }
         let permit = self.scheduler.try_acquire_device().context(
             "local device is busy; finish the existing offline work before starting online capture",
@@ -287,6 +301,9 @@ async fn run_session(
     );
     if !models.translation_drafts {
         command.arg("--no-translation-drafts");
+    }
+    if let Some(path) = models.speculative_model {
+        command.arg("--speculative-model").arg(path);
     }
     if let Some(key) = translation_key {
         command.env("ATOGAKI_ONLINE_LLAMA_KEY", key);
@@ -467,6 +484,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn speculative_profile_passes_its_model_without_requiring_a_cpu_draft() {
+        let root = std::env::temp_dir().join(format!("atogaki-speculative-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("online_worker")).unwrap();
+        std::fs::write(root.join("vad.onnx"), b"fixture").unwrap();
+        executable(
+            &root.join("python"),
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nprintf '%s\\n' '{{\"kind\":\"session_ready\"}}'\ncat >/dev/null\nprintf '%s\\n' '{{\"kind\":\"session_stopped\"}}'\n",
+                root.join("args").display()
+            ),
+        );
+        executable(
+            &root.join("capture"),
+            "#!/bin/sh\nprintf '%s\\n' '{\"kind\":\"capture_ready\"}' >&2\ncat >/dev/null\n",
+        );
+        let service = OnlineSessionService::new(StageScheduler::new(2));
+        service
+            .start(
+                OnlineRuntime {
+                    python: root.join("python"),
+                    worker_root: root.clone(),
+                    capture: root.join("capture"),
+                    translator: None,
+                },
+                OnlineModels {
+                    language: "ja".into(),
+                    draft_model: root.join("not-installed"),
+                    final_model: root.clone(),
+                    speculative_model: Some(root.clone()),
+                    vad_model: root.join("vad.onnx"),
+                    translation_url: None,
+                    translation_drafts: true,
+                    translation_context: Value::Null,
+                },
+                Arc::new(|_| {}),
+            )
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(5), async {
+            while service.status().phase != "running" {
+                assert_ne!(service.status().phase, "failed", "{:?}", service.status());
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(service.stop().await.unwrap().phase, "stopped");
+        let args = std::fs::read_to_string(root.join("args")).unwrap();
+        assert!(args.contains(&format!("--speculative-model\n{}\n", root.display())));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn session_waits_for_models_then_stops_capture_and_drains_without_recording() {
         let root = std::env::temp_dir().join(format!("atogaki-session-{}", Uuid::new_v4()));
         std::fs::create_dir_all(root.join("online_worker")).unwrap();
@@ -491,6 +561,7 @@ mod tests {
             language: "ja".into(),
             draft_model: root.clone(),
             final_model: root.clone(),
+            speculative_model: None,
             vad_model: root.join("vad.onnx"),
             translation_url: None,
             translation_drafts: true,
