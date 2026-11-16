@@ -15,8 +15,8 @@ test('generated reading and button colors remain readable for light dark and gra
   for(const color of [[255,255,255],[0,0,0],[240,220,10],[255,0,100],[0,220,255],[128,128,128]]){
     const vars=paletteVariables({dominant:color,accent:color,swatches:[color]});
     assert.ok(contrast(unhex(vars['--ink']),unhex(vars['--reading-fill']))>=7);
-    assert.ok(contrast(unhex(vars['--muted']),unhex(vars['--surface']))>=4.5);
-    assert.ok(contrast(unhex(vars['--accent']),[255,250,241])>=4.5);
+    assert.ok(contrast(unhex(vars['--muted-foreground']),unhex(vars['--surface']))>=4.5);
+    assert.ok(contrast(unhex(vars['--primary']),[255,250,241])>=4.5);
   }
 });
 test('three role selections independently control scene reading and accent colors',()=>{
@@ -24,18 +24,18 @@ test('three role selections independently control scene reading and accent color
   const original=paletteVariables(palette);
   const scene=paletteVariables(palette,.45,{ground:[180,50,40]});
   assert.notEqual(scene['--page-ground'],original['--page-ground']);
-  assert.equal(scene['--accent'],original['--accent']);
+  assert.equal(scene['--primary'],original['--primary']);
   assert.equal(scene['--surface'],original['--surface']);
   const reading=paletteVariables(palette,.45,{reading:[210,170,60]});
   assert.notEqual(reading['--surface'],original['--surface']);
-  assert.equal(reading['--accent'],original['--accent']);
+  assert.equal(reading['--primary'],original['--primary']);
   const accent=paletteVariables(palette,.45,{accent:[170,50,110],reading:palette.accent});
-  assert.notEqual(accent['--accent'],original['--accent']);
+  assert.notEqual(accent['--primary'],original['--primary']);
   assert.equal(accent['--surface'],original['--surface']);
   for(const ground of [[255,255,255],[0,0,0]])for(const reading of [[255,240,0],[0,80,255]])for(const accent of [[0,255,255],[255,0,0]]){
     const colors=paletteVariables(palette,.45,{ground,reading,accent});
     assert.ok(contrast(unhex(colors['--ink']),unhex(colors['--reading-fill']))>=7);
-    assert.ok(contrast(unhex(colors['--accent']),[255,250,241])>=4.5);
+    assert.ok(contrast(unhex(colors['--primary']),[255,250,241])>=4.5);
   }
 });
 test('extracted choices represent different colors rather than adjacent bins of one hue',()=>{

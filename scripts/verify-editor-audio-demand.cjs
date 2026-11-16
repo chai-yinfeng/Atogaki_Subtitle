@@ -7,7 +7,7 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright'),asse
   await require('./editor-ui-fixture.cjs').installEditorFixture(page,6,18000);
   await page.addInitScript(()=>{window.__qaDemandData=window.__qaAudio;window.__qaAudio=new URL('/qa-demand.wav',location.href).href;});
   await page.route('**/qa-demand.wav',async route=>{const data=await page.evaluate(()=>window.__qaDemandData);await route.fulfill({status:200,contentType:'audio/wav',body:Buffer.from(data.split(',')[1],'base64')});});
-  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
+  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   await page.locator('#karaoke-current-source').waitFor();await page.waitForTimeout(500);
   const audio=()=>page.locator('#karaoke-media-host audio');
   assert.equal(await audio().getAttribute('preload'),'none');assert.equal(requests.length,0,'opening editor must not fetch audio');
@@ -24,7 +24,7 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright'),asse
   await page.locator('[data-cue-id="cue-2"] [data-cue-time]').click();
   await page.waitForFunction(()=>{const a=document.querySelector('#karaoke-media-host audio');return !a.paused&&a.currentTime>=6});
   await page.locator('#karaoke-toggle-playback').click();const time=await audio().evaluate(a=>a.currentTime);assert.ok(time>=6&&time<9);
-  await page.locator('[data-editor-action="back"]').click();const before=requests.length;await page.locator('.job-open').first().click();
+  await page.locator('[data-editor-action="back"]').click();const before=requests.length;await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   await page.waitForTimeout(500);assert.equal(requests.length,before,'same-task resume must remain deferred');
   assert.match(await page.locator('#karaoke-current-source').inputValue(),/第 3 句/);
   await page.locator('#karaoke-toggle-playback').click();await page.waitForFunction(t=>{const a=document.querySelector('#karaoke-media-host audio');return a.readyState>=1&&!a.paused&&a.currentTime>=t},time);

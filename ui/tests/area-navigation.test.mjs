@@ -38,3 +38,7 @@ test('an empty editor selection presents the area without opening a task',async(
 test('dispose invalidates pending initialization and future shows',async()=>{
  const wait=deferred(),f=fixture({learning:()=>wait.promise});const flight=f.navigation.show('learning');await settle();f.navigation.dispose();wait.resolve();await flight;await f.navigation.show('workbench');assert.deepEqual(f.events,[['area','learning'],['dictionary']]);
 });
+test('online navigation uses the main page without initializing offline task services',async()=>{
+ const f=fixture();await f.navigation.show('online');
+ assert.deepEqual(f.events,[['area','online'],['scroll']]);
+});

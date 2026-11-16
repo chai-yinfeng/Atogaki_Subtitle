@@ -18,7 +18,7 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright');cons
    return structuredClone(preview);
   };
  });
- await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();await page.locator('[data-editor-action="export"]').click();assert.equal(await page.locator('#subtitle-style-dialog').count(),0);await page.locator('#edit-subtitle-styles').click();
+ await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();await page.locator('[data-editor-action="export"]').click();assert.equal(await page.locator('#subtitle-style-dialog').count(),0);await page.locator('#edit-subtitle-styles').click();
  const dialog=page.locator('#subtitle-style-dialog'),size=dialog.locator('[data-style-editor="source"] [data-style-field="font_size"]');
  await page.waitForFunction(()=>document.querySelector('#subtitle-style-message').textContent.includes('当前样式已保存'));assert.equal(await size.inputValue(),'30');
  assert.equal(await dialog.getAttribute('role'),'region');assert.equal(await page.locator('#workspace-view').evaluate(e=>e.inert),true);

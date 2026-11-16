@@ -7,7 +7,7 @@ const { webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE), assert = requ
    page.on('pageerror', error=>errors.push(String(error)));
    await require('./editor-ui-fixture.cjs').installEditorFixture(page);
    await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1438');
-   await page.locator('.job-open').first().click();
+   await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
    await page.locator('.editor-cue-row').first().click();
    const source = await page.locator('#karaoke-current-source').inputValue();
    await page.locator('#karaoke-waveform').evaluate(el=>el.dataset.identity='shared');

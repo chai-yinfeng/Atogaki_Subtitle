@@ -18,7 +18,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
     return window.__test.recordStructure(before,r.removeId?'删除字幕块':'插入字幕块',r.jobId);
    };
   });
-  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
+  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   const open=async()=>{await page.locator('.editor-menu > summary').click();await page.locator('#karaoke-insert-block').click();};
   const dialog=page.locator('#insert-subtitle-block-dialog'),start=dialog.locator('[name="start"]'),end=dialog.locator('[name="end"]'),source=dialog.locator('[name="source"]'),translation=dialog.locator('[name="translation"]'),submit=dialog.locator('[type="submit"]'),status=dialog.locator('[role="status"]');
   await open();assert.equal(await dialog.getAttribute('role'),'region');assert.equal(await dialog.evaluate(d=>d.matches(':modal')),false);
@@ -43,7 +43,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
   await page.getByRole('button',{name:'撤销打轴',exact:true}).click();await page.waitForFunction(()=>window.__test.cues.length===31);
   assert.equal(await page.evaluate(id=>window.__test.cues.find(cue=>cue.id===id)?.source_text,insertedId),'插入回归');
   await open();await dialog.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await page.locator('.editor-menu > summary').evaluate(e=>e===document.activeElement),true);
-  await open();await page.locator('[data-editor-action="back"]').evaluate(b=>b.click());await page.locator('.job-open').first().waitFor();assert.equal(await dialog.count(),0);
+  await open();await page.locator('[data-editor-action="back"]').evaluate(b=>b.click());await page.locator('.job-open').first().waitFor({state:'attached'});assert.equal(await dialog.count(),0);
   const isolated=await browser.newPage();isolated.on('pageerror',e=>errors.push(String(e)));await isolated.setContent('<main><button id="trigger">open</button></main>');
   await isolated.evaluate(async sources=>{
    const load=source=>URL.createObjectURL(new Blob([source],{type:'text/javascript'}));const tools=load(sources.tools),view=load(sources.view.replace('"./task-tools"',JSON.stringify(tools)));

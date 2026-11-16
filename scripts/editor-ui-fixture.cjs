@@ -52,3 +52,9 @@ await page.addInitScript(({audioUrl,cueCount,durationMs})=>{
   window.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
 }, {audioUrl:'data:audio/wav;base64,'+wav.toString('base64'),cueCount,durationMs});
 };
+
+// Explicitly open the task sheet when a regression needs to enter an existing job.
+module.exports.openTaskList = async function(page) {
+ const drawer=page.locator('#recent-jobs-drawer');
+ if(await drawer.count()&&!await drawer.evaluate(element=>element.open))await page.locator('#open-recent-jobs').click();
+};

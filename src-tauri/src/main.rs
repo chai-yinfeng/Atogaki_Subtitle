@@ -192,12 +192,7 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
             .caption_locked
             .clone()
     });
-    let reference_window = online
-        .then(|| {
-            app.get_webview_window("online-control")
-                .or_else(|| app.get_webview_window("main"))
-        })
-        .flatten();
+    let reference_window = online.then(|| app.get_webview_window("main")).flatten();
     let window = window.clone();
     window
         .clone()
@@ -2255,7 +2250,6 @@ fn main() {
             online_session::online_session_status,
             online_session::online_choices,
             online_session::online_snapshot,
-            online_session::open_online_control,
             online_session::open_online_captions,
             online_session::toggle_online_captions,
             online_session::hide_online_captions,

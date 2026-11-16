@@ -84,3 +84,9 @@ SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依�
 WebView 的阅读页以译文定稿范围和单调阅读时间推进，A 的退场不依赖 B 是否完成；后端识别、MT 分组、版本及原文历史不受显示起点影响。新打开的窗口恢复最新组，不重播传输缓存历史。见[0081](decisions/0081-online-caption-page-retirement.md)。
 
 模型下载视图按识别／翻译过滤同一个目录与管理会话；翻译路径、选择和离线／在线默认集中在翻译页。主窗口与在线控制复用主题语义 token，独立字幕窗保持自己的对比底；没有增加前端框架。见[0082](decisions/0082-compact-purpose-based-desktop-settings.md)。
+
+## 主窗口布局与在线控制（0083）
+
+2026-11-16 后继用户反馈取代上一版外层布局：app-shell.css 是唯一窗口几何入口，listening.css／editor.css 不再重写 .shell。旧的全局／主题覆盖层拆除，保留任务／学习／编辑器局部样式到 feature-styles.css；primitives.css 和 theme-tokens.css 定义 Neutral 控件及语义 token，settings.css 管理设置滚动区。
+
+online-view.ts 是主窗口与字幕入口共享的挂载组件，查询限定 root，释放订阅、轮询和窗口事件；导航隐藏它不结束 Rust 会话。online.ts 只负责独立字幕／组件验证入口的主题与挂载，不再提供产品控制窗口；原生 open_online_control 已移除，字幕定位参照主窗口。最近任务使用默认关闭的原生 dialog，保留同一任务列表节点及轮询。详见[0083](decisions/0083-neutral-shell-and-embedded-online.md)。

@@ -9,7 +9,7 @@ const fs=require('node:fs'), path=require('node:path');
  // Old settings preserve folds but reset geometry to the new layout.
  await p.addInitScript(()=>localStorage.setItem('atogaki.editorLayout.v2',JSON.stringify({version:2,video:true,waveform:true,topRatio:24,editorRatio:50,videoRatio:20})));
  await p.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');
- await p.locator('.job-open').first().click(); await p.locator('.editor-cue-row').first().waitFor();
+ await require('./editor-ui-fixture.cjs').openTaskList(p); await p.locator('.job-open').first().click(); await p.locator('.editor-cue-row').first().waitFor();
  const output=process.env.ATOGAKI_EDITOR_QA_OUTPUT || '/tmp/atogaki-editor-compact';fs.mkdirSync(output,{recursive:true});
  const ratios={videoRatio:44,topRatio:67,waveRatio:34};
  for(const [field,value] of Object.entries(ratios)) assert.equal(await p.locator(`[data-editor-resize="${field}"]`).getAttribute('aria-valuenow'),String(value));
@@ -20,7 +20,8 @@ const fs=require('node:fs'), path=require('node:path');
   });
   assert.ok(geometry.height<=geometry.viewport[1]);assert.ok(geometry.bodyWidth<=geometry.viewport[0]);
   assert.equal(geometry.video.y,geometry.wave.y);assert.ok(geometry.video.r<=geometry.wave.x);
-  assert.equal(geometry.video.b,geometry.edit.b);assert.equal(geometry.wave.x,geometry.edit.x);
+  // WebKit distributes fr rows in 1/64px units; alignment is a physical-pixel constraint.
+  assert.ok(Math.abs(geometry.video.b-geometry.edit.b)<1);assert.equal(geometry.wave.x,geometry.edit.x);
   assert.ok(geometry.source.b<geometry.translation.y);assert.ok(geometry.source.w>geometry.edit.w*.9);
   assert.ok(geometry.source.h>=36);assert.ok(geometry.edit.b<=geometry.list.y);
   assert.ok(geometry.list.h>=110);assert.ok(geometry.rows<=40);
@@ -50,13 +51,13 @@ const fs=require('node:fs'), path=require('node:path');
  assert.ok(Number(await p.locator('[data-editor-resize="videoRatio"]').getAttribute('aria-valuenow'))>44);
  await p.locator('[data-editor-reset]').click();
  await p.setViewportSize({width:960,height:640});console.log('960',await check());await p.screenshot({path:path.join(output,'compact-960.png')});
- // A theme switch does not recolor editor chrome or leak the editor palette to listening.
+ // The shared neutral surface remains stable when an optional accent preset changes.
  const palette=()=>p.locator('#karaoke-view').evaluate(e=>getComputedStyle(e).getPropertyValue('--surface'));
  const before=await palette(); await p.evaluate(()=>document.documentElement.dataset.theme='letter');assert.equal(await palette(),before);
  await p.addStyleTag({content:'#karaoke-view button,#karaoke-view summary,#karaoke-view input,#karaoke-view textarea {font-size:18px !important}'});
  assert.ok(await p.evaluate(()=>document.documentElement.scrollHeight<=innerHeight && document.documentElement.scrollWidth<=innerWidth));
  await p.screenshot({path:path.join(output,'compact-large-type.png')});
- await p.reload();await p.locator('.job-open').first().click();await p.locator('.editor-cue-row').first().waitFor();
+ await p.reload();await require('./editor-ui-fixture.cjs').openTaskList(p); await p.locator('.job-open').first().click();await p.locator('.editor-cue-row').first().waitFor();
  assert.equal(await wave.getAttribute('aria-valuenow'),'34');
  // Late playback reveals only viewport rows, then manual scrolling pauses scrolling alone.
  const seek=async time=>p.locator('#karaoke-media-host audio').evaluate(async(a,time)=>{
@@ -74,7 +75,8 @@ const fs=require('node:fs'), path=require('node:path');
  assert.ok(await p.locator('.editor-cue-row').count()<=40);
  await p.locator('[data-editor-action="back"]').click();
  assert.equal(await p.locator('.shell > header').isVisible(),true);
- assert.notEqual(await p.locator('.shell').evaluate(e=>getComputedStyle(e).getPropertyValue('--surface').trim()),'#fff');
+ assert.equal(await p.locator('.shell').evaluate(e=>getComputedStyle(e).getPropertyValue('--surface').trim()),'#fff');
+ assert.equal(await p.locator('body').evaluate(e=>getComputedStyle(e).backgroundImage),'none');
  assert.deepEqual(errors,[]);console.log('PASS: compact geometry, migration, menus, fold transport, resizing, large type, palette isolation, 10k follow and scroll');
  await b.close();
 })().catch(e=>{console.error(e);process.exit(1)});

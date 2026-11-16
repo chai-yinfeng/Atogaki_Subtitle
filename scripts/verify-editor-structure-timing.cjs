@@ -33,7 +33,7 @@ const assert=require('node:assert/strict');
   const url=process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430';
   const start=page.locator('#editor-cue-start'),notice=page.locator('#karaoke-timing-message');
   const open=async()=>{
-   await page.goto(url);await page.locator('.job-open').first().click();
+   await page.goto(url);await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
    await page.locator('#karaoke-media-host audio').evaluate(async a=>{if(a.readyState<1) await new Promise(r=>{a.addEventListener('loadedmetadata',r,{once:true});a.load();});await new Promise(r=>{a.addEventListener('seeked',r,{once:true});a.currentTime=1;});a.dispatchEvent(new Event('timeupdate'));});
   };
   const action=async name=>{

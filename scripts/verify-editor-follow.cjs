@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
  const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
  await require('./editor-ui-fixture.cjs').installEditorFixture(page);
  await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');
- await page.locator('.job-open').first().click();
+ await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
  const source=page.locator('#karaoke-current-source'), follow=page.locator('[data-editor-action="follow"]');
  const seek=async time=>page.locator('#karaoke-media-host audio').evaluate(async (audio,time)=>{
   if(audio.readyState<1) await new Promise(resolve=>{audio.addEventListener('loadedmetadata',resolve,{once:true});audio.load();});

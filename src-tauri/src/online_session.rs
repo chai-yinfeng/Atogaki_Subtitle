@@ -17,7 +17,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 pub struct DesktopOnlineSession {
     pub service: OnlineSessionService,
@@ -518,32 +518,6 @@ pub async fn stop_online_session(
     state: State<'_, DesktopOnlineSession>,
 ) -> Result<OnlineSessionStatus, String> {
     state.service.stop().await.map_err(|e| format!("{e:#}"))
-}
-#[tauri::command]
-pub fn open_online_control(app: AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("online-control") {
-        w.show().map_err(|e| e.to_string())?;
-        return w.set_focus().map_err(|e| e.to_string());
-    }
-    let w = WebviewWindowBuilder::new(
-        &app,
-        "online-control",
-        WebviewUrl::App("online.html".into()),
-    )
-    .title("Atogaki · 在线字幕控制面板")
-    .accept_first_mouse(true)
-    .inner_size(780., 680.)
-    .min_inner_size(650., 500.)
-    .build()
-    .map_err(|e| e.to_string())?;
-    let window = w.clone();
-    w.on_window_event(move |e| {
-        if let WindowEvent::CloseRequested { api, .. } = e {
-            api.prevent_close();
-            let _ = window.hide();
-        }
-    });
-    Ok(())
 }
 #[tauri::command]
 pub fn open_online_captions(

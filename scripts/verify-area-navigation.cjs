@@ -17,18 +17,18 @@ const assert=require('node:assert/strict');
    };
   });
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
-  await page.locator('.job-open').first().waitFor({state:'visible'});
+  await page.locator('.job-open').first().waitFor({state:'attached'});
   const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   for(const returnToLearning of [false,true]) {
    await page.evaluate(()=>window.__areaQA.hold=true);await page.locator('#show-learning').click();
    await page.waitForFunction(()=>window.__areaQA.release);
-   await page.locator('#show-workbench').click();await page.locator('.job-open').first().waitFor({state:'visible'});
+   await page.locator('#show-workbench').click();await page.locator('.job-open').first().waitFor({state:'attached'});
    if(returnToLearning){await page.locator('#show-learning').click();await page.locator('#learning-item-list').waitFor({state:'visible'});}
    await settle();await page.evaluate(()=>{window.__areaQA.scrolls=0;window.__areaQA.release();window.__areaQA.release=null;});await settle();
    assert.equal(await page.evaluate(()=>window.__areaQA.scrolls),0,'old learning visit must not scroll the new area or a newer learning visit');
-   if(returnToLearning){await page.locator('#show-workbench').click();await page.locator('.job-open').first().waitFor({state:'visible'});}
+   if(returnToLearning){await page.locator('#show-workbench').click();await page.locator('.job-open').first().waitFor({state:'attached'});}
   }
-  await page.locator('.job-open').first().click();await page.locator('#karaoke-current-source').waitFor({state:'visible'});
+  await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();await page.locator('#karaoke-current-source').waitFor({state:'visible'});
   assert.match(await page.locator('#karaoke-current-source').inputValue(),/第 1 句/);
   assert.deepEqual(errors,[]);
   console.log('PASS: late learning completion cannot scroll another area or a newer same-area visit; child editor navigation still opens normally');

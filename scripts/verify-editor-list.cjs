@@ -7,7 +7,7 @@ const { webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE || 'playwright'
     page.on('pageerror',error=>errors.push(String(error)));
     await require('./editor-ui-fixture.cjs').installEditorFixture(page,10000,20000);
     await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1430');
-    await page.locator('.job-open').first().click();
+    await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
     await page.locator('.editor-cue-row').first().waitFor();
     await require('./load-editor-test-media.cjs')(page);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio, #karaoke-media-host video')?.readyState>=1);
     const clockChanges=await page.evaluate(async()=>{
@@ -58,7 +58,7 @@ const { webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE || 'playwright'
     assert.equal(await page.locator('[data-cue-id="cue-9999"]').getAttribute('aria-selected'),'true');
     assert.ok(await page.locator('.editor-cue-row').count()<40);
     await page.locator('[data-editor-action="back"]').click();
-    await page.locator('.job-open').first().click();
+    await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
     await page.locator('.editor-cue-row').first().waitFor();
     assert.deepEqual(errors,[]);
     console.log('PASS: pixel scroll does not mutate rows; retained focus, local save, filtering, empty restore, End and remount',mutations);

@@ -21,7 +21,7 @@ const assert=require('node:assert/strict');
    };
   });
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
-  await page.locator('.job-open').first().click();
+  await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   await page.getByRole('button',{name:'翻译与词表',exact:true}).click();
   const selection=page.locator('#workspace-glossary'),preview=page.locator('#glossary-preview');
   await selection.selectOption('A');await page.locator('#preview-glossary').click();

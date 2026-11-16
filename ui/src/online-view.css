@@ -1,0 +1,16 @@
+/* Shared online component: no body, header or root-level theme/layout rules. */
+.online-panel { min-width:0; color:var(--foreground); }
+.online-panel .online-card { width:100%; min-width:0; }
+.online-panel header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:28px; }
+.online-panel header strong { font-size:24px; font-weight:600; letter-spacing:-.025em; }
+.online-panel .online-layout { display:grid; grid-template-columns:250px minmax(0,1fr); gap:32px; }
+.online-panel .session-sidebar { min-width:0; border-right:1px solid var(--border); padding-right:24px; }
+.online-panel .session-controls,.online-panel .session-options,.online-panel .configuration { display:grid; gap:16px; }
+.online-panel label { display:flex; flex-direction:column; gap:8px; font-size:13px; font-weight:500; }
+.online-panel .check { display:flex; flex-direction:row; align-items:center; gap:8px; font-size:12px; }
+.online-panel .recognition-mode { display:flex; gap:12px; margin:0; padding:0; border:0; }.online-panel .recognition-mode legend { font-size:13px; margin-bottom:8px; }.online-panel .recognition-mode label { display:flex; flex-direction:row; align-items:center; gap:6px; font-size:13px; }
+.online-panel .actions { display:flex; flex-wrap:wrap; gap:8px; }.online-panel .help { font-size:12px; line-height:1.5; color:var(--muted-foreground); margin:4px 0; }.online-panel .online-settings { margin:20px 0; }.online-panel .configuration { padding-top:16px; }.online-panel .overlay-lock { margin:16px 0; }
+.online-panel .caption-workspace { min-width:0; }.online-panel #online-status { font-size:12px; color:var(--muted-foreground); margin:0 0 20px; min-height:18px; }
+.online-panel .track { padding:20px 0; border-top:1px solid var(--border); }.online-panel .track-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }.online-panel .badge,.online-panel .track-state { font-size:12px; color:var(--muted-foreground); }.online-panel .track p { font-size:21px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; margin:14px 0 0; max-height:30vh; overflow:auto; }.online-panel .draft { color:var(--primary); }.online-panel .omitted { color:var(--muted-foreground); }
+@media(max-width:1000px) { .online-panel .online-layout { grid-template-columns:220px minmax(0,1fr); gap:24px; }.online-panel .session-sidebar { padding-right:20px; } }
+@media(max-width:620px) { .online-panel .online-layout { grid-template-columns:minmax(0,1fr); }.online-panel .session-sidebar { border:0; border-bottom:1px solid var(--border); padding:0 0 20px; }.online-panel header { margin-bottom:20px; }.online-panel header strong { font-size:20px; } }

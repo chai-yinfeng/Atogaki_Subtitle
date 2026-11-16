@@ -11,7 +11,7 @@ const context=await browser.newContext({viewport:{width:1180,height:760}});
 const page=await context.newPage();
 const errors=[];page.on('pageerror',e=>errors.push(String(e)));
 await require('./editor-ui-fixture.cjs').installEditorFixture(page);
-await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await page.locator('.job-open').first().click();
+await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
 await page.locator('#editor-cue-list .editor-cue-row').first().waitFor();
 assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.cmd==='get_job_detail').length),1);
 assert.equal(await page.locator('.editor-workspace-label').innerText(),'字幕编辑');
@@ -136,14 +136,14 @@ assert.ok(await page.locator('.editor-cue-row').count() <= 80);
 assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.cmd==='list_jobs').length),0);
 assert.equal(await page.evaluate(()=>window.__test.calls.filter(call=>call.cmd==='list_job_summaries').length),1);
 // Reload validates cross-session layout preferences and restores the same panel sizes.
-await page.reload();await page.locator('.job-open').first().click();
+await page.reload();await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
 await page.locator('#editor-cue-list .editor-cue-row').first().waitFor();
 assert.equal(await page.locator('[data-editor-resize="videoRatio"]').getAttribute('aria-valuenow'),'46');
 assert.equal(await page.locator('#subtitle-list textarea').count(),0);
 // The same region still mounts as a read-only progress page for active jobs.
 await page.evaluate(()=>{window.__test.job.status='transcribing';window.__test.job.segment_count=0;});
 await page.locator('[data-editor-action="back"]').click();
-await page.locator('.job-open').first().click();await page.locator('#workspace-view').waitFor();
+await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();await page.locator('#workspace-view').waitFor();
 assert.match(await page.locator('#workspace-title').innerText(),/任务进度/);
 assert.equal(await page.locator('#subtitle-list textarea').count(),0);
 await page.locator('#back-to-jobs').click();

@@ -30,7 +30,7 @@ const assert=require('node:assert/strict');
    const names=['subtitle-overlay-visibility','subtitle-overlay-playback-action','tauri://close-requested'];
    await page.waitForFunction(names=>names.every(name=>window.__runtimeQA.listeners.some(item=>item.event===name)),names);
    if(delayed)await page.waitForFunction(()=>window.__runtimeQA.release);
-   await page.locator('.job-open').first().click();await page.locator('#karaoke-current-source').waitFor({state:'visible'});
+   await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();await page.locator('#karaoke-current-source').waitFor({state:'visible'});
    // Page lifecycle dispatch exercises the actual application disposer with mocked IPC.
    const intervals=await page.evaluate(()=>{window.dispatchEvent(new Event('pagehide'));return window.__runtimeQA.intervals;});
    if(delayed)await page.evaluate(()=>{window.__runtimeQA.release();window.__runtimeQA.release=null;});

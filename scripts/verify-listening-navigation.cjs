@@ -22,8 +22,8 @@ const assert=require('node:assert/strict');
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
   const audio=page.locator('#listening-media-host audio');
   const listen=async()=>{await page.locator('#show-listening').click();await page.locator('[data-listen-job]').first().click();};
-  const home=async()=>{await page.locator('#show-workbench').click();await page.locator('.job-open').first().waitFor({state:'visible'});};
-  await page.locator('.job-open').first().waitFor({state:'visible'});
+  const home=async()=>{await page.locator('#show-workbench').click();await page.locator('.job-open').first().waitFor({state:'attached'});};
+  await page.locator('.job-open').first().waitFor({state:'attached'});
   for(const held of ['get_playback_position','list_learning_items']) {
    await page.evaluate(command=>{window.__listeningQA.hold=command;window.__listeningQA.resume=4500;},held);
    await listen();await page.waitForFunction(()=>window.__listeningQA.release);

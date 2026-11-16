@@ -75,9 +75,9 @@ export function paletteVariables(palette: ImagePalette, strength=.45, roles:Colo
   const ground=rgb([groundH,Math.min(groundS,.35),.17]);
   const alpha=Math.max(.15,Math.min(.85,strength));
   return {
-    '--page-ground':hex(ground),'--surface':hex(surface),'--surface-soft':hex(soft),'--ink':hex(ink),'--muted':hex(muted),
-    '--line':hex(reading(.67)),'--accent':hex(accent),'--accent-hover':hex(color(.23,Math.min(s,.52))),
-    '--accent-soft':hex(color(.81)),'--accent-soft-hover':hex(color(.74)),
+    '--background':hex(reading(.98)),'--foreground':hex(ink),'--card':hex(surface),'--secondary':hex(soft),'--muted':hex(soft),'--page-ground':hex(ground),'--surface':hex(surface),'--surface-soft':hex(soft),'--ink':hex(ink),'--muted-foreground':hex(muted),
+    '--line':hex(reading(.67)),'--primary':hex(accent),'--primary-hover':hex(color(.23,Math.min(s,.52))),
+    '--accent':hex(color(.81)),'--accent-hover':hex(color(.74)),
     '--page-paper':`rgba(${ground.join(',')},${alpha})`,'--chrome-ink':'#f0f3e9','--chrome-muted':'#dce8df',
     '--chrome-line':'#dbe8e080','--chrome-fill':`rgba(${ground.join(',')},.9)`,
     '--panel-tint':hex(surface)+'f5','--reading-wash':hex(surface)+'e8','--reading-fill':hex(reading(.97)),

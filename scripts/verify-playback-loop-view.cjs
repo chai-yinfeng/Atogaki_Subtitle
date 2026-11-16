@@ -6,7 +6,7 @@ const assert=require('node:assert/strict');
   const page=await browser.newPage({viewport:{width:1180,height:760}}),errors=[];
   page.on('pageerror',e=>errors.push(String(e)));
   await require('./editor-ui-fixture.cjs').installEditorFixture(page,30);
-  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
+  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   const audio=page.locator('#karaoke-media-host audio');await require('./load-editor-test-media.cjs')(page);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1);
   const seek=async seconds=>audio.evaluate(async(a,seconds)=>{a.pause();if(Math.abs(a.currentTime-seconds)<.001)return;await new Promise(resolve=>{a.addEventListener('seeked',resolve,{once:true});a.currentTime=seconds;});},seconds);
   const click=action=>page.locator('#karaoke-view .loop-tools [data-loop="'+action+'"]').click();
@@ -20,7 +20,7 @@ const assert=require('node:assert/strict');
   await seek(3.5);await click('head');assert.equal(await message(),'试听 00:00:02.500 → 00:00:04.000');await audio.evaluate(a=>a.currentTime=4.1);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio').paused);
   await seek(3.5);await click('tail');assert.equal(await message(),'试听 00:00:04.800 → 00:00:06.300');await audio.evaluate(a=>a.currentTime=6.4);await page.waitForFunction(()=>document.querySelector('#karaoke-media-host audio').paused);
   await click('off');await seek(19);await click('tail');assert.equal(await message(),'试听 00:00:19.800 → 00:00:20.000');
-  await page.locator('[data-editor-action="back"]').click();await page.locator('.job-open').first().waitFor({state:'visible'});assert.ok((await page.locator('.loop-state').allTextContents()).every(text=>text==='循环已关闭'));
+  await page.locator('[data-editor-action="back"]').click();await page.locator('.job-open').first().waitFor({state:'attached'});assert.ok((await page.locator('.loop-state').allTextContents()).every(text=>text==='循环已关闭'));
   await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));assert.equal(await page.locator('.loop-tools').count(),0);
   const result=await page.evaluate(async()=>{
    const {mountPlaybackLoopView}=await import('/src/playback-loop-view.ts');const root=document.createElement('section');root.innerHTML='<div class="playback-tools"></div><div class="playback-tools"></div><div class="playback-tools"></div>';document.body.append(root);const calls=[];

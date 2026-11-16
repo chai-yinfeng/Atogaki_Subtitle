@@ -5,7 +5,7 @@ const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
  try {
   const page=await browser.newPage({viewport:{width:1180,height:760}}),errors=[];
   page.on('pageerror',error=>errors.push(String(error)));
-  await installProcessingFixture(page);await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
+  await installProcessingFixture(page);await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   await page.evaluate(()=>{
    const signal={id:'signal',job_id:'editor-test',run_id:'original',signal_kind:'boundary_repetition',severity:'warning',start_ms:3000,end_ms:5800,message:'提示 <button>文本</button>',latest_decision:null,latest_decision_note:null};
    window.__test.signals=[signal,{...signal,id:'resolved',message:'已解决提示',latest_decision:'resolved'}];
@@ -76,7 +76,7 @@ const {installProcessingFixture}=require('./editor-processing-fixture.cjs');
   // A completed release belongs to the originating task even after navigation.
   await page.evaluate(()=>{window.__test.held.history=false;window.__test.held.release=true;window.__test.historyRows=[{id:'late',provider_name:'迟到清理',model_identity:'test',scope_start_ms:0,scope_end_ms:2800,created_at_unix:1,status:'succeeded',cleanable:true,reopenable:true}]});
   await page.locator('[data-candidate-history]').click();await page.locator('[data-release-run="late"]').click();await page.locator('[data-accept-cleanup]').click();await page.waitForFunction(()=>window.__test.pending.some(r=>r.kind==='release'));
-  assert.equal(await page.locator('[data-reopen-run="late"]').isDisabled(),true);await close();await page.locator('[data-editor-action="back"]').click();await page.locator('.job-open').nth(1).click();
+  assert.equal(await page.locator('[data-reopen-run="late"]').isDisabled(),true);await close();await page.locator('[data-editor-action="back"]').click();await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').nth(1).click();
   await page.waitForFunction(()=>document.querySelector('#karaoke-current-source').value.startsWith('任务 B 第'));const bText=await page.locator('#karaoke-current-source').inputValue();
   await page.evaluate(()=>window.__test.pending.find(r=>r.kind==='release').resolve());await page.waitForTimeout(50);assert.equal(await page.locator('#karaoke-current-source').inputValue(),bText);
   await open();assert.equal(await page.locator('.candidate-history').textContent(),'');

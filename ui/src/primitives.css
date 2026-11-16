@@ -1,0 +1,41 @@
+/* Shared neutral controls, used by every main-window page. */
+:root { font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; color:var(--foreground); background:var(--background); }
+* { box-sizing:border-box; }
+html,body,#app { width:100%; height:100%; margin:0; min-width:0; }
+body { background:var(--background); color:var(--foreground); overflow:hidden; }
+[hidden],.hidden { display:none!important; }
+h1,h2,h3,h4,p { margin:0; }
+h1,h2,h3,h4 { font-family:inherit; letter-spacing:-.025em; color:inherit; }
+h1 { font-size:20px; font-weight:600; } h2 { font-size:24px; font-weight:600; } h3 { font-size:16px; font-weight:600; } h4 { font-size:14px; font-weight:600; }
+button,input,select,textarea { font:inherit; color:inherit; }
+button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:36px; padding:7px 14px; border:1px solid transparent; border-radius:calc(var(--radius) * .6); background:var(--primary); color:var(--primary-foreground); font-size:14px; font-weight:500; cursor:pointer; box-shadow:0 1px 2px #00000008; }
+button:hover { background:var(--primary-hover); }
+button.secondary,button.quiet { color:var(--foreground); background:var(--background); border-color:var(--border); }
+button.secondary:hover,button.quiet:hover { background:var(--accent); }
+button:disabled { opacity:.5; cursor:default; }
+button.danger { color:var(--destructive); background:var(--background); border-color:var(--border); }
+input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea { appearance:none; width:100%; min-width:0; min-height:36px; padding:7px 11px; border:1px solid var(--input); border-radius:calc(var(--radius) * .6); background:var(--background); color:var(--foreground); font-size:14px; box-shadow:0 1px 2px #00000005; }
+input[type=search]::-webkit-search-decoration,input[type=search]::-webkit-search-cancel-button { appearance:none; }
+input::placeholder,textarea::placeholder { color:var(--muted-foreground); opacity:1; }
+select { height:36px; padding-right:30px; background-image:linear-gradient(45deg,transparent 50%,var(--muted-foreground) 50%),linear-gradient(135deg,var(--muted-foreground) 50%,transparent 50%); background-position:calc(100% - 15px) center,calc(100% - 10px) center; background-size:5px 5px; background-repeat:no-repeat; }
+input[type=range] { accent-color:var(--primary); min-width:0; }
+input[type=checkbox],input[type=radio] { accent-color:var(--primary); flex:none; width:16px; height:16px; margin:0; }
+textarea { resize:vertical; }
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible { outline:3px solid color-mix(in srgb,var(--ring) 45%,transparent); outline-offset:2px; }
+label { font-size:13px; font-weight:500; color:var(--foreground); }
+summary { cursor:pointer; color:var(--muted-foreground); font-size:13px; padding:8px 0; }
+hr { border:0; border-top:1px solid var(--border); }
+a { color:var(--primary); }
+.eyebrow { display:none; }
+.empty-state { display:grid; place-content:center; gap:8px; min-height:120px; color:var(--muted-foreground); font-size:13px; text-align:center; padding:24px; }
+.empty-state.error,.warning { color:var(--destructive); }
+.section-heading,.panel-heading,.dialog-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.section-heading>span { color:var(--muted-foreground); font-size:12px; }
+.form-footer { display:flex; align-items:center; justify-content:flex-end; gap:16px; }
+.form-footer>span { flex:1; font-size:13px; color:var(--muted-foreground); }
+.offline-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.offline-tools input { flex:1; min-width:160px; }
+dialog { color:var(--foreground); background:var(--background); border:1px solid var(--border); border-radius:var(--radius); box-shadow:0 16px 48px #0002; }
+dialog::backdrop { background:#0006; }
+.dialog-heading h2 { font-size:20px; }
+.image-theme-credit { position:fixed; inset:auto auto 10px 16px; max-width:150px; font-size:10px; color:var(--muted-foreground); }

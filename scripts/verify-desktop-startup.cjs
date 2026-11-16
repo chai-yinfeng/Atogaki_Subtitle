@@ -25,7 +25,7 @@ const assert=require('node:assert/strict');
    },mode);
    await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
    if(mode==='normal') {
-    await page.locator('.job-open').first().waitFor();await page.waitForFunction(()=>document.querySelector('#data-path').textContent.includes('/test/isolated'));
+    await page.locator('.job-open').first().waitFor({state:'attached'});await page.waitForFunction(()=>document.querySelector('#data-path').textContent.includes('/test/isolated'));
     const counts=await page.evaluate(()=>Object.fromEntries(['data_directory','list_glossaries','task_presets','list_job_summaries'].map(cmd=>[cmd,window.__test.calls.filter(call=>call.cmd===cmd).length])));
     assert.deepEqual(counts,{data_directory:1,list_glossaries:1,task_presets:0,list_job_summaries:1});
    } else if(mode==='dispose') {
@@ -37,7 +37,7 @@ const assert=require('node:assert/strict');
     const after=await page.evaluate(selectors=>selectors.map(selector=>document.querySelector(selector).innerHTML),selectors);
     assert.deepEqual(after,before,'late startup reads must not update a disposed page');
    } else if(mode==='runtime') {
-    await page.locator('.job-open').first().waitFor();await page.evaluate(()=>window.__startupQA.holdRuntime=true);
+    await page.locator('.job-open').first().waitFor({state:'attached'});await page.evaluate(()=>window.__startupQA.holdRuntime=true);
     await page.waitForFunction(()=>window.__startupQA.held.list_job_summaries);
     const before=await page.locator('#job-list').innerHTML();
     await page.evaluate(()=>{window.dispatchEvent(new Event('pagehide'));window.__startupQA.held.list_job_summaries();});

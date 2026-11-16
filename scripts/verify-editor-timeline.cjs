@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
  const b=await webkit.launch({headless:true}),p=await b.newPage({viewport:{width:960,height:640}}),errors=[];
  p.on('pageerror',e=>errors.push(String(e)));
  await require('./editor-ui-fixture.cjs').installEditorFixture(p);
- await p.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await p.locator('.job-open').first().click();
+ await p.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await require('./editor-ui-fixture.cjs').openTaskList(p); await p.locator('.job-open').first().click();
  const canvas=p.locator('#karaoke-waveform');await canvas.waitFor();
  await p.waitForFunction(()=>window.__test.calls.some(c=>c.cmd==='get_waveform_window'));
  const colors=await canvas.evaluate(c=>{

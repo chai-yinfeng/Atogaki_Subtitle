@@ -7,7 +7,7 @@ const assert=require('node:assert/strict');
   page.on('pageerror',e=>errors.push(String(e)));
   await require('./editor-ui-fixture.cjs').installEditorFixture(page,30);
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
-  const open=async()=>{await page.locator('.job-open').first().click();await page.locator('#karaoke-current-source').waitFor();};
+  const open=async()=>{await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();await page.locator('#karaoke-current-source').waitFor();};
   await open();
   await page.waitForFunction(()=>window.__test.calls.filter(c=>c.cmd==='get_structure_edit_state').length===1);
   const undo=page.getByRole('button',{name:'撤销打轴',exact:true}),start=page.locator('#editor-cue-start'),save=page.locator('[data-editor-action="save-time"]');

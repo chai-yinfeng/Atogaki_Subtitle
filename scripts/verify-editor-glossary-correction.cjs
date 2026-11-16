@@ -19,7 +19,7 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright'),asse
     return base(cmd,args);
    };
   });
-  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
+  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   await page.getByRole('button',{name:'翻译与词表',exact:true}).click();await page.locator('#workspace-glossary').selectOption('A');await page.locator('#back-to-jobs').click();
   const dialog=page.locator('#glossary-correction-dialog'),submit=page.locator('#glossary-correction-form button[type=submit]');
   const open=async(target)=>{

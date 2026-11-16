@@ -1,10 +1,20 @@
-export type AppTheme = "moonlight" | "letter";
+export type AppTheme = "neutral" | "moonlight" | "letter";
 export function normalizeTheme(value: string | null): AppTheme {
-  return value === "letter" ? "letter" : "moonlight";
+  return value === "letter" || value === "moonlight" ? value : "neutral";
 }
 export function readTheme(): AppTheme {
-  try { return normalizeTheme(localStorage.getItem("atogaki.appearance.theme")); }
-  catch { return "moonlight"; }
+  try {
+    // Preserve the old selection and image settings before the new shell's first run.
+    if (!localStorage.getItem("atogaki.appearance.shellVersion")) {
+      const theme=localStorage.getItem("atogaki.appearance.theme"),image=localStorage.getItem("atogaki.appearance.imageTheme");
+      localStorage.setItem("atogaki.appearance.beforeShellV2",JSON.stringify({theme,image}));
+      if(image){try{const saved=JSON.parse(image);if(saved&&typeof saved==="object")localStorage.setItem("atogaki.appearance.imageTheme",JSON.stringify({...saved,enabled:false}));}catch{/* Preserve malformed legacy data as-is. */}}
+      localStorage.setItem("atogaki.appearance.theme","neutral");
+      localStorage.setItem("atogaki.appearance.shellVersion","2");
+    }
+    return normalizeTheme(localStorage.getItem("atogaki.appearance.theme"));
+  }
+  catch { return "neutral"; }
 }
 export function applyTheme(theme: AppTheme): void {
   document.documentElement.dataset.theme = theme;

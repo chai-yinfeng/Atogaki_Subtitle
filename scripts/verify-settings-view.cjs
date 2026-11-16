@@ -4,7 +4,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
  const browser=await webkit.launch({headless:true});
  try{
   const page=await browser.newPage({viewport:{width:1180,height:760}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
-  await require('./editor-ui-fixture.cjs').installEditorFixture(page,30);await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().waitFor();await page.screenshot({path:'/tmp/atogaki-workbench-compact.png',fullPage:true});await page.locator('#open-settings').click();
+  await require('./editor-ui-fixture.cjs').installEditorFixture(page,30);await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().waitFor({state:'attached'});await page.screenshot({path:'/tmp/atogaki-workbench-compact.png',fullPage:true});await page.locator('#open-settings').click();
   const keys=['appearance','transcription','translation','models','dictionary','network'];
   assert.deepEqual(await page.locator('.settings-content > [data-settings-page]').evaluateAll(nodes=>nodes.map(e=>e.dataset.settingsPage)),keys);assert.equal(await page.locator('[data-settings-tab="transcription"]').getAttribute('aria-pressed'),'true');
   assert.deepEqual(await page.evaluate(()=>{const ids=[...document.querySelectorAll('[id]')].map(e=>e.id);return ids.filter((id,i)=>ids.indexOf(id)!==i);}),[]);

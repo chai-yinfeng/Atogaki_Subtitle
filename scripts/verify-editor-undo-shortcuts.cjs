@@ -6,7 +6,7 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE), assert=require('n
   page.on('pageerror',error=>errors.push(String(error)));
   await require('./editor-ui-fixture.cjs').installEditorFixture(page);
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1438');
-  await page.locator('.job-open').first().click();await page.locator('.editor-cue-row').first().click();
+  await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();await page.locator('.editor-cue-row').first().click();
   const calls=()=>page.evaluate(()=>window.__test.calls.filter(c=>c.cmd==='undo_subtitle_structure').length);
   const saveTime=async(endMs=2700)=>{
    await page.locator('#editor-cue-end').fill(`00:00:02.${String(endMs-2000).padStart(3,'0')}`);

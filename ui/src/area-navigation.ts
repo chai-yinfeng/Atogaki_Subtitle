@@ -1,4 +1,4 @@
-export type MainArea = "workbench" | "listening" | "learning" | "karaoke";
+export type MainArea = "workbench" | "listening" | "learning" | "karaoke" | "online";
 type Options<D> = {
   begin(): number;
   current(navigation: number): boolean;

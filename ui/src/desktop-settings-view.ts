@@ -1,4 +1,4 @@
-type Theme = "moonlight" | "letter";
+type Theme = "neutral" | "moonlight" | "letter";
 type Options = {
   openButton: HTMLButtonElement | null;
   visit(): number;
@@ -41,7 +41,7 @@ export function mountDesktopSettingsView(dialog: HTMLDialogElement, options: Opt
     if (button.id === "close-settings") dialog.close();
     else if (button.id === "finish-settings") options.save(true);
     else if (button.dataset.settingsTab) selectPage(button.dataset.settingsTab);
-    else if (button.dataset.appTheme === "moonlight" || button.dataset.appTheme === "letter") { options.applyTheme(button.dataset.appTheme); syncTheme(); }
+    else if (button.dataset.appTheme === "neutral" || button.dataset.appTheme === "moonlight" || button.dataset.appTheme === "letter") { options.applyTheme(button.dataset.appTheme); syncTheme(); }
   }, { signal: events.signal });
   const dirty = (event: Event) => {
     const target = event.target;

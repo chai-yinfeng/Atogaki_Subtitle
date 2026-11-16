@@ -96,6 +96,8 @@ import type { PlaybackAction } from "./playback-shortcuts";
 import "./styles.css";
 import "./listening.css";
 import "./editor.css";
+import "./online-view.css";
+import {mountOnlineView} from "./online-view";
 import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
 import { mountListeningLayout } from "./listening-layout";
@@ -348,8 +350,8 @@ if (!app) throw new Error("missing app root");
 
 app.innerHTML = `
   <main class="shell">
-    <header>
-      <div>
+    <header class="app-sidebar">
+      <div class="app-brand">
         <p class="eyebrow">LOCAL MEDIA LANGUAGE WORKSPACE</p>
         <h1>Atogaki</h1>
       </div>
@@ -359,12 +361,13 @@ app.innerHTML = `
           <button id="show-listening" type="button" class="secondary">收听</button>
           <button id="show-learning" type="button" class="secondary">学习</button>
         </nav>
-        <button id="open-online" type="button" class="secondary">在线字幕</button>
+        <button id="open-online" type="button" class="secondary"><span>在线字幕</span><span id="online-running-indicator" class="running-dot hidden" aria-label="在线会话运行中"></span></button>
         <button id="open-settings" type="button" class="secondary">设置</button>
-        <button id="refresh" type="button">刷新任务</button>
       </div>
     </header>
-    <div id="home-view">
+    <div class="app-content">
+    <div id="home-view" class="app-page">
+      <div class="page-heading"><div><h2>工作台</h2><p>导入媒体，创建双语字幕。</p></div><button id="open-recent-jobs" type="button" class="secondary" aria-haspopup="dialog" aria-controls="recent-jobs-drawer">最近任务</button></div>
       <p class="data-path hidden" id="data-path"></p>
       <section class="create-task" aria-labelledby="create-heading">
         <div class="section-heading"><h2 id="create-heading">新建转写任务</h2><span>本地执行</span></div>
@@ -393,18 +396,17 @@ app.innerHTML = `
           <div class="form-footer"><span id="task-message" role="status"></span><button id="submit-task" type="submit">开始转写</button></div>
         </form>
       </section>
-      <section class="jobs" aria-labelledby="jobs-heading">
-        <div class="section-heading">
-          <h2 id="jobs-heading">最近任务</h2>
-          <span id="job-count"></span>
-        </div>
-        <p id="job-management-message" class="job-management-message" role="status"></p>
-        <div id="job-list" class="job-list" aria-live="polite"></div>
-      </section>
     </div>
+    <dialog id="recent-jobs-drawer" class="task-sheet" aria-labelledby="jobs-heading">
+      <div class="sheet-heading"><h2 id="jobs-heading">最近任务</h2><button id="close-recent-jobs" type="button" class="secondary">关闭</button></div>
+      <span id="job-count" class="sheet-count"></span>
+      <p id="job-management-message" class="job-management-message" role="status"></p>
+      <div id="job-list" class="job-list" aria-live="polite"></div>
+    </dialog>
+    <section id="online-view" class="app-page hidden" aria-label="在线字幕"><div id="online-root"></div></section>
     <section id="listening-view" class="listening-view hidden" aria-labelledby="listening-title">
       <div class="module-heading listening-heading">
-        <div><p class="eyebrow">LISTENING LIBRARY</p><h2 id="listening-title">收听</h2><p>阅读全文并跟随播放；选择一段原文即可收藏词语、短语或语法表达。</p></div>
+        <div><h2 id="listening-title">收听</h2></div>
       </div>
       <div class="listening-layout">
         <aside class="listening-library" aria-label="可收听任务">
@@ -557,9 +559,17 @@ ${taskToolsTemplate(fileManagerLabel)}
       </form>
     </dialog>
     ${desktopSettingsTemplate()}
+    </div>
   </main>
 `;
 
+let onlinePanel:ReturnType<typeof mountOnlineView>|null=null;
+const onlineView=document.querySelector<HTMLElement>("#online-view")!;
+const taskDrawer=document.querySelector<HTMLDialogElement>("#recent-jobs-drawer")!;
+document.getElementById("open-recent-jobs")!.onclick=()=>{taskDrawer.showModal();taskDrawer.querySelector<HTMLInputElement>('input[type="search"]')?.focus();};
+document.getElementById("close-recent-jobs")!.onclick=()=>taskDrawer.close();
+taskDrawer.addEventListener("close",()=>{if(currentArea==="workbench"&&!document.querySelector("dialog[open]"))document.getElementById("open-recent-jobs")!.focus();});
+taskDrawer.addEventListener("click",event=>{if(event.target===taskDrawer){const rect=taskDrawer.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)taskDrawer.close();}});
 const homeView = document.querySelector<HTMLDivElement>("#home-view");
 const listeningView = document.querySelector<HTMLElement>("#listening-view");
 const learningView = document.querySelector<HTMLElement>("#learning-view");
@@ -1324,7 +1334,7 @@ window.addEventListener("pagehide", () => {
   subtitleExport.dispose();
   subtitleExportView.dispose();
   editorLayout.dispose();
-  listeningLayout.dispose();
+  listeningLayout.dispose(); onlinePanel?.dispose();
   editorMenus.dispose();
   editorFollow.dispose();
   if (timelinePaintFrame !== null) cancelAnimationFrame(timelinePaintFrame);
@@ -2077,6 +2087,7 @@ function renderJobs(jobs: LocalJob[]): void {
   jobList.querySelectorAll<HTMLButtonElement>("[data-partial-job]").forEach(button => button.addEventListener("click", () => void showPartialTranscript(button.dataset.partialJob ?? "")));
   jobList.querySelectorAll<HTMLButtonElement>("[data-job-id]").forEach((button) => {
     button.addEventListener("click", () => {
+      taskDrawer.close();
       const job = jobs.find(j => j.job_id === button.dataset.jobId);
       if (job && job.status !== "done" && job.recovery?.duration_ms && (job.recovery.completed_ms < job.recovery.duration_ms || job.segment_count === 0)) void showPartialTranscript(job.job_id);
       else void openJob(button.dataset.jobId ?? "");
@@ -2363,11 +2374,11 @@ function showWorkspace(show: boolean): void {
   shell?.classList.toggle("workspace-open", show);
   homeView?.classList.toggle("hidden", show);
   if (show) taskTools.mountPage(); else taskTools.unmount();
+  onlineView.classList.add("hidden");
   listeningView?.classList.add("hidden");
   learningView?.classList.add("hidden");
   karaokeView?.classList.add("hidden");
   if (show) { currentArea = "workspace"; taskProgress.mount(); } else taskProgress.unmount();
-  document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", show);
 }
 
 function assertPlaybackCanStop(): void {
@@ -2426,6 +2437,12 @@ const areaNavigation = createAreaNavigation<JobDetail>({
     subtitleList?.replaceChildren();
     listeningSubtitleList?.replaceChildren();
     currentArea = area;
+    if(taskDrawer.open)taskDrawer.close();
+    onlineView.classList.toggle("hidden",area!=="online");
+    if(area==="online"&&!onlinePanel)onlinePanel=mountOnlineView(document.querySelector<HTMLElement>("#online-root")!,{control:true,status:phase=>{
+      const running=["loading","requesting_audio","running","stopping","draining"].includes(phase);
+      document.getElementById("online-running-indicator")!.classList.toggle("hidden",!running);
+    }});
     shell?.classList.toggle("workspace-open", area === "karaoke");
     taskTools.unmount();
     homeView?.classList.toggle("hidden", area !== "workbench");
@@ -2435,7 +2452,7 @@ const areaNavigation = createAreaNavigation<JobDetail>({
     document.querySelector<HTMLButtonElement>("#show-workbench")?.classList.toggle("active", area === "workbench");
     document.querySelector<HTMLButtonElement>("#show-listening")?.classList.toggle("active", area === "listening");
     document.querySelector<HTMLButtonElement>("#show-learning")?.classList.toggle("active", area === "learning");
-    document.querySelector<HTMLButtonElement>("#refresh")?.classList.toggle("hidden", area === "karaoke");
+    document.getElementById("open-online")!.classList.toggle("active",area==="online");
     updatePlaybackControls();
     renderSubtitleOverlayButton();
     renderListeningJobs(latestJobs);
@@ -4438,7 +4455,6 @@ async function applyPreviewedGlossary(): Promise<void> {
   }
 }
 
-document.querySelector<HTMLButtonElement>("#refresh")?.addEventListener("click", () => void refresh());
 document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("click", () => void showTopLevelArea("workbench"));
 document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => void showTopLevelArea("listening"));
 document.querySelector<HTMLButtonElement>("#show-learning")?.addEventListener("click", () => void showTopLevelArea("learning"));
@@ -4731,6 +4747,7 @@ async function refreshProviderReadiness(): Promise<void> { await providerActions
 function addOfflineTools(): void {
   const jobsSearch = document.createElement("input");
   jobsSearch.type = "search";
+  jobsSearch.id = "job-title-search";
   jobsSearch.placeholder = "搜索任务标题";
   jobsSearch.setAttribute("aria-label", "搜索任务标题");
   jobsSearch.oninput = () => {
@@ -4874,5 +4891,5 @@ const desktopStartup = createDesktopStartup({
 });
 desktopStartup.mount();
 
-// Online owns a separate session and window; opening controls does not change playback.
-document.getElementById("open-online")?.addEventListener("click", () => { void invoke("open_online_control").catch(error => window.alert(String(error))); });
+// Capture is owned by Rust, independent of the currently visible main page.
+document.getElementById("open-online")?.addEventListener("click",()=>void showTopLevelArea("online"));

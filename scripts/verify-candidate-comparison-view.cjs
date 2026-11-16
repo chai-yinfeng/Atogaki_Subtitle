@@ -5,7 +5,7 @@ const assert=require('node:assert/strict');
  try {
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(String(e)));
   await require('./editor-ui-fixture.cjs').installEditorFixture(page,30);
-  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
+  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));
   await page.evaluate(async()=>{
    const check=(condition,message)=>{if(!condition)throw Error(message);};

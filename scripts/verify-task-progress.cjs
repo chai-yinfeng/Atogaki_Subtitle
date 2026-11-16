@@ -22,11 +22,11 @@ const assert=require('node:assert/strict');
    };
   });
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
-  const open=async()=>{await page.locator('.job-open').first().click();};
+  const open=async()=>{await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();};
   const home=async()=>{
    const editor=await page.locator('#karaoke-current-source').isVisible();
    await page.locator(editor?'[data-editor-action="back"]':'#back-to-jobs').click();
-   await page.locator('.job-open').first().waitFor({state:'visible'});
+   await page.locator('.job-open').first().waitFor({state:'attached'});
   };
   const drain=()=>page.evaluate(()=>new Promise(resolve=>queueMicrotask(()=>queueMicrotask(resolve))));
   const reads=()=>page.evaluate(()=>window.__progressQA.reads);

@@ -22,7 +22,7 @@ const assert=require('node:assert/strict');
  });
  await p.route('**/bad.mp4',route=>route.fulfill({status:200,contentType:'video/mp4',body:'invalid video'}));
  await p.route('**/bad.wav',route=>route.fulfill({status:200,contentType:'audio/wav',body:'invalid audio'}));
- await p.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await p.locator('.job-open').first().click();
+ await p.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1420');await require('./editor-ui-fixture.cjs').openTaskList(p); await p.locator('.job-open').first().click();
  const audio=p.locator('#karaoke-media-host audio');await audio.waitFor();
  await audio.evaluate(async a=>{
   if(a.readyState<1) await new Promise(r=>{a.addEventListener('loadedmetadata',r,{once:true});a.load();});
@@ -40,7 +40,7 @@ const assert=require('node:assert/strict');
  assert.equal(await p.locator('#karaoke-current-time').innerText(),clock);assert.equal(await audio.count(),1);
  await audio.evaluate(async a=>{await new Promise(r=>{a.addEventListener('seeked',r,{once:true});a.currentTime=18;});});
  await p.locator('[data-editor-action="back"]').click();assert.equal(await p.locator('#karaoke-media-host audio').count(),0);
- await p.locator('.job-open').first().click();
+ await require('./editor-ui-fixture.cjs').openTaskList(p); await p.locator('.job-open').first().click();
  await require('./load-editor-test-media.cjs')(p);
  await p.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.currentTime>=17.9);
  assert.ok(await p.locator('#editor-cue-list').evaluate(e=>e.scrollTop>0));
@@ -55,7 +55,7 @@ const assert=require('node:assert/strict');
  await p.locator('#show-workbench').click();assert.equal(await listening.count(),0);
  assert.equal(await p.evaluate(()=>window.__test.resumeMs),9000);
  // Both invalid sources stop after one fallback instead of recreating players forever.
- await p.evaluate(()=>window.__test.mode='broken');await p.locator('.job-open').first().click();
+ await p.evaluate(()=>window.__test.mode='broken');await require('./editor-ui-fixture.cjs').openTaskList(p); await p.locator('.job-open').first().click();
  await audio.waitFor();await p.locator('#karaoke-toggle-playback').click();
  await p.waitForFunction(()=>document.querySelector('#karaoke-media-message').textContent.includes('媒体加载失败'));
  assert.equal(await p.locator('#karaoke-media-host video').count(),0);assert.equal(await audio.count(),1);

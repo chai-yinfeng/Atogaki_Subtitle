@@ -19,7 +19,7 @@ const assert=require('node:assert/strict');
     return result;
    };
   });
-  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('.job-open').first().click();
+  await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await require('./editor-ui-fixture.cjs').openTaskList(page); await page.locator('.job-open').first().click();
   const consumer=page.locator('[data-cue-id="cue-2"]');
   assert.equal(await consumer.locator('.cue-status').innerText(),'已保存');
   await page.evaluate(()=>{window.__consumerNode=document.querySelector('[data-cue-id="cue-2"]');window.__editorNode=document.querySelector('#karaoke-current-source');});
