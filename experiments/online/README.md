@@ -9,6 +9,7 @@ _核对：2026-11-15。生产实现已整合 main；本目录不是另一套待�
 | 用途 | 现有入口 | 证据及边界 |
 | --- | --- | --- |
 | 单路实时路径验证 | `replay_single_qwen.py`、`live_asr_schedule.py` | 已到达 PCM 前缀、1× 时钟、有界最新需求、裁片 EOF 锁定、可选现有 MT；不是原生 App 验收 |
+| 音频前缀缓存 | `qwen_prefix_cache.py`、`test_qwen_prefix_cache.py` | 复用已装包完整音频块，target／DFlash KV 对齐；生成文字不保留，不导入生产 |
 | Python 专用 draft 实验 | `run_qwen_speculative.py`、`qwen_speculative.py`、`test_qwen_speculative.py` | 固定包／主模型／已核准裁片，原接口／新封装无 draft／DFlash／DSpark；不导入生产 worker |
 | 当前 worker 因果回放 | `run_two_pass.py`、`summarize_two_pass.py`、`replay_presentation.mjs` | [13 分钟回归](../../docs/qwen8-online-regression-2026-11-14.md)；不含系统采集／原生上屏 |
 | Qwen 候选与听审 | `screen_qwen_candidates.py`、`screen_whisper_reference.py`、`audit_qwen_screen.py` | [同输入筛选与首批反馈](../../docs/qwen-radio-candidate-screen-2026-11-13.md)；已选 1.7B 8bit，不默认扩大矩阵 |
@@ -21,7 +22,7 @@ _核对：2026-11-15。生产实现已整合 main；本目录不是另一套待�
 
 ## 单路 Qwen＋DFlash 持续预览
 
-`replay_single_qwen.py` 在相同五个核准裁片上比较单路 Qwen＋DFlash 与受控 SenseVoice CPU preview＋Qwen final。输入按 512 samples、1× 时钟喂入，每约一秒以已到达音频前缀发起识别；一个 GPU owning thread，preview 需求只保留最新，final 优先且不可丢失。同一完整输入已有／正在计算时升级为 final，不为 EOF 重复识别。每次重新编码当前前缀，没有保留文字前缀或跨窗口 KV 复用。
+`replay_single_qwen.py` 在相同五个核准裁片上比较单路 Qwen＋DFlash 与受控 SenseVoice CPU preview＋Qwen final。输入按 512 samples、1× 时钟喂入，每约一秒以已到达音频前缀发起识别；一个 GPU owning thread，preview 需求只保留最新，final 优先且不可丢失。同一完整输入已有／正在计算时升级为 final，不为 EOF 重复识别。默认每次重新编码当前前缀，没有保留文字前缀或跨窗口 KV 复用。
 
 五个来源分别清空语义上下文，连续时钟使上一裁片 MT 可以与下一裁片 ASR 竞争。闭合仅取已知裁片 EOF，不模拟未知 VAD／H/G 词级边界。`--translation-url` 可接本机自管服务，复用 StageAdmission 禁止 GPU 重叠；只在锁定后翻译整个裁片，H／R／F 均空。两个模型路径都使用该相同边界与 MT 策略，因此这是受控比较，不是完整生产 worker A/B。服务由调用方启动／回收，鉴权沿用已有环境变量，不能写入命令或产物。
 
@@ -33,6 +34,8 @@ _核对：2026-11-15。生产实现已整合 main；本目录不是另一套待�
 ```
 
 对照使用 `--mode dual-control --sensevoice-dir /path/to/installed/ja`；两者可加 `--translation-url http://127.0.0.1:<port>/v1`。目录记录输入／模型／源码摘要、事件、指标与线程退出状态。三臂各两轮已完成，单路首次出字较晚、最终译文时间接近对照，Qwen 重算成本约四倍。首次非空、回改字符及 headless display-ready 时间不等于首次正确或原生上屏；真实输入、翻译竞争、失败及质量边界见[第五阶段](../../docs/evaluation.md#第五阶段单路-qwendflash-的持续预览验证2026-11-15)。
+
+单路可显式加 `--audio-prefix-cache`，使用已安装 `mlx-qwen3-asr==0.4.4` 的完整约 8 秒音频块缓存及其尾帧／全局 mel 最大值失效规则。仅保留完整音频前缀的 target KV 和由 taps 投影得到的 DFlash context KV；不强制保留旧文字，不更改注意力块、归一化或分组。每个裁片重置，拒绝缩短／替换输入和超过 30 秒的窗口。事件增加 `audio_cache` 命中／失效／重算帧数，以及显式求值后的 features／encoder／prefill／generation 计时；总耗时仍包含未归入这些阶段的准备和解析成本。缓存前后的冻结前缀审计及 1× 对照分别保存，详见[第六阶段](../../docs/evaluation.md#第六阶段完整音频块与-dflash-kv-缓存2026-11-15)。
 
 ## Python DFlash／DSpark 实验
 

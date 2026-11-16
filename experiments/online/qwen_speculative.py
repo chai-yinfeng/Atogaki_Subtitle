@@ -3,6 +3,7 @@
 from dataclasses import dataclass, asdict
 import json
 from pathlib import Path
+import time
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -184,21 +185,56 @@ class DecodeResult:
     max_confidence_logit: float | None = None
 
 
-def decode(target, prompt_embeddings, max_new_tokens, draft=None, *, eos_token_ids=(151643, 151645)):
-    """Greedy target verification with per-call caches and exact rejection rollback."""
+@dataclass
+class DecoderPrefix:
+    """Only immutable prompt/audio positions; never retain generated text."""
+    target: KVCache | None = None
+    draft: KVCache | None = None
+
+
+def _snapshot(cache, positions):
+    result = KVCache(len(cache.keys))
+    result.offset = positions
+    result.keys = [mx.contiguous(k[:, :, :positions]) if k is not None else None for k in cache.keys]
+    result.values = [mx.contiguous(v[:, :, :positions]) if v is not None else None for v in cache.values]
+    mx.eval(*[x for x in result.keys + result.values if x is not None])
+    return result
+
+
+def decode(target, prompt_embeddings, max_new_tokens, draft=None, *, eos_token_ids=(151643, 151645),
+           prefix=None, retain_positions=0, timings=None):
+    """Greedy verification; optionally fork immutable audio KV before this prompt tail."""
     if max_new_tokens < 0:
         raise ValueError('max_new_tokens must be nonnegative')
-    prompt_length = prompt_embeddings.shape[1]
+    reused = prefix.target.offset if prefix is not None and prefix.target is not None else 0
+    prompt_length = reused + prompt_embeddings.shape[1]
+    if retain_positions and (prefix is None or not reused <= retain_positions <= prompt_length):
+        raise ValueError('Retained audio prefix must be inside the current prompt')
+    if reused and (not retain_positions or (draft is not None and
+            (prefix.draft is None or prefix.draft.offset != reused))):
+        raise ValueError('Target and draft must reuse the same immutable prefix')
     if draft and prompt_length + max_new_tokens + draft.block_size > draft.raw['transformer_layer_config'].get('sliding_window', 32768):
         raise ValueError('This short-crop experiment does not implement sliding-window eviction')
     if max_new_tokens == 0:
         return DecodeResult([], 'length', 0, 0, 0, 0, 0, 0)
-    cache = target.model.create_cache(max_seq_len=prompt_length + max_new_tokens)
+    if timings is not None:
+        mx.synchronize()
+    before = time.monotonic()
+    cache = prefix.target.fork() if reused else target.model.create_cache(max_seq_len=prompt_length + max_new_tokens)
     taps = draft.taps if draft else ()
     logits, captured = target.forward(prompt_embeddings, cache, taps, last_only=True)
-    draft_cache = draft.new_cache(prompt_length + max_new_tokens + draft.block_size) if draft else None
+    draft_cache = (prefix.draft.fork() if reused else
+                   draft.new_cache(prompt_length + max_new_tokens + draft.block_size)) if draft else None
     if draft:
-        draft.append_context(captured, prompt_length, draft_cache)
+        draft.append_context(captured, prompt_embeddings.shape[1], draft_cache)
+    if retain_positions > reused:
+        prefix.target = _snapshot(cache, retain_positions)
+        prefix.draft = _snapshot(draft_cache, retain_positions) if draft else None
+    if timings is not None:
+        mx.eval(logits, *[x for x in (draft_cache.keys + draft_cache.values if draft_cache else []) if x is not None])
+        mx.synchronize()
+        timings['prefill_s'] = time.monotonic()-before
+    generation_started = time.monotonic()
     tokens = []
     finish = None
     observed = 0
@@ -257,20 +293,33 @@ def decode(target, prompt_embeddings, max_new_tokens, draft=None, *, eos_token_i
         draft.append_context(captured, keep, draft_cache)
         if cache.offset != draft_cache.offset:
             raise AssertionError('Target and draft committed prefixes diverged')
+    if timings is not None:
+        mx.synchronize()
+        timings['generation_s'] = time.monotonic()-generation_started
     return DecodeResult(tokens, finish, rounds, proposed_count, accepted_count,
                         cache.offset, draft_cache.offset if draft_cache else 0, rejected_rounds,
                         min(confidence_values) if confidence_values else None,
                         max(confidence_values) if confidence_values else None)
 
 
-def transcribe(session, target, draft, samples, max_new_tokens=512):
+def transcribe(session, target, draft, samples, max_new_tokens=512, *, timings=None):
     """Run the unchanged short-crop audio path with the experimental decoder."""
+    before = time.monotonic()
     mel, lengths = compute_features(samples)
+    if timings is not None:
+        mx.eval(mel, lengths)
+        mx.synchronize()
+        timings['features_s'] = time.monotonic()-before
+    before = time.monotonic()
     features, _ = session.model.audio_tower(mel.astype(session.dtype), lengths)
+    if timings is not None:
+        mx.eval(features)
+        mx.synchronize()
+        timings['encoder_s'] = time.monotonic()-before
     prompt = session.tokenizer.build_prompt_tokens(n_audio_tokens=features.shape[1], language='Japanese', context='')
     ids = mx.array([prompt], dtype=mx.int32)
     embeddings = session.model._embed_tokens(ids)
     embeddings = session.model._inject_audio_features(embeddings, features, ids == session.model.audio_token_id)
-    result = decode(target, embeddings, max_new_tokens, draft)
+    result = decode(target, embeddings, max_new_tokens, draft, timings=timings)
     _, text = parse_asr_output(session.tokenizer.decode(result.tokens), user_language='Japanese')
     return dict(text=text, **asdict(result))

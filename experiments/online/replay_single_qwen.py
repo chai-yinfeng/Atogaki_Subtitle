@@ -30,6 +30,7 @@ def main():
     parser.add_argument('--draft-dir', type=Path)
     parser.add_argument('--sensevoice-dir', type=Path)
     parser.add_argument('--mode', choices=['single-dflash', 'dual-control'], required=True)
+    parser.add_argument('--audio-prefix-cache', action='store_true', help='Reuse only complete immutable audio blocks')
     parser.add_argument('--translation-url')
     parser.add_argument('--translation-model', default='Hy-MT2-1.8B-Q4_K_M')
     parser.add_argument('--output', type=Path, required=True)
@@ -40,6 +41,8 @@ def main():
         parser.error('single lane requires the pinned DFlash head')
     if args.mode == 'dual-control' and not args.sensevoice_dir:
         parser.error('dual control requires the installed CPU recognizer')
+    if args.audio_prefix_cache and args.mode != 'single-dflash':
+        parser.error('audio prefix cache is only supported by the isolated single DFlash lane')
     if version('mlx-qwen3-asr') != '0.4.4':
         parser.error('requires mlx-qwen3-asr 0.4.4')
     rows = json.loads(args.inputs.read_text())['rows']
@@ -55,6 +58,7 @@ def main():
     metadata = dict(mode=args.mode, mt=bool(args.translation_url), input_sha256=args.input_sha256,
                     source_hashes={str(p): digest(p) for p in [Path(__file__), Path(__file__).with_name('qwen_speculative.py'),
                                  Path(__file__).with_name('live_asr_schedule.py'),
+                                 Path(__file__).with_name('qwen_prefix_cache.py'),
                                  Path(_worker_path.__file__).parents[2] / 'src/infrastructure/online_worker/stage_admission.py']},
                     model_hashes={str(p): digest(p) for directory in [args.model_dir, *([args.draft_dir] if args.draft_dir else [])]
                                   for p in directory.glob('*.safetensors')},
@@ -62,7 +66,8 @@ def main():
                     conditions=dict(rate=1, refresh_seconds=1, max_new_tokens=512, target_dtype='float16', draft_dtype='bfloat16',
                                     cache_limit_bytes=512000000, boundaries='existing crop EOF; not natural VAD',
                                     history=[], lookahead='', scene='', translation='whole locked crop only',
-                                    prefix_reuse=False, sequence='back-to-back crops with independent semantic contexts',
+                                    prefix_reuse=args.audio_prefix_cache, forced_text_prefix=False,
+                                    sequence='back-to-back crops with independent semantic contexts',
                                     clocks='headless display-ready events; no native capture or paint'))
     metadata['model_hashes'].update(cpu_hashes)
     gpu_jobs, cpu_jobs = ASRMailbox(), ASRMailbox()
@@ -112,6 +117,12 @@ def main():
                 session = Session(model=str(args.model_dir.resolve()), dtype=mx.float16)
                 target = Target(session.model)
                 draft = Draft.load(args.draft_dir, session.model.config.text_config, dtype=mx.bfloat16) if args.mode == 'single-dflash' else None
+                if args.audio_prefix_cache:
+                    from qwen_prefix_cache import CachedTranscriber
+                    cached = CachedTranscriber(session, target, draft)
+                else:
+                    cached = None
+                crop_id = None
                 mx.synchronize()
                 load_times['qwen_seconds'] = time.monotonic()-before
                 gpu_ready.set()
@@ -125,8 +136,15 @@ def main():
                         if before-events.started < job['start_s']+job['end']/16000:
                             raise AssertionError('ASR received future audio')
                         mx.reset_peak_memory()
-                        if draft:
-                            result = transcribe(session, target, draft, job['samples'])
+                        if cached:
+                            if crop_id != job['sid']:
+                                cached.reset()
+                                crop_id = job['sid']
+                            result = cached.transcribe(job['samples'])
+                        elif draft:
+                            timings = {}
+                            result = transcribe(session, target, draft, job['samples'], timings=timings)
+                            result['timings'] = timings
                         else:
                             value = session.transcribe(job['samples'], language='Japanese', max_new_tokens=512, return_chunks=True)
                             result = dict(text=value.text, finish_reason=value.finish_reason)
@@ -137,7 +155,8 @@ def main():
                                     final=final, input_samples=job['end'], start_s=job['start_s'],
                                     compute_s=result['compute_s'], queue_wait_s=result['queue_wait_s'],
                                     peak_active_bytes=mx.get_peak_memory(), active_bytes=mx.get_active_memory(),
-                                    cache_bytes=mx.get_cache_memory(), finish_reason=result['finish_reason'])
+                                    cache_bytes=mx.get_cache_memory(), finish_reason=result['finish_reason'],
+                                    timings=result.get('timings'), audio_cache=result.get('audio_cache'))
                         publish(job, result, final)
                         mx.clear_cache()
             except Exception as error:
