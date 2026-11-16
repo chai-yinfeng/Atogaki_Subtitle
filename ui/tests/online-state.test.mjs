@@ -1,45 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DraftPresentation, OnlineCaptions } from '../src/online-state.ts';
+import { DraftPresentation, OnlineCaptions, stableReadingMs } from '../src/online-state.ts';
 const status=id=>({sessionId:id,phase:'running',error:null});
 const event=(sequence,body,sessionId='s')=>({sequence,sessionId,event:body});
-test('MT range retains matching Qwen text beside only a small live ASR tail',()=>{
- const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- state.accept(event(1,{kind:'source_final',segment_id:'a',start_s:10,end_s:14,text:'原文A'}));
- state.accept(event(2,{kind:'source_final',segment_id:'b',start_s:14,end_s:18,text:'原文B'}));
- state.accept(event(3,{kind:'translation_final',group_id:'g',start_s:10,end_s:18,text:'译文AB',source_revisions:{a:1,b:1}}));
- state.accept(event(4,{kind:'source_final',segment_id:'c',start_s:18,end_s:20,text:'尚未翻译C'}));
- state.accept(event(5,{kind:'source_draft',segment_id:'d',start_s:20,end_s:22,text:'最新草稿D'}));
- assert.deepEqual(state.tracks().translationParts.map(e=>e.text),['译文AB']);
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.text),['原文A','原文B','…','最新草稿D']);
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.kind),['source_final','source_final','source_gap','source_draft']);
- state.accept(event(6,{kind:'translation_draft',group_id:'next',start_s:18,end_s:22,text:'译文CD',source_revisions:{c:1,d:1}}));
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.text),['原文A','原文B','尚未翻译C','最新草稿D']);
-});
-
-test('moving the paired reading range evicts old original and translation together',()=>{
- const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- state.accept(event(1,{kind:'source_final',segment_id:'a',start_s:0,end_s:4,text:'old original'}));
- state.accept(event(2,{kind:'translation_draft',group_id:'old',start_s:0,end_s:4,text:'old draft',source_revisions:{a:1}}));
- state.accept(event(3,{kind:'source_final',segment_id:'b',start_s:20,end_s:26,text:'new original'}));
- state.accept(event(4,{kind:'translation_draft',group_id:'new',start_s:20,end_s:26,text:'new draft',source_revisions:{b:1}}));
- assert.deepEqual(state.tracks().translationParts.map(e=>e.text),['new draft']);
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.text),['new original']);
-});
-
-test('paired sources survive ASR map eviction and do not turn blue while MT waits',()=>{
- const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- state.accept(event(1,{kind:'source_final',segment_id:'a',start_s:0,end_s:4,text:'paired source'}));
- state.accept(event(2,{kind:'translation_draft',group_id:'g',start_s:0,end_s:4,text:'translation',source_revisions:{a:1}}));
- for(let i=1;i<=70;i++)state.accept(event(i+2,{kind:'source_final',segment_id:`s${i}`,start_s:i+4,end_s:i+5,text:`source ${i}`}));
- assert.equal(state.tracks().sourceParts[0].text,'paired source');
- assert.equal(state.tracks().sourceParts[0].kind,'source_final');
- assert.ok(state.tracks().sourceParts.length<=4);
- state.accept(event(73,{kind:'translation_final',group_id:'next',start_s:73,end_s:75,text:'latest translation',source_revisions:{s69:1,s70:1}}));
- assert.deepEqual(state.tracks().translationParts.map(e=>e.text),['latest translation']);
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.text),['source 69','source 70']);
-});
-
 test('new window can recover the paired original from an actual MT input snapshot',()=>{
  const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[event(300,{
   kind:'translation_final',group_id:'g',start_s:10,end_s:18,text:'译文',source_text:'对应的Qwen原文',source_revisions:{a:2,b:2}})]});
@@ -47,17 +10,6 @@ test('new window can recover the paired original from an actual MT input snapsho
  assert.equal(state.tracks().sourceParts[0].kind,'source_final');
 });
 
-test('source pairing follows the MT snapshot actually shown by the prefix gate',()=>{
- const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- state.accept(event(1,{kind:'source_final',segment_id:'a',start_s:0,end_s:3,text:'A'}));
- const shown={kind:'translation_draft',group_id:'g',start_s:0,end_s:3,text:'old translation',source_revisions:{a:1}};
- state.accept(event(2,shown));
- state.accept(event(3,{kind:'source_final',segment_id:'b',start_s:3,end_s:6,text:'B'}));
- state.accept(event(4,{kind:'source_draft',segment_id:'c',start_s:6,end_s:8,text:'C'}));
- state.accept(event(5,{...shown,end_s:8,text:'new translation',source_revisions:{a:1,b:1,c:1}}));
- assert.deepEqual(state.tracks([shown]).sourceParts.map(e=>e.text),['A','…','C']);
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.text),['A','B','C']);
-});
 test('late final ASR cannot replace the next segment draft; MT owns a separate group',()=>{
  const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
  state.accept(event(1,{kind:'source_draft',segment_id:'next',start_s:5,text:'next'}));
@@ -75,45 +27,6 @@ test('new session clears old captions and rejects late events from the old sessi
  const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[event(1,{kind:'source_final',segment_id:'a',text:'old'})]});
  state.snapshot({status:status('new'),events:[]});state.accept(event(2,{kind:'source_final',segment_id:'a',text:'late'}));
  assert.equal(state.tracks().source,null);
-});
-
-test('locked MT prefix survives the event ring beside its revisable tail',()=>{
- const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- state.accept(event(1,{kind:'translation_final',group_id:'locked',start_s:0,end_s:2,text:'white prefix'}));
- for(let i=2;i<310;i++)state.accept(event(i,{kind:'translation_draft',group_id:'tail',start_s:2,end_s:5,text:`blue tail ${i}`}));
- const parts=state.tracks().translationParts;
- assert.deepEqual(parts.map(e=>e.kind),['translation_final','translation_draft']);
- assert.equal(parts[0].text,'white prefix');
- assert.equal(parts[1].text,'blue tail 309');
- state.accept(event(310,{kind:'translation_final',group_id:'tail',start_s:2,end_s:5,text:'locked tail'}));
- assert.deepEqual(state.tracks().translationParts.map(e=>e.kind),['translation_final','translation_final']);
-});
-test('ASR locks independently while MT still revises the same audio range',()=>{
- const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- state.accept(event(1,{kind:'source_final',segment_id:'a',start_s:0,end_s:3,text:'Qwen final'}));
- state.accept(event(2,{kind:'source_draft',segment_id:'b',start_s:3,end_s:5,text:'SenseVoice draft'}));
- state.accept(event(3,{kind:'translation_draft',group_id:'g',start_s:0,end_s:5,text:'still mutable'}));
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.kind),['source_final','source_draft']);
- assert.deepEqual(state.tracks().translationParts.map(e=>e.kind),['translation_draft']);
-});
-test('reading range advances by audio time at whole-unit boundaries, not a three-item count',()=>{
- const state=new OnlineCaptions();state.snapshot({status:{...status('s'),translationEnabled:false},events:[]});
- for(let i=1;i<=9;i++)state.accept(event(i,{kind:'source_final',segment_id:`s${i}`,start_s:i-1,end_s:i,text:`source ${i}`}));
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.segment_id),['s5','s6','s7','s8','s9']);
- assert.deepEqual(state.tracks().translationParts,[]);
- state.accept(event(10,{kind:'source_draft',segment_id:'next',start_s:9,end_s:16,text:'long draft'}));
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.segment_id),['s9','next']);
- state.accept(event(11,{kind:'source_final',segment_id:'next',start_s:9,end_s:16,text:'Qwen result'}));
- assert.deepEqual(state.tracks().sourceParts.map(e=>e.segment_id),['next']);
-});
-test('committing a split MT prefix replaces its former whole-group draft',()=>{
- const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- state.accept(event(1,{kind:'translation_draft',group_id:'g1',start_s:0,end_s:5,text:'old whole draft'}));
- state.accept(event(2,{kind:'translation_final',group_id:'g1',start_s:0,end_s:2,text:'prefix only'}));
- state.accept(event(3,{kind:'translation_draft',group_id:'g2',start_s:2,end_s:5,text:'tail only'}));
- assert.deepEqual(state.tracks().translationParts.map(e=>e.text),['prefix only','tail only']);
- state.accept(event(4,{kind:'translation_draft',group_id:'g1',start_s:0,end_s:5,text:'late old draft'}));
- assert.equal(state.tracks().translationParts[0].text,'prefix only');
 });
 
 test('prefix rewrites wait two seconds and replace the entire latest snapshot',()=>{
@@ -135,14 +48,6 @@ test('new groups and clearing the activity bypass the prefix gate',()=>{
  assert.equal(gate.select({kind:'source_draft',segment_id:'b',text:'reset'},30).text,'reset');
 });
 
-test('splitting a long MT draft never brings expired text back into the reading frame',()=>{
- const state=new OnlineCaptions();state.snapshot({status:status('s'),events:[]});
- for(let i=1;i<=3;i++)state.accept(event(i,{kind:'translation_final',group_id:`old${i}`,start_s:i-1,end_s:i,text:`old ${i}`}));
- state.accept(event(4,{kind:'translation_draft',group_id:'g',start_s:3,end_s:10,text:'whole draft'}));
- state.accept(event(5,{kind:'translation_final',group_id:'g',start_s:3,end_s:6,text:'locked prefix'}));
- assert.deepEqual(state.tracks().translationParts.map(e=>e.text),['locked prefix']);
-});
-
 test('terminal translation failure replaces draft immediately, keeps Qwen pair and survives snapshots',()=>{
  const model=new OnlineCaptions();model.snapshot({status:status('s'),events:[]});
  const source=event(1,{kind:'source_final',segment_id:'a',start_s:0,end_s:2,text:'原文'});
@@ -161,4 +66,108 @@ test('terminal translation failure replaces draft immediately, keeps Qwen pair a
  assert.equal(restored.tracks().sourceParts[0].kind,'source_final');
  assert.equal(restored.translationFailures,1);
  restored.snapshot({status:status('other'),events:[]});assert.equal(restored.translationFailures,0);
+});
+
+function fixture() {
+ let now=0;
+ const model=new OnlineCaptions(()=>now);
+ model.snapshot({status:status('s'),events:[]});
+ return {model, at(value){now=value;return model.tracks();}};
+}
+const source=(id,start,end,text=id,kind='source_final')=>({kind,segment_id:id,start_s:start,end_s:end,text});
+const translation=(id,start,end,text=id,kind='translation_final',ids=[])=>({kind,group_id:id,start_s:start,end_s:end,text,source_revisions:Object.fromEntries(ids.map(id=>[id,1]))});
+test('A retires after stable reading time without any B source or translation',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,source('a',0,4)));
+ model.accept(event(2,translation('A',0,4,'译文A','translation_final',['a'])));
+ assert.deepEqual(at(0).sourceParts.map(e=>e.text),['a']);
+ assert.equal(at(stableReadingMs-1).translationParts[0].text,'译文A');
+ assert.deepEqual(at(stableReadingMs).translationParts,[]);
+ assert.deepEqual(at(stableReadingMs).sourceParts,[]);
+ assert.equal(model.tracks().translation.text,'译文A'); // Display is not processing history.
+});
+test('B accumulates in background and appears at its latest revision with no A tail',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,source('a',0,4)));
+ model.accept(event(2,translation('A',0,4,'A final','translation_final',['a'])));
+ at(0);
+ model.accept(event(3,source('b',4,12,'long B','source_draft')));
+ model.accept(event(4,translation('B',4,8,'B short','translation_draft',['b'])));
+ model.accept(event(5,translation('B',4,12,'B latest complete snapshot','translation_draft',['b'])));
+ assert.deepEqual(at(2999).sourceParts.map(e=>e.text),['a']);
+ const frame=at(3000);
+ assert.deepEqual(frame.sourceParts.map(e=>e.text),['long B']);
+ assert.deepEqual(frame.translationParts.map(e=>e.text),['B latest complete snapshot']);
+});
+test('B may have source only when A leaves; old translation is not carried across',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,source('a',0,4)));
+ model.accept(event(2,translation('A',0,4,'A','translation_final',['a'])));at(0);
+ model.accept(event(3,source('b',4,9,'B original','source_draft')));
+ const frame=at(3000);
+ assert.deepEqual(frame.sourceParts.map(e=>e.text),['B original']);
+ assert.deepEqual(frame.translationParts,[]);
+});
+test('a queued final starts its reading time when displayed, not when received',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,translation('A',0,4)));
+ model.accept(event(2,translation('B',4,8)));at(0);
+ assert.equal(at(3000).translationParts[0].group_id,'B');
+ assert.equal(at(5999).translationParts[0].group_id,'B');
+ assert.deepEqual(at(6000).translationParts,[]);
+});
+test('late MT final has its full reading time even after a long audio pause',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,translation('A',0,4,'preview','translation_draft')));at(0);
+ assert.equal(at(20000).translationParts[0].text,'preview');
+ model.accept(event(2,translation('A',0,4,'final')));
+ assert.equal(at(25000).translationParts[0].text,'final');
+ assert.equal(at(27999).translationParts[0].text,'final');
+ assert.deepEqual(at(28000).translationParts,[]);
+});
+test('snapshots do not restart a reading timer or resurrect an expired page',()=>{
+ const {model,at}=fixture();
+ const final=event(1,translation('A',0,4));model.accept(final);at(0);
+ model.snapshot({status:status('s'),events:[final]});at(2000);
+ assert.deepEqual(at(3000).translationParts,[]);
+ model.snapshot({status:status('s'),events:[final,event(2,translation('A',0,4,'late draft','translation_draft'))]});
+ assert.deepEqual(at(4000).translationParts,[]);
+});
+test('split MT final moves the display boundary only after its own reading time',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,source('a',0,3)));
+ model.accept(event(2,source('b',3,8)));
+ model.accept(event(3,translation('A',0,8,'whole preview','translation_draft',['a','b'])));at(0);
+ model.accept(event(4,translation('A',0,3,'prefix final','translation_final',['a'])));
+ model.accept(event(5,translation('B',3,8,'tail preview','translation_draft',['b'])));
+ assert.deepEqual(at(1000).sourceParts.map(e=>e.text),['a']);
+ assert.deepEqual(at(4000).sourceParts.map(e=>e.text),['b']);
+ assert.deepEqual(at(4000).translationParts.map(e=>e.text),['tail preview']);
+});
+test('displayed MT snapshot controls its source pairing while prefix edits are gated',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,source('a',0,3)));
+ const shown=translation('A',0,3,'old','translation_draft',['a']);model.accept(event(2,shown));at(0);
+ model.accept(event(3,source('b',3,8)));
+ model.accept(event(4,translation('A',0,8,'new','translation_draft',['a','b'])));
+ assert.deepEqual(model.tracks([shown]).sourceParts.map(e=>e.text),['a','b']);
+});
+test('paired source remains available after live ASR map eviction',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,source('a',0,4)));
+ model.accept(event(2,translation('A',0,4,'A','translation_final',['a'])));at(0);
+ for(let i=1;i<=70;i++)model.accept(event(i+2,source('s'+i,i+4,i+5)));
+ assert.deepEqual(at(1000).sourceParts.map(e=>e.text),['a']);
+});
+test('new session resets both the page boundary and reading clock',()=>{
+ const {model,at}=fixture();model.accept(event(1,translation('A',0,4)));at(0);at(3000);
+ model.snapshot({status:status('new'),events:[event(1,translation('N',0,2),'new')]});
+ assert.equal(at(4000).translationParts[0].group_id,'N');
+ assert.deepEqual(at(7000).translationParts,[]);
+});
+test('source-only sessions retain the existing whole-unit reading range',()=>{
+ const {model}=fixture();model.snapshot({status:{...status('s'),translationEnabled:false},events:[]});
+ for(let i=1;i<=9;i++)model.accept(event(i,source('s'+i,i-1,i)));
+ assert.deepEqual(model.tracks().sourceParts.map(e=>e.segment_id),['s5','s6','s7','s8','s9']);
+ assert.deepEqual(model.tracks().translationParts,[]);
 });

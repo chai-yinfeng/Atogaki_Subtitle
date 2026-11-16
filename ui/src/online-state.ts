@@ -27,6 +27,9 @@ export const phaseLabel: Record<string, string> = {
 };
 export const activePhase = (phase: string) => ["loading", "requesting_audio", "running", "stopping", "draining"].includes(phase);
 
+const endOf = (event: LiveEvent) => event.end_s ?? event.start_s ?? 0;
+const settled = (event: LiveEvent) => event.kind === "translation_final" || event.kind === "translation_failed";
+export const stableReadingMs = 3000;
 const byTime = (a: LiveEvent, b: LiveEvent) => (a.start_s ?? 0) - (b.start_s ?? 0);
 
 /** Keep settled captions independently of the rolling event transport buffer. */
@@ -40,7 +43,12 @@ export class OnlineCaptions {
   private groupSources = new Map<string, LiveEvent[]>();
   private prunedThrough = -1;
   private sourceEnd = 0;
-  private translationEnd = 0;
+  private displayAfter = -Infinity;
+  private page: LiveEvent | null = null;
+  private pageDeadline: number | null = null;
+
+  private clock: () => number;
+  constructor(clock: () => number = () => performance.now()) { this.clock = clock; }
 
   snapshot(snapshot: OnlineSnapshot): void {
     if (snapshot.status.sessionId !== this.status.sessionId) {
@@ -50,7 +58,10 @@ export class OnlineCaptions {
       this.groups.clear();
       this.groupSources.clear();
       this.prunedThrough = -1;
-      this.sourceEnd = this.translationEnd = 0;
+      this.sourceEnd = 0;
+      this.displayAfter = -Infinity;
+      this.page = null;
+      this.pageDeadline = null;
     }
     this.status = snapshot.status;
     this.translationEnabled = snapshot.status.translationEnabled ?? true;
@@ -73,7 +84,6 @@ export class OnlineCaptions {
     if (e.group_id && (e.kind === "translation_draft" || e.kind === "translation_final" || e.kind === "translation_failed")) {
       if (this.update(this.groups, e.group_id, event, 64)) {
         if (e.kind === "translation_failed") this.translationFailures++;
-        this.translationEnd = Math.max(this.translationEnd, e.end_s ?? e.start_s ?? 0);
         this.groupSources.set(e.group_id, this.sourcesFor(e));
         for (const id of this.groupSources.keys()) if (!this.groups.has(id)) this.groupSources.delete(id);
       }
@@ -113,20 +123,23 @@ export class OnlineCaptions {
   tracks(displayedTranslations?: LiveEvent[]): { source: LiveEvent | null; translation: LiveEvent | null; sourceParts: LiveEvent[]; translationParts: LiveEvent[] } {
     const sources = [...this.sources.values()].map(e => e.event).sort(byTime);
     const translations = [...this.groups.values()].map(e => e.event).sort(byTime);
-    const translationParts = this.translationEnabled ? displayedTranslations ?? pairedReadingWindow(translations, this.translationEnd) : [];
+    const current = this.translationEnabled && displayedTranslations === undefined ? this.readingPage(translations) : null;
+    const translationParts = this.translationEnabled ? displayedTranslations ?? (current ? [current] : []) : [];
     let sourceParts = readingWindow(sources, this.sourceEnd);
-    if (translationParts.length) {
-      const paired = translationParts.flatMap(group => this.sourcesFor(group));
-      const ids = new Set(translationParts.flatMap(group => Object.keys(group.source_revisions ?? {})));
-      for (const part of paired) if (part.segment_id) ids.add(part.segment_id);
-      const end = Math.max(...translationParts.map(e => e.end_s ?? e.start_s ?? 0));
-      const tail = sources.filter(e => !ids.has(e.segment_id!) &&
-        (e.end_s ?? e.start_s ?? 0) > Math.max(end, this.sourceEnd - 2));
-      const omitted = tail.length && sources.some(e => !ids.has(e.segment_id!) &&
-        (e.end_s ?? e.start_s ?? 0) > end && (e.start_s ?? 0) < (tail[0].start_s ?? 0) && !tail.includes(e));
-      const gap: LiveEvent[] = omitted ? [{kind:"source_gap", segment_id:`gap:${tail[0].segment_id}`,
-        start_s:end, end_s:tail[0].start_s, text:"…"}] : [];
-      sourceParts = [...new Map([...paired, ...gap, ...tail].map(e => [e.segment_id, e])).values()].sort(byTime);
+    if (this.translationEnabled) {
+      const group = translationParts[0];
+      if (group) {
+        const paired = this.sourcesFor(group);
+        const ids = new Set(paired.map(e => e.segment_id));
+        // A settled page has an exact source boundary. B continues in memory,
+        // independently of A's reading timer; no B readiness gates retirement.
+        const next = translations.find(e => (e.start_s ?? 0) > (group.start_s ?? 0));
+        const tail = settled(group) ? [] : sources.filter(e => !ids.has(e.segment_id) &&
+          endOf(e) > endOf(group) && (!next || (e.start_s ?? 0) < (next.start_s ?? 0)));
+        sourceParts = [...paired, ...tail].sort(byTime);
+      } else {
+        sourceParts = sources.filter(e => endOf(e) > this.displayAfter);
+      }
     }
     return {
       source: sources.at(-1) ?? null,
@@ -136,15 +149,20 @@ export class OnlineCaptions {
     };
   }
 
-}
-
-/** Both frames follow these units. Obsolete drafts and an old whole final
- * are not exempt from the reading range; always retain the current MT unit
- * while a split final is waiting for its new tail's first translation. */
-function pairedReadingWindow(parts: LiveEvent[], end: number): LiveEvent[] {
-  const current = parts.at(-1);
-  return parts.filter(e => e === current || ((e.kind === "translation_final" || e.kind === "translation_failed") &&
-    (e.end_s ?? e.start_s ?? 0) > end - 5));
+  private readingPage(parts: LiveEvent[]): LiveEvent | null {
+    const now = this.clock();
+    if (this.page) this.page = parts.find(e => e.group_id === this.page!.group_id) ?? this.page;
+    if (this.pageDeadline !== null && now >= this.pageDeadline) {
+      this.displayAfter = Math.max(this.displayAfter, endOf(this.page!));
+      this.page = null;
+      this.pageDeadline = null;
+    }
+    if (!this.page) this.page = parts.find(e => endOf(e) > this.displayAfter) ?? null;
+    // Start when the final is first displayed, including a final that waited
+    // behind A. Replayed snapshots must not restart this clock.
+    if (this.page && settled(this.page) && this.pageDeadline === null) this.pageDeadline = now + stableReadingMs;
+    return this.page;
+  }
 }
 
 /** Five seconds is a soft reading range: keep complete units and the locked
