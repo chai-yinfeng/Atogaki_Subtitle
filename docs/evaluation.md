@@ -270,7 +270,7 @@ Typeless 的[官方说明](https://www.typeless.com/data-controls)明确音频�
 
 首次指标有两轮十个裁片观测，final 有十二个 VAD 段／译组；不是相同条目的字词级时钟。首次非空可能很短，文字变化间隔也受内容重复影响；请求音频范围可能先于／晚于语义所需内容，不能当作持续正确中文的滞后。新模式并非所有指标更快，更不是质量分数改善；它避免 CPU 草稿到 Qwen 定稿的模型切换，在本批保持最终原文一致并缩短中位定稿尾部，是否改善阅读由本机试用确认。Qwen allocator peak 约 3.508 GB，旧路径未计相同 allocator 指标，不提供错误的 0 GB 对照或长时内存保证。
 
-189 项 Python（含同坐标复用、较短 VAD final 清缓存和 final／preview 取序）、4 项 Rust owner／参数／停止测试、372 项前端、TypeScript／生产构建和 Tauri offline check 通过。本机安装前还需核对完整 bundle 资源、签名及 App 就绪；实际安装记录写入[本机安装文档](local-editor-installation.md)，不以回放代替真实捕获／原生上屏或长期质量验收。
+189 项 Python（含同坐标复用、较短 VAD final 清缓存和 final／preview 取序）、4 项 Rust owner／参数／停止测试、5 项 Tauri 目录、372 项前端、TypeScript／生产构建和 Tauri offline check 通过。已从 `57f1fbd` 构建并安装，40 文件／共享资源／sidecar／deep strict 签名一致，安装包中的模块实际加载受管 DFlash 模型通过；原生面板配置就绪，未开始采集。数据库 20 表在替换前后和启动后均一致，旧 App 与一致性数据库备份保留。见[本机安装文档](local-editor-installation.md#2026-11-16单路-qwendflash-本地预译试用)；不以回放或就绪界面代替真实捕获／原生上屏或长期质量验收。
 
 ## 已停用的历史入口
 
