@@ -1,6 +1,18 @@
 # 本机安装与回退记录
 
-最新安装为 2026-11-16 的字幕整组退场／显式模式／紧凑设置试用版，代码提交 `5a69c82`，App 版本号仍为 0.1.3；没有修改公开 Release。以下按日期保留历史记录。
+最新安装为 2026-11-16 的 Neutral 主窗口／嵌入在线控制试用版，代码提交 `f258819`（主要重设计为 `c782543`），App 版本号仍为 0.1.3；没有修改公开 Release。以下按日期保留历史记录。
+
+## 2026-11-16：Neutral 主窗口与嵌入在线控制
+
+用户确认按 shadcn 标准大幅重做界面。按[0083](decisions/0083-neutral-shell-and-embedded-online.md)拆开窗口布局与页面样式，工作台以新任务为主体、最近任务默认藏在侧边抽屉；修复收听区域挤压，在线控制直接嵌入主窗口，独立字幕窗保留。常驻刷新按钮只重复已有两秒轮询，已移除。首次运行将旧主题和图片配置备份到 WebView 本地后选择 Neutral，不删除图片、模型或字幕。
+
+从干净 `c782543` 编译首轮 App，原生验收发现无头 WebKit 自动关闭 dialog 的 Escape 行为在实际 WKWebView 不生效；`f258819` 增加显式键处理后再次从干净源码执行 `cargo tauri build --config tauri.macos-complete.conf.json --bundles app`，原子替换 `/Applications/Atogaki.app`。最终原生验收确认 Escape 关闭并返回触发按钮焦点、默认隐藏抽屉／13 个任务、内嵌在线控制和开始可用。首轮同布局已用真实媒体暂停加载核对播放器、当前字幕与右侧正文；没有点击播放或启动系统采集。最终 App 留在在线页未开始状态，原有识别模式与翻译配置保留。
+
+原版回退包保留于 `/Applications/.Atogaki.previous-20261116-neutral-shell`；首轮候选留于 `/Applications/.Atogaki.previous-20261116-neutral-shell-first-build`。更早回退包保留。最终构建／安装 40 个文件逐项一致，全部共享 Python 资源、五个 sidecar 和 deep／strict ad-hoc 签名通过。安装前 SQLite backup API 一致性备份已保存；两次安装、两次启动后的 20 张表摘要均与安装前完全相同，integrity=ok、foreign key 检查为空。
+
+377 项前端、4 项 Rust 会话、2 项 Tauri 模式／模型目录回归、类型／生产构建、两套 fmt 与 diff 检查通过。生产 WebKit 覆盖三档收听布局、任务抽屉、在线离开／返回、设置保存／模型管理／文件选择、编辑／保存／撤销／播放恢复、候选弹窗、媒体关联、字幕导出与跨任务位置。已有回归脚本改用显式打开任务抽屉；导出隔离断言检查实际 inert 祖先。没有更改 ASR／MT、开展新语义评分、调用云端或宣称两秒体验通过。
+
+构建／测试日志、数据库备份／表摘要、包清单和截图保存在忽略的 `local-artifacts/evaluation/neutral-shell-app-20261116/`。本轮只向用户个人仓库的 `codex/desktop-shell-redesign` 推送源码，没有发布 Release 或 tag。
 
 ## 2026-11-16：字幕阅读退场与主题设置整理
 
