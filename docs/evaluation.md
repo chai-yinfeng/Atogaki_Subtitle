@@ -166,6 +166,21 @@ DSpark 在当前 checkpoint、固定整块和参考适配下反而多花约 21.4
 
 实现验证：生产 Python 环境执行 `python3 -m unittest discover -s experiments/online -p 'test_*.py'` 共 182 项通过，包含新增的需求合并、EOF 升级／复用、终止唤醒和指标合同；根目录及 Tauri 的 `cargo fmt --check`、`git diff --check` 通过。实验基于 `fad236e`，运行前保存参与源码快照与摘要，运行后逐一一致；没有重打包／安装 App。
 
+### 原文锁定到译文完成的配对补算（2026-11-15）
+
+按用户要求，仅分析上述既有事件，不发起新推理。逐条用 `segment_id` 和 `source_revision` 配对，计算 `translation_final.emission_s - source_final.emission_s` 后聚合；不能相减两个 EOF 延迟中位数来代替配对差值。每臂十条观测，明细与原事件摘要保存于私有 `lock-to-translation.json`。
+
+| 条件 | 锁定到译文完成，中位数 | 同项范围 | MT 调用，中位数 | MT 排队，中位数 |
+| --- | ---: | ---: | ---: | ---: |
+| 单路 DFlash＋MT | 0.417 s | 0.254–0.814 s | 0.393 s | 0.026 s |
+| SenseVoice preview＋Qwen final＋MT | 0.384 s | 0.235–0.800 s | 0.372 s | 0.012 s |
+
+MT 调用计时包括本地 HTTP、server prefill／生成及客户端解析校验，不是纯 GPU kernel 时间；各列分别取中位数，不能严格相加。当前客户端 `stream=False`，只能得到完整译文，没有首 token／首个正确译文的计时。本轮是短裁片、空 H/R、每个 final 翻译一次；没有测预译重试或更长历史，不能据此断言生产链路由 MT 或 ASR 单独主导。自然边界等待也不包含在“锁定后”区间内。
+
+只读核对还发现，已安装 `mlx-qwen3-asr==0.4.4` 的 `streaming.py` 已有 `_WindowPrefixCache`／`reuse_window_prefix`，`encoder.py` 对齐模型 `n_window_infer=800`（约 8 秒）块对角注意力。双向依赖存在于块内，不意味着整个未锁定语义群都必须重新编码：完整块且前处理输入不变时，可复用 encoder 输出及相应音频前缀的 decoder KV；部分尾块仍重算，音频之后的生成文字不能因此沿用旧 KV。centered STFT 需要额外尾部样本，窗口全局 log-mel 最大值变化会使旧块缓存失效；浮点归约次序也须核对。机制见[包上游 Streaming 说明](https://github.com/moona3k/mlx-qwen3-asr#streaming)，本机源码已交叉检查，不把上游 benchmark 当成本机结果。
+
+第五阶段入口没有调用该 streaming 路径，专用 DFlash decoder 每请求新建 target／draft cache；因此 4.25 倍是当前实现的实测成本，不能作为架构不可优化的下界。后继可先研究复用已有的音频块缓存，保持文字可回改，再单独评估文字前缀强制保留；两者不能绑定为一个无损优化。尚未适配或实测缓存＋DFlash，不更新生产默认，也没有实现云端在线 MT。用户提出的 API key 方向仍在讨论，未授权调用或上传材料。
+
 ## 已停用的历史入口
 
 旧素材角色、CER／WER 方法、ASR 实验、未校正模型参照、离线诊断、runtime 候选和时钟／资源验证均见[历史归档](archive/2026-11-14/evaluation-before-confirmed-text.md)。它们只解释当时工作，不是当前待跑任务；恢复旧实验需要重新明确范围，不能通过旧状态自动混入当前结果。
