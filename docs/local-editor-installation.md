@@ -1,6 +1,18 @@
 # 本机安装与回退记录
 
-最新安装为 2026-11-16 的本地 DFlash 试用版，代码提交 `57f1fbd`，App 版本号仍为 0.1.3；没有修改公开 Release。以下按日期保留历史记录。
+最新安装为 2026-11-16 的字幕整组退场／显式模式／紧凑设置试用版，代码提交 `5a69c82`，App 版本号仍为 0.1.3；没有修改公开 Release。以下按日期保留历史记录。
+
+## 2026-11-16：字幕阅读退场与主题设置整理
+
+用户确认 A 组译文定稿、稳定阅读时间结束后直接切入 B 当时已有内容，不等待 B 就绪；翻译上下文不随显示清除。按[0081](decisions/0081-online-caption-page-retirement.md)使用 3 秒阅读时间、现有 500ms 轮询，按[0082](decisions/0082-compact-purpose-based-desktop-settings.md)整理侧栏、翻译模型入口、任务预设和主题。显式 One Pass／Two Pass、DFlash 现有四语言提示及独立依赖验证见 0080 后继记录。
+
+从干净提交 `5a69c82` 执行 `cargo tauri build --config tauri.macos-complete.conf.json --bundles app`。确认旧 App 未运行后，先用 SQLite backup API 保存一致性备份，再原子替换 `/Applications/Atogaki.app`，旧包保留在 `/Applications/.Atogaki.previous-20261116-caption-ui`；更早的 DFlash 回退包也保留。构建和安装的 40 个文件、全部共享 Python 资源、五个 sidecar 与 deep／strict ad-hoc 签名一致。没有发布 Release、tag 或更新公开安装资产。
+
+安装包内的 `SpeculativeASR.load` 实际加载受管 Qwen 1.7B 8bit＋DFlash，确认 English 参数传入缓存转录器，音频样本数为 0；不是英语内容质量实测。原生窗口确认工作台 13 个任务、识别页的 One Pass／Two Pass 分类、翻译页默认与模型管理；在线控制显示 One Pass、日语、Qwen 1.7B 8bit、Hy-MT2、预译勾选、开始可用，停在未开始状态，没有开启系统音频采集或修改正式配置。
+
+替换前／替换后／启动后 20 张数据库表摘要一致，integrity=ok、foreign key 检查为空。375 项前端、190 项 Python／MLX、4 项 Rust 会话、2 项模式／目录回归及类型／生产构建／两套 fmt／diff 通过；10 个生产 WebKit 检查入口覆盖显示退场、跨窗口默认／配色、设置／后端草稿／凭据隔离、模型下载与选择、文件选择和启动。两套主题及安装版在线控制截图已检查。真实节目语义、稳定阅读节奏及持续两秒目标仍由用户试用确认；没有重跑语义评分或调用云端。
+
+备份、表摘要、包清单、模型加载／构建／测试日志及截图保存在忽略的 `local-artifacts/evaluation/caption-ui-app-20261116/`。
 
 ## 2026-11-16：单路 Qwen＋DFlash 本地预译试用
 
