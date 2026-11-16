@@ -76,3 +76,11 @@ SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依�
 前端保留一个播放器、一份字幕草稿与导航身份。`editor-session`、`editor-follow` 管理编辑／播放／锁定，`editor-cue-list` 管理虚拟列表，`editor-timeline-*`／`editor-waveform` 管理绘制与交互，`*-navigation` 管理各入口访问，`*-view` 管理 DOM 生命周期，`*-backend` 适配 IPC。异步返回核对当前任务／访问／代次；视图销毁不取消已经提交的数据库事务。
 
 统一编辑器布局和交互以 [0058](decisions/0058-compact-editor-and-playback-follow.md) 为准；Rust 模块整理以 [0059](decisions/0059-desktop-command-and-repository-modules.md) 为准。`ui/src/main.ts`、Rust 服务与 `LocalDatabase` 仍集中较多协调，后续按真实变更和缺陷拆分，不以文件长度直接启动重构。各子模块历史说明与旧小节锚点见[原架构记录](archive/2026-11-11/architecture-before-review.md#字幕编辑前端的渐进边界)。
+
+## 2026-11-16 在线显示与配置入口
+
+在线识别显式区分 One Pass（Qwen＋DFlash）与 Two Pass（SenseVoice／Zipformer＋Qwen），依赖分别校验，不再由语言标签隐式切换。DFlash 在现有四种在线语言中传递对应模型提示，既有日语质量证据不推广到其他语言。见 0080 后继记录。
+
+WebView 的阅读页以译文定稿范围和单调阅读时间推进，A 的退场不依赖 B 是否完成；后端识别、MT 分组、版本及原文历史不受显示起点影响。新打开的窗口恢复最新组，不重播传输缓存历史。见[0081](decisions/0081-online-caption-page-retirement.md)。
+
+模型下载视图按识别／翻译过滤同一个目录与管理会话；翻译路径、选择和离线／在线默认集中在翻译页。主窗口与在线控制复用主题语义 token，独立字幕窗保持自己的对比底；没有增加前端框架。见[0082](decisions/0082-compact-purpose-based-desktop-settings.md)。

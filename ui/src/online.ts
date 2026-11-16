@@ -2,39 +2,59 @@ import {invoke} from "@tauri-apps/api/core";
 import {listen} from "@tauri-apps/api/event";
 import {DraftPresentation, OnlineCaptions, activePhase, phaseLabel, type CaptionEvent, type OnlineSnapshot, type LiveEvent} from "./online-state";
 import "./online.css";
+import {readOnlinePreferences, saveOnlinePreferences} from "./online-preferences";
+import {applyTheme, readTheme} from "./themes";
+import {readImageTheme} from "./appearance";
+import {paletteVariables} from "./image-palette";
+let paletteKeys:string[]=[];
+function restoreAppearance():void {
+ for(const key of paletteKeys)document.documentElement.style.removeProperty(key);
+ applyTheme(readTheme());
+ const theme=readImageTheme();
+ if(theme?.enabled){
+  const palette=paletteVariables(theme.palette,theme.strength,theme.roles);
+  paletteKeys=Object.keys(palette);
+  for(const [key,value] of Object.entries(palette))document.documentElement.style.setProperty(key,value);
+ }else paletteKeys=[];
+}
+restoreAppearance();
+window.addEventListener("storage",event=>{if(event.key?.startsWith("atogaki.appearance."))restoreAppearance();});
 
 type Choice={id:string;name:string;ready:boolean};
-type Choices={languages:Choice[];finals:Choice[];runtimeReady:boolean;translationReady:boolean;translators:Choice[]};
+type DraftChoice=Choice&{language:string};
+type Choices={drafts:DraftChoice[];accelerationReady:boolean;languages:Choice[];finals:Choice[];runtimeReady:boolean;translationReady:boolean;translators:Choice[]};
 type Glossary={id:string;name:string;source_language:string};
 const control=document.body.dataset.view==="control";
 const root=document.querySelector<HTMLElement>("#online-root")!;
 root.innerHTML=`<section class="online-card">
 <header ${control?"data-tauri-drag-region":""}><strong ${control?"data-tauri-drag-region":""}>Atogaki · ${control?"在线字幕控制面板":"在线字幕"}</strong><button id="online-hide" class="quiet" type="button">${control?"字幕窗":"隐藏"}</button></header>
-${control?`<section class="session-controls" aria-label="在线会话控制">
-<div class="session-options"><label>原文语言<select id="online-language"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>翻译为中文</label></div>
+<div class="online-layout">${control?`<aside class="session-sidebar"><section class="session-controls" aria-label="在线会话控制">
+<div class="session-options"><fieldset class="recognition-mode"><legend>识别模式</legend><label><input type="radio" name="recognition-mode" value="one-pass" checked>One Pass</label><label><input type="radio" name="recognition-mode" value="two-pass">Two Pass</label></fieldset><label>原文语言<select id="online-language"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>翻译为中文</label></div>
 <div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止并完成末段</button></div>
-<p class="help">读取系统声音，不使用麦克风，不保存录音。隐藏字幕窗后仍会继续处理。</p>
+<p id="online-profile-status" class="help" role="status"></p>
 </section>
 <details id="online-settings" class="online-settings"><summary>识别与翻译设置</summary>
 <div class="configuration">
-<label>确认识别模型<select id="online-model"></select></label>
+<label id="online-draft-field">草稿识别<select id="online-draft-model"></select></label>
+<label><span id="online-model-label">识别模型</span><select id="online-model"></select></label>
 <label>翻译模型<select id="online-translator"></select></label>
 <label class="wide">词表<select id="online-glossary"><option value="">不使用词表</option></select></label>
 <label class="wide">场景提示（可选）<textarea id="online-scene" maxlength="1000" rows="2" placeholder="例如：个人电台，讲述过去的经历。只填写确定的信息。"></textarea></label>
 <label class="check wide"><input type="checkbox" id="online-drafts" checked aria-describedby="online-drafts-help">提前翻译未完成的原文（译文可回改）</label>
-<p id="online-drafts-help" class="help">开启会增加翻译计算；关闭后，等待原文确认且分组结束再翻译。</p>
-<p class="help">设置在下次开始时生效。蓝色草稿仍会更新；已锁定内容不再回改。</p>
+<p id="online-drafts-help" class="help">关闭后等待原文和分组确认。</p>
+
 <button id="online-refresh" class="secondary wide" type="button">刷新模型／词表</button>
 </div></details>
-<label class="check overlay-lock"><input type="checkbox" id="online-lock">锁定字幕窗（鼠标穿透）</label>`:""}
+<label class="check overlay-lock"><input type="checkbox" id="online-lock">锁定字幕窗（鼠标穿透）</label><p class="help">系统音频 · 不保存录音</p></aside>`:""}<div class="caption-workspace">
 <p id="online-status" role="status">正在读取会话状态…</p>
 <section id="source-track" class="track"><div class="track-heading"><span class="badge">原文</span><span id="source-state" class="track-state"></span></div><p id="source-text">等待语音…</p></section>
 <section id="translation-track" class="track"><div class="track-heading"><span class="badge">译文</span><span id="translation-state" class="track-state"></span></div><p id="translation-text">等待翻译…</p></section>
 ${control?`<details class="timing-details"><summary>处理延迟</summary><p id="online-timing" class="help"></p></details>`:""}
-</section>`;
+</div></div></section>`;
 const model=new OnlineCaptions();
 const find=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
 const set=(id:string,text:string)=>{const node=find(id);if(node.textContent!==text)node.textContent=text;};
+let preferences=readOnlinePreferences();
 let choices:Choices|null=null, busy=false, message="", disposed=false;
 let pendingCaptionSession:string|null=null;
 let captionLocked=false, lockBusy=false;
@@ -86,9 +106,17 @@ function render():void {
  if(!control)return;
  if(state.phase==="running"&&pendingCaptionSession===state.sessionId){pendingCaptionSession=null;void invoke("open_online_captions").catch(e=>{message=String(e);render();});}
  const active=activePhase(state.phase);
- find<HTMLButtonElement>("online-start").disabled=busy||active||!choices?.runtimeReady||!choices.finals.find(x=>x.id===find<HTMLSelectElement>("online-model").value)?.ready||!choices.languages.find(x=>x.id===find<HTMLSelectElement>("online-language").value)?.ready;
+ const mode=recognitionMode(), single=mode==="one-pass";
+ const draft=choices?.drafts.find(x=>x.id===find<HTMLSelectElement>("online-draft-model").value&&x.language===find<HTMLSelectElement>("online-language").value);
+ const target=choices?.finals.find(x=>x.id===find<HTMLSelectElement>("online-model").value);
+ const ready=target?.ready&&(single?choices?.accelerationReady&&target.id==="qwen-1.7b-8bit":draft?.ready);
+ find<HTMLButtonElement>("online-start").disabled=busy||active||!choices?.runtimeReady||!ready;
  find<HTMLButtonElement>("online-stop").disabled=busy||!active;
- for(const id of ["online-language","online-model","online-translate","online-drafts","online-translator","online-glossary","online-scene","online-refresh"]) (find(id) as HTMLInputElement).disabled=active||busy;
+ for(const id of ["online-language","online-model","online-draft-model","online-translate","online-drafts","online-translator","online-glossary","online-scene","online-refresh"]) (find(id) as HTMLInputElement).disabled=active||busy;
+ for(const input of root.querySelectorAll<HTMLInputElement>('input[name="recognition-mode"]'))input.disabled=active||busy;
+ find("online-draft-field").hidden=single;
+ set("online-model-label",single?"识别模型":"确认识别模型");
+ set("online-profile-status",single?(choices?.accelerationReady?"Qwen3-ASR · DFlash":"需准备 Qwen3-ASR 1.7B 8-bit 和 DFlash"):draft?.ready?draft.name+" → Qwen3-ASR":"请准备所选草稿识别模型");
  const translationReady=!!choices?.translators.some(x=>x.id===find<HTMLSelectElement>("online-translator").value&&x.ready);
  find<HTMLInputElement>("online-translate").disabled=active||busy||!translationReady;
  const translating=find<HTMLInputElement>("online-translate").checked&&translationReady;
@@ -106,11 +134,30 @@ function filterGlossaries():void {
  for(const option of select.options)option.disabled=!!option.value&&option.dataset.language!==language;
  if(select.selectedOptions[0]?.disabled)select.value="";
 }
+function recognitionMode(): "one-pass"|"two-pass" {
+ return root.querySelector<HTMLInputElement>('input[name="recognition-mode"]:checked')?.value === "two-pass"?"two-pass":"one-pass";
+}
+function filterModels():void {
+ const select=find<HTMLSelectElement>("online-model"),single=recognitionMode()==="one-pass";
+ for(const option of select.options)option.disabled=!choices?.finals.find(x=>x.id===option.value)?.ready||(single&&option.value!=="qwen-1.7b-8bit");
+ if(select.selectedOptions[0]?.disabled)select.value=[...select.options].find(x=>!x.disabled)?.value??"";
+ const drafts=find<HTMLSelectElement>("online-draft-model"),previous=drafts.value||preferences.draftBackend;
+ drafts.replaceChildren(...(choices?.drafts??[]).filter(x=>x.language===find<HTMLSelectElement>("online-language").value).map(c=>{
+  const option=document.createElement("option");option.value=c.id;option.textContent=c.name+(c.ready?"":" · 未就绪");option.disabled=!c.ready;return option;
+ }));
+ drafts.value=[...drafts.options].some(x=>x.value===previous&&!x.disabled)?previous:[...drafts.options].find(x=>!x.disabled)?.value??"";
+}
+function remember():void {
+ saveOnlinePreferences({recognitionMode:recognitionMode(),draftBackend:find<HTMLSelectElement>("online-draft-model").value==="zipformer"?"zipformer":"sensevoice",
+  language:find<HTMLSelectElement>("online-language").value,finalModel:find<HTMLSelectElement>("online-model").value,
+  translationBackend:find<HTMLSelectElement>("online-translator").value,translate:find<HTMLInputElement>("online-translate").checked,
+  translationDrafts:find<HTMLInputElement>("online-drafts").checked});
+}
 async function loadChoices():Promise<void>{
  const [loaded,glossaries]=await Promise.all([invoke<Choices>("online_choices"),invoke<Glossary[]>("list_glossaries")]);
  if(disposed)return;
  choices=loaded;
- for(const [id,list,fallback] of [["online-language",choices.languages,"ja"],["online-model",choices.finals,"qwen-1.7b-8bit"],["online-translator",choices.translators,"hy-mt2"]] as const){
+ for(const [id,list,fallback] of [["online-language",choices.languages,preferences.language],["online-model",choices.finals,preferences.finalModel],["online-translator",choices.translators,preferences.translationBackend]] as const){
   const select=find<HTMLSelectElement>(id), previous=select.value||fallback;
   select.replaceChildren(...list.map(c=>{const option=document.createElement("option");option.value=c.id;option.textContent=c.name+(c.ready?"":" · 未就绪");option.disabled=!c.ready;return option;}));
   select.value=list.some(c=>c.id===previous&&c.ready)?previous:list.find(c=>c.ready)?.id??"";
@@ -120,11 +167,14 @@ async function loadChoices():Promise<void>{
  select.replaceChildren(empty,...glossaries.map(g=>{const option=document.createElement("option");option.value=g.id;option.textContent=g.name;option.dataset.language=g.source_language;return option;}));
  select.value=previous;
  if(!select.value)select.value="";
- filterGlossaries();
+ filterGlossaries();filterModels();
 }
 async function mount():Promise<void>{
 const unlisten=await listen<CaptionEvent>("online-session-event",({payload})=>{model.accept(payload);render();});
 if(control){
+ root.querySelector<HTMLInputElement>('input[name="recognition-mode"][value="'+preferences.recognitionMode+'"]')!.checked=true;
+ find<HTMLInputElement>("online-translate").checked=preferences.translate;
+ find<HTMLInputElement>("online-drafts").checked=preferences.translationDrafts;
  find("online-lock").onchange=async()=>{
   const locked=find<HTMLInputElement>("online-lock").checked;lockBusy=true;render();
   try{await invoke("set_online_caption_locked",{locked});captionLocked=locked;}catch(e){message=String(e);}finally{lockBusy=false;await refresh();}
@@ -137,15 +187,32 @@ if(control){
  find("online-start").onclick=async()=>{
   busy=true;message="";render();
   try{
+   remember();
    await invoke("hide_online_captions");
-   const status=await invoke<OnlineSnapshot["status"]>("start_online_session",{options:{language:find<HTMLSelectElement>("online-language").value,finalModel:find<HTMLSelectElement>("online-model").value,translate:find<HTMLInputElement>("online-translate").checked,translationDrafts:find<HTMLInputElement>("online-drafts").checked,translationBackend:find<HTMLSelectElement>("online-translator").value,glossaryId:find<HTMLSelectElement>("online-glossary").value||null,scene:find<HTMLTextAreaElement>("online-scene").value}});
+   const status=await invoke<OnlineSnapshot["status"]>("start_online_session",{options:{recognitionMode:recognitionMode(),draftBackend:find<HTMLSelectElement>("online-draft-model").value,language:find<HTMLSelectElement>("online-language").value,finalModel:find<HTMLSelectElement>("online-model").value,translate:find<HTMLInputElement>("online-translate").checked,translationDrafts:find<HTMLInputElement>("online-drafts").checked,translationBackend:find<HTMLSelectElement>("online-translator").value,glossaryId:find<HTMLSelectElement>("online-glossary").value||null,scene:find<HTMLTextAreaElement>("online-scene").value}});
    model.snapshot({status,events:[]});pendingCaptionSession=status.sessionId;
   }catch(e){message=String(e);}finally{busy=false;await refresh();}
  };
+ window.addEventListener("storage",event=>{
+  if(event.key!=="atogaki.onlinePreferences"||busy||activePhase(model.status.phase))return;
+  preferences=readOnlinePreferences();
+  root.querySelector<HTMLInputElement>('input[name="recognition-mode"][value="'+preferences.recognitionMode+'"]')!.checked=true;
+  find<HTMLSelectElement>("online-language").value=preferences.language;
+  find<HTMLSelectElement>("online-model").value=preferences.finalModel;
+  find<HTMLSelectElement>("online-draft-model").value=preferences.draftBackend;
+  find<HTMLSelectElement>("online-translator").value=preferences.translationBackend;
+  find<HTMLInputElement>("online-translate").checked=preferences.translate;
+  find<HTMLInputElement>("online-drafts").checked=preferences.translationDrafts;
+  filterModels();filterGlossaries();render();
+ });
  find("online-stop").onclick=async()=>{busy=true;message="";render();try{await invoke("stop_online_session");}catch(e){message=String(e);}finally{busy=false;await refresh();}};
- find("online-language").onchange=()=>{filterGlossaries();render();};
- find("online-translator").onchange=()=>render();
- find("online-translate").onchange=()=>render();
+ find("online-language").onchange=()=>{filterGlossaries();filterModels();remember();render();};
+ for(const input of root.querySelectorAll<HTMLInputElement>('input[name="recognition-mode"]'))input.onchange=()=>{filterModels();remember();render();};
+ find("online-model").onchange=()=>{remember();render();};
+ find("online-draft-model").onchange=()=>{remember();render();};
+ find("online-drafts").onchange=()=>remember();
+ find("online-translator").onchange=()=>{remember();render();};
+ find("online-translate").onchange=()=>{remember();render();};
  find("online-refresh").onclick=()=>void loadChoices().then(()=>{message="";render();}).catch(e=>{message=String(e);render();});
 }
 find("online-hide").onclick=async()=>{

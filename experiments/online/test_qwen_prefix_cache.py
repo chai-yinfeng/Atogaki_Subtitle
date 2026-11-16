@@ -49,6 +49,18 @@ class PrefixCacheTests(unittest.TestCase):
         draft.target_ids = mx.arange(32)
         return session, Target(model), draft
 
+    def test_language_is_forwarded_to_prompt_and_output_parser(self):
+        for language in ['Japanese', 'English', 'Chinese', 'Korean']:
+            session, target, draft = self.runtime()
+            cached = CachedTranscriber(session, target, draft, language=language)
+            features = (mx.ones((1, 1, 4)), mx.array([4]))
+            with patch.object(session.tokenizer, 'build_prompt_tokens', wraps=session.tokenizer.build_prompt_tokens) as prompt, \
+                 patch('qwen_prefix_cache.compute_features', return_value=features), \
+                 patch('qwen_prefix_cache.parse_asr_output', return_value=(language, 'text')) as parser:
+                self.assertEqual(cached.transcribe(np.arange(4, dtype=np.float32), 8)['text'], 'text')
+                self.assertEqual(prompt.call_args.kwargs['language'], language)
+                self.assertEqual(parser.call_args.kwargs['user_language'], language)
+
     def test_cached_target_and_draft_follow_changed_tail_without_retaining_text(self):
         session, target, draft = self.runtime()
         prefix = DecoderPrefix()

@@ -5,23 +5,23 @@ export function desktopSettingsTemplate(): string {
       <form id="settings-form">
         <div class="dialog-heading">
           <div><p class="eyebrow">SETTINGS</p><h2>设置</h2></div>
-          <button id="close-settings" type="button" class="secondary">稍后再说</button>
+          <button id="close-settings" type="button" class="secondary">关闭</button>
         </div>
-        <p class="dialog-help">媒体和模型默认保留在本机；选择云端翻译 provider 时，只有原文字幕和上下文会发送到对应服务。</p>
-<nav class="settings-tabs" aria-label="设置分区"><button type="button" class="secondary" data-settings-tab="appearance" aria-pressed="false">外观</button><button type="button" class="secondary active" data-settings-tab="transcription" aria-pressed="true">转录</button><button type="button" class="secondary" data-settings-tab="translation" aria-pressed="false">翻译</button><button type="button" class="secondary" data-settings-tab="models" aria-pressed="false">模型与存储</button><button type="button" class="secondary" data-settings-tab="dictionary" aria-pressed="false">词典</button><button type="button" class="secondary" data-settings-tab="network" aria-pressed="false">网络与高级</button></nav>
+<nav class="settings-tabs" aria-label="设置分区"><button type="button" class="secondary" data-settings-tab="appearance" aria-pressed="false">外观</button><button type="button" class="secondary active" data-settings-tab="transcription" aria-pressed="true">识别</button><button type="button" class="secondary" data-settings-tab="translation" aria-pressed="false">翻译</button><button type="button" class="secondary" data-settings-tab="models" aria-pressed="false">存储</button><button type="button" class="secondary" data-settings-tab="dictionary" aria-pressed="false">词典</button><button type="button" class="secondary" data-settings-tab="network" aria-pressed="false">网络与高级</button></nav>
 <div class="settings-content">
 <section data-settings-page="appearance" class="settings-section hidden appearance-settings"><h3>外观</h3><p>选择页面主题，即时生效并自动保存。字幕导出样式保持独立。</p><div class="theme-options"><button type="button" data-app-theme="moonlight"><span class="theme-swatch moonlight-swatch"></span><strong>月夜</strong><span>颜料笔触、月光与青灰纸面</span></button><button type="button" data-app-theme="letter"><span class="theme-swatch letter-swatch"></span><strong>来信</strong><span>纸纤维、折痕与信笺层次</span></button></div></section>
         <section data-settings-page="transcription" class="settings-section">
           <div class="settings-section-heading"><div><strong>本地转录</strong></div><span id="model-readiness"></span></div>
           <div class="settings-path-row">
-            <label>Whisper 模型<input id="settings-whisper-model" placeholder="选择已有 ggml-*.bin，或从下方下载" /></label>
+            <label>Whisper 模型<input id="settings-whisper-model" placeholder="选择模型文件" /></label>
             <button id="settings-choose-whisper" type="button" class="secondary">选择文件</button>
           </div>
           <div class="settings-path-row">
-            <label>Silero VAD 模型（推荐）<input id="settings-vad-model" placeholder="选择已有 ggml-silero-*.bin，或从下方下载" /></label>
+            <label>Silero VAD 模型（推荐）<input id="settings-vad-model" placeholder="选择 VAD 文件" /></label>
             <button id="settings-choose-vad" type="button" class="secondary">选择文件</button>
           </div>
 
+          <div id="model-catalog" class="model-catalog"></div>
           <details class="onboarding-optional"><summary>可选：Gemini 局部修复</summary>
         <section class="settings-section">
           <div class="settings-section-heading"><div><strong>3. 云端 ASR（可选）</strong><span>Gemini Key 只存入系统凭据库。配置 Key 不会授权上传；每次运行仍需单独确认音频范围。</span></div><span id="asr-credential-store-label"></span></div>
@@ -33,14 +33,7 @@ export function desktopSettingsTemplate(): string {
           </details>
         </section>
 ${translationProviderTemplate()}
-<section data-settings-page="models" class="settings-section hidden"><h3>模型与存储</h3><p>按用途展开模型，按需下载、校验与卸载。下载完成不代表在线运行环境已经就绪。</p><span id="models-directory"></span>
-          <div id="model-catalog" class="model-catalog"></div>
-          <p id="model-download-message" class="settings-message" role="status"></p>
-          <div class="settings-path-row">
-            <label>Hy-MT2 模型<input id="settings-hy-mt2-model" placeholder="选择已有 Hy-MT2 *.gguf，或从下方下载" /></label>
-            <button id="settings-choose-hy-mt2" type="button" class="secondary">选择文件</button>
-          </div>
-</section>
+<section data-settings-page="models" class="settings-section hidden"><h3>存储</h3><span id="models-directory"></span></section>
         <section data-settings-page="dictionary" class="settings-section hidden">
           <div class="settings-section-heading"><div><strong>词典</strong><span>离线包由你明确点击后下载到正式应用数据目录；商业词典的 Key 分来源保存。</span></div><span id="dictionary-directory"></span></div>
           <div>
@@ -86,7 +79,7 @@ ${translationProviderTemplate()}
         </section>
 </div>
         <div class="settings-footer">
-          <span id="settings-message" role="status"></span>
+          <div class="settings-status"><span id="settings-message" role="status"></span><span id="model-download-message" class="settings-message" role="status"></span></div>
           <div><button id="save-settings" type="submit" class="secondary">保存</button><button id="finish-settings" type="button">保存并开始使用</button></div>
         </div>
       </form>

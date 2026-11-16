@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 (async()=>{
  const browser=await webkit.launch({headless:true});
  try {
-  for(const mode of ['normal','dispose','presets','runtime']) {
+  for(const mode of ['normal','dispose','runtime']) {
    const page=await browser.newPage({viewport:{width:1180,height:760}}),errors=[];
    page.on('pageerror',e=>errors.push(String(e)));
    await require('./editor-ui-fixture.cjs').installEditorFixture(page,30);
@@ -27,10 +27,10 @@ const assert=require('node:assert/strict');
    if(mode==='normal') {
     await page.locator('.job-open').first().waitFor();await page.waitForFunction(()=>document.querySelector('#data-path').textContent.includes('/test/isolated'));
     const counts=await page.evaluate(()=>Object.fromEntries(['data_directory','list_glossaries','task_presets','list_job_summaries'].map(cmd=>[cmd,window.__test.calls.filter(call=>call.cmd===cmd).length])));
-    assert.deepEqual(counts,{data_directory:1,list_glossaries:1,task_presets:1,list_job_summaries:1});
+    assert.deepEqual(counts,{data_directory:1,list_glossaries:1,task_presets:0,list_job_summaries:1});
    } else if(mode==='dispose') {
-    await page.waitForFunction(()=>Object.keys(window.__startupQA.held).length===4);
-    const selectors=['#data-path','#job-list','#task-glossary','[aria-label="任务预设"]'];
+    await page.waitForFunction(()=>Object.keys(window.__startupQA.held).length===3);
+    const selectors=['#data-path','#job-list','#task-glossary'];
     const before=await page.evaluate(selectors=>selectors.map(selector=>document.querySelector(selector).innerHTML),selectors);
     await page.evaluate(()=>{window.dispatchEvent(new Event('pagehide'));Object.values(window.__startupQA.held).forEach(resolve=>resolve());});
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -43,16 +43,10 @@ const assert=require('node:assert/strict');
     await page.evaluate(()=>{window.dispatchEvent(new Event('pagehide'));window.__startupQA.held.list_job_summaries();});
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     assert.equal(await page.locator('#job-list').innerHTML(),before);
-   } else {
-    await page.waitForFunction(()=>window.__startupQA.held.task_presets);
-    await page.getByRole('textbox',{name:'预设名称',exact:true}).fill('新预设');await page.getByRole('button',{name:'保存当前配置为预设',exact:true}).click();
-    await page.waitForFunction(()=>document.querySelector('[aria-label="任务预设"]').textContent.includes('新预设'));
-    await page.evaluate(()=>window.__startupQA.held.task_presets());
-    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-    const presets=await page.locator('[aria-label="任务预设"]').textContent();assert.match(presets,/新预设/);assert.doesNotMatch(presets,/旧预设/);
    }
+   assert.equal(await page.locator('[aria-label="任务预设"]').count(),0);
    assert.deepEqual(errors,[]);await page.close();
   }
-  console.log('PASS: initial reads start once, disposed-page directory/tasks/glossaries/presets remain unchanged, late runtime refresh cannot render, and stale startup presets cannot replace a newer save');
+  console.log('PASS: initial reads start once, disposed-page directory/tasks/glossaries remain unchanged, late runtime refresh cannot render, and removed presets are not loaded');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

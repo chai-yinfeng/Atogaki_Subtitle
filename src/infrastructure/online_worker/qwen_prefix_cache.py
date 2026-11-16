@@ -20,8 +20,9 @@ class CachedTranscriber:
     Target and DFlash KV snapshots end at the same complete audio block.
     No forced text prefix, attention-mask change, or mel normalization change.
     """
-    def __init__(self, session, target, draft):
+    def __init__(self, session, target, draft, *, language="Japanese"):
         self.session, self.target, self.draft = session, target, draft
+        self.language = language
         self.reset()
 
     def reset(self):
@@ -60,7 +61,7 @@ class CachedTranscriber:
         reused_positions = self.decoder.target.offset if self.decoder.target is not None else 0
         total_tokens = reused_blocks*audio_cache.tokens_per_block + int(features.shape[0])
         prompt = self.session.tokenizer.build_prompt_tokens(
-            n_audio_tokens=total_tokens, language='Japanese', context='')
+            n_audio_tokens=total_tokens, language=self.language, context='')
         head = _prompt_audio_start(prompt, self.session.model.audio_token_id, total_tokens)
         retain = head+audio_cache.cached_tokens if audio_cache.blocks else 0
         if reused_positions != (head+reused_blocks*audio_cache.tokens_per_block if reused_blocks else 0):
@@ -80,7 +81,7 @@ class CachedTranscriber:
         result = decode(self.target, embeddings, max_new_tokens-len(prefix_ids), self.draft,
                         prefix=self.decoder, retain_positions=retain, timings=timings)
         result.tokens = prefix_ids + result.tokens
-        _, text = parse_asr_output(self.session.tokenizer.decode(result.tokens), user_language='Japanese')
+        _, text = parse_asr_output(self.session.tokenizer.decode(result.tokens), user_language=self.language)
         self.audio = samples.copy()
         self.raw_tokens = list(result.tokens)
         self.frozen_tokens = prefix_ids

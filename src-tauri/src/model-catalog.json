@@ -691,7 +691,7 @@
     "name": "DFlash 1.7B 转录加速包",
     "fileName": "online/qwen-dflash-1.7b",
     "sizeLabel": "约 726 MB",
-    "recommendedFor": "配合在线日语 Qwen3-ASR 1.7B 8bit，提供可回改预览和确认识别；本地试用配置，不是独立识别模型。",
+    "recommendedFor": "配合在线 Qwen3-ASR 1.7B 8bit，提供可回改预览和确认识别；本地试用配置，不是独立识别模型。",
     "sourceUrl": "https://huggingface.co/wilsonzheng0327/Qwen3-ASR-1.7B-dflash",
     "optional": true,
     "bundle": true,

@@ -29,6 +29,8 @@ pub struct OnlineRuntime {
 pub struct OnlineModels {
     pub language: String,
     pub draft_model: PathBuf,
+    #[serde(default)]
+    pub draft_kind: Option<String>,
     pub final_model: PathBuf,
     #[serde(default)]
     pub speculative_model: Option<PathBuf>,
@@ -165,8 +167,16 @@ impl OnlineSessionService {
         if !["ja", "en", "zh", "ko"].contains(&models.language.as_str()) {
             bail!("unsupported online source language");
         }
-        if models.speculative_model.is_some() && models.language != "ja" {
-            bail!("the DFlash local trial profile currently supports Japanese only");
+        if let Some(kind) = &models.draft_kind
+            && !["sensevoice", "zipformer"].contains(&kind.as_str())
+        {
+            bail!("unsupported online draft recognizer");
+        }
+        if models.speculative_model.is_none()
+            && models.draft_kind.as_deref() == Some("zipformer")
+            && models.language == "ja"
+        {
+            bail!("no verified Japanese Zipformer checkpoint");
         }
         let permit = self.scheduler.try_acquire_device().context(
             "local device is busy; finish the existing offline work before starting online capture",
@@ -273,11 +283,14 @@ async fn run_session(
             "--language",
             &models.language,
             "--draft",
-            if models.language == "ja" {
-                "sensevoice"
-            } else {
-                "zipformer"
-            },
+            models
+                .draft_kind
+                .as_deref()
+                .unwrap_or(if models.language == "ja" {
+                    "sensevoice"
+                } else {
+                    "zipformer"
+                }),
             "--final",
             "qwen",
         ])
@@ -509,8 +522,9 @@ mod tests {
                     translator: None,
                 },
                 OnlineModels {
-                    language: "ja".into(),
+                    language: "en".into(),
                     draft_model: root.join("not-installed"),
+                    draft_kind: None,
                     final_model: root.clone(),
                     speculative_model: Some(root.clone()),
                     vad_model: root.join("vad.onnx"),
@@ -533,6 +547,7 @@ mod tests {
         assert_eq!(service.stop().await.unwrap().phase, "stopped");
         let args = std::fs::read_to_string(root.join("args")).unwrap();
         assert!(args.contains(&format!("--speculative-model\n{}\n", root.display())));
+        assert!(args.contains("--language\nen\n"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -560,6 +575,7 @@ mod tests {
         let models = OnlineModels {
             language: "ja".into(),
             draft_model: root.clone(),
+            draft_kind: None,
             final_model: root.clone(),
             speculative_model: None,
             vad_model: root.join("vad.onnx"),

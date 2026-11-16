@@ -4,13 +4,14 @@ const assert=require('node:assert/strict');
 (async()=>{
  const browser=await webkit.launch({headless:true});
  try{
-  const page=await browser.newPage({viewport:{width:760,height:700}}),errors=[];
+  const context=await browser.newContext({viewport:{width:760,height:700}});
+  const page=await context.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(String(error)));
-  await page.addInitScript(()=>{
+  await context.addInitScript(()=>{
    window.__onlineQA={calls:[],status:{sessionId:null,phase:'idle',error:null},events:[],visible:false,locked:false};
    window.__TAURI_INTERNALS__={metadata:{currentWindow:{label:'online-control'},currentWebview:{label:'online-control'}},transformCallback:()=>1,unregisterCallback:()=>{},invoke:async(command,args={})=>{
     const q=window.__onlineQA;q.calls.push({command,args});
-    if(command==='online_choices')return {languages:[{id:'ja',name:'日语',ready:true}],finals:[{id:'qwen-1.7b-8bit',name:'Qwen3-ASR 1.7B 8bit',ready:true},{id:'qwen-1.7b',name:'Qwen3-ASR 1.7B',ready:true},{id:'qwen-0.6b',name:'Qwen3-ASR 0.6B',ready:false}],runtimeReady:true,translationReady:true,translators:[{id:'hy-mt2',name:'Hy-MT2 1.8B',ready:true}]};
+    if(command==='online_choices')return {accelerationReady:true,drafts:[{id:'sensevoice',name:'SenseVoice',language:'ja',ready:true},{id:'zipformer',name:'Zipformer',language:'ja',ready:false},{id:'sensevoice',name:'SenseVoice',language:'en',ready:true},{id:'zipformer',name:'Zipformer',language:'en',ready:true}],languages:[{id:'ja',name:'日语',ready:true},{id:'en',name:'英语',ready:true}],finals:[{id:'qwen-1.7b-8bit',name:'Qwen3-ASR 1.7B 8bit',ready:true},{id:'qwen-1.7b',name:'Qwen3-ASR 1.7B',ready:true},{id:'qwen-0.6b',name:'Qwen3-ASR 0.6B',ready:false}],runtimeReady:true,translationReady:true,translators:[{id:'hy-mt2',name:'Hy-MT2 1.8B',ready:true}]};
     if(command==='list_glossaries')return [{id:'ja',name:'日语词表',source_language:'ja'},{id:'en',name:'英语词表',source_language:'en'}];
     if(command==='online_snapshot')return {status:q.status,events:q.events,captionVisible:q.visible,captionLocked:q.locked};
     if(command==='start_online_session'){q.status={sessionId:'s',phase:'running',error:null,translationEnabled:args.options.translate};return q.status;}
@@ -30,10 +31,18 @@ const assert=require('node:assert/strict');
   assert.equal(await page.locator('#online-start').isVisible(),true);
   assert.equal(await page.locator('#online-model').inputValue(),'qwen-1.7b-8bit');
   await page.locator('#online-settings summary').click();
+  assert.equal(await page.locator('#online-draft-field').isVisible(),false);
+  await page.locator('input[value="two-pass"]').check();
+  assert.equal(await page.locator('#online-draft-field').isVisible(),true);
+  assert.equal(await page.locator('#online-draft-model option[value="zipformer"]').evaluate(e=>e.disabled),true);
   await page.locator('#online-model').selectOption('qwen-1.7b');
   await page.locator('#online-refresh').click();
   await page.evaluate(()=>new Promise(requestAnimationFrame));
   assert.equal(await page.locator('#online-model').inputValue(),'qwen-1.7b');
+  await page.locator('input[value="one-pass"]').check();
+  await page.locator('#online-language').selectOption('en');
+  assert.equal(await page.locator('#online-start').isEnabled(),true);
+  await page.locator('#online-language').selectOption('ja');
   await page.locator('#online-model').selectOption('qwen-1.7b-8bit');
   await page.locator('#online-translate').uncheck();
   assert.equal(await page.locator('#online-drafts').isDisabled(),true);
@@ -45,6 +54,8 @@ const assert=require('node:assert/strict');
   await page.locator('#online-stop:enabled').waitFor();
   const options=await page.evaluate(()=>window.__onlineQA.calls.find(c=>c.command==='start_online_session').args.options);
   assert.equal(options.finalModel,'qwen-1.7b-8bit');
+  assert.equal(options.recognitionMode,'one-pass');
+  assert.equal(JSON.parse(await page.evaluate(()=>localStorage.getItem('atogaki.onlinePreferences'))).recognitionMode,'one-pass');
   assert.equal(options.translate,true);assert.equal(options.translationDrafts,false);
   assert.equal(await page.locator('#online-language').isDisabled(),true);
   await page.evaluate(()=>{window.__onlineQA.events=[{sessionId:'s',sequence:1,event:{kind:'source_final',segment_id:'a',start_s:0,end_s:3,text:'已固定原文'}},{sessionId:'s',sequence:2,event:{kind:'translation_draft',group_id:'g',start_s:0,end_s:3,text:'可回改译文',source_revisions:{a:1}}}];});
@@ -53,6 +64,10 @@ const assert=require('node:assert/strict');
   await page.evaluate(()=>window.__onlineQA.events.push({sessionId:'s',sequence:3,event:{kind:'translation_final',group_id:'g',start_s:0,end_s:3,text:'已固定译文',source_revisions:{a:1}}}));
   await page.waitForFunction(()=>document.getElementById('translation-state').textContent==='已锁定');
   assert.equal(await page.locator('#translation-text').textContent(),'已固定译文 ');
+  await page.evaluate(()=>window.__onlineQA.events.push({sessionId:'s',sequence:4,event:{kind:'source_draft',segment_id:'b',start_s:3,end_s:12,text:'下一组已经积累的原文'}}));
+  assert.equal(await page.locator('#source-text').textContent(),'已固定原文 ');
+  await page.waitForFunction(()=>document.getElementById('source-text').textContent==='下一组已经积累的原文 ',{},{timeout:5000});
+  assert.equal(await page.locator('#translation-text').textContent(),'等待翻译…');
   await page.locator('#online-hide').click();
   assert.equal(await page.locator('#online-stop').isEnabled(),true,'hiding captions must not stop capture');
   await page.locator('#online-stop').click();await page.locator('#online-start:enabled').waitFor();
@@ -70,6 +85,16 @@ const assert=require('node:assert/strict');
   await page.setViewportSize({width:900,height:260});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight&&document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:'/tmp/atogaki-online-caption.png'});
+  const second=await page.context().newPage();await second.goto(base+'/online.html');await second.locator('#online-start:enabled').waitFor();
+  await page.evaluate(()=>localStorage.setItem('atogaki.onlinePreferences',JSON.stringify({recognitionMode:'two-pass',draftBackend:'zipformer',language:'en',finalModel:'qwen-1.7b-8bit',translationBackend:'hy-mt2',translate:false,translationDrafts:true})));
+  await second.waitForFunction(()=>document.querySelector('input[value="two-pass"]').checked&&document.getElementById('online-language').value==='en');
+  assert.equal(await second.locator('#online-draft-model').inputValue(),'zipformer');assert.equal(await second.locator('#online-translate').isChecked(),false);
+  await page.evaluate(()=>localStorage.setItem('atogaki.appearance.theme','letter'));
+  await second.waitForFunction(()=>document.documentElement.dataset.theme==='letter');
+  await page.evaluate(()=>localStorage.setItem('atogaki.appearance.imageTheme',JSON.stringify({version:1,name:'a'.repeat(64)+'.png',displayName:'fixture',template:'letter',enabled:true,palette:{dominant:[60,90,100],accent:[30,110,90],swatches:[[60,90,100],[30,110,90]]},strength:.45,fit:'contain'})));
+  await second.waitForFunction(()=>document.documentElement.style.getPropertyValue('--accent')!=='');
+  assert.equal(await second.locator('#online-start').isEnabled(),true);
+  await second.close();
   assert.deepEqual(errors,[]);
   console.log('PASS: folded controls preserve pretranslation intent, disabled settings follow the session, caption states match displayed revisions, and small controls/fixed overlay fit.');
  }finally{await browser.close();}

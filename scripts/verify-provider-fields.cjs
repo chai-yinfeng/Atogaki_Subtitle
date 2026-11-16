@@ -19,7 +19,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
    };
   });
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');await page.locator('#open-settings').click();await page.locator('[data-settings-tab="translation"]').click();await page.waitForFunction(()=>document.querySelector('#settings-provider-model').value==='saved-a');
-  const choose=id=>page.locator(`[data-provider-card="${id}"] [data-configure-provider]`).click();
+  const choose=id=>page.locator('#settings-provider').selectOption(id);
   await page.locator('#settings-provider-model').fill('draft-a');await choose('gemini');
   await page.evaluate(()=>window.__fields.profiles=['deepseek','gemini'].map(id=>({provider_id:id,model:id==='gemini'?'saved-b':'saved-a',base_url:null,style:id+' style',readiness:'unconfigured'})));
   await page.locator('[data-provider-card="gemini"] [data-check-provider]').click();await page.waitForFunction(()=>document.querySelector('#settings-provider-model').value==='saved-b');assert.equal(await page.locator('#settings-provider-base-url').inputValue(),'https://generativelanguage.googleapis.com/v1beta/openai');

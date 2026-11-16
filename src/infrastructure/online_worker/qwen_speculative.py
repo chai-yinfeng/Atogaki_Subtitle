@@ -302,7 +302,7 @@ def decode(target, prompt_embeddings, max_new_tokens, draft=None, *, eos_token_i
                         max(confidence_values) if confidence_values else None)
 
 
-def transcribe(session, target, draft, samples, max_new_tokens=512, *, timings=None):
+def transcribe(session, target, draft, samples, max_new_tokens=512, *, timings=None, language="Japanese"):
     """Run the unchanged short-crop audio path with the experimental decoder."""
     before = time.monotonic()
     mel, lengths = compute_features(samples)
@@ -316,10 +316,10 @@ def transcribe(session, target, draft, samples, max_new_tokens=512, *, timings=N
         mx.eval(features)
         mx.synchronize()
         timings['encoder_s'] = time.monotonic()-before
-    prompt = session.tokenizer.build_prompt_tokens(n_audio_tokens=features.shape[1], language='Japanese', context='')
+    prompt = session.tokenizer.build_prompt_tokens(n_audio_tokens=features.shape[1], language=language, context='')
     ids = mx.array([prompt], dtype=mx.int32)
     embeddings = session.model._embed_tokens(ids)
     embeddings = session.model._inject_audio_features(embeddings, features, ids == session.model.audio_token_id)
     result = decode(target, embeddings, max_new_tokens, draft, timings=timings)
-    _, text = parse_asr_output(session.tokenizer.decode(result.tokens), user_language='Japanese')
+    _, text = parse_asr_output(session.tokenizer.decode(result.tokens), user_language=language)
     return dict(text=text, **asdict(result))

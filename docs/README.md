@@ -30,6 +30,8 @@ _更新：2026-11-14。_
 | 学习来源与词典 | [0032](decisions/0032-learning-reader-and-source-backed-collections.md)–[0036](decisions/0036-ecdict-pinned-base-data.md) |
 | 研究晋升 | [0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)；在线分支的后继接入与限制见[系统回顾](system-review-2026-11-11.md#审阅范围与分支事实) |
 
+- 在线显示与界面配置：[0081 整组阅读退场](decisions/0081-online-caption-page-retirement.md)、[0082 紧凑设置与主题](decisions/0082-compact-purpose-based-desktop-settings.md)。
+
 ## 在线实现与研究入口
 
 - [当前翻译正确性基线](evaluation.md)、[唯一素材名单](../experiments/online/datasets/japanese-radio/confirmed-text-baseline.json)：只用用户校正原文及明确前文，参考后文为空；五段既有裁片，未校正模型输出及旧角色不参与当前结果。

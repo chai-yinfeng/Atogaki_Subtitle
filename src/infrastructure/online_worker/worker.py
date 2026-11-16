@@ -130,18 +130,18 @@ def main():
     p.add_argument('--draft-model', type=Path, required=True)
     p.add_argument('--final', choices=['qwen', 'sensevoice'], default='qwen')
     p.add_argument('--final-model', type=Path, required=True)
-    p.add_argument('--speculative-model', type=Path, help='Japanese Qwen 1.7B DFlash local trial profile')
+    p.add_argument('--speculative-model', type=Path, help='Qwen 1.7B DFlash acceleration package')
     p.add_argument('--vad-model', type=Path, required=True)
     p.add_argument('--translation-url', help='Optional loopback llama-server /v1 URL')
     p.add_argument('--drain-deadline', type=Path, help='Desktop-owned temporary stop deadline; no audio or text')
     p.add_argument('--translation-drafts', action=argparse.BooleanOptionalAction, default=True,
                    help='Retranslate active source drafts (disable to translate only closed groups)')
     a = p.parse_args()
-    if a.draft == 'zipformer' and a.language == 'ja':
+    if a.speculative_model is None and a.draft == 'zipformer' and a.language == 'ja':
         p.error('no verified Japanese Zipformer checkpoint; use a local rolling draft')
     single_asr = a.speculative_model is not None
-    if single_asr and (a.language != 'ja' or a.final != 'qwen'):
-        p.error('the DFlash trial profile requires Japanese Qwen recognition')
+    if single_asr and a.final != 'qwen':
+        p.error('DFlash requires Qwen recognition')
     if a.output:
         a.output.mkdir(parents=True, exist_ok=False)
     import numpy as np
@@ -214,7 +214,7 @@ def main():
                     import mlx.core as mx
                     if single_asr:
                         from .speculative_asr import SpeculativeASR
-                        model = SpeculativeASR.load(a.final_model, a.speculative_model)
+                        model = SpeculativeASR.load(a.final_model, a.speculative_model, language=a.language)
                     else:
                         from mlx_qwen3_asr import Session
                         model = Session(model=str(a.final_model.resolve()), dtype=mx.float16)
@@ -408,7 +408,7 @@ def main():
             close_segments(end)
             audio_clock.update(seconds=end/16000, speech=vad.is_speech_detected())
             translation.advance(**audio_clock, now=time.monotonic()-events.started)
-            interval = 1.0 if a.draft == 'sensevoice' else .032
+            interval = 1.0 if single_asr or a.draft == 'sensevoice' else .032
             if vad.is_speech_detected() and end/16000-last_snapshot >= interval:
                 job = snapshot(vad.current_segment, end)
                 if len(job['samples']):

@@ -11,7 +11,7 @@ _核对：2026-11-16。当前开发主线，不等于 v0.1.3 稳定发行。_
 | 层级 | 当前开发实现 | 仍未实现或未验证 |
 | --- | --- | --- |
 | 输入 | macOS 系统音频或同 worker 的因果 WAV 回放 | 实际整链最低系统版本需随选定 runtime 核验；采集 14.2+ 不代表 MLX 全链兼容 |
-| 草稿 | 日语 1.7B 8bit＋完整 DFlash 包时单路 Qwen 预览；其他配置沿用 SenseVoice／Zipformer | 新机 runtime 安装闭环；DSpark 不作为试用配置 |
+| 草稿 | 显式 One Pass：1.7B 8bit＋DFlash；Two Pass：所选 SenseVoice／Zipformer＋Qwen。DFlash 开放现有中日英韩入口，实际质量主要验证日语 | 新机 runtime 安装闭环；DSpark 不作为试用配置 |
 | 确认 ASR | Qwen3-ASR 1.7B MLX 8bit 默认；DFlash 路径沿用 VAD 定稿，其他 Qwen 可选 | Qwen 离线文件 provider、native runtime 迁移未实施 |
 | 在线 MT | Hy-MT2 1.8B Q4_K_M 默认；Index-Translate 2B Q4 可选，均由 App 管理本地 llama-server | 在线面板没有 DeepSeek／Gemini 云端入口；离线已有云端文本 provider 不等于在线已接入 |
 | 状态与调度 | F／H／G／R、源时钟分组、revision、需求合并、阶段交错、共同停止预算；DFlash 音频块／target／draft KV 复用 | 原生采集到上屏的完整质量验收、连续正确中文两秒及长时资源 |

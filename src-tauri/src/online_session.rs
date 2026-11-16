@@ -63,7 +63,17 @@ pub struct Choice {
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DraftChoice {
+    id: String,
+    language: String,
+    name: String,
+    ready: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Choices {
+    drafts: Vec<DraftChoice>,
+    acceleration_ready: bool,
     languages: Vec<Choice>,
     finals: Vec<Choice>,
     runtime_ready: bool,
@@ -88,6 +98,10 @@ pub struct Snapshot {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Start {
+    #[serde(default = "default_recognition_mode")]
+    recognition_mode: String,
+    #[serde(default = "default_draft_backend")]
+    draft_backend: String,
     language: String,
     final_model: String,
     translate: bool,
@@ -98,6 +112,49 @@ pub struct Start {
     scene: String,
     glossary_id: Option<String>,
 }
+fn default_recognition_mode() -> String {
+    "one-pass".into()
+}
+fn default_draft_backend() -> String {
+    "sensevoice".into()
+}
+
+fn recognition_profile(
+    a: &Assets,
+    mode: &str,
+    language: &str,
+    draft_backend: &str,
+    final_id: &str,
+    acceleration: Option<PathBuf>,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
+    if !["ja", "en", "zh", "ko"].contains(&language) {
+        return Err("不支持该原文语言".into());
+    }
+    match mode {
+        "one-pass" => {
+            if final_id != "qwen-1.7b-8bit" {
+                return Err("当前 DFlash 加速包需要 Qwen3-ASR 1.7B 8-bit".into());
+            }
+            let path = acceleration.ok_or("DFlash 加速包未就绪，请在识别模型中准备")?;
+            Ok((path.clone(), Some(path)))
+        }
+        "two-pass" => {
+            let key = match draft_backend {
+                "sensevoice" => "ja",
+                "zipformer" if language != "ja" => language,
+                "zipformer" => return Err("尚无经过验证的日语 Zipformer 模型".into()),
+                _ => return Err("未知草稿识别后端".into()),
+            };
+            let model = a.drafts.get(key).ok_or("没有该语言的草稿模型")?;
+            if !model_ready(model, &format!("draft-{key}")) {
+                return Err("草稿识别模型包未就绪".into());
+            }
+            Ok((model.path.clone(), None))
+        }
+        _ => Err("未知在线识别模式".into()),
+    }
+}
+
 fn default_translation_backend() -> String {
     "hy-mt2".into()
 }
@@ -217,27 +274,43 @@ pub async fn online_choices(
         },
     ];
     Ok(Choices {
+        acceleration_ready: speculative_model(&state).is_some(),
+        drafts: ["ja", "en", "zh", "ko"]
+            .into_iter()
+            .flat_map(|language| {
+                ["sensevoice", "zipformer"]
+                    .into_iter()
+                    .map(|id| {
+                        let key = if id == "sensevoice" { "ja" } else { language };
+                        DraftChoice {
+                            id: id.into(),
+                            language: language.into(),
+                            name: if id == "sensevoice" {
+                                "SenseVoice"
+                            } else {
+                                "Zipformer"
+                            }
+                            .into(),
+                            ready: !(id == "zipformer" && language == "ja")
+                                && a.drafts
+                                    .get(key)
+                                    .is_some_and(|m| model_ready(m, &format!("draft-{key}"))),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect(),
         languages: [
-            (
-                "ja",
-                if speculative_model(&state).is_some() {
-                    "日语 · Qwen＋DFlash"
-                } else {
-                    "日语 · SenseVoice"
-                },
-            ),
-            ("en", "英语 · Zipformer"),
-            ("zh", "中文 · Zipformer"),
-            ("ko", "韩语 · Zipformer"),
+            ("ja", "日语"),
+            ("en", "英语"),
+            ("zh", "中文"),
+            ("ko", "韩语"),
         ]
         .into_iter()
         .map(|(id, name)| Choice {
             id: id.into(),
             name: name.into(),
-            ready: (id == "ja" && speculative_model(&state).is_some())
-                || a.drafts
-                    .get(id)
-                    .is_some_and(|m| model_ready(m, &format!("draft-{id}"))),
+            ready: true,
         })
         .collect(),
         finals: a
@@ -321,22 +394,21 @@ pub async fn start_online_session(
         .map_err(|e| e.to_string())?
         .or(a.hy_mt2);
     let mut r = runtime(&app, &state)?;
-    let draft = a
-        .drafts
-        .get(&options.language)
-        .ok_or("没有该语言的草稿模型")?;
     let final_model = a
         .finals
         .iter()
         .find(|m| m.id == options.final_model)
         .ok_or("未安装所选定稿模型")?;
-    let acceleration = (options.language == "ja" && final_model.id == "qwen-1.7b-8bit")
-        .then(|| speculative_model(&state))
-        .flatten();
-    if (acceleration.is_none() && !model_ready(draft, &format!("draft-{}", options.language)))
-        || !model_ready(final_model, &final_model.id)
-    {
-        return Err("所选识别模型包不完整，请先在模型与存储中准备模型。".into());
+    let (draft_model, acceleration) = recognition_profile(
+        &a,
+        &options.recognition_mode,
+        &options.language,
+        &options.draft_backend,
+        &final_model.id,
+        speculative_model(&state),
+    )?;
+    if !model_ready(final_model, &final_model.id) {
+        return Err("所选识别模型包不完整，请先在识别模型中准备。".into());
     }
     if options.scene.chars().count() > 1000 {
         return Err("场景提示最多1000字符".into());
@@ -375,7 +447,8 @@ pub async fn start_online_session(
     }
     let models = OnlineModels {
         language: options.language,
-        draft_model: draft.path.clone(),
+        draft_model,
+        draft_kind: (options.recognition_mode == "two-pass").then_some(options.draft_backend),
         final_model: final_model.path.clone(),
         speculative_model: acceleration,
         vad_model: a.vad,
@@ -598,6 +671,68 @@ pub fn set_online_caption_locked(
 mod model_tests {
     use super::*;
     use atogaki_subtitle::application::stage_scheduler::StageScheduler;
+
+    #[test]
+    fn explicit_profiles_require_their_own_dependencies_without_falling_back() {
+        let a = Assets {
+            drafts: HashMap::new(),
+            finals: vec![],
+            vad: PathBuf::new(),
+            hy_mt2: None,
+        };
+        for language in ["ja", "en", "zh", "ko"] {
+            let (_, path) = recognition_profile(
+                &a,
+                "one-pass",
+                language,
+                "zipformer",
+                "qwen-1.7b-8bit",
+                Some(PathBuf::from("head")),
+            )
+            .unwrap();
+            assert_eq!(path, Some(PathBuf::from("head")));
+        }
+        assert!(
+            recognition_profile(
+                &a,
+                "one-pass",
+                "ja",
+                "sensevoice",
+                "qwen-0.6b",
+                Some("head".into())
+            )
+            .is_err()
+        );
+        assert!(
+            recognition_profile(&a, "one-pass", "en", "sensevoice", "qwen-1.7b-8bit", None)
+                .is_err()
+        );
+        assert!(
+            recognition_profile(
+                &a,
+                "two-pass",
+                "ja",
+                "zipformer",
+                "qwen-1.7b-8bit",
+                Some("head".into())
+            )
+            .is_err()
+        );
+        assert!(
+            recognition_profile(
+                &a,
+                "two-pass",
+                "en",
+                "sensevoice",
+                "qwen-1.7b-8bit",
+                Some("head".into())
+            )
+            .is_err()
+        );
+        assert!(
+            recognition_profile(&a, "auto", "ja", "sensevoice", "qwen-1.7b-8bit", None).is_err()
+        );
+    }
 
     #[test]
     fn model_choices_exist_without_a_private_manifest_and_reject_incomplete_packages() {

@@ -51,7 +51,8 @@ export class OnlineCaptions {
   constructor(clock: () => number = () => performance.now()) { this.clock = clock; }
 
   snapshot(snapshot: OnlineSnapshot): void {
-    if (snapshot.status.sessionId !== this.status.sessionId) {
+    const changed = snapshot.status.sessionId !== this.status.sessionId;
+    if (changed) {
       this.translationFailures = 0;
       this.events.clear();
       this.sources.clear();
@@ -66,6 +67,11 @@ export class OnlineCaptions {
     this.status = snapshot.status;
     this.translationEnabled = snapshot.status.translationEnabled ?? true;
     for (const e of snapshot.events) this.accept(e);
+    // Restoring a window is not a replay of all retained transport history.
+    if (changed && this.groups.size) {
+      this.page = [...this.groups.values()].map(e => e.event).sort(byTime).at(-1)!;
+      this.displayAfter = this.page.start_s ?? -Infinity;
+    }
   }
 
   accept(event: CaptionEvent): void {

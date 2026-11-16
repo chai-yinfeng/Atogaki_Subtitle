@@ -6,7 +6,7 @@ import { extractPalette, paletteVariables, type ImagePalette, type ColorRoles } 
 type ImageTheme = {version:1; name:string; displayName:string; palette:ImagePalette; roles?:ColorRoles; template:AppTheme; fit:'contain'|'cover'; strength:number; credit:string; source:string; enabled:boolean};
 const KEY='atogaki.appearance.imageTheme';
 const validName=(name:unknown):name is string=>typeof name==='string'&&/^[a-f0-9]{64}\.(png|jpg|webp)$/.test(name);
-function read():ImageTheme|null {
+export function readImageTheme():ImageTheme|null {
   try {
     const value=JSON.parse(localStorage.getItem(KEY)??'null');
     const color=(rgb:unknown)=>Array.isArray(rgb)&&rgb.length===3&&rgb.every(c=>typeof c==='number'&&Number.isFinite(c)&&c>=0&&c<=255);
@@ -17,7 +17,7 @@ function read():ImageTheme|null {
   }catch{return null;}
 }
 export function mountImageThemes(host:HTMLElement) {
-  let config=read(),applying=false,working=false,disposed=false;
+  let config=readImageTheme(),applying=false,working=false,disposed=false;
   let applyGeneration=0,renderGeneration=0,operationGeneration=0;
   const events=new AbortController(),urls=new Set<string>(),images=new Set<HTMLImageElement>();
   const invalidate=()=>{applyGeneration++;operationGeneration++;};

@@ -21,7 +21,10 @@ class SpeculativeASR:
         self.last_result = None
 
     @classmethod
-    def load(cls, model_dir, draft_dir):
+    def load(cls, model_dir, draft_dir, *, language="ja"):
+        languages = {'ja': 'Japanese', 'zh': 'Chinese', 'en': 'English', 'ko': 'Korean'}
+        if language not in languages:
+            raise ValueError('Unsupported online recognition language')
         if version('mlx-qwen3-asr') != '0.4.4':
             raise RuntimeError('DFlash profile requires mlx-qwen3-asr 0.4.4')
         import mlx.core as mx
@@ -34,7 +37,7 @@ class SpeculativeASR:
         if draft.algorithm != 'dflash':
             raise ValueError('The local trial profile requires the DFlash checkpoint')
         mx.synchronize()
-        return cls(CachedTranscriber(session, Target(session.model), draft))
+        return cls(CachedTranscriber(session, Target(session.model), draft, language=languages[language]))
 
     def transcribe(self, job):
         origin = (job['segment_id'], job['start_s'])

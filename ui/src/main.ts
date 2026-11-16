@@ -110,6 +110,7 @@ import { createEditorBackend } from "./editor-backend";
 import type { SubtitleSegment } from "./editor-types";
 import { SubtitleTimeline } from "./subtitle-timeline";
 import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./job-progress";
+import {readOnlinePreferences, saveOnlinePreferences} from "./online-preferences";
 import { applyTheme, readTheme, candidateLabel } from "./themes";
 applyTheme(readTheme());
 import { matchesQuery, highlightSaved } from "./offline-tools";
@@ -364,23 +365,18 @@ app.innerHTML = `
       </div>
     </header>
     <div id="home-view">
-      <section class="intro">
-        <h2>离线理解，保留在本机。</h2>
-        <p>选择节目语言、本地媒体与 Whisper 模型，保存任务后即可在后台转写。</p>
-        <p class="data-path" id="data-path">正在读取本地数据目录…</p>
-      </section>
+      <p class="data-path hidden" id="data-path"></p>
       <section class="create-task" aria-labelledby="create-heading">
         <div class="section-heading"><h2 id="create-heading">新建转写任务</h2><span>本地执行</span></div>
         <form id="task-form">
-          <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option></select></label>
-          <label>翻译目标<select id="target-language" disabled><option value="zh-Hans">简体中文</option></select></label>
+          <label class="task-target hidden">翻译目标<select id="target-language" disabled><option value="zh-Hans">简体中文</option></select></label>
           <label>媒体文件<input id="media-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
+          <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option></select></label>
           <div class="vad-setting">
-            <label><input id="vad-enabled" type="checkbox" checked />启用语音活动检测（推荐）</label>
-            <span>先过滤静音、音乐和环境声，再交给 Whisper；使用 Silero VAD 默认参数。</span>
+            <label><input id="vad-enabled" type="checkbox" checked />语音活动检测</label>
           </div>
-          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="index-translate-local">Index-Translate 2B · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select><span>云端随稳定原文提前翻译，本地在完整转录后翻译；云端只发送字幕文本和上下文。</span></label>
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="index-translate-local">Index-Translate 2B · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select></label>
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
@@ -388,7 +384,7 @@ app.innerHTML = `
             <div id="task-content-packs" class="task-content-packs"></div>
             <details open><summary>最终 Whisper prompt</summary><pre id="task-prompt-preview">正在生成预览…</pre></details>
           </div>
-          <details><summary>高级：模型路径与 VAD 参数</summary>
+          <details><summary>识别模型与 VAD</summary>
           <label>Whisper 模型<input id="model-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-model" type="button" class="secondary">选择模型</button>
           <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
@@ -765,6 +761,7 @@ let desktopSettings: DesktopSettings | null = null;
 let availableModels: ModelCatalogItem[] = [];
 let modelDownloads: ModelDownloadState[] = [];
 let modelManagement: ReturnType<typeof createModelManagementSession> | null = null;
+let translationCatalogView: ReturnType<typeof mountModelManagementView> | null = null;
 let modelCatalogView: ReturnType<typeof mountModelManagementView> | null = null;
 let dictionaryCredentialView: ReturnType<typeof mountDictionaryCredentialView> | null = null;
 let asrCredentialView: ReturnType<typeof mountAsrCredentialView> | null = null;
@@ -1310,7 +1307,7 @@ window.addEventListener("pagehide", () => {
   modelPicker.dispose();
   modelPickerView?.dispose();
   modelManagement?.dispose();
-  modelCatalogView?.dispose();
+  modelCatalogView?.dispose(); translationCatalogView?.dispose();
   providerFields?.dispose();
   settingsView?.dispose();
   providerActions?.dispose();
@@ -1522,7 +1519,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   renderModelCatalog();
 }
 
-function renderModelCatalog(): void { modelCatalogView?.render(); renderProviderCards(); }
+function renderModelCatalog(): void { modelCatalogView?.render(); translationCatalogView?.render(); renderProviderCards(); }
 
 function renderDictionaryCatalog(): void { dictionaryDownloadView?.render(); }
 
@@ -1578,6 +1575,8 @@ const settingsSave = createDesktopSettingsSave({
       settingsWhisperModel.focus();
       return null;
     }
+    const onlineDefault = document.querySelector<HTMLSelectElement>("#settings-online-provider")!.value;
+    const onlineChanged = settingsDirtyFields.has("settings-online-provider");
     const fields = settingsDirtyFields.snapshot(), provider = settingsProvider.value;
     const revision = settingsDirtyFields.revision, profileRevision = providerDrafts.revision;
     const profile = providerDrafts.snapshot();
@@ -1598,6 +1597,10 @@ const settingsSave = createDesktopSettingsSave({
         onboardingCompleted: finishOnboarding || desktopSettings?.onboardingCompleted || false,
       },
       acknowledge: () => {
+        if (onlineChanged) {
+          if (onlineDefault === "none") saveOnlinePreferences({translate:false});
+          else saveOnlinePreferences({translationBackend:onlineDefault,translate:true});
+        }
         settingsDirtyFields.acknowledge(fields);
         providerDrafts.acknowledge(profile, provider);
       },
@@ -1759,9 +1762,16 @@ modelManagement = createModelManagementSession({
 });
 modelCatalogView = mountModelManagementView(modelCatalogHost!, {
   visit: () => settingsVisit,
-  state: () => ({ catalog: availableModels, downloads: modelDownloads, busy: modelManagement?.busy ?? false }),
+  state: () => ({ catalog: availableModels.filter(m => m.category !== "translation" && !["hy-mt2", "index-translate"].includes(m.kind)), downloads: modelDownloads, busy: modelManagement?.busy ?? false }),
   action: (action, id) => modelManagement!.run(action, id),
   formatBytes,
+  error: text => { if (modelDownloadMessage) modelDownloadMessage.textContent = text; },
+});
+
+translationCatalogView = mountModelManagementView(document.querySelector<HTMLElement>("#translation-model-catalog")!, {
+  visit: () => settingsVisit,
+  state: () => ({catalog: availableModels.filter(m => m.category === "translation" || ["hy-mt2", "index-translate"].includes(m.kind)), downloads: modelDownloads, busy: modelManagement?.busy ?? false}),
+  action: (action, id) => modelManagement!.run(action, id), formatBytes,
   error: text => { if (modelDownloadMessage) modelDownloadMessage.textContent = text; },
 });
 
@@ -4455,7 +4465,11 @@ document.querySelector<HTMLButtonElement>("#close-learning-selection")?.addEvent
 settingsView = mountDesktopSettingsView(settingsDialog!, {
   openButton: document.querySelector<HTMLButtonElement>("#open-settings"),
   visit: () => settingsVisit,
-  opening: () => { ++settingsVisit; settingsDirtyFields.clear(); },
+  opening: () => {
+    ++settingsVisit; settingsDirtyFields.clear();
+    const online=readOnlinePreferences();
+    document.querySelector<HTMLSelectElement>("#settings-online-provider")!.value=online.translate?online.translationBackend:"none";
+  },
   opened: () => { modelManagement?.observe(); dictionaryDownloadSession?.observe(); void loadDesktopSettings(false); },
   closed: () => { ++settingsVisit; dictionaryDownloadSession?.hidden(); dictionaryCredentialSession.hidden(); settingsLoad.invalidateDictionaries(); asrCredentials.hidden(); networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
   dirty: id => settingsDirtyFields.add(id),
@@ -4784,79 +4798,6 @@ const playbackLoopView = mountPlaybackLoopView(
 );
 
 
-const presetTools = document.createElement("div");
-presetTools.className = "offline-tools";
-presetTools.innerHTML =
-  '<select aria-label="任务预设"><option value="">选择任务预设</option></select><input aria-label="预设名称" placeholder="预设名称" maxlength="64"/><button type="button" class="secondary">保存当前配置为预设</button><span>预设不保存媒体路径或 API Key。</span>';
-document.querySelector("#task-form")?.prepend(presetTools);
-let taskPresets: Array<{
-  name: string;
-  configuration: {
-    modelPath: string;
-    vadModelPath: string | null;
-    sourceLanguage: LanguageCode;
-    glossaryId: string | null;
-    selectedContentGroups: string[];
-    translationProviderId: string;
-  };
-}> = [];
-let presetReadGeneration = 0;
-async function loadTaskPresets(current: () => boolean = () => desktopStartup.active): Promise<void> {
-  const request = ++presetReadGeneration;
-  const active = () => current() && request === presetReadGeneration;
-  try {
-    const loaded: typeof taskPresets = await invoke("task_presets");
-    if (!active()) return;
-    taskPresets = loaded;
-    presetTools.querySelector("select")!.innerHTML =
-      '<option value="">选择任务预设</option>' +
-      taskPresets.map((p, i) => `<option value="${i}">${escapeHtml(p.name)}</option>`).join("");
-  } catch (e) {
-    if (active() && taskMessage) taskMessage.textContent = `预设读取失败：${String(e)}`;
-  }
-}
-presetTools.querySelector<HTMLSelectElement>("select")!.onchange = async (event) => {
-  const value = (event.target as HTMLSelectElement).value;
-  if (!value) return;
-  const config = taskPresets[Number(value)]?.configuration;
-  if (!config) return;
-  taskFilePickerView?.invalidateModels();
-  if (modelPath) modelPath.value = config.modelPath;
-  if (sourceLanguage) sourceLanguage.value = config.sourceLanguage;
-  renderGlossaryOptions();
-  if (vadEnabled) vadEnabled.checked = Boolean(config.vadModelPath);
-  if (vadModelPath) vadModelPath.value = config.vadModelPath ?? "";
-  if (taskGlossary) taskGlossary.value = config.glossaryId ?? "";
-  taskGlossaryConfigurationId = taskGlossary?.value || null;
-  const provider = document.querySelector<HTMLSelectElement>("#task-translation-provider");
-  if (provider) provider.value = config.translationProviderId;
-  selectedTaskContentGroups.clear();
-  config.selectedContentGroups.forEach((g) => selectedTaskContentGroups.add(g));
-  syncVadControls();
-  await refreshTaskGlossaryConfiguration();
-  updateTaskPipelineSummary();
-};
-presetTools.querySelector<HTMLButtonElement>("button")!.onclick = async () => {
-  try {
-    await invoke("save_task_preset", {
-      name: presetTools.querySelector("input")!.value,
-      configuration: {
-        modelPath: modelPath?.value,
-        vadModelPath: vadEnabled?.checked ? vadModelPath?.value : null,
-        sourceLanguage: selectedSourceLanguage(),
-        glossaryId: taskGlossary?.value || null,
-        selectedContentGroups: Array.from(selectedTaskContentGroups),
-        translationProviderId:
-          document.querySelector<HTMLSelectElement>("#task-translation-provider")?.value || "none",
-      },
-    });
-    await loadTaskPresets();
-    if (taskMessage) taskMessage.textContent = "预设已保存。";
-  } catch (e) {
-    if (taskMessage) taskMessage.textContent = String(e);
-  }
-};
-
 function updateTaskPipelineSummary():void {
   const summary=document.querySelector<HTMLElement>("#task-pipeline-summary");
   if(!summary)return;
@@ -4925,7 +4866,6 @@ const desktopStartup = createDesktopStartup({
     { name: "翻译状态", run: refreshTranslationStatus },
     { name: "识别词表", run: refreshGlossaries },
     { name: "任务摘要", run: refresh },
-    { name: "任务预设", run: loadTaskPresets },
   ],
   directory: settingsBackend.dataDirectory,
   directoryAccepted: path => { if (dataPath) dataPath.textContent = `本地数据：${path}`; },

@@ -171,3 +171,10 @@ test('source-only sessions retain the existing whole-unit reading range',()=>{
  assert.deepEqual(model.tracks().sourceParts.map(e=>e.segment_id),['s5','s6','s7','s8','s9']);
  assert.deepEqual(model.tracks().translationParts,[]);
 });
+
+test('opening a window restores the latest group instead of replaying retained history',()=>{
+ let now=10000;const model=new OnlineCaptions(()=>now);
+ model.snapshot({status:status('s'),events:[event(1,translation('old',0,4)),event(2,translation('latest',4,8))]});
+ assert.deepEqual(model.tracks().translationParts.map(e=>e.group_id),['latest']);
+ now=13000;assert.deepEqual(model.tracks().translationParts,[]);
+});
