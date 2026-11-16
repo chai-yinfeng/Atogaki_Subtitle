@@ -111,6 +111,33 @@ class PrefixCacheTests(unittest.TestCase):
         self.assertIsNone(cached.state._prefix_cache)
         self.assertEqual(len(cached.audio), 0)
 
+    def test_text_lock_waits_two_calls_preserves_prefix_and_respects_total_budget(self):
+        session, target, draft = self.runtime()
+        def inject(embeddings, features, mask):
+            start = int(mx.argmax(mask[0]).item())
+            embeddings[:, start:start+features.shape[1]] = features
+            return embeddings
+        session.model._inject_audio_features = inject
+        cached = CachedTranscriber(session, target, draft)
+        frozen = []
+        for index, length in enumerate([10, 12, 14, 16]):
+            maximum = 2 if index == 3 else 1
+            features = (mx.ones((1, 1, length))*maximum, mx.array([length]))
+            with patch('qwen_prefix_cache.compute_features', return_value=features):
+                result = cached.transcribe(np.arange(length, dtype=np.float32), 12, text_prefix_rollback=5)
+            self.assertLessEqual(len(result['tokens']), 12)
+            self.assertEqual(result['tokens'][:len(frozen)], frozen)
+            self.assertEqual(result['text_prefix']['forced_tokens'], 0 if index < 2 else 7)
+            frozen = list(cached.frozen_tokens)
+            self.assertEqual(cached.decoder.target.offset, cached.decoder.draft.offset)
+        self.assertTrue(result['audio_cache']['invalidated'])
+        cached.reset()
+        self.assertEqual(cached.frozen_tokens, [])
+        self.assertEqual(cached.raw_tokens, [])
+        self.assertEqual(cached.calls, 0)
+        with self.assertRaises(ValueError):
+            cached.transcribe(np.arange(10, dtype=np.float32), text_prefix_rollback=-1)
+
 
 if __name__ == '__main__':
     unittest.main()

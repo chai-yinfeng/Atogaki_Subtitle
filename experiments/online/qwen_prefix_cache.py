@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import mlx.core as mx
 import numpy as np
 from mlx_qwen3_asr.audio import compute_features
-from mlx_qwen3_asr.streaming import _encode_with_prefix_cache, _prompt_audio_start
+from mlx_qwen3_asr.streaming import _encode_with_prefix_cache, _prompt_audio_start, _rollback_prefix_ids
 from mlx_qwen3_asr.tokenizer import parse_asr_output
 
 from qwen_speculative import DecoderPrefix, decode
@@ -28,8 +28,13 @@ class CachedTranscriber:
         self.audio = np.empty(0, dtype=np.float32)
         self.state = SimpleNamespace(_prefix_cache=None)
         self.decoder = DecoderPrefix()
+        self.raw_tokens = []
+        self.frozen_tokens = []
+        self.calls = 0
 
-    def transcribe(self, samples, max_new_tokens=512):
+    def transcribe(self, samples, max_new_tokens=512, *, text_prefix_rollback=None):
+        if text_prefix_rollback is not None and text_prefix_rollback < 0:
+            raise ValueError('Text rollback must be nonnegative or disabled')
         timings = {}
         before = time.monotonic()
         samples = np.asarray(samples, dtype=np.float32)
@@ -60,15 +65,28 @@ class CachedTranscriber:
         retain = head+audio_cache.cached_tokens if audio_cache.blocks else 0
         if reused_positions != (head+reused_blocks*audio_cache.tokens_per_block if reused_blocks else 0):
             raise AssertionError('Encoder, target and draft prefix boundaries disagree')
-        ids = mx.array([prompt[reused_positions:]], dtype=mx.int32)
+        prefix_ids = []
+        if text_prefix_rollback is not None and self.calls >= 2:
+            rollback = min(text_prefix_rollback, len(self.raw_tokens)-len(self.frozen_tokens))
+            prefix_ids = _rollback_prefix_ids(self.raw_tokens, rollback, self.session.tokenizer)
+            if prefix_ids[:len(self.frozen_tokens)] != self.frozen_tokens:
+                raise AssertionError('A frozen text prefix cannot be rewritten')
+        if len(prefix_ids) >= max_new_tokens:
+            raise ValueError('Frozen text leaves no generation budget')
+        ids = mx.array([prompt[reused_positions:] + prefix_ids], dtype=mx.int32)
         embeddings = self.session.model._embed_tokens(ids)
         embeddings = self.session.model._inject_audio_features(
             embeddings, features[None, :, :], ids == self.session.model.audio_token_id)
-        result = decode(self.target, embeddings, max_new_tokens, self.draft,
+        result = decode(self.target, embeddings, max_new_tokens-len(prefix_ids), self.draft,
                         prefix=self.decoder, retain_positions=retain, timings=timings)
+        result.tokens = prefix_ids + result.tokens
         _, text = parse_asr_output(self.session.tokenizer.decode(result.tokens), user_language='Japanese')
         self.audio = samples.copy()
+        self.raw_tokens = list(result.tokens)
+        self.frozen_tokens = prefix_ids
+        self.calls += 1
         return dict(text=text, **asdict(result), timings=timings,
+                    text_prefix=dict(forced_tokens=len(prefix_ids), rollback=text_prefix_rollback),
                     audio_cache=dict(reused_blocks=reused_blocks, new_blocks=new_blocks,
                                      invalidated=invalidated, reused_positions=reused_positions,
                                      retained_positions=retain, mel_frames=int(mel.shape[-1]),

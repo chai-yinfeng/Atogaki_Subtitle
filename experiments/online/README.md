@@ -37,6 +37,8 @@ _核对：2026-11-15。生产实现已整合 main；本目录不是另一套待�
 
 单路可显式加 `--audio-prefix-cache`，使用已安装 `mlx-qwen3-asr==0.4.4` 的完整约 8 秒音频块缓存及其尾帧／全局 mel 最大值失效规则。仅保留完整音频前缀的 target KV 和由 taps 投影得到的 DFlash context KV；不强制保留旧文字，不更改注意力块、归一化或分组。每个裁片重置，拒绝缩短／替换输入和超过 30 秒的窗口。事件增加 `audio_cache` 命中／失效／重算帧数，以及显式求值后的 features／encoder／prefill／generation 计时；总耗时仍包含未归入这些阶段的准备和解析成本。缓存前后的冻结前缀审计及 1× 对照分别保存，详见[第六阶段](../../docs/evaluation.md#第六阶段完整音频块与-dflash-kv-缓存2026-11-15)。
 
+`--refresh-seconds` 只调整实验预览周期，默认仍为 1 秒；EOF 立即提交 final，不等刷新 tick。`--text-prefix-rollback 5` 要求音频缓存，前两次解码不固定文字，之后保留上次输出、末尾 5 tokens 仍可改；沿用已装包的字符完整性回退，不允许已固定前缀缩短或改写。最终识别也沿用此前固定前缀，属于会影响质量的独立候选，不冒称无损缓存；总输出仍限 512 tokens，事件记录实际强制 token 数与完整输出 tokens，仅写私有结果。刷新率、文字锁定及 VAD 边界各自比较，见[第七阶段](../../docs/evaluation.md#第七阶段刷新文字锁定与边界影响2026-11-15)。
+
 ## Python DFlash／DSpark 实验
 
 用户于 2026-11-15 确认先适配 DFlash、通过后接 DSpark。实验复用 `mlx-qwen3-asr==0.4.4` 的音频处理、模型层和 KVCache，增加进入指定层之前的 hidden-state taps、专用 draft head、因果 block verify 与拒绝回退。每请求新建缓存；保留原 EOS／循环／token 上限规则。两种算法的 anchor 对齐不同：DFlash 从 mask 位置提议，DSpark 也使用 anchor 位置，并加 reduced-vocabulary Markov bias。confidence head 实际计算并记录原始 logits，本轮固定整块长度，不发明阈值或自适应截断。

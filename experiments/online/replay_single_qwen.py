@@ -4,6 +4,7 @@ import argparse
 import hashlib
 from importlib.metadata import version
 import json
+import math
 from pathlib import Path
 import resource
 import threading
@@ -31,6 +32,8 @@ def main():
     parser.add_argument('--sensevoice-dir', type=Path)
     parser.add_argument('--mode', choices=['single-dflash', 'dual-control'], required=True)
     parser.add_argument('--audio-prefix-cache', action='store_true', help='Reuse only complete immutable audio blocks')
+    parser.add_argument('--refresh-seconds', type=float, default=1.0)
+    parser.add_argument('--text-prefix-rollback', type=int, help='Experimental forced text prefix after two calls; keep this many tail tokens editable')
     parser.add_argument('--translation-url')
     parser.add_argument('--translation-model', default='Hy-MT2-1.8B-Q4_K_M')
     parser.add_argument('--output', type=Path, required=True)
@@ -43,6 +46,11 @@ def main():
         parser.error('dual control requires the installed CPU recognizer')
     if args.audio_prefix_cache and args.mode != 'single-dflash':
         parser.error('audio prefix cache is only supported by the isolated single DFlash lane')
+    if not math.isfinite(args.refresh_seconds) or not .032 <= args.refresh_seconds <= 30:
+        parser.error('refresh seconds must be finite and between .032 and 30')
+    if args.text_prefix_rollback is not None and (not args.audio_prefix_cache or args.text_prefix_rollback < 0):
+        parser.error('text prefix rollback requires the audio cache and a nonnegative token count')
+    refresh_samples = round(args.refresh_seconds*16000)
     if version('mlx-qwen3-asr') != '0.4.4':
         parser.error('requires mlx-qwen3-asr 0.4.4')
     rows = json.loads(args.inputs.read_text())['rows']
@@ -63,10 +71,11 @@ def main():
                     model_hashes={str(p): digest(p) for directory in [args.model_dir, *([args.draft_dir] if args.draft_dir else [])]
                                   for p in directory.glob('*.safetensors')},
                     packages={p: version(p) for p in ['mlx', 'mlx-metal', 'mlx-qwen3-asr', 'sherpa-onnx']},
-                    conditions=dict(rate=1, refresh_seconds=1, max_new_tokens=512, target_dtype='float16', draft_dtype='bfloat16',
+                    conditions=dict(rate=1, refresh_seconds=args.refresh_seconds, max_new_tokens=512, target_dtype='float16', draft_dtype='bfloat16',
                                     cache_limit_bytes=512000000, boundaries='existing crop EOF; not natural VAD',
                                     history=[], lookahead='', scene='', translation='whole locked crop only',
-                                    prefix_reuse=args.audio_prefix_cache, forced_text_prefix=False,
+                                    prefix_reuse=args.audio_prefix_cache, text_prefix_rollback=args.text_prefix_rollback,
+                                    forced_text_prefix=args.text_prefix_rollback is not None,
                                     sequence='back-to-back crops with independent semantic contexts',
                                     clocks='headless display-ready events; no native capture or paint'))
     metadata['model_hashes'].update(cpu_hashes)
@@ -140,7 +149,7 @@ def main():
                             if crop_id != job['sid']:
                                 cached.reset()
                                 crop_id = job['sid']
-                            result = cached.transcribe(job['samples'])
+                            result = cached.transcribe(job['samples'], text_prefix_rollback=args.text_prefix_rollback)
                         elif draft:
                             timings = {}
                             result = transcribe(session, target, draft, job['samples'], timings=timings)
@@ -156,7 +165,8 @@ def main():
                                     compute_s=result['compute_s'], queue_wait_s=result['queue_wait_s'],
                                     peak_active_bytes=mx.get_peak_memory(), active_bytes=mx.get_active_memory(),
                                     cache_bytes=mx.get_cache_memory(), finish_reason=result['finish_reason'],
-                                    timings=result.get('timings'), audio_cache=result.get('audio_cache'))
+                                    timings=result.get('timings'), audio_cache=result.get('audio_cache'),
+                                    text_prefix=result.get('text_prefix'), tokens=result.get('tokens'))
                         publish(job, result, final)
                         mx.clear_cache()
             except Exception as error:
@@ -238,7 +248,7 @@ def main():
             source = PCMInput(row['audio_path'])
             ring = AudioRing(seconds=30)
             events.emit('crop_start', segment_id=row['id'], start_s=offset, duration_s=source.frames/16000)
-            next_refresh = 16000
+            next_refresh = refresh_samples
             for samples in source:
                 due = events.started+offset+(ring.end+len(samples))/16000
                 time.sleep(max(0, due-time.monotonic()))
@@ -246,7 +256,7 @@ def main():
                 if ring.end >= next_refresh and ring.end < source.frames:
                     job = dict(sid=row['id'], start_s=offset, end=ring.end, samples=ring.snapshot(0, ring.end), queued_at=time.monotonic())
                     (gpu_jobs if args.mode == 'single-dflash' else cpu_jobs).preview(job)
-                    next_refresh = (ring.end//16000+1)*16000
+                    next_refresh = (ring.end//refresh_samples+1)*refresh_samples
                 if errors:
                     break
             if errors:
