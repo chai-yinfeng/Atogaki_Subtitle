@@ -1,24 +1,36 @@
-export type AppTheme = "neutral" | "moonlight" | "letter";
+export type AppTheme = "light" | "dark" | "system";
 export function normalizeTheme(value: string | null): AppTheme {
-  return value === "letter" || value === "moonlight" ? value : "neutral";
+  return value === "dark" || value === "system" ? value : "light";
 }
 export function readTheme(): AppTheme {
   try {
-    // Preserve the old selection and image settings before the new shell's first run.
     if (!localStorage.getItem("atogaki.appearance.shellVersion")) {
       const theme=localStorage.getItem("atogaki.appearance.theme"),image=localStorage.getItem("atogaki.appearance.imageTheme");
       localStorage.setItem("atogaki.appearance.beforeShellV2",JSON.stringify({theme,image}));
-      if(image){try{const saved=JSON.parse(image);if(saved&&typeof saved==="object")localStorage.setItem("atogaki.appearance.imageTheme",JSON.stringify({...saved,enabled:false}));}catch{/* Preserve malformed legacy data as-is. */}}
-      localStorage.setItem("atogaki.appearance.theme","neutral");
+      if(image){try{const saved=JSON.parse(image);if(saved&&typeof saved==="object")localStorage.setItem("atogaki.appearance.imageTheme",JSON.stringify({...saved,enabled:false}));}catch{/* Preserve malformed legacy data. */}}
+      localStorage.setItem("atogaki.appearance.theme","light");
       localStorage.setItem("atogaki.appearance.shellVersion","2");
     }
-    return normalizeTheme(localStorage.getItem("atogaki.appearance.theme"));
-  }
-  catch { return "neutral"; }
+    const saved=localStorage.getItem("atogaki.appearance.theme");
+    if(saved && !["light","dark","system"].includes(saved)) {
+      if(!localStorage.getItem("atogaki.appearance.beforeThemeV3"))localStorage.setItem("atogaki.appearance.beforeThemeV3",JSON.stringify({theme:saved,image:localStorage.getItem("atogaki.appearance.imageTheme")}));
+      localStorage.setItem("atogaki.appearance.theme","light");
+    }
+    return normalizeTheme(saved);
+  } catch { return "light"; }
+}
+let system: MediaQueryList | null = null;
+export function resolvedTheme(theme:AppTheme):"light"|"dark" {
+  return theme==="system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light") : theme;
 }
 export function applyTheme(theme: AppTheme): void {
-  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.themePreference = theme;
+  document.documentElement.dataset.theme = resolvedTheme(theme);
   try { localStorage.setItem("atogaki.appearance.theme", theme); } catch { /* Session preference still applies. */ }
+  if(!system && typeof window.matchMedia==="function") {
+    system=window.matchMedia("(prefers-color-scheme: dark)");
+    system.addEventListener("change",()=>{if(document.documentElement.dataset.themePreference==="system")applyTheme("system");});
+  }
   window.dispatchEvent(new Event("atogaki-theme-change"));
 }
 export type CandidateLabelInput = { id:string; provider_name:string; model_identity:string; scope_start_ms:number; scope_end_ms:number|null; created_at_unix:number; is_candidate?:boolean };

@@ -2,8 +2,8 @@
 #karaoke-view {
   margin: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 5px; color: var(--ink); font: 12px system-ui, sans-serif; }
 #karaoke-view button, #karaoke-view summary { min-height:28px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 3px; font: 12px system-ui; align-self: center; white-space: nowrap; }
-#karaoke-view button.secondary, #karaoke-view summary { color: var(--ink); background: #f6f7f9; }
-#karaoke-view button.secondary:hover, #karaoke-view summary:hover { background: #e3e9f1; }
+#karaoke-view button.secondary, #karaoke-view summary { color: var(--ink); background: var(--secondary); }
+#karaoke-view button.secondary:hover, #karaoke-view summary:hover { background: var(--accent); }
 #karaoke-view button:disabled { cursor: default; }
 #karaoke-view [data-editor-action="follow"][aria-pressed="true"] { background: var(--accent); color: var(--primary); border-color: #8caace; }
 .editor-command-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; flex-shrink: 0; }
@@ -67,7 +67,7 @@
 .editor-cue-header > *, .editor-cue-row > * { height: 100%; line-height: 27px; padding: 0 6px; border-right: 1px solid var(--line); }
 .editor-cue-header { flex-shrink: 0; font-size: 11px; height: 23px; background: var(--surface-soft); border-block: 1px solid var(--line); }
 .editor-cue-header > * { line-height: 22px; }
-.editor-cue-row { height: 28px; font-size: 12px; border-bottom: 1px solid #e2e6eb; cursor: pointer; background: var(--surface); }
+.editor-cue-row { height: 28px; font-size: 12px; border-bottom: 1px solid var(--border); cursor: pointer; background: var(--surface); }
 .editor-cue-row > * { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #karaoke-view .editor-cue-row button { text-align: left; font: 11px ui-monospace, monospace; background: transparent; color: var(--ink); padding: 0 6px; border: 0; border-right: 1px solid var(--line); border-radius: 0; height: 100%; }
 .editor-cue-row.selected { background: var(--accent); outline: 2px solid var(--primary); outline-offset: -2px; }

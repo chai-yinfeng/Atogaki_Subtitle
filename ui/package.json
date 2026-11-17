@@ -10,6 +10,7 @@
     "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@material/material-color-utilities": "0.3.0",
     "@tauri-apps/api": "^2.11.1"
   },
   "devDependencies": {

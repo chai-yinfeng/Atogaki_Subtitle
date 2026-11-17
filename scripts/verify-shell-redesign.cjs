@@ -28,7 +28,7 @@ const assert=require('node:assert/strict');
   assert.equal(await page.locator('#recent-jobs-drawer').evaluate(e=>e.open),false);
   assert.equal(await page.locator('.job-open').first().isVisible(),false);
   assert.equal(await page.locator('#refresh').count(),0);
-  assert.equal(await page.locator('html').getAttribute('data-theme'),'neutral');
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
   await page.screenshot({path:'/tmp/atogaki-shell-workbench.png'});
   await page.locator('#open-recent-jobs').click();
   assert.equal(await page.locator('#recent-jobs-drawer').evaluate(e=>e.open),true);
@@ -99,6 +99,6 @@ const assert=require('node:assert/strict');
   assert.equal(await page.locator('#karaoke-view').isVisible(),true);
   await page.screenshot({path:'/tmp/atogaki-shell-editor.png'});
   assert.deepEqual(errors,[]);
-  console.log('PASS: neutral migration, full task page, accessible hidden task sheet, search spacing, listening drawer and navigation folds at 960/1180/1440, playback retention, usage guide, online control fold lifecycle and editor task sheet.');
+  console.log('PASS: legacy theme migration, full task page, accessible hidden task sheet, search spacing, listening drawer and navigation folds at 960/1180/1440, playback retention, usage guide, online control fold lifecycle and editor task sheet.');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

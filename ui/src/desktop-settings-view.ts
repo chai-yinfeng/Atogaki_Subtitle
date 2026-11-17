@@ -1,4 +1,4 @@
-type Theme = "neutral" | "moonlight" | "letter";
+import type {AppTheme as Theme} from "./themes";
 type Options = {
   openButton: HTMLButtonElement | null;
   visit(): number;
@@ -18,7 +18,7 @@ export function mountDesktopSettingsView(dialog: HTMLDialogElement, options: Opt
   let disposed = false, restore: { button: HTMLButtonElement; visit: number } | null = null;
   const syncTheme = () => {
     if (disposed) return;
-    for (const button of form.querySelectorAll<HTMLButtonElement>("[data-app-theme]")) button.setAttribute("aria-pressed", String(button.dataset.appTheme === document.documentElement.dataset.theme));
+    for (const button of form.querySelectorAll<HTMLButtonElement>("[data-app-theme]")) button.setAttribute("aria-pressed", String(button.dataset.appTheme === document.documentElement.dataset.themePreference));
   };
   const selectPage = (key: string) => {
     if (disposed || !pages.some(page => page.dataset.settingsPage === key)) return;
@@ -41,7 +41,7 @@ export function mountDesktopSettingsView(dialog: HTMLDialogElement, options: Opt
     if (button.id === "close-settings") dialog.close();
     else if (button.id === "finish-settings") options.save(true);
     else if (button.dataset.settingsTab) selectPage(button.dataset.settingsTab);
-    else if (button.dataset.appTheme === "neutral" || button.dataset.appTheme === "moonlight" || button.dataset.appTheme === "letter") { options.applyTheme(button.dataset.appTheme); syncTheme(); }
+    else if (button.dataset.appTheme === "light" || button.dataset.appTheme === "dark" || button.dataset.appTheme === "system") { options.applyTheme(button.dataset.appTheme); syncTheme(); }
   }, { signal: events.signal });
   const dirty = (event: Event) => {
     const target = event.target;

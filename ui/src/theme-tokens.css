@@ -18,5 +18,14 @@
   --panel-tint: var(--card); --reading-wash: var(--card); --reading-fill: var(--card);
   --material-mark: var(--border); --panel-shadow: none; --scene: none;
 }
-:root[data-theme=moonlight] { --primary:#334b5c; --primary-hover:#263b49; --sidebar:#f6f8fa; }
-:root[data-theme=letter] { --primary:#6e4f40; --primary-hover:#533a2e; --sidebar:#faf9f6; }
+:root[data-theme=light] { color-scheme:light; }
+:root[data-theme=dark] {
+  color-scheme:dark;
+  --background:#0a0a0a; --foreground:#fafafa; --card:#171717; --card-foreground:#fafafa;
+  --popover:#171717; --popover-foreground:#fafafa;
+  --primary:#e5e5e5; --primary-foreground:#171717; --primary-hover:#d4d4d4;
+  --secondary:#262626; --secondary-foreground:#fafafa; --muted:#262626; --muted-foreground:#a3a3a3;
+  --accent:#262626; --accent-foreground:#fafafa; --accent-hover:#404040;
+  --destructive:#f87171; --border:#333333; --input:#404040; --ring:#737373;
+  --sidebar:#171717; --sidebar-foreground:#e5e5e5; --sidebar-accent:#262626; --sidebar-border:#333333;
+}
