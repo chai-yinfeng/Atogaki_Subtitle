@@ -24,7 +24,7 @@ const path = require('node:path');
       });
       await page.goto(process.env.ATOGAKI_EDITOR_URL || 'http://127.0.0.1:1430');
       await page.locator('#show-listening').click();
-      await page.locator('[data-listen-job]').first().click();
+      await page.locator('#open-listening-library').click();await page.locator('[data-listen-job]').first().click();
       await page.waitForFunction(() => document.querySelector('#listening-media-host video')?.readyState >= 1);
       assert.equal(await page.locator('#listening-view .loop-tools, #listening-view [data-loop], #listening-view .loop-state').count(), 0);
       assert.deepEqual(await page.locator('#listening-view .playback-tools button').allTextContents(), ['上一句', '−5 秒', '播放', '+5 秒', '下一句']);
@@ -71,7 +71,10 @@ const path = require('node:path');
       await page.locator('#listening-layout-placement').selectOption('hidden');
       assert.equal(await page.locator('.listening-reading').isVisible(), false);
       const hiddenVideo = await videoSize();
-      assert.ok(hiddenVideo.fitHeight > initialVideo.fitHeight+5, JSON.stringify({initialVideo,hiddenVideo}));
+      assert.ok(hiddenVideo.width > initialVideo.width+5 && hiddenVideo.fitHeight >= initialVideo.fitHeight-1, JSON.stringify({initialVideo,hiddenVideo}));
+      // With the programme rail removed, the video may already be height-limited.
+      // Extra width can increase rendered height only when the original width was the limit.
+      if(initialVideo.fitHeight < initialVideo.height-5)assert.ok(hiddenVideo.fitHeight > initialVideo.fitHeight+5, JSON.stringify({initialVideo,hiddenVideo}));
       const videoHandle=page.locator('.listening-video-splitter'),handleBox=await videoHandle.boundingBox();
       await page.mouse.move(handleBox.x+handleBox.width/2,handleBox.y+handleBox.height/2);await page.mouse.down();
       await page.mouse.move(handleBox.x+handleBox.width/2,handleBox.y+handleBox.height/2-70,{steps:6});await page.mouse.up();
@@ -91,7 +94,7 @@ const path = require('node:path');
           await page.screenshot({path:path.join(process.env.ATOGAKI_SCREENSHOTS_DIR,`listening-${placement}-${viewport.width}.png`)});
         }
       }
-      await page.reload();await page.locator('#show-listening').click();await page.locator('[data-listen-job]').first().click();
+      await page.reload();await page.locator('#show-listening').click();await page.locator('#open-listening-library').click();await page.locator('[data-listen-job]').first().click();
       assert.equal(await page.locator('#listening-layout-placement').inputValue(),process.env.ATOGAKI_SCREENSHOTS_DIR?'hidden':'right');
       assert.equal(await videoHandle.getAttribute('aria-valuenow'),'85');
       assert.deepEqual(errors, []);

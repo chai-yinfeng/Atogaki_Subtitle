@@ -100,6 +100,7 @@ import "./online-view.css";
 import {mountOnlineView} from "./online-view";
 import {mountSheet, mountNavigationToggle} from "./app-panels";
 import {usageGuide} from "./usage-guide";
+import {mountTaskOrdering} from "./task-ordering";
 import {mountOfflineModels,type OfflineModelChoice} from "./offline-models";
 import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
@@ -736,6 +737,7 @@ const dictionaryCredentialMessage = document.querySelector<HTMLParagraphElement>
 
 let refreshing = false;
 let jobOrderBusy = false;
+let jobOrdering:ReturnType<typeof mountTaskOrdering>|null=null;
 let latestJobs: LocalJob[] = [];
 let currentArea: TopLevelArea = "workbench";
 let renderedJobsFingerprint: string | null = null;
@@ -1296,6 +1298,7 @@ window.addEventListener("pagehide", () => {
   editorStructureHistory.dispose();
   editorContextStatus.dispose();
   editorNavigation.dispose();
+  jobOrdering?.dispose();
   taskSheet.dispose(); listeningSheet.dispose(); guideSheet.dispose(); navigationToggle.dispose();
   taskNavigation.dispose();
   taskProgress.dispose();
@@ -2061,6 +2064,7 @@ function hasUnsavedSubtitleEdits(): boolean {
 function renderJobs(jobs: LocalJob[]): void {
   jobs = jobs.filter(job => matchesQuery(taskTitleQuery,[displayName(job)]));
   if (!jobList || !jobCount) return;
+  jobOrdering?.dispose();jobOrdering=null;
   jobCount.textContent = `${jobs.length} 个任务`;
   if (jobs.length === 0) {
     jobList.innerHTML = `<div class="empty-state"><strong>还没有本地任务。</strong><span>选择媒体与模型，创建第一个离线转写任务。</span></div>`;
@@ -2162,90 +2166,8 @@ async function persistDisplayedJobOrder(): Promise<void> {
 }
 
 function enableJobOrdering(): void {
-  if (!jobList) return;
-  jobCardsInDisplayOrder().forEach((card) => {
-    const handle = card.querySelector<HTMLElement>(".job-drag-handle");
-    if (!handle) return;
-    let mouseActive = false;
-    let startY = 0;
-    let moved = false;
-    let suppressOpenClick = false;
-    const finishMouseOrder = (): void => {
-      if (!mouseActive) return;
-      mouseActive = false;
-      window.removeEventListener("mousemove", moveMouseOrder);
-      window.removeEventListener("mouseup", finishMouseOrder);
-      window.removeEventListener("blur", finishMouseOrder);
-      card.classList.remove("drag-armed", "dragging");
-      jobCardsInDisplayOrder().forEach((jobCard) => jobCard.classList.remove("drag-target"));
-      if (moved) {
-        suppressOpenClick = true;
-        window.setTimeout(() => { suppressOpenClick = false; }, 0);
-        void persistDisplayedJobOrder();
-      } else if (jobManagementMessage?.textContent?.startsWith("正在调整任务顺序")) {
-        jobManagementMessage.textContent = "";
-      }
-      moved = false;
-    };
-    const moveMouseOrder = (event: MouseEvent): void => {
-      if (!mouseActive) return;
-      if ((event.buttons & 1) === 0) {
-        finishMouseOrder();
-        return;
-      }
-      if (!moved && Math.abs(event.clientY - startY) < 4) return;
-      event.preventDefault();
-      moved = true;
-      card.classList.remove("drag-armed");
-      card.classList.add("dragging");
-      const target = jobCardsInDisplayOrder()
-        .filter((jobCard) => jobCard !== card)
-        .reduce<HTMLElement | null>((nearest, jobCard) => {
-          if (!nearest) return jobCard;
-          const distance = Math.abs(event.clientY - (jobCard.getBoundingClientRect().top + jobCard.offsetHeight / 2));
-          const nearestDistance = Math.abs(event.clientY - (nearest.getBoundingClientRect().top + nearest.offsetHeight / 2));
-          return distance < nearestDistance ? jobCard : nearest;
-        }, null);
-      if (target) {
-        const before = event.clientY < target.getBoundingClientRect().top + target.offsetHeight / 2;
-        jobList.insertBefore(card, before ? target : target.nextElementSibling);
-        jobCardsInDisplayOrder().forEach((jobCard) => jobCard.classList.toggle("drag-target", jobCard === target));
-      }
-      const edge = 52;
-      if (event.clientY < edge) window.scrollBy({ top: -18, behavior: "auto" });
-      else if (event.clientY > window.innerHeight - edge) window.scrollBy({ top: 18, behavior: "auto" });
-    };
-    card.addEventListener("mousedown", (event) => {
-      if (event.button !== 0) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest(".job-actions")) return;
-      if (target?.closest(".job-drag-handle")) event.preventDefault();
-      mouseActive = true;
-      startY = event.clientY;
-      moved = false;
-      card.classList.add("drag-armed");
-      if (jobManagementMessage) jobManagementMessage.textContent = "正在调整任务顺序；移动到目标位置后松开鼠标。";
-      window.addEventListener("mousemove", moveMouseOrder);
-      window.addEventListener("mouseup", finishMouseOrder);
-      window.addEventListener("blur", finishMouseOrder);
-    });
-    card.addEventListener("click", (event) => {
-      if (!suppressOpenClick || !(event.target instanceof Element) || !event.target.closest(".job-open")) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      suppressOpenClick = false;
-    }, true);
-    handle.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      event.preventDefault();
-      const sibling = event.key === "ArrowUp" ? card.previousElementSibling : card.nextElementSibling;
-      if (!(sibling instanceof HTMLElement)) return;
-      if (event.key === "ArrowUp") jobList.insertBefore(card, sibling);
-      else jobList.insertBefore(sibling, card);
-      handle.focus();
-      void persistDisplayedJobOrder();
-    });
-  });
+  if(!jobList)return;
+  jobOrdering=mountTaskOrdering(jobList,taskDrawer,{busy:()=>jobOrderBusy,save:persistDisplayedJobOrder,message:text=>{if(jobManagementMessage)jobManagementMessage.textContent=text;}});
 }
 
 function renderListeningJobs(jobs: LocalJob[]): void {
@@ -2256,7 +2178,7 @@ function renderListeningJobs(jobs: LocalJob[]): void {
     ? translated.map((job) => `<button type="button" class="listening-job${activeDetail?.job.job_id === job.job_id && currentArea === "listening" ? " active" : ""}" data-listen-job="${escapeHtml(job.job_id)}"><strong>${escapeHtml(displayName(job))}</strong><span>${escapeHtml(languageLabel(job.source_language))} → ${escapeHtml(languageLabel(job.target_language))} · ${job.segment_count} 段</span></button>`).join("")
     : `<div class="empty-state"><strong>还没有可收听任务。</strong><span>完整翻译的任务会自动出现在这里。</span></div>`;
   listeningJobList.querySelectorAll<HTMLButtonElement>("[data-listen-job]").forEach((button) => {
-    button.addEventListener("click", () => void openListeningJob(button.dataset.listenJob ?? ""));
+    button.addEventListener("click", () => {listeningSheet.close();void openListeningJob(button.dataset.listenJob ?? "");});
   });
 }
 
@@ -2337,7 +2259,7 @@ async function deleteJob(job: LocalJob): Promise<void> {
 }
 
 async function refresh(current: () => boolean = () => desktopStartup.active): Promise<void> {
-  if (!jobList || refreshing || jobOrderBusy || (currentArea !== "workbench" && currentArea !== "listening")) return;
+  if (!jobList || refreshing || jobOrderBusy || jobOrdering?.active || (currentArea !== "workbench" && currentArea !== "listening")) return;
   refreshing = true;
   if (!activeDetail && renderedJobsFingerprint === null && jobList.childElementCount === 0) {
     jobList.innerHTML = `<div class="empty-state">正在读取任务…</div>`;

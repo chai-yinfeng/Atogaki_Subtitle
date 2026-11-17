@@ -21,7 +21,7 @@ const assert=require('node:assert/strict');
   });
   await page.goto(process.env.ATOGAKI_EDITOR_URL||'http://127.0.0.1:1430');
   const audio=page.locator('#listening-media-host audio');
-  const listen=async()=>{await page.locator('#show-listening').click();await page.locator('[data-listen-job]').first().click();};
+  const listen=async()=>{await page.locator('#show-listening').click();await page.locator('#open-listening-library').click();await page.locator('[data-listen-job]').first().click();};
   const home=async()=>{await page.locator('#show-workbench').click();await page.locator('.job-open').first().waitFor({state:'attached'});};
   await page.locator('.job-open').first().waitFor({state:'attached'});
   for(const held of ['get_playback_position','list_learning_items']) {

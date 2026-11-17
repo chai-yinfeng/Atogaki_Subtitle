@@ -44,18 +44,22 @@
 #job-title-search { display:block; margin:20px 0; }
 .job-management-message:empty { display:none; }
 .job-list { display:grid; gap:12px; overflow-anchor:none; }
-.job-card { min-width:0; display:grid; grid-template-columns:20px minmax(0,1fr); gap:8px; padding:16px; border:1px solid var(--border); border-radius:8px; background:var(--card); }
+.job-card { min-width:0; display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:12px; padding:14px; border:1px solid var(--border); border-radius:8px; background:var(--card); }
 .job-card:hover { background:var(--muted); }
 .job-open { display:grid; align-items:start; justify-content:stretch; gap:10px; min-width:0; background:transparent; color:var(--foreground); border:0; padding:0; box-shadow:none; text-align:left; }
 .job-open:hover { background:transparent; }
 .job-open h3 { font-size:14px; line-height:1.5; overflow-wrap:anywhere; }
 .job-open p { margin-top:5px; font-size:12px; color:var(--muted-foreground); overflow-wrap:anywhere; }
 .job-statuses { display:flex; flex-wrap:wrap; gap:6px; }
-.job-actions { grid-column:2; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.job-actions { grid-column:3; align-self:start; display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:6px; max-width:160px; }
 .job-actions button { min-height:28px; padding:4px 9px; font-size:12px; }
 .job-drag-handle { align-self:start; padding:0; min-height:28px; min-width:16px; border:0; background:transparent; color:var(--muted-foreground); box-shadow:none; cursor:grab; }
 .job-drag-handle:hover { background:var(--accent); }
-.job-card.dragging { opacity:.45; }.job-card.drag-target { border-color:var(--ring); background:var(--accent); }
+.job-drag-handle { touch-action:none; }
+.job-drag-preview { position:fixed; z-index:100; pointer-events:none; box-shadow:0 12px 32px #0003; transform:rotate(.8deg); opacity:.95; }
+.job-drop-placeholder { border:2px dashed var(--ring); border-radius:8px; background:var(--muted); }
+.job-error { grid-column:2/-1; }
+@media(max-width:500px) { .job-card { grid-template-columns:16px minmax(0,1fr); }.job-actions { grid-column:2; max-width:none; } }
 .running-dot { width:7px; height:7px; margin-left:auto; border-radius:50%; background:#16a34a; }
 #online-view { padding:28px; }
 #learning-view { margin:0; }

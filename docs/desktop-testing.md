@@ -315,3 +315,5 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright \
 该脚本仅使用合成 IPC，覆盖预译开关进入实际 start 参数、折叠设置保留选择、翻译关闭时关联控件禁用、会话运行中配置禁用、隐藏字幕窗不停会话、草稿／锁定标记及窄屏／固定字幕窗布局。它不启动音频采集或模型，也不读写正式数据库。截图输出 `/tmp/atogaki-online-controls.png`、`/tmp/atogaki-online-controls-small.png`、`/tmp/atogaki-online-caption.png`；本轮检查通过，不能代替真实系统采集或端到端语义验收。
 
 当前在线与离线代码已整合到 main，稳定发行仍为 v0.1.3。本轮 UI 未覆盖已安装 App。在线 Python runtime／多文件模型仍依赖本机导入，普通用户的准备闭环待确认，不通过本次测试追加实现。
+
+任务排序交互可运行 scripts/verify-task-ordering.cjs：仅合成任务，验证浮动副本、插入占位、保存、取消、抽屉自动滚动与键盘，不操作正式任务顺序。

@@ -47,7 +47,7 @@ const assert=require('node:assert/strict');
  assert.equal(await p.locator('[data-cue-id="cue-6"]').getAttribute('aria-current'),'true');
  await p.locator('[data-editor-action="back"]').click();
  // Shared listening player restores and persists position without an editor instance.
- await p.locator('#show-listening').click();await p.locator('[data-listen-job]').first().click();
+ await p.locator('#show-listening').click();await p.locator('#open-listening-library').click();await p.locator('[data-listen-job]').first().click();
  const listening=p.locator('#listening-media-host audio');await listening.waitFor();
  await p.waitForFunction(()=>{const a=document.querySelector('#listening-media-host audio');return a.readyState>=1&&a.currentTime>=4.4;});
  assert.ok(await listening.evaluate(a=>a.currentTime<4.7));
