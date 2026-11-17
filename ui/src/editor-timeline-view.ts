@@ -59,8 +59,9 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
       canvas.height = height;
     }
     const theme = getComputedStyle(styleRoot);
-    const accent = theme.getPropertyValue("--accent").trim();
-    const accentSoft = theme.getPropertyValue("--accent-soft").trim();
+    const accent = theme.getPropertyValue("--primary").trim() || "#262626";
+    const accentSoft = theme.getPropertyValue("--accent").trim() || "#f5f5f5";
+    const accentForeground = theme.getPropertyValue("--primary-foreground").trim() || "#fafafa";
     const context = canvas.getContext("2d");
     if (!context) return;
     context.setTransform(scale, 0, 0, scale, 0, 0);
@@ -81,7 +82,7 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
 
     const start = snapshot.viewport?.startMs ?? waveform.start_ms;
     const end = snapshot.viewport?.endMs ?? waveform.end_ms;
-    const bitmapKey = JSON.stringify([width, height, start, end, gain, accent, accentSoft,
+    const bitmapKey = JSON.stringify([width, height, start, end, gain, accent, accentSoft, accentForeground,
       theme.getPropertyValue("--ink"), theme.getPropertyValue("--surface-soft"), activeId,
       draggedCueId,
       timelineSegments.map(cue => [cue.id, cue.start_ms, cue.end_ms, cue.source_text])]);
@@ -152,7 +153,7 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
           context.beginPath();
           context.rect(left + 5, trackTop + 2, Math.max(1, right - left - 10), trackHeight - 4);
           context.clip();
-          context.fillStyle = active ? "#fffaf1" : theme.getPropertyValue("--ink").trim();
+          context.fillStyle = active ? accentForeground : theme.getPropertyValue("--ink").trim();
           context.font = "11px system-ui";
           context.textAlign = "left";
           context.fillText(segment.source_text, left + 7, trackTop + trackHeight / 2 + 4);

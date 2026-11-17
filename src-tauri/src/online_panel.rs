@@ -104,9 +104,14 @@ pub(crate) fn new(
     panel.setTitleVisibility(NSWindowTitleVisibility::Hidden);
     panel.setTitlebarAppearsTransparent(true);
     panel.setFrame_display(frame, false);
-    panel.setOpaque(false);
-    panel.setBackgroundColor(Some(&NSColor::clearColor()));
-    panel.setAlphaValue(1.0); // Only CSS background is translucent; text stays opaque.
+    panel.setOpaque(true);
+    panel.setBackgroundColor(Some(&NSColor::colorWithSRGBRed_green_blue_alpha(
+        35.0 / 255.0,
+        35.0 / 255.0,
+        38.0 / 255.0,
+        1.0,
+    )));
+    panel.setAlphaValue(1.0);
     panel.setHasShadow(false);
     if let Some(screen) = screen {
         let visible = screen.visibleFrame();

@@ -10,7 +10,14 @@ const assert=require('node:assert/strict');
  const colors=await canvas.evaluate(c=>{
   const px=c.getContext('2d').getImageData(c.width-2,2,1,1).data;return [...px].slice(0,3);
  });
- assert.deepEqual(colors,[238,241,245]);
+ assert.deepEqual(colors,[245,245,245]);
+ const waveformPixels=await canvas.evaluate(c=>{
+  const scale=c.width/c.getBoundingClientRect().width;
+  const pixels=c.getContext('2d').getImageData(0,Math.round(30*scale),c.width,Math.max(1,Math.round(14*scale))).data;
+  let dark=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]<60&&pixels[i+1]<60&&pixels[i+2]<60)dark++;
+  return dark;
+ });
+ assert.ok(waveformPixels>100,'waveform strokes must be visible against the neutral background');
  // In the compact view the bottom subtitle track remains visible and hittable.
  const box=await canvas.boundingBox();
  const height=box.height, trackTop=28+Math.max(12,(height-56)*.5)+(height<100?6:14);

@@ -2279,22 +2279,6 @@ fn main() {
                             closing_app.exit(0);
                         });
                     }
-                    #[cfg(target_os = "macos")]
-                    WindowEvent::Focused(focused) => {
-                        let overlay_visible = app_handle
-                            .state::<SubtitleOverlayState>()
-                            .current
-                            .lock()
-                            .is_ok_and(|current| current.is_some());
-                        if overlay_visible {
-                            let policy = if *focused {
-                                tauri::ActivationPolicy::Regular
-                            } else {
-                                tauri::ActivationPolicy::Accessory
-                            };
-                            let _ = app_handle.set_activation_policy(policy);
-                        }
-                    }
                     _ => {}
                 });
             }
