@@ -1,6 +1,18 @@
 # 本机安装与回退记录
 
-最新安装为 2026-11-17 的离线 Qwen／ForcedAligner 与模型入口试用版，代码提交 `b13c746`（主要接入为 `c7a9883`），App 版本号仍为 0.1.3；没有修改公开 Release。以下按日期保留历史记录。
+最新安装为 2026-11-17 的侧栏／主题／命名模型试用版，代码提交 `b5c81b8`，包含此前离线 Qwen／ForcedAligner；App 版本号仍为 0.1.3，没有修改公开 Release。以下按日期保留历史记录。
+
+## 2026-11-17：侧栏、图片主题与命名模型试装
+
+从干净 `b5c81b8` 执行 `cargo tauri build --config tauri.macos-complete.conf.json --bundles app`，确认旧主程序／audio-tap 停止后保存 SQLite 一致性备份，原子替换 `/Applications/Atogaki.app`。前版 b13c746 保留于 `/Applications/.Atogaki.previous-20261117-desktop-feedback`，更早回退包保留。构建与安装的 41 个文件、共享 Python 资源、五个 sidecar 和 deep／strict ad hoc 签名核对通过。没有发布 Release、tag、更新密钥或更新清单。
+
+本次包含使用说明、主导航／在线设置折叠、收听节目抽屉、编辑器任务抽屉、带拖动副本和插入位置的任务排序；亮／暗／跟随系统替代旧基础主题，图片主题使用 Material 语义色阶，支持命名、独立亮暗预览和显式应用。设置支持命名注册 Whisper／VAD／Qwen 本地模型，任务使用稳定 ID，移除配置不删除原文件。设计与范围见[0083](decisions/0083-neutral-shell-and-embedded-online.md)、[0085](decisions/0085-light-dark-and-image-theme-studio.md)及[0086](decisions/0086-named-local-model-registration.md)。
+
+原生窗口确认主导航开合、使用说明、节目抽屉选择后关闭、命名模型设置入口、基础亮暗切换、原图片保留及完整亮暗预览，取消后恢复；在线设置可收起／展开，模式及语言不变，最终停在未开始状态。只读选择已有节目且保持暂停，没有拖动正式任务、注册用户模型、启动采集／云端或编辑正式字幕。部分模态框的原生 AX 树为空，实际截图与键盘操作可用；自动化覆盖另由生产 WebKit 验证。此前波形首次绘制空白仍待定位，本次不宣称已修复。
+
+启动后 integrity=ok、foreign key 检查为空，20 张表中 19 张逐表内容摘要完全一致；local_settings 仅有选中节目播放位置的更新时间改变，位置值不变。13 个任务及正式字幕、媒体、词表、模型保持原样。379 项前端、44 项 Tauri（4 ignored）、相关 WebKit、类型／生产构建、两套 fmt 与 diff 通过；核心 Rust 全量没有在本次界面后继变更中重复执行。WebKit 覆盖主题草稿／导入／迟到返回、设置／模型注册与选择、任务拖动／取消／滚动、播放器保持及窄窗口布局。没有新增语义评分或两秒目标结论。
+
+构建／安装清单、数据库备份／差异说明、验证日志与原生截图保存在忽略的 `local-artifacts/evaluation/desktop-feedback-20261117/`。旧权限重置后的同版重开已由用户确认成功，见下文；本次换包改变 ad hoc 身份，未再自动重置授权，也没有验证跨更新权限保留。自动更新仍仅完成可行性调查，未接入 updater。
 
 ## 2026-11-17：离线 Qwen、强制对齐与模型入口
 
