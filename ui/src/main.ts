@@ -98,6 +98,8 @@ import "./listening.css";
 import "./editor.css";
 import "./online-view.css";
 import {mountOnlineView} from "./online-view";
+import {mountSheet, mountNavigationToggle} from "./app-panels";
+import {usageGuide} from "./usage-guide";
 import {mountOfflineModels,type OfflineModelChoice} from "./offline-models";
 import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
@@ -351,7 +353,7 @@ if (!app) throw new Error("missing app root");
 
 app.innerHTML = `
   <main class="shell">
-    <header class="app-sidebar">
+    <header id="app-navigation" class="app-sidebar">
       <div class="app-brand">
         <p class="eyebrow">LOCAL MEDIA LANGUAGE WORKSPACE</p>
         <h1>Atogaki</h1>
@@ -364,9 +366,11 @@ app.innerHTML = `
         </nav>
         <button id="open-online" type="button" class="secondary"><span>在线字幕</span><span id="online-running-indicator" class="running-dot hidden" aria-label="在线会话运行中"></span></button>
         <button id="open-settings" type="button" class="secondary">设置</button>
+        <button id="open-usage-guide" type="button" class="secondary" aria-haspopup="dialog" aria-controls="usage-guide">使用说明</button>
       </div>
     </header>
     <div class="app-content">
+    <div class="app-topbar"><button id="toggle-navigation" type="button" class="quiet" aria-controls="app-navigation" aria-expanded="true">收起导航栏</button></div>
     <div id="home-view" class="app-page">
       <div class="page-heading"><div><h2>工作台</h2><p>导入媒体，创建双语字幕。</p></div><button id="open-recent-jobs" type="button" class="secondary" aria-haspopup="dialog" aria-controls="recent-jobs-drawer">最近任务</button></div>
       <p class="data-path hidden" id="data-path"></p>
@@ -408,12 +412,9 @@ app.innerHTML = `
     <section id="listening-view" class="listening-view hidden" aria-labelledby="listening-title">
       <div class="module-heading listening-heading">
         <div><h2 id="listening-title">收听</h2></div>
+        <button id="open-listening-library" type="button" class="secondary" aria-haspopup="dialog" aria-controls="listening-library-drawer">节目列表</button>
       </div>
       <div class="listening-layout">
-        <aside class="listening-library" aria-label="可收听任务">
-          <div class="section-heading"><h3>已翻译节目</h3><span id="listening-job-count"></span></div>
-          <div id="listening-job-list" class="listening-job-list"></div>
-        </aside>
         <section class="listening-player">
           <div class="panel-heading compact">
             <div><p class="eyebrow">NOW PLAYING</p><h3 id="listening-job-title">选择一个节目开始收听</h3></div>
@@ -438,7 +439,7 @@ app.innerHTML = `
           </div>
           <details class="listening-playback-info"><summary>播放信息与快捷键</summary>
           <p class="shortcut-help">快捷键：空格/K 播放暂停 · ←/J 与 →/L 跳 5 秒 · [ ] 切换字幕 · , . 调整速度 · O 开关悬浮字幕</p>
-          <p id="listening-media-message" class="media-message">从左侧选择一个已翻译任务。</p>
+          <p id="listening-media-message" class="media-message">从节目列表选择一个已翻译任务。</p>
           </details>
           </div>
           <div class="listening-splitter" tabindex="0" role="separator" aria-label="调整播放与全文比例" aria-valuemin="25" aria-valuemax="75"></div>
@@ -458,6 +459,12 @@ app.innerHTML = `
         </section>
       </div>
     </section>
+    <dialog id="listening-library-drawer" class="task-sheet listening-library" aria-labelledby="listening-library-title">
+      <div class="sheet-heading"><h2 id="listening-library-title">节目列表</h2><button id="close-listening-library" type="button" class="secondary">关闭</button></div>
+      <span id="listening-job-count" class="sheet-count"></span>
+      <div id="listening-job-list" class="listening-job-list"></div>
+    </dialog>
+    ${usageGuide}
     <section id="learning-view" class="learning-view hidden" aria-labelledby="learning-title">
       <div class="module-heading learning-heading">
         <div><p class="eyebrow">LEARNING LIBRARY</p><h2 id="learning-title">学习</h2><p>保存词语、短语、语法表达与整句，在原节目语境中反复回听。</p></div>
@@ -567,11 +574,11 @@ ${taskToolsTemplate(fileManagerLabel)}
 let onlinePanel:ReturnType<typeof mountOnlineView>|null=null;
 const onlineView=document.querySelector<HTMLElement>("#online-view")!;
 const taskDrawer=document.querySelector<HTMLDialogElement>("#recent-jobs-drawer")!;
-document.getElementById("open-recent-jobs")!.onclick=()=>{taskDrawer.showModal();taskDrawer.querySelector<HTMLInputElement>('input[type="search"]')?.focus();};
-document.getElementById("close-recent-jobs")!.onclick=()=>taskDrawer.close();
-taskDrawer.addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();event.stopPropagation();taskDrawer.close();}});
-taskDrawer.addEventListener("close",()=>{if(currentArea==="workbench"&&!document.querySelector("dialog[open]"))document.getElementById("open-recent-jobs")!.focus();});
-taskDrawer.addEventListener("click",event=>{if(event.target===taskDrawer){const rect=taskDrawer.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)taskDrawer.close();}});
+const taskSheet=mountSheet(taskDrawer,[document.getElementById("open-recent-jobs")!,document.getElementById("editor-open-tasks")!],document.getElementById("close-recent-jobs")!);
+const listeningDrawer=document.querySelector<HTMLDialogElement>("#listening-library-drawer")!;
+const listeningSheet=mountSheet(listeningDrawer,[document.getElementById("open-listening-library")!],document.getElementById("close-listening-library")!);
+const guideSheet=mountSheet(document.querySelector<HTMLDialogElement>("#usage-guide")!,[document.getElementById("open-usage-guide")!],document.getElementById("close-usage-guide")!);
+const navigationToggle=mountNavigationToggle(document.querySelector<HTMLElement>(".shell")!,document.getElementById("app-navigation")!,document.querySelector<HTMLButtonElement>("#toggle-navigation")!);
 const homeView = document.querySelector<HTMLDivElement>("#home-view");
 const listeningView = document.querySelector<HTMLElement>("#listening-view");
 const learningView = document.querySelector<HTMLElement>("#learning-view");
@@ -1289,6 +1296,7 @@ window.addEventListener("pagehide", () => {
   editorStructureHistory.dispose();
   editorContextStatus.dispose();
   editorNavigation.dispose();
+  taskSheet.dispose(); listeningSheet.dispose(); guideSheet.dispose(); navigationToggle.dispose();
   taskNavigation.dispose();
   taskProgress.dispose();
   listeningNavigation.dispose();
@@ -2447,6 +2455,7 @@ const areaNavigation = createAreaNavigation<JobDetail>({
     listeningSubtitleList?.replaceChildren();
     currentArea = area;
     if(taskDrawer.open)taskDrawer.close();
+    if(listeningDrawer.open)listeningDrawer.close();
     onlineView.classList.toggle("hidden",area!=="online");
     if(area==="online"&&!onlinePanel)onlinePanel=mountOnlineView(document.querySelector<HTMLElement>("#online-root")!,{control:true,status:phase=>{
       const running=["loading","requesting_audio","running","stopping","draining"].includes(phase);
@@ -2494,6 +2503,7 @@ const listeningNavigation = createListeningNavigation<JobDetail>({
   },
   apply: (detail, resumeMs) => {
     activeDetail = detail; editorContextStatus.invalidate();
+    listeningSheet.close();
     activeSegmentId = null;
     if (listeningJobTitle) listeningJobTitle.textContent = displayName(detail.job);
     renderListeningJobs(latestJobs);

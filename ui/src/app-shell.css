@@ -8,6 +8,16 @@
 .app-sidebar button:hover,.app-sidebar button.active { background:var(--sidebar-accent); color:var(--foreground); }
 .app-sidebar #open-settings { margin-top:20px; }
 .app-content { min-width:0; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+.app-topbar { display:flex; flex:none; padding:8px 24px 0; }
+.app-topbar button { min-height:28px; padding:3px 8px; font-size:12px; }
+.shell.navigation-collapsed { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
+.shell.navigation-collapsed>.app-sidebar { display:none; }
+.shell.workspace-open .app-topbar { display:none; }
+.usage-guide { width:min(640px,100vw); }
+.usage-guide .guide-intro { color:var(--muted-foreground); margin:12px 0 24px; font-size:13px; }
+.usage-guide details { border-top:1px solid var(--border); padding-block:8px; }
+.usage-guide summary { color:var(--foreground); font-weight:500; }
+.usage-guide details p { font-size:13px; line-height:1.8; margin:8px 0 16px; }
 .app-content> :is(#home-view,#learning-view,#online-view,#listening-view) { flex:1; min-height:0; min-width:0; }
 .app-page,#learning-view { padding:32px; overflow:auto; }
 .page-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:32px; }

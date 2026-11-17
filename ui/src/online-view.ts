@@ -13,9 +13,11 @@ export function mountOnlineView(root:HTMLElement, options:{control:boolean;statu
 const control=options.control;
 root.classList.add("online-panel");root.dataset.view=control?"control":"caption";
 const events=new AbortController();let unlisten=()=>{};let poll:number|null=null;
+let controlsCollapsed=false;
+if(control){try{controlsCollapsed=localStorage.getItem("atogaki.onlineControlsCollapsed")==="true";}catch{/* Optional preference. */}}
 root.innerHTML=`<section class="online-card">
-<header ${control?"data-tauri-drag-region":""}><strong ${control?"data-tauri-drag-region":""}>${control?"在线字幕":"Atogaki · 在线字幕"}</strong><button id="online-hide" class="quiet" type="button">${control?"字幕窗":"隐藏"}</button></header>
-<div class="online-layout">${control?`<aside class="session-sidebar"><section class="session-controls" aria-label="在线会话控制">
+<header ${control?"data-tauri-drag-region":""}><strong ${control?"data-tauri-drag-region":""}>${control?"在线字幕":"Atogaki · 在线字幕"}</strong>${control?'<button id="online-toggle-controls" class="quiet" type="button" aria-expanded="true" aria-controls="online-session-controls">收起设置</button>':""}<button id="online-hide" class="quiet" type="button">${control?"字幕窗":"隐藏"}</button></header>
+<div class="online-layout">${control?`<aside id="online-session-controls" class="session-sidebar"><section class="session-controls" aria-label="在线会话控制">
 <div class="session-options"><fieldset class="recognition-mode"><legend>识别模式</legend><label><input type="radio" name="recognition-mode" value="one-pass" checked>One Pass</label><label><input type="radio" name="recognition-mode" value="two-pass">Two Pass</label></fieldset><label>原文语言<select id="online-language"></select></label><label class="check"><input type="checkbox" id="online-translate" checked>翻译为中文</label></div>
 <div class="actions"><button id="online-start">开始</button><button id="online-stop" class="secondary">停止</button></div>
 <p id="online-profile-status" class="help" role="status"></p>
@@ -83,6 +85,11 @@ function render():void {
  const state=model.status, t=model.tracks();
  options.status?.(state.phase);
  root.dataset.locked=String(captionLocked);
+ if(control){
+  root.dataset.controlsCollapsed=String(controlsCollapsed);
+  const sidebar=find("online-session-controls");sidebar.hidden=controlsCollapsed;sidebar.inert=controlsCollapsed;
+  const toggle=find<HTMLButtonElement>("online-toggle-controls");toggle.textContent=controlsCollapsed?"显示设置":"收起设置";toggle.setAttribute("aria-expanded",String(!controlsCollapsed));
+ }
  if(control){const lock=find<HTMLInputElement>("online-lock");lock.disabled=lockBusy;if(!lockBusy)lock.checked=captionLocked;}
  if(control){const toggle=find<HTMLButtonElement>("online-hide");toggle.disabled=captionBusy;toggle.textContent=captionVisible?"隐藏字幕窗":"显示字幕窗";toggle.setAttribute("aria-pressed",String(captionVisible));}
  set("online-status",message||state.error||`${phaseLabel[state.phase]||state.phase}${model.translationFailures?" · 部分片段翻译失败，原文已保留":""}`);
@@ -175,6 +182,11 @@ if(control){
   if(!choices?.runtimeReady)message="在线运行环境尚未准备好。";
  }catch(e){message=String(e);}
  if(disposed)return;
+ find("online-toggle-controls").onclick=()=>{
+  controlsCollapsed=!controlsCollapsed;
+  try{localStorage.setItem("atogaki.onlineControlsCollapsed",String(controlsCollapsed));}catch{/* Session preference still applies. */}
+  render();
+ };
  find("online-start").onclick=async()=>{
   busy=true;message="";render();
   try{

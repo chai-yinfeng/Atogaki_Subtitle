@@ -14,3 +14,6 @@
 .online-panel .track { padding:20px 0; border-top:1px solid var(--border); }.online-panel .track-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }.online-panel .badge,.online-panel .track-state { font-size:12px; color:var(--muted-foreground); }.online-panel .track p { font-size:21px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; margin:14px 0 0; max-height:30vh; overflow:auto; }.online-panel .draft { color:var(--primary); }.online-panel .omitted { color:var(--muted-foreground); }
 @media(max-width:1000px) { .online-panel .online-layout { grid-template-columns:220px minmax(0,1fr); gap:24px; }.online-panel .session-sidebar { padding-right:20px; } }
 @media(max-width:620px) { .online-panel .online-layout { grid-template-columns:minmax(0,1fr); }.online-panel .session-sidebar { border:0; border-bottom:1px solid var(--border); padding:0 0 20px; }.online-panel header { margin-bottom:20px; }.online-panel header strong { font-size:20px; } }
+
+.online-panel[data-view=control][data-controls-collapsed=true] .online-layout { grid-template-columns:minmax(0,1fr); }
+.online-panel header #online-toggle-controls { margin-left:auto; }
