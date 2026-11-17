@@ -14,6 +14,12 @@
 
 377 项前端、核心 Rust 190 passed／6 ignored、Tauri 41 passed／4 ignored、3 项对齐投影与相关 WebKit／类型／生产构建／两套 fmt／diff 检查通过。WebKit 覆盖模型分组、离线选择／依赖禁用／VAD 分离／模型 ID、文件选择、波形像素／拖动和在线控制。最终文案另跑 8 项目录／下载回归；沙箱首次禁止临时 HTTP 监听，获得环境权限后全部通过。日志、清单、备份与截图保存在忽略的 local-artifacts/evaluation/offline-qwen-20261117/；没有发布 Release 或 tag。
 
+## 2026-11-17：同一安装包的系统音频授权复核
+
+在不替换 b13c746 安装包的条件下，用户确认仅退出／重开也重复出现系统音频提示。只读 TCC 日志显示 AudioCapture 的 subject 和 responsible_path 均正确归属正式 Atogaki，保存的旧代码要求与当前 ad hoc cdhash 不匹配。不是因为 Python、SenseVoice 或 helper 被识别为另一个权限主体。日志留在私有临时证据，不上传完整系统日志。
+
+经用户明确批准，确认在线已停止，正常退出并确认主进程／audio-tap 退出后，仅执行 tccutil reset AudioCapture com.chai-yinfeng.atogaki，随后重新打开同一安装包。由用户亲自点允许、停止、退出并重开，反馈不再弹。没有重置其他权限、改动 TCC 数据库或创建签名证书。该结果只证明旧记录冲突清理后同版能保留授权；ad hoc 跨版本身份变化仍是更新设计的约束。
+
 ## 2026-11-16：Neutral 主窗口与嵌入在线控制
 
 用户确认按 shadcn 标准大幅重做界面。按[0083](decisions/0083-neutral-shell-and-embedded-online.md)拆开窗口布局与页面样式，工作台以新任务为主体、最近任务默认藏在侧边抽屉；修复收听区域挤压，在线控制直接嵌入主窗口，独立字幕窗保留。常驻刷新按钮只重复已有两秒轮询，已移除。首次运行将旧主题和图片配置备份到 WebView 本地后选择 Neutral，不删除图片、模型或字幕。
