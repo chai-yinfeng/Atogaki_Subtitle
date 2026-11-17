@@ -28,7 +28,7 @@ Whisper Medium 是本项目日语离线工作的常用选择。用户反馈 Larg
 
 Qwen3-ASR 0.6B 和 1.7B，以及完整／4-bit／8-bit 权重，提供不同的磁盘、内存和计算取舍。量化位数描述权重存储，不代表整套计算都使用该位数；模型文件大小也不是运行内存上限。
 
-当前开发源码已补齐离线 Qwen 入口与完整打轴；本机安装与稳定 Release 状态需看路线图。选择离线 Qwen 还需要准备 Qwen3-ForcedAligner 0.6B（约 1.84 GB）及本地对齐运行环境，缺失时该选项不可用。ForcedAligner 将已经识别的文字对齐到音频，不是第二次翻译，也不能保证修正误听。
+当前本机开发试用版已补齐离线 Qwen 入口与完整打轴；稳定 Release 状态需看路线图。选择离线 Qwen 还需要准备 Qwen3-ForcedAligner 0.6B（约 1.84 GB）及本地对齐运行环境，缺失时该选项不可用。ForcedAligner 将已经识别的文字对齐到音频，不是第二次翻译，也不能保证修正误听。
 
 离线 Qwen 在识别和打轴完成后开始翻译；Whisper 的部分云端后端支持识别期间提前翻译。
 
@@ -39,7 +39,7 @@ Qwen3-ASR 0.6B 和 1.7B，以及完整／4-bit／8-bit 权重，提供不同的�
 | 路径 | 当前适配 | 使用边界 |
 | --- | --- | --- |
 | Whisper | macOS 桌面打包 whisper.cpp／Metal | 模型、媒体长度和内存仍影响速度 |
-| Qwen3-ASR | Apple Silicon／MLX | 开发源码支持在线与离线；安装／发行状态见路线图 |
+| Qwen3-ASR | Apple Silicon／MLX | 本机开发试用版支持在线与离线；发行状态见路线图 |
 | DFlash | Apple Silicon／MLX，配套 Qwen 1.7B 8-bit | 不是任意模型通用的加速开关；日语有当前实验记录 |
 | SenseVoice／Zipformer 草稿 | 当前使用 CPU 路径 | SenseVoice 周期重识别，Zipformer 原生流式 |
 

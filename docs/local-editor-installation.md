@@ -1,6 +1,18 @@
 # 本机安装与回退记录
 
-最新安装为 2026-11-16 的 Neutral 主窗口／嵌入在线控制试用版，代码提交 `f258819`（主要重设计为 `c782543`），App 版本号仍为 0.1.3；没有修改公开 Release。以下按日期保留历史记录。
+最新安装为 2026-11-17 的离线 Qwen／ForcedAligner 与模型入口试用版，代码提交 `b13c746`（主要接入为 `c7a9883`），App 版本号仍为 0.1.3；没有修改公开 Release。以下按日期保留历史记录。
+
+## 2026-11-17：离线 Qwen、强制对齐与模型入口
+
+按[0084](decisions/0084-offline-qwen-and-forced-alignment.md)接入离线 Qwen、冻结识别／对齐配置、检查点恢复、候选与字幕导出。任务页改为基础识别模型列表，VAD／词表进入高级选项；Qwen 隐藏 Whisper 专用 VAD。模型目录按用途／家族两层展开，推荐项使用标签，Qwen 卡片同步说明在线与离线用途。波形使用 Neutral 对应的 primary／accent 配色，两种字幕浮窗使用实底，并移除离线浮窗失焦切换 Accessory 的策略。
+
+本机已准备固定官方 ForcedAligner 包（权重约 1.84 GB）及独立 alignment runtime；原有在线 Python 包和模型没有替换。核准 radio-01-012 的隔离功能运行完成 50 个对齐单元 → 3 段字幕 → SRT；完整检查点副本在不存在的 Python 路径下仍可导出，确认复用不重复推理。这是功能冒烟，不是新增质量评分或产品延迟基准。新机器的 Python runtime 自动安装仍未完成。
+
+从干净 `b13c746` 执行 `cargo tauri build --config tauri.macos-complete.conf.json --bundles app`，正常退出首轮候选后原子替换 /Applications/Atogaki.app。最终包 41 个文件、全部共享 Python 资源、五个 sidecar 与 deep／strict ad-hoc 签名一致。原版保留于 /Applications/.Atogaki.previous-20261117-offline-qwen，首轮候选保留于 /Applications/.Atogaki.candidate-20261117-offline-qwen；更早回退包保留。安装前一致性数据库备份、两次安装／启动后的 20 张表摘要完全一致，integrity=ok、foreign key 检查为空，13 个任务保留。
+
+原生 AX 确认 Qwen 1.7B 8bit 可在离线任务选择、Qwen 高级选项无 Whisper VAD、ForcedAligner 已安装、模型家族与推荐标签及用途文案正确；核对后恢复用户原有 Whisper Medium 任务偏好。在线浮窗待机截图确认不透明背景，随后隐藏；没有开始系统采集、媒体播放、云端请求或正式字幕编辑。编辑器首次进入出现 Canvas 空白，收起再展开后波形、标尺和字幕块清晰可见；首屏绘制触发仍待定位，不能把颜色回归通过表述成完整修复。Dock 修复的源码检查通过，本轮没有独立 Dock 行为验收。
+
+377 项前端、核心 Rust 190 passed／6 ignored、Tauri 41 passed／4 ignored、3 项对齐投影与相关 WebKit／类型／生产构建／两套 fmt／diff 检查通过。WebKit 覆盖模型分组、离线选择／依赖禁用／VAD 分离／模型 ID、文件选择、波形像素／拖动和在线控制。最终文案另跑 8 项目录／下载回归；沙箱首次禁止临时 HTTP 监听，获得环境权限后全部通过。日志、清单、备份与截图保存在忽略的 local-artifacts/evaluation/offline-qwen-20261117/；没有发布 Release 或 tag。
 
 ## 2026-11-16：Neutral 主窗口与嵌入在线控制
 
