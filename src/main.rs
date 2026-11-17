@@ -125,11 +125,27 @@ async fn main() -> Result<()> {
         }
         Command::Serve(args) => interface::web::serve(args).await,
         Command::Transcribe(args) => {
+            anyhow::ensure!(
+                args.alignment_model.is_none() || args.engine == "mlx-qwen3-asr",
+                "--alignment-model requires the mlx-qwen3-asr engine"
+            );
+            let mut transcription: TranscriptionOptions = args.whisper.clone().into();
+            transcription.alignment_model = args.alignment_model;
             let runner = if args.engine == "mlx-whisper" {
                 runner.with_asr_provider(std::sync::Arc::new(
                     atogaki_subtitle::infrastructure::mlx_asr::MlxWhisperProvider {
                         python: args.python,
                         model: args.whisper.model.clone(),
+                    },
+                ))
+            } else if args.engine == "mlx-qwen3-asr" {
+                runner.with_asr_provider(std::sync::Arc::new(
+                    atogaki_subtitle::infrastructure::qwen_asr::QwenAsrProvider {
+                        runtime: Some(atogaki_subtitle::infrastructure::qwen_asr::QwenRuntime {
+                            python: args.python,
+                            worker_root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                                .join("src/infrastructure"),
+                        }),
                     },
                 ))
             } else {
@@ -139,7 +155,7 @@ async fn main() -> Result<()> {
                 .transcribe(TranscribeSpec {
                     input: args.input,
                     output_dir: args.output_dir,
-                    transcription: args.whisper.into(),
+                    transcription,
                 })
                 .await?;
             println!("Job written to {}", job.dir.display());

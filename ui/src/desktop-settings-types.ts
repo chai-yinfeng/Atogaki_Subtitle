@@ -3,6 +3,7 @@ export type DesktopSettings = {
   needsOnboarding: boolean;
   whisperModelPath: string | null;
   whisperModelReady: boolean;
+  qwenOfflineReady?: boolean;
   vadModelPath: string | null;
   vadModelReady: boolean;
   hyMt2ModelPath: string | null;
@@ -33,13 +34,13 @@ export type SaveDesktopSettingsRequest = {
 
 export type ModelCatalogItem = {
   id: string;
-  kind: "whisper" | "vad" | "hy-mt2" | "index-translate" | "qwen-asr" | "online-draft" | "online-vad" | "qwen-dflash";
+  kind: "whisper" | "vad" | "hy-mt2" | "index-translate" | "qwen-asr" | "online-draft" | "online-vad" | "qwen-dflash" | "qwen-aligner";
   name: string;
   fileName: string;
   sizeLabel: string;
   recommendedFor: string;
   sourceUrl: string;
-  category?: "transcription" | "draft" | "translation" | "vad";
+  category?: "transcription" | "draft" | "translation" | "vad" | "alignment";
   family?: string;
   optional?: boolean;
   selectable?: boolean;

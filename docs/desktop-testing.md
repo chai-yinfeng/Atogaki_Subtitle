@@ -14,6 +14,8 @@ _最后更新：2026-10-27_
 
 主窗口采用 [0083](decisions/0083-neutral-shell-and-embedded-online.md) 的 Neutral shell。最近任务默认隐藏，合成浏览器测试需要操作任务时先调用 `editor-ui-fixture.cjs` 的 `openTaskList(page)`；只等待任务数据初始化时使用 attached 状态，不能要求列表默认可见。在线控制位于主程序页面，独立字幕窗仍保留。
 
+离线任务页使用基础模型下拉项，原路径选择只留设置入口；`verify-offline-models.cjs` 覆盖模型 ID／依赖禁用／VAD 分离和偏好恢复，`verify-task-file-picker.cjs` 的产品入口验证集中于媒体批选，旧模型选择控制器只在独立合成页检查生命周期。
+
 构建前端并启动 Vite preview 后，运行 `node scripts/verify-shell-redesign.cjs`（可通过 `ATOGAKI_EDITOR_URL`、`ATOGAKI_PLAYWRIGHT_MODULE` 和 `PLAYWRIGHT_BROWSERS_PATH` 指定本机已有 QA 环境）。脚本只使用合成 IPC／静音，检查抽屉关闭／搜索／焦点、收听三档窗口布局、嵌入在线会话和编辑器入口，并输出临时截图。它不代表真实采集、ASR／MT 质量或端到端延迟通过。设置、编辑、导出等行为继续使用各自已有回归脚本。
 
 ## 当前 QA 隔离方式（2026-10-26）

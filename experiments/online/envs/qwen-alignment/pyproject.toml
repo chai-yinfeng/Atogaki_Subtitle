@@ -1,0 +1,12 @@
+[project]
+name = "atogaki-qwen-alignment-dependencies"
+version = "0.0.1"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "nagisa==0.3.2",
+  "soynlp==0.0.493",
+  "numpy==2.4.6",
+]
+
+[tool.uv]
+package = false

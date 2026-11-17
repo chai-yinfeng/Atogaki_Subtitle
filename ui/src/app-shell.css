@@ -21,7 +21,7 @@
 .create-task label:has(#source-language) { max-width:160px; }
 .create-task .vad-setting { display:flex; align-items:end; padding-bottom:9px; }
 .create-task .vad-setting label { display:flex; flex-direction:row; align-items:center; gap:8px; }
-.create-task .task-translation-setting { grid-column:1/-1; max-width:420px; }
+.create-task .task-recognition-setting,.create-task .task-translation-setting { grid-column:1/-1; max-width:420px; }
 .create-task form>details,.create-task #task-glossary-configuration,.create-task .form-footer { grid-column:1/-1; }
 .create-task form>details { border-top:1px solid var(--border); padding-top:8px; }
 .create-task form>details label { margin:12px 0 8px; }

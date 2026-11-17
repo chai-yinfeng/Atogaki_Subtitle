@@ -43,6 +43,7 @@ pub struct LocalRetranscriptionPreview {
 pub struct LocalRetranscriptionService {
     ffmpeg: PathBuf,
     asr_provider: Arc<dyn AsrProvider>,
+    qwen_runtime: Option<crate::infrastructure::qwen_asr::QwenRuntime>,
     database: LocalDatabase,
     recognition_lock: Arc<Mutex<()>>,
     artifact_lock: Arc<Mutex<()>>,
@@ -56,6 +57,7 @@ impl LocalRetranscriptionService {
         Self {
             ffmpeg,
             asr_provider: Arc::new(WhisperAsrProvider::new(whisper_cli)),
+            qwen_runtime: None,
             database,
             recognition_lock: Arc::new(Mutex::new(())),
             artifact_lock: Arc::new(Mutex::new(())),
@@ -71,6 +73,14 @@ impl LocalRetranscriptionService {
         session: super::structure_edit_session::StructureEditSession,
     ) -> Self {
         self.structure_edits = Some(session);
+        self
+    }
+
+    pub fn with_qwen_runtime(
+        mut self,
+        runtime: crate::infrastructure::qwen_asr::QwenRuntime,
+    ) -> Self {
+        self.qwen_runtime = Some(runtime);
         self
     }
 
@@ -150,6 +160,14 @@ impl LocalRetranscriptionService {
 
         let job = Job::open(PathBuf::from(&job_record.storage_dir))?;
         let mut options = job.read_recognition_options()?;
+        let asr_provider =
+            if asr_provider.status().id == "whisper.cpp" && options.alignment_model.is_some() {
+                Arc::new(crate::infrastructure::qwen_asr::QwenAsrProvider {
+                    runtime: self.qwen_runtime.clone(),
+                }) as Arc<dyn AsrProvider>
+            } else {
+                asr_provider
+            };
         options.whisper.max_context = Some(0);
         let parent_run_id = self
             .database
@@ -235,7 +253,11 @@ impl LocalRetranscriptionService {
         let recognition_future = async {
             let _stage_permit = if !cloud {
                 if let Some(scheduler) = &self.scheduler {
-                    Some(scheduler.acquire_asr().await)
+                    Some(if metadata.0 == "mlx-qwen3-asr" {
+                        scheduler.acquire_device().await
+                    } else {
+                        scheduler.acquire_asr().await
+                    })
                 } else {
                     None
                 }
@@ -254,10 +276,10 @@ impl LocalRetranscriptionService {
                 &artifacts.dir.join("progress.json"),
                 &serde_json::json!({"phase":"transcribing"}),
             )?;
-            let response = if metadata.0 == "whisper.cpp" {
+            let response = if matches!(metadata.0.as_str(), "whisper.cpp" | "mlx-qwen3-asr") {
                 use sha2::{Digest, Sha256};
                 let key = serde_json::to_vec(
-                    &serde_json::json!({"start":start_ms,"end":end_ms,"configuration":options,"model_sha256":crate::application::acoustic_plan::file_digest(&options.whisper.model)?}),
+                    &serde_json::json!({"start":start_ms,"end":end_ms,"configuration":options,"configuration_sha256":crate::application::acoustic_plan::configuration_digest(&options, &metadata.0).await?}),
                 )?;
                 let root = job
                     .dir

@@ -375,7 +375,7 @@ impl JobRunner {
 
         let response = if matches!(
             self.asr_provider.status().id.as_str(),
-            "whisper.cpp" | "mlx-whisper"
+            "whisper.cpp" | "mlx-whisper" | "mlx-qwen3-asr"
         ) {
             crate::application::acoustic_plan::execute_chunks_with_progress(
                 job,
@@ -404,10 +404,13 @@ impl JobRunner {
             let cache = job.dir.join("asr-checkpoint/final-cues.json");
             let mut cue_set = if matches!(
                 self.asr_provider.status().id.as_str(),
-                "whisper.cpp" | "mlx-whisper"
+                "whisper.cpp" | "mlx-whisper" | "mlx-qwen3-asr"
             ) {
                 let fresh = || -> Result<crate::application::CandidateCueSet> {
-                    if self.asr_provider.status().id == "mlx-whisper" {
+                    if matches!(
+                        self.asr_provider.status().id.as_str(),
+                        "mlx-whisper" | "mlx-qwen3-asr"
+                    ) {
                         let mut cues =
                             segment_timed_units(&response.timed_units, options.source_language)?;
                         cues.segmentation_policy = format!(
@@ -422,7 +425,10 @@ impl JobRunner {
                         ))
                     }
                 };
-                let expected_policy = if self.asr_provider.status().id == "mlx-whisper" {
+                let expected_policy = if matches!(
+                    self.asr_provider.status().id.as_str(),
+                    "mlx-whisper" | "mlx-qwen3-asr"
+                ) {
                     format!(
                         "{}+{}",
                         crate::application::subtitle_segmentation::LEGACY_SEGMENTATION_POLICY,
@@ -458,7 +464,7 @@ impl JobRunner {
             artifacts.write_candidate_cues(&cue_set)?;
             if matches!(
                 self.asr_provider.status().id.as_str(),
-                "whisper.cpp" | "mlx-whisper"
+                "whisper.cpp" | "mlx-whisper" | "mlx-qwen3-asr"
             ) {
                 crate::application::acoustic_plan::write_json(&cache, &cue_set)?;
                 crate::application::acoustic_plan::atomic_write(
@@ -476,7 +482,7 @@ impl JobRunner {
             ));
             if matches!(
                 self.asr_provider.status().id.as_str(),
-                "whisper.cpp" | "mlx-whisper"
+                "whisper.cpp" | "mlx-whisper" | "mlx-qwen3-asr"
             ) {
                 let mut seam_signals = crate::application::acoustic_plan::stitching_signals(
                     job,

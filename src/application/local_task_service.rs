@@ -3,7 +3,7 @@ use std::{
     fs,
     future::Future,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
@@ -33,6 +33,7 @@ const DEFAULT_QUEUE_CAPACITY: usize = 8;
 #[derive(Clone)]
 pub struct LocalTaskService {
     sender: mpsc::Sender<QueuedTask>,
+    qwen_runtime: Arc<OnceLock<crate::infrastructure::qwen_asr::QwenRuntime>>,
     scheduler: Arc<crate::application::stage_scheduler::StageScheduler>,
     controls: Arc<Mutex<HashMap<String, TaskControl>>>,
     automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
@@ -67,6 +68,15 @@ enum QueuedTask {
 }
 
 impl LocalTaskService {
+    pub fn set_qwen_runtime(
+        &self,
+        runtime: crate::infrastructure::qwen_asr::QwenRuntime,
+    ) -> Result<()> {
+        self.qwen_runtime
+            .set(runtime)
+            .map_err(|_| anyhow!("Qwen runtime already configured"))
+    }
+
     pub fn stage_scheduler(&self) -> Arc<crate::application::stage_scheduler::StageScheduler> {
         self.scheduler.clone()
     }
@@ -161,6 +171,7 @@ impl LocalTaskService {
         let controls = Arc::new(Mutex::new(HashMap::new()));
         let automatic = Arc::new(Mutex::new(HashMap::new()));
 
+        let qwen_runtime = Arc::new(OnceLock::new());
         let scheduler = crate::application::stage_scheduler::StageScheduler::new(workers);
         handle.spawn(run_worker(
             config.clone(),
@@ -169,9 +180,11 @@ impl LocalTaskService {
             controls.clone(),
             automatic.clone(),
             scheduler.clone(),
+            qwen_runtime.clone(),
         ));
 
         Ok(Self {
+            qwen_runtime,
             scheduler,
             sender,
             controls,
@@ -697,7 +710,17 @@ impl LocalTaskService {
             bail!("source media no longer exists: {}", input.display());
         }
         let mut transcription = previous_job.read_recognition_options()?;
-        if !transcription.whisper.model.is_file() {
+        if transcription
+            .alignment_model
+            .as_ref()
+            .is_some_and(|path| !path.is_dir())
+        {
+            bail!("原 Qwen 对齐模型缺失；请恢复同一模型后重试")
+        }
+        if transcription.alignment_model.is_some() && !transcription.whisper.model.is_dir() {
+            bail!("原 Qwen 识别模型缺失；请恢复同一模型后重试")
+        }
+        if transcription.alignment_model.is_none() && !transcription.whisper.model.is_file() {
             transcription.whisper.model = whisper_model_override
                 .filter(|path| path.is_file())
                 .ok_or_else(|| {
@@ -984,8 +1007,19 @@ impl LocalTaskService {
             .ok_or_else(|| anyhow!("task manifest missing"))?;
         let mut options = job.read_recognition_options()?;
         let asr_pending = !job.dir.join("asr-published.json").is_file();
+        if asr_pending
+            && options
+                .alignment_model
+                .as_ref()
+                .is_some_and(|path| !path.is_dir())
+        {
+            bail!("原 Qwen 对齐模型缺失；请恢复同一模型后继续")
+        }
+        if asr_pending && options.alignment_model.is_some() && !options.whisper.model.is_dir() {
+            bail!("原 Qwen 识别模型缺失；请恢复同一模型后继续")
+        }
         let mut relocated = false;
-        if asr_pending && !options.whisper.model.exists() {
+        if asr_pending && options.alignment_model.is_none() && !options.whisper.model.exists() {
             relocated = true;
             options.whisper.model = whisper_override
                 .filter(|p| p.is_file())
@@ -1080,6 +1114,7 @@ async fn run_worker(
     controls: Arc<Mutex<HashMap<String, TaskControl>>>,
     automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
     scheduler: Arc<crate::application::stage_scheduler::StageScheduler>,
+    qwen_runtime: Arc<OnceLock<crate::infrastructure::qwen_asr::QwenRuntime>>,
 ) {
     loop {
         let task = {
@@ -1096,8 +1131,18 @@ async fn run_worker(
         let controls = controls.clone();
         let automatic = automatic.clone();
         let scheduler = scheduler.clone();
+        let qwen_runtime = qwen_runtime.clone();
         tokio::spawn(async move {
-            run_queued_task(config, task, database, controls, automatic, scheduler).await;
+            run_queued_task(
+                config,
+                task,
+                database,
+                controls,
+                automatic,
+                scheduler,
+                qwen_runtime,
+            )
+            .await;
         });
     }
 }
@@ -1109,8 +1154,19 @@ async fn run_queued_task(
     controls: Arc<Mutex<HashMap<String, TaskControl>>>,
     automatic: Arc<Mutex<HashMap<String, crate::application::LocalWorkspaceService>>>,
     scheduler: Arc<crate::application::stage_scheduler::StageScheduler>,
+    qwen_runtime: Arc<OnceLock<crate::infrastructure::qwen_asr::QwenRuntime>>,
 ) {
+    let qwen = match &task {
+        QueuedTask::Transcribe { spec, .. } => spec.transcription.alignment_model.is_some(),
+        QueuedTask::Process { spec, .. } => spec.transcription.alignment_model.is_some(),
+    };
     let mut runner = JobRunner::new(config);
+    if qwen {
+        runner =
+            runner.with_asr_provider(Arc::new(crate::infrastructure::qwen_asr::QwenAsrProvider {
+                runtime: qwen_runtime.get().cloned(),
+            }));
+    }
     if let Some(database) = &database {
         runner = runner.with_database(database.clone());
     }
@@ -1144,7 +1200,7 @@ async fn run_queued_task(
         }
         let permit = if asr_pending {
             tokio::select! {
-                permit = scheduler.acquire_asr() => Some(permit),
+                permit = async { if qwen { scheduler.acquire_device().await } else { scheduler.acquire_asr().await } } => Some(permit),
                 _ = pause.changed() => continue,
             }
         } else {
@@ -1166,8 +1222,11 @@ async fn run_queued_task(
     let automatic_workspace = automatic.lock().await.get(&id).cloned();
     let work = async {
         let job = Job::open(job_dir.clone())?;
+        // Qwen publishes grouped aligned-word cues only after segmentation.
+        // Do not submit word-by-word cloud requests with incompatible cue IDs.
         let early = automatic_workspace
             .as_ref()
+            .filter(|_| !qwen)
             .map(|workspace| {
                 crate::application::early_translation::EarlyTranslationSession::new(
                     job.clone(),
@@ -1365,6 +1424,117 @@ mod tests {
     };
     use tokio::sync::mpsc;
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qwen_task_uses_aligned_word_evidence_and_frozen_model_configuration() {
+        use crate::infrastructure::qwen_asr::QwenRuntime;
+        use std::{os::unix::fs::PermissionsExt, time::Duration};
+        let root = std::env::temp_dir().join(format!("atogaki-qwen-task-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let ffmpeg = root.join("ffmpeg");
+        fs::write(&ffmpeg,"#!/bin/sh\nneed_input=0\nfor arg do\n if [ \"$need_input\" = 1 ]; then input=$arg; need_input=0; fi\n if [ \"$arg\" = -i ]; then need_input=1; fi\n destination=$arg\ndone\ncp \"$input\" \"$destination\"\n").unwrap();
+        let raw = root.join("raw.json");
+        fs::write(&raw, b"{}").unwrap();
+        let response=serde_json::json!({"raw_output_path":raw,"timed_units":[{"id":"a","text":"猫です。","kind":"word","start_ms":100,"end_ms":900,"timing_source":"forced_alignment"}]}).to_string();
+        let python = root.join("python");
+        fs::write(
+            &python,
+            format!(
+                "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{}'\n",
+                response.replace('\'', "'\\''")
+            ),
+        )
+        .unwrap();
+        for path in [&ffmpeg, &python] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let input = root.join("input.wav");
+        let mut wav = vec![];
+        wav.extend(b"RIFF");
+        wav.extend(32036u32.to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16u32.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(16000u32.to_le_bytes());
+        wav.extend(32000u32.to_le_bytes());
+        wav.extend(2u16.to_le_bytes());
+        wav.extend(16u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend(32000u32.to_le_bytes());
+        wav.resize(32044, 0);
+        fs::write(&input, wav).unwrap();
+        let model = root.join("qwen");
+        let aligner = root.join("aligner");
+        for path in [&model, &aligner] {
+            fs::create_dir(path).unwrap();
+            fs::write(path.join("config.json"), b"fixture").unwrap();
+        }
+        let service = LocalTaskService::with_workers(
+            crate::infrastructure::config::AppConfig {
+                ffmpeg,
+                whisper_cli: "must-not-run-whisper".into(),
+                deepl_auth_key: None,
+            },
+            root.join("jobs"),
+            1,
+            8,
+        )
+        .unwrap();
+        service
+            .set_qwen_runtime(QwenRuntime {
+                python,
+                worker_root: root.clone(),
+            })
+            .unwrap();
+        let mut transcription = TranscriptionOptions::japanese(model);
+        transcription.alignment_model = Some(aligner.clone());
+        let queued = service
+            .submit_transcription(TranscribeSpec {
+                input,
+                output_dir: None,
+                transcription,
+            })
+            .await
+            .unwrap();
+        let job_dir = root.join("jobs").join(&queued.manifest.job_id);
+        let snapshot = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let snapshot = service.snapshot(&job_dir).unwrap();
+                if matches!(
+                    snapshot.manifest.status,
+                    crate::application::job_status::JobStatus::Done
+                        | crate::application::job_status::JobStatus::Failed
+                ) {
+                    break snapshot;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            snapshot.manifest.status,
+            crate::application::job_status::JobStatus::Done,
+            "{:?}",
+            snapshot.manifest
+        );
+        assert_eq!(snapshot.segments[0].source_text, "猫です。");
+        let job = crate::infrastructure::job_store::Job::open(job_dir.clone()).unwrap();
+        assert_eq!(
+            job.read_recognition_options().unwrap().alignment_model,
+            Some(aligner)
+        );
+        let plan: serde_json::Value =
+            serde_json::from_slice(&fs::read(job_dir.join("asr-checkpoint/plan.json")).unwrap())
+                .unwrap();
+        assert!(plan["configuration_sha256"].as_str().is_some());
+        assert!(job.source_srt.is_file());
+        drop(service);
+        tokio::task::yield_now().await;
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn rejects_an_invalid_worker_or_queue_count_before_starting() {
         let config = AppConfig {
@@ -1520,6 +1690,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            qwen_runtime: std::sync::Arc::new(std::sync::OnceLock::new()),
             scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -1558,6 +1729,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            qwen_runtime: std::sync::Arc::new(std::sync::OnceLock::new()),
             scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -1621,6 +1793,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            qwen_runtime: std::sync::Arc::new(std::sync::OnceLock::new()),
             scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -1707,6 +1880,7 @@ mod tests {
         let (sender, _receiver) = mpsc::channel(1);
         let jobs_dir = root.join("jobs");
         let service = LocalTaskService {
+            qwen_runtime: std::sync::Arc::new(std::sync::OnceLock::new()),
             scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -1755,6 +1929,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(2);
         let service = LocalTaskService {
+            qwen_runtime: std::sync::Arc::new(std::sync::OnceLock::new()),
             scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -1852,6 +2027,7 @@ mod tests {
             .unwrap();
         let (sender, _receiver) = mpsc::channel(1);
         let service = LocalTaskService {
+            qwen_runtime: std::sync::Arc::new(std::sync::OnceLock::new()),
             scheduler: crate::application::stage_scheduler::StageScheduler::new(2),
             automatic: std::sync::Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),

@@ -7,6 +7,7 @@ mod dictionary_download;
 mod dictionary_lookup;
 mod media_server;
 mod model_download;
+mod offline_models;
 #[cfg(target_os = "macos")]
 mod online_panel;
 mod online_session;
@@ -388,6 +389,8 @@ struct SubmitTranscriptionRequest {
     translation_provider_id: Option<String>,
     input_path: String,
     model_path: String,
+    #[serde(default)]
+    recognition_model_id: Option<String>,
     source_language: LanguageCode,
     vad_model_path: Option<String>,
     glossary_id: Option<String>,
@@ -858,11 +861,19 @@ async fn partial_transcript(
         .ok_or("task not found")?;
     let job = atogaki_subtitle::infrastructure::job_store::Job::open(record.storage_dir.into())
         .map_err(|e| e.to_string())?;
+    let qwen = job
+        .read_recognition_options()
+        .ok()
+        .filter(|options| options.alignment_model.is_some());
     atogaki_subtitle::application::acoustic_plan::partial_units(&job)
-        .map(|units| {
-            atogaki_subtitle::application::acoustic_plan::candidate_cues(&units)
-                .transcript_segments()
+        .and_then(|units| {
+            if let Some(options) = qwen {
+                atogaki_subtitle::application::segment_timed_units(&units, options.source_language)
+            } else {
+                Ok(atogaki_subtitle::application::acoustic_plan::candidate_cues(&units))
+            }
         })
+        .map(|cues| cues.transcript_segments())
         .map_err(|e| format!("{e:#}"))
 }
 
@@ -1046,7 +1057,45 @@ async fn submit_transcription(
     state: State<'_, DesktopState>,
     request: SubmitTranscriptionRequest,
 ) -> Result<String, String> {
-    let transcription = desktop_transcription_options(&request)?;
+    let mut transcription = desktop_transcription_options(&request)?;
+    if let Some(id) = request.recognition_model_id.as_deref() {
+        let settings = state
+            .settings_service
+            .load()
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        let models = PathBuf::from(settings.models_directory);
+        if id == "configured-whisper" {
+            transcription.whisper.model = settings
+                .whisper_model_path
+                .ok_or("尚未配置识别模型")?
+                .into();
+        } else {
+            let model = state
+                .model_download_service
+                .catalog()
+                .into_iter()
+                .find(|m| m.id == id && matches!(m.kind.as_str(), "whisper" | "qwen-asr"))
+                .ok_or("未知识别模型")?;
+            if !model.installed(&models) {
+                return Err("识别模型尚未下载完成".into());
+            }
+            transcription.whisper.model = models.join(&model.file_name);
+            if model.kind == "qwen-asr" {
+                if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+                    return Err("Qwen MLX 需要 Apple Silicon".into());
+                }
+                if !offline_models::alignment_runtime_ready(&models) {
+                    return Err("请先准备本地 Qwen 与对齐运行环境".into());
+                }
+                transcription.alignment_model = Some(
+                    offline_models::aligner_path(&models)
+                        .ok_or("请先下载 Qwen3-ForcedAligner 字幕对齐模型")?,
+                );
+                transcription.whisper.vad_model = None;
+            }
+        }
+    }
     let settings = state
         .settings_service
         .load()
@@ -2150,6 +2199,11 @@ fn main() {
                     database.clone(),
                 )
             })?;
+            let qwen_runtime = atogaki_subtitle::infrastructure::qwen_asr::QwenRuntime {
+                python: data_dir.join("runtimes/online/bin/python3"),
+                worker_root: app.path().resource_dir()?,
+            };
+            task_service.set_qwen_runtime(qwen_runtime.clone())?;
             tauri::async_runtime::block_on(task_service.recover_interrupted_jobs())?;
             let workspace_service = LocalWorkspaceService::with_provider(
                 database.clone(),
@@ -2165,6 +2219,7 @@ fn main() {
                 config.whisper_cli.clone(),
                 database.clone(),
             )
+            .with_qwen_runtime(qwen_runtime)
             .with_stage_scheduler(task_service.stage_scheduler())
             .with_structure_edits(workspace_service.structure_edits());
             let subtitle_style_service = SubtitleStyleService::new(
@@ -2247,6 +2302,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            offline_models::offline_recognition_choices,
             online_session::online_session_status,
             online_session::online_choices,
             online_session::online_snapshot,
@@ -2472,6 +2528,7 @@ mod tests {
     #[test]
     fn desktop_request_keeps_vad_disabled_when_no_model_is_selected() {
         let request = SubmitTranscriptionRequest {
+            recognition_model_id: None,
             translation_provider_id: None,
             input_path: "audio.wav".to_string(),
             model_path: "whisper.bin".to_string(),
@@ -2497,6 +2554,7 @@ mod tests {
         let vad_model = root.join("ggml-silero.bin");
         fs::write(&vad_model, b"test model placeholder").unwrap();
         let request = SubmitTranscriptionRequest {
+            recognition_model_id: None,
             translation_provider_id: None,
             input_path: "audio.wav".to_string(),
             model_path: "whisper.bin".to_string(),

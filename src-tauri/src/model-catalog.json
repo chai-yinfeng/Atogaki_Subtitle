@@ -712,5 +712,59 @@
         "bytes": 725684336
       }
     ]
+  },
+  {
+    "id": "qwen-forced-aligner-0.6b",
+    "kind": "qwen-aligner",
+    "category": "alignment",
+    "family": "Qwen3-ForcedAligner",
+    "name": "Qwen3-ForcedAligner 0.6B",
+    "fileName": "offline/qwen-forced-aligner-0.6b",
+    "sizeLabel": "约 1.84 GB",
+    "recommendedFor": "离线 Qwen 字幕打轴所需的时间对齐模型，不用于识别原文或翻译。",
+    "sourceUrl": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/tree/c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+    "optional": true,
+    "bundle": true,
+    "selectable": false,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "config.json",
+        "downloadPath": "Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/config.json",
+        "sha256": "d616c65d46c4b90bdc651b0a0963ea932732241140f337f9bb6b0335a9c8ef09",
+        "bytes": 5982
+      },
+      {
+        "name": "model.safetensors",
+        "downloadPath": "Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/model.safetensors",
+        "sha256": "47831d0e82f96b20e9034dba01a075ee06436654719f6a68289e49f1b65ce0e7",
+        "bytes": 1835544544
+      },
+      {
+        "name": "preprocessor_config.json",
+        "downloadPath": "Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/preprocessor_config.json",
+        "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+        "bytes": 330
+      },
+      {
+        "name": "tokenizer_config.json",
+        "downloadPath": "Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/tokenizer_config.json",
+        "sha256": "3ab80063f8511deb9566e6ad438d17b7a6277fcffd52d92854112f19d36bd81c",
+        "bytes": 12666
+      },
+      {
+        "name": "vocab.json",
+        "downloadPath": "Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/vocab.json",
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "bytes": 2776833
+      },
+      {
+        "name": "merges.txt",
+        "downloadPath": "Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/merges.txt",
+        "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+        "bytes": 1671853
+      }
+    ]
   }
 ]

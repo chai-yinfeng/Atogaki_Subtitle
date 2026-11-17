@@ -111,8 +111,14 @@ pub struct RecordArgs {
 
 #[derive(Debug, Args)]
 pub struct TranscribeArgs {
-    #[arg(long, default_value="whisper.cpp", value_parser=["whisper.cpp","mlx-whisper"])]
+    #[arg(long, default_value="whisper.cpp", value_parser=["whisper.cpp","mlx-whisper","mlx-qwen3-asr"])]
     pub engine: String,
+    #[arg(
+        long,
+        required_if_eq("engine", "mlx-qwen3-asr"),
+        help = "Local ForcedAligner model for Qwen subtitle timing"
+    )]
+    pub alignment_model: Option<PathBuf>,
     #[arg(
         long,
         default_value = "python3",
@@ -340,6 +346,7 @@ pub struct WhisperArgs {
 impl From<WhisperArgs> for TranscriptionOptions {
     fn from(args: WhisperArgs) -> Self {
         Self {
+            alignment_model: None,
             source_language: args.source_language,
             glossary: args.glossary,
             prompt: args.prompt,

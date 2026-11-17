@@ -10,6 +10,8 @@ use crate::domain::LanguageCode;
 /// input representation into this type before invoking the application layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment_model: Option<PathBuf>,
     #[serde(default)]
     pub source_language: LanguageCode,
     pub glossary: Option<PathBuf>,
@@ -55,6 +57,7 @@ impl TranscriptionOptions {
 
     pub fn new(model: PathBuf, source_language: LanguageCode) -> Self {
         Self {
+            alignment_model: None,
             source_language,
             glossary: None,
             prompt: None,

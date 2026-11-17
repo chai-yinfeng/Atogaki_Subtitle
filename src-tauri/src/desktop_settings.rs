@@ -68,6 +68,7 @@ pub struct DesktopSettings {
     pub needs_onboarding: bool,
     pub whisper_model_path: Option<String>,
     pub whisper_model_ready: bool,
+    pub qwen_offline_ready: bool,
     pub vad_model_path: Option<String>,
     pub vad_model_ready: bool,
     pub hy_mt2_model_path: Option<String>,
@@ -609,9 +610,12 @@ impl DesktopSettingsService {
 
         Ok(DesktopSettings {
             onboarding_completed,
-            needs_onboarding: !onboarding_completed || !whisper_model_ready,
+            needs_onboarding: !onboarding_completed
+                || !(whisper_model_ready
+                    || crate::offline_models::qwen_ready(&self.models_directory)),
             whisper_model_path: display_path(whisper_model.as_ref()),
             whisper_model_ready,
+            qwen_offline_ready: crate::offline_models::qwen_ready(&self.models_directory),
             vad_model_path: display_path(vad_model.as_ref()),
             vad_model_ready,
             hy_mt2_model_path: display_path(hy_mt2_model.as_ref()),

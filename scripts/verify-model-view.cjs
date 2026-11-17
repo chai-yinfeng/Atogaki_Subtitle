@@ -32,7 +32,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
    const state=window.__grouped={catalog,downloads:[],busy:false,calls:[]};
    state.view=mountModelManagementView(document.querySelector('#models'),{visit:()=>1,state:()=>state,formatBytes:n=>n+' bytes',error:text=>{throw Error(text)},action:async(...args)=>state.calls.push(args)});
   },{source:stripTypeScriptTypes(fs.readFileSync('ui/src/model-management-view.ts','utf8')),catalog});
-  assert.deepEqual(await page.locator('#models > [data-model-group]').evaluateAll(nodes=>nodes.map(node=>node.dataset.modelGroup)),['acceleration','transcription','draft','translation','vad']);
+  assert.deepEqual(await page.locator('#models > [data-model-group]').evaluateAll(nodes=>nodes.map(node=>node.dataset.modelGroup)),['acceleration','transcription','alignment','draft','translation','vad']);
   assert.equal(await primary('whisper-medium').isVisible(),false);
   await page.locator('[data-model-group="transcription"] > summary').click();
   assert.equal(await primary('whisper-medium').isVisible(),true);

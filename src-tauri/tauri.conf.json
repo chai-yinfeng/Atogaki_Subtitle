@@ -59,6 +59,7 @@
     "resources": {
       "../LICENSE": "LICENSE",
       "third-party/": "third-party/",
+      "../src/infrastructure/online_worker/offline_asr.py": "online_worker/offline_asr.py",
       "../src/infrastructure/online_worker/__init__.py": "online_worker/__init__.py",
       "../src/infrastructure/online_worker/__main__.py": "online_worker/__main__.py",
       "../src/infrastructure/online_worker/worker.py": "online_worker/worker.py",

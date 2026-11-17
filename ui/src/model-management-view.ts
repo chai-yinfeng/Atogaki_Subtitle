@@ -19,7 +19,7 @@ export function mountModelManagementView(root: HTMLElement, options: Options) {
   const cards = new Map<string, Card>(), events = new AbortController();
   type Group = { node: HTMLDetailsElement; summary: HTMLElement; list: HTMLElement };
   const groups = new Map<string, Group>();
-  const titles = { acceleration: "One Pass 加速包", transcription: "转录", draft: "Two Pass 草稿识别", translation: "翻译", vad: "VAD" };
+  const titles = { acceleration: "One Pass 加速包", transcription: "转录", alignment: "字幕对齐", draft: "Two Pass 草稿识别", translation: "翻译", vad: "VAD" };
   const category = (model: ModelCatalogItem) => model.kind === "qwen-dflash" ? "acceleration" : model.category ?? (model.kind === "whisper" || model.kind === "qwen-asr" ? "transcription" : model.kind === "online-draft" ? "draft" : model.kind === "vad" || model.kind === "online-vad" ? "vad" : "translation");
   const group = (key: string, title: string, open: boolean, parent: HTMLElement): Group => {
     let result = groups.get(key);

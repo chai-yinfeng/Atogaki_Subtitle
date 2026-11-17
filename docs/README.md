@@ -34,6 +34,8 @@ _更新：2026-11-17。_
 | 学习来源与词典 | [0032](decisions/0032-learning-reader-and-source-backed-collections.md)–[0036](decisions/0036-ecdict-pinned-base-data.md) |
 | 研究晋升 | [0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)；在线分支的后继接入与限制见[系统回顾](system-review-2026-11-11.md#审阅范围与分支事实) |
 
+- [0084 离线 Qwen 与强制对齐](decisions/0084-offline-qwen-and-forced-alignment.md)：开发接入、附加模型／运行环境与功能验证边界。
+
 - 主窗口与默认视觉以[0083 Neutral 重设计](decisions/0083-neutral-shell-and-embedded-online.md)为准；在线显示与界面配置：[0081 整组阅读退场](decisions/0081-online-caption-page-retirement.md)、[0082 紧凑设置与主题](decisions/0082-compact-purpose-based-desktop-settings.md)。
 
 ## 在线实现与研究入口

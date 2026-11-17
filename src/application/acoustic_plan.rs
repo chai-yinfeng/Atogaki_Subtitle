@@ -393,7 +393,7 @@ pub async fn configuration_digest(
     let provider_id = provider_id.to_string();
     tokio::task::spawn_blocking(move || -> Result<String> {
         let mut config = serde_json::to_value(&fingerprint_options)?;
-        for key in ["model", "vad_model", "glossary"] {
+        for key in ["model", "vad_model", "glossary", "alignment_model"] {
             if let Some(path) = config.get(key).and_then(|v| v.as_str()) {
                 config[key] = serde_json::Value::String(file_digest(Path::new(path))?);
             }

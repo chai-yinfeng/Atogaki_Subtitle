@@ -6,7 +6,7 @@ export function mountTaskFilePickerView(root: HTMLFormElement, session: ReturnTy
   const ids: Record<string, TaskFileKind> = { "choose-media": "media", "choose-model": "model", "choose-vad-model": "vad" };
   const inputs = { media: root.querySelector<HTMLInputElement>("#media-path")!, model: root.querySelector<HTMLInputElement>("#model-path")!, vad: root.querySelector<HTMLInputElement>("#vad-model-path")! };
   const vad = root.querySelector<HTMLInputElement>("#vad-enabled")!;
-  const buttons = Object.entries(ids).map(([id, kind]) => ({ node: root.querySelector<HTMLButtonElement>(`#${id}`)!, kind }));
+  const buttons = Object.entries(ids).map(([id, kind]) => ({ node: root.querySelector<HTMLButtonElement>(`#${id}`), kind })).filter((item):item is {node:HTMLButtonElement;kind:TaskFileKind}=>item.node!==null);
   const versions = { media: 0, model: 0, vad: 0 }, events = new AbortController(); let disposed = false;
   const render = () => {
     if (disposed) return;

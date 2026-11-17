@@ -90,3 +90,7 @@ WebView 的阅读页以译文定稿范围和单调阅读时间推进，A 的退�
 2026-11-16 后继用户反馈取代上一版外层布局：app-shell.css 是唯一窗口几何入口，listening.css／editor.css 不再重写 .shell。旧的全局／主题覆盖层拆除，保留任务／学习／编辑器局部样式到 feature-styles.css；primitives.css 和 theme-tokens.css 定义 Neutral 控件及语义 token，settings.css 管理设置滚动区。
 
 online-view.ts 是主窗口与字幕入口共享的挂载组件，查询限定 root，释放订阅、轮询和窗口事件；导航隐藏它不结束 Rust 会话。online.ts 只负责独立字幕／组件验证入口的主题与挂载，不再提供产品控制窗口；原生 open_online_control 已移除，字幕定位参照主窗口。最近任务使用默认关闭的原生 dialog，保留同一任务列表节点及轮询。详见[0083](decisions/0083-neutral-shell-and-embedded-online.md)。
+
+## 离线 Qwen 与对齐（2026-11-17 开发接入）
+
+QwenAsrProvider 调用共享包 online_worker.offline_asr，读取已有 WAV 数组，执行本地 Session 与 ForcedAligner，返回标明 forced_alignment 的时间证据。LocalTaskService 按冻结 alignment_model 选择 Qwen provider，运行环境由 App 注入，不接受任务 JSON 中的 Python 执行路径。Qwen 使用已有 acoustic_plan／stitch／分段／来源记录，并在设备阶段独占；云端提前翻译对本首版关闭，完成分段后再走现有翻译。任务页选择已安装模型 ID，主进程重新解析和校验，Whisper 老配置仍可加载。模型、独立分词依赖、检查点与验证边界见[0084](decisions/0084-offline-qwen-and-forced-alignment.md)。

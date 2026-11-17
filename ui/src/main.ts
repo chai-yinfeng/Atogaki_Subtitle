@@ -98,6 +98,7 @@ import "./listening.css";
 import "./editor.css";
 import "./online-view.css";
 import {mountOnlineView} from "./online-view";
+import {mountOfflineModels,type OfflineModelChoice} from "./offline-models";
 import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
 import { mountListeningLayout } from "./listening-layout";
@@ -376,22 +377,22 @@ app.innerHTML = `
           <label>媒体文件<input id="media-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
           <button id="choose-media" type="button" class="secondary">选择媒体</button>
           <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option></select></label>
+          <label class="task-recognition-setting">识别模型<select id="recognition-model" required><option value="">正在读取模型…</option></select></label>
+          <input id="model-path" type="hidden" />
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="index-translate-local">Index-Translate 2B · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select></label>
+          <details id="task-advanced"><summary>高级选项</summary>
           <div class="vad-setting">
             <label><input id="vad-enabled" type="checkbox" checked />语音活动检测</label>
           </div>
-          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="index-translate-local">Index-Translate 2B · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select></label>
+          <label class="task-vad-model">VAD 模型<select id="vad-model"></select></label>
+          <input id="vad-model-path" type="hidden" />
           <label>识别词表<select id="task-glossary"><option value="">不使用词表</option></select></label>
           <button id="manage-glossaries" type="button" class="secondary">管理词表</button>
           <div id="task-glossary-configuration" class="task-glossary-configuration hidden">
             <div class="content-pack-heading"><div><strong>当前内容包</strong><span>核心词条始终提示；只选择本期可能出现的作品。</span></div><span id="task-prompt-summary"></span></div>
             <div id="task-content-packs" class="task-content-packs"></div>
-            <details open><summary>最终 Whisper prompt</summary><pre id="task-prompt-preview">正在生成预览…</pre></details>
+            <details open><summary>识别提示</summary><pre id="task-prompt-preview">正在生成预览…</pre></details>
           </div>
-          <details><summary>识别模型与 VAD</summary>
-          <label>Whisper 模型<input id="model-path" required placeholder="选择文件，或直接粘贴完整路径" /></label>
-          <button id="choose-model" type="button" class="secondary">选择模型</button>
-          <label>Silero VAD 模型<input id="vad-model-path" required placeholder="选择 ggml-silero-*.bin，或直接粘贴完整路径" /></label>
-          <button id="choose-vad-model" type="button" class="secondary">选择 VAD 模型</button>
           </details>
           <div class="form-footer"><span id="task-message" role="status"></span><button id="submit-task" type="submit">开始转写</button></div>
         </form>
@@ -1478,6 +1479,12 @@ function overwriteSettingsField<T extends HTMLInputElement | HTMLSelectElement>(
   else if (typeof value === "string") field.value = value;
 }
 
+const offlineModels=mountOfflineModels(document.querySelector<HTMLFormElement>('#task-form')!,{
+  choices:()=>invoke<OfflineModelChoice[]>('offline_recognition_choices'),
+  changed:()=>updateTaskPipelineSummary(),message:text=>{if(taskMessage)taskMessage.textContent=text;}
+});
+window.addEventListener('pagehide',()=>offlineModels.dispose(),{once:true});
+
 function renderDesktopSettings(settings: DesktopSettings): void {
   desktopSettings = settings;
   settingsView?.onboarding(settings.needsOnboarding);
@@ -1493,12 +1500,12 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   if (modelReadiness) {
     const recognition = settings.whisperModelReady
       ? settings.vadModelReady ? "Whisper 与 VAD 已就绪" : "Whisper 已就绪 · VAD 可选"
-      : "需要配置 Whisper 模型";
+      : settings.qwenOfflineReady ? "Qwen 与字幕对齐模型已就绪" : "需要准备识别模型";
     const localTranslation = settings.hyMt2ModelReady
       ? settings.localTranslationRuntimeReady ? " · Hy-MT2 已就绪" : " · Hy-MT2 runtime 缺失"
       : "";
     modelReadiness.textContent = `${recognition}${localTranslation}`;
-    modelReadiness.classList.toggle("warning", !settings.whisperModelReady);
+    modelReadiness.classList.toggle("warning", !settings.whisperModelReady&&!settings.qwenOfflineReady);
   }
   if (credentialStoreLabel) credentialStoreLabel.textContent = settings.credentialStore;
   if (apiKeyStatus) {
@@ -1523,8 +1530,9 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   }
   const taskProvider = document.querySelector<HTMLSelectElement>("#task-translation-provider");
   if (taskProvider && !taskProvider.value && settings.translationProviderId !== "none") taskProvider.value = settings.translationProviderId;
-  if (modelPath && settings.whisperModelPath) modelPath.value = settings.whisperModelPath;
+  if (modelPath && settings.whisperModelPath && offlineModels.selection?.provider!=="mlx-qwen3-asr") modelPath.value = settings.whisperModelPath;
   if (vadModelPath && settings.vadModelPath) vadModelPath.value = settings.vadModelPath;
+  void offlineModels.refresh(settings,availableModels,modelDownloads);
   updateTaskPipelineSummary();
   syncNetworkSettings();
   renderModelCatalog();
@@ -1581,8 +1589,8 @@ const settingsSave = createDesktopSettingsSave({
   visit: () => settingsVisit,
   capture: finishOnboarding => {
     if (!settingsWhisperModel || !settingsVadModel || !settingsHyMt2Model || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !settingsProviderModel || !settingsProviderBaseUrl || !settingsTranslationStyle) return null;
-    if (finishOnboarding && !settingsWhisperModel.value.trim()) {
-      if (settingsMessage) settingsMessage.textContent = "请先选择或下载一个 Whisper 模型。";
+    if (finishOnboarding && !settingsWhisperModel.value.trim() && !desktopSettings?.qwenOfflineReady) {
+      if (settingsMessage) settingsMessage.textContent = "请先准备 Whisper 或 Qwen＋字幕对齐模型。";
       settingsWhisperModel.focus();
       return null;
     }
@@ -4664,7 +4672,8 @@ sourceLanguage?.addEventListener("change", () => {
 document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!mediaPath?.value || !modelPath?.value || !taskMessage || !submitButton) return;
-  if (vadEnabled?.checked && !vadModelPath?.value.trim()) {
+  const qwen=offlineModels.selection?.provider==="mlx-qwen3-asr";
+  if (!qwen && vadEnabled?.checked && !vadModelPath?.value.trim()) {
     taskMessage.textContent = "启用 VAD 时需要选择 Silero VAD 模型。";
     vadModelPath?.focus();
     return;
@@ -4674,9 +4683,10 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
   const request = {
       inputPath: mediaPath.value,
       modelPath: modelPath.value,
+      recognitionModelId: offlineModels.selection?.id??null,
       sourceLanguage: selectedSourceLanguage(),
       translationProviderId: (document.querySelector<HTMLSelectElement>("#task-translation-provider")?.value || "none"),
-      vadModelPath: vadEnabled?.checked ? vadModelPath?.value.trim() || null : null,
+      vadModelPath: !qwen && vadEnabled?.checked ? vadModelPath?.value.trim() || null : null,
       glossaryId: taskGlossary?.value || null,
       selectedContentGroups: taskGlossary?.value ? Array.from(selectedTaskContentGroups) : [],
     };
@@ -4821,7 +4831,7 @@ function updateTaskPipelineSummary():void {
   if(!summary)return;
   const provider=document.querySelector<HTMLSelectElement>("#task-translation-provider");
   const model=(modelPath?.value??"").split(/[\\/]/).at(-1)||"未选择模型";
-  summary.textContent=`转录：Whisper · ${model} · 本地；翻译：${provider?.selectedOptions[0]?.textContent??"未选择"}`;
+  summary.textContent=`转录：${offlineModels.selection?.name??model} · 本地；翻译：${provider?.selectedOptions[0]?.textContent??"未选择"}`;
 }
 const pipelineSummary=document.createElement("p");pipelineSummary.id="task-pipeline-summary";pipelineSummary.className="settings-message";
 document.querySelector("#task-form")?.before(pipelineSummary);

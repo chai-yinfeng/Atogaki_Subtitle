@@ -15,3 +15,5 @@ pub mod whisper;
 pub mod whisper_asr;
 
 pub mod mlx_asr;
+
+pub mod qwen_asr;

@@ -51,6 +51,8 @@ macOS 版本没有 Developer ID 签名或公证。核对下载来源与 SHA-256 
 
 学习词典与字幕翻译相互独立。JMdict、Tomoshi 和 ECDICT 由用户在设置页明确下载到 `dictionaries/`；Merriam-Webster Key 单独保存到系统凭据库。Collins 未取得可测试的 API 账户，Cambridge API 当前不可用，两者均不出现在产品路径中。
 
+开发源码已增加 Qwen 离线转录与强制对齐打轴，需同时准备识别包、ForcedAligner 和对齐运行环境；公开 v0.1.3 不包含此入口。准备与边界见[0084](docs/decisions/0084-offline-qwen-and-forced-alignment.md)。
+
 Whisper 模型建议：
 
 | 模型 | 大约大小 | 适用场景 |

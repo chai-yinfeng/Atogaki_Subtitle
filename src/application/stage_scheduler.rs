@@ -36,6 +36,14 @@ impl StageScheduler {
             .ok()
     }
 
+    pub async fn acquire_device(&self) -> OwnedSemaphorePermit {
+        self.asr
+            .clone()
+            .acquire_many_owned(self.asr_capacity)
+            .await
+            .expect("local stage stays open")
+    }
+
     pub async fn acquire_asr(&self) -> OwnedSemaphorePermit {
         self.asr
             .clone()
