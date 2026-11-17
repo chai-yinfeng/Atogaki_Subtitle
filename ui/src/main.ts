@@ -101,6 +101,7 @@ import {mountOnlineView} from "./online-view";
 import {mountSheet, mountNavigationToggle} from "./app-panels";
 import {usageGuide} from "./usage-guide";
 import {mountTaskOrdering} from "./task-ordering";
+import {mountCustomModels,type RegisteredModel} from "./custom-models";
 import {mountOfflineModels,type OfflineModelChoice} from "./offline-models";
 import { editorTemplate } from "./editor-template";
 import { EditorSession, mergeDraggedCueTiming, type CueFilter } from "./editor-session";
@@ -1306,7 +1307,7 @@ window.addEventListener("pagehide", () => {
   areaNavigation.dispose();
   desktopRuntime.dispose();
   desktopStartup.dispose();
-  imageThemes?.dispose();
+  imageThemes?.dispose();customModelsView?.dispose();
   editorControls.dispose();
   editorRepairControls.dispose();
   repairRangePicker.dispose();
@@ -1492,6 +1493,7 @@ function overwriteSettingsField<T extends HTMLInputElement | HTMLSelectElement>(
 
 const offlineModels=mountOfflineModels(document.querySelector<HTMLFormElement>('#task-form')!,{
   choices:()=>invoke<OfflineModelChoice[]>('offline_recognition_choices'),
+  vads:()=>invoke<RegisteredModel[]>('registered_models',{}),
   changed:()=>updateTaskPipelineSummary(),message:text=>{if(taskMessage)taskMessage.textContent=text;}
 });
 window.addEventListener('pagehide',()=>offlineModels.dispose(),{once:true});
@@ -1602,7 +1604,7 @@ const settingsSave = createDesktopSettingsSave({
     if (!settingsWhisperModel || !settingsVadModel || !settingsHyMt2Model || !settingsProvider || !settingsApiKey || !settingsProxyMode || !settingsProxyUrl || !settingsModelMirror || !settingsProviderModel || !settingsProviderBaseUrl || !settingsTranslationStyle) return null;
     if (finishOnboarding && !settingsWhisperModel.value.trim() && !desktopSettings?.qwenOfflineReady) {
       if (settingsMessage) settingsMessage.textContent = "请先准备 Whisper 或 Qwen＋字幕对齐模型。";
-      settingsWhisperModel.focus();
+      document.querySelector<HTMLElement>("#custom-models summary")?.focus();
       return null;
     }
     const onlineDefault = document.querySelector<HTMLSelectElement>("#settings-online-provider")!.value;
@@ -4427,7 +4429,7 @@ settingsView = mountDesktopSettingsView(settingsDialog!, {
     const online=readOnlinePreferences();
     document.querySelector<HTMLSelectElement>("#settings-online-provider")!.value=online.translate?online.translationBackend:"none";
   },
-  opened: () => { modelManagement?.observe(); dictionaryDownloadSession?.observe(); void loadDesktopSettings(false); },
+  opened: () => { void customModelsView?.refresh(); modelManagement?.observe(); dictionaryDownloadSession?.observe(); void loadDesktopSettings(false); },
   closed: () => { ++settingsVisit; dictionaryDownloadSession?.hidden(); dictionaryCredentialSession.hidden(); settingsLoad.invalidateDictionaries(); asrCredentials.hidden(); networkTest.hidden(); modelPicker.hidden(); modelManagement?.hidden(); settingsLoad.invalidate(); settingsDirtyFields.clear(); },
   dirty: id => settingsDirtyFields.add(id),
   save: finish => { void saveSettings(finish); },
@@ -4607,7 +4609,7 @@ document.querySelector<HTMLFormElement>("#task-form")?.addEventListener("submit"
   const qwen=offlineModels.selection?.provider==="mlx-qwen3-asr";
   if (!qwen && vadEnabled?.checked && !vadModelPath?.value.trim()) {
     taskMessage.textContent = "启用 VAD 时需要选择 Silero VAD 模型。";
-    vadModelPath?.focus();
+    document.querySelector<HTMLSelectElement>("#vad-model")?.focus();
     return;
   }
   submitButton.disabled = true;
@@ -4772,6 +4774,8 @@ updateTaskPipelineSummary();
 
 
 
+const customModelsView=mountCustomModels(document.getElementById("custom-models")!,{invoke,visit:()=>settingsVisit,active:()=>settingsDialog?.open??false,changed:()=>void loadDesktopSettings(false)});
+void customModelsView.refresh();
 const appearanceHost = document.querySelector<HTMLElement>(".appearance-settings");
 let imageThemes: ReturnType<typeof mountImageThemes> | null = null;
 if (appearanceHost) {

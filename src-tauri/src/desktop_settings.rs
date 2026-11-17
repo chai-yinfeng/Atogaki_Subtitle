@@ -499,20 +499,39 @@ impl DesktopSettingsService {
             .await?
             .as_deref()
             == Some("true");
+        let registered_models = crate::custom_models::read(&self.database).await?;
         let whisper_model = self
             .database
             .get_setting(WHISPER_MODEL_PATH)
             .await?
             .map(PathBuf::from)
             .filter(|path| path.is_file())
-            .or_else(|| self.environment_whisper_model.clone());
+            .or_else(|| self.environment_whisper_model.clone())
+            .or_else(|| {
+                registered_models
+                    .iter()
+                    .find(|m| {
+                        m.kind == "whisper"
+                            && crate::custom_models::validate(&m.kind, Path::new(&m.path)).is_ok()
+                    })
+                    .map(|m| PathBuf::from(&m.path))
+            });
         let vad_model = self
             .database
             .get_setting(VAD_MODEL_PATH)
             .await?
             .map(PathBuf::from)
             .filter(|path| path.is_file())
-            .or_else(|| self.environment_vad_model.clone());
+            .or_else(|| self.environment_vad_model.clone())
+            .or_else(|| {
+                registered_models
+                    .iter()
+                    .find(|m| {
+                        m.kind == "vad"
+                            && crate::custom_models::validate(&m.kind, Path::new(&m.path)).is_ok()
+                    })
+                    .map(|m| PathBuf::from(&m.path))
+            });
         let hy_mt2_model = self
             .database
             .get_setting(HY_MT2_MODEL_PATH)
@@ -608,14 +627,20 @@ impl DesktopSettingsService {
         let vad_model_ready = vad_model.as_ref().is_some_and(|path| path.is_file());
         let download_network = self.download_network_settings().await?;
 
+        let qwen_offline_ready = crate::offline_models::qwen_ready(&self.models_directory)
+            || cfg!(all(target_os = "macos", target_arch = "aarch64"))
+                && crate::offline_models::alignment_runtime_ready(&self.models_directory)
+                && crate::offline_models::aligner_path(&self.models_directory).is_some()
+                && registered_models.iter().any(|m| {
+                    m.kind == "qwen-asr"
+                        && crate::custom_models::validate(&m.kind, Path::new(&m.path)).is_ok()
+                });
         Ok(DesktopSettings {
             onboarding_completed,
-            needs_onboarding: !onboarding_completed
-                || !(whisper_model_ready
-                    || crate::offline_models::qwen_ready(&self.models_directory)),
+            needs_onboarding: !onboarding_completed || !(whisper_model_ready || qwen_offline_ready),
             whisper_model_path: display_path(whisper_model.as_ref()),
             whisper_model_ready,
-            qwen_offline_ready: crate::offline_models::qwen_ready(&self.models_directory),
+            qwen_offline_ready,
             vad_model_path: display_path(vad_model.as_ref()),
             vad_model_ready,
             hy_mt2_model_path: display_path(hy_mt2_model.as_ref()),

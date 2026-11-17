@@ -12,15 +12,9 @@ export function desktopSettingsTemplate(): string {
 <section data-settings-page="appearance" class="settings-section hidden appearance-settings"><h3>外观</h3><div class="theme-options"><button type="button" data-app-theme="light"><span class="theme-swatch light-swatch"></span><strong>亮色</strong></button><button type="button" data-app-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>暗色</strong></button><button type="button" data-app-theme="system"><span class="theme-swatch system-swatch"></span><strong>跟随系统</strong></button></div></section>
         <section data-settings-page="transcription" class="settings-section">
           <div class="settings-section-heading"><div><strong>本地转录</strong></div><span id="model-readiness"></span></div>
-          <div class="settings-path-row">
-            <label>Whisper 模型<input id="settings-whisper-model" placeholder="选择模型文件" /></label>
-            <button id="settings-choose-whisper" type="button" class="secondary">选择文件</button>
-          </div>
-          <div class="settings-path-row">
-            <label>Silero VAD 模型（推荐）<input id="settings-vad-model" placeholder="选择 VAD 文件" /></label>
-            <button id="settings-choose-vad" type="button" class="secondary">选择文件</button>
-          </div>
-
+          <input id="settings-whisper-model" type="hidden" />
+          <input id="settings-vad-model" type="hidden" />
+          <section id="custom-models" class="custom-models"></section>
           <div id="model-catalog" class="model-catalog"></div>
           <details class="onboarding-optional"><summary>可选：Gemini 局部修复</summary>
         <section class="settings-section">

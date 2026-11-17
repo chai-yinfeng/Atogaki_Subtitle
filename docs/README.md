@@ -74,3 +74,5 @@ _更新：2026-11-17。_
 [归档索引](archive/2026-11-11/README.md)列出已被取代的提案、已修复缺陷记录、路线图历史，以及清理前完整架构／路线图快照和后继依据。[发行记录](release-notes/)与[历次 ADR](decisions/)保留版本来源；归档正文中的状态是当时观察，不表示今天仍待完成。
 
 - [0085：亮暗主题与图片配色编辑器](decisions/0085-light-dark-and-image-theme-studio.md)
+
+- [0086：按名称导入本机识别模型](decisions/0086-named-local-model-registration.md)

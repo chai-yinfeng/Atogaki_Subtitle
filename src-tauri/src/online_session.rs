@@ -214,6 +214,28 @@ fn assets(state: &DesktopOnlineSession) -> Result<Assets, String> {
     }
     Ok(assets)
 }
+async fn configured_assets(
+    state: &DesktopOnlineSession,
+    registered: &crate::custom_models::CustomModels,
+) -> Result<Assets, String> {
+    let mut a = assets(state)?;
+    for registered in registered.list().await.map_err(|e| format!("{e:#}"))? {
+        if registered.kind == "qwen-asr"
+            && crate::custom_models::validate(
+                &registered.kind,
+                std::path::Path::new(&registered.path),
+            )
+            .is_ok()
+        {
+            a.finals.push(Model {
+                id: registered.id,
+                name: registered.name,
+                path: registered.path.into(),
+            });
+        }
+    }
+    Ok(a)
+}
 fn model_ready(model: &Model, catalog_id: &str) -> bool {
     crate::model_download::model_catalog()
         .iter()
@@ -251,7 +273,7 @@ pub async fn online_choices(
     state: State<'_, DesktopOnlineSession>,
     desktop: State<'_, crate::DesktopState>,
 ) -> Result<Choices, String> {
-    let mut a = assets(&state)?;
+    let mut a = configured_assets(&state, &desktop.custom_models).await?;
     a.hy_mt2 = desktop
         .settings_service
         .downloaded_model_path("hy-mt2")
@@ -386,7 +408,7 @@ pub async fn start_online_session(
             return Err("系统音频采集需要 macOS 14.2+".into());
         }
     }
-    let mut a = assets(&state)?;
+    let mut a = configured_assets(&state, &desktop.custom_models).await?;
     a.hy_mt2 = desktop
         .settings_service
         .downloaded_model_path("hy-mt2")

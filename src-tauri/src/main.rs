@@ -2,6 +2,7 @@
 
 mod commands;
 mod credential_store;
+mod custom_models;
 mod desktop_settings;
 mod dictionary_download;
 mod dictionary_lookup;
@@ -70,6 +71,7 @@ struct DesktopState {
     retranscription_service: LocalRetranscriptionService,
     subtitle_style_service: SubtitleStyleService,
     settings_service: DesktopSettingsService,
+    custom_models: custom_models::CustomModels,
     model_download_service: ModelDownloadService,
     dictionary_download_service: DictionaryDownloadService,
     dictionary_lookup_service: dictionary_lookup::DictionaryLookupService,
@@ -1070,6 +1072,28 @@ async fn submit_transcription(
                 .whisper_model_path
                 .ok_or("尚未配置识别模型")?
                 .into();
+        } else if id.starts_with("custom-") {
+            let model = state
+                .custom_models
+                .list()
+                .await
+                .map_err(|e| format!("{e:#}"))?
+                .into_iter()
+                .find(|m| m.id == id && m.kind != "vad")
+                .ok_or("自定义识别模型不存在")?;
+            custom_models::validate(&model.kind, Path::new(&model.path))
+                .map_err(|e| format!("{e:#}"))?;
+            transcription.whisper.model = model.path.into();
+            if model.kind == "qwen-asr" {
+                if !cfg!(all(target_os = "macos", target_arch = "aarch64"))
+                    || !offline_models::alignment_runtime_ready(&models)
+                {
+                    return Err("需要 Apple Silicon 与本地 Qwen／对齐运行环境".into());
+                }
+                transcription.alignment_model =
+                    Some(offline_models::aligner_path(&models).ok_or("请先下载字幕对齐模型")?);
+                transcription.whisper.vad_model = None;
+            }
         } else {
             let model = state
                 .model_download_service
@@ -2246,6 +2270,7 @@ fn main() {
             ));
             app.manage(DesktopState {
                 data_dir,
+                custom_models: custom_models::CustomModels::new(database.clone()),
                 task_service,
                 workspace_service,
                 glossary_service,
@@ -2287,6 +2312,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             offline_models::offline_recognition_choices,
+            custom_models::registered_models,
+            custom_models::register_model,
+            custom_models::rename_registered_model,
+            custom_models::forget_registered_model,
+            custom_models::pick_registered_model,
             online_session::online_session_status,
             online_session::online_choices,
             online_session::online_snapshot,

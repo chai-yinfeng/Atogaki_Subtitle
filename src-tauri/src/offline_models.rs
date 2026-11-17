@@ -74,6 +74,37 @@ pub async fn offline_recognition_choices(
             reason: String::new(),
         });
     }
+    for model in state
+        .custom_models
+        .list()
+        .await
+        .map_err(|e| format!("{e:#}"))?
+    {
+        if model.kind == "vad" {
+            continue;
+        }
+        let qwen = model.kind == "qwen-asr";
+        let ready = crate::custom_models::validate(&model.kind, Path::new(&model.path)).is_ok()
+            && (!qwen
+                || cfg!(all(target_os = "macos", target_arch = "aarch64")) && runtime && aligned);
+        let choice = OfflineModelChoice {
+            id: model.id,
+            name: model.name,
+            path: model.path,
+            provider: if qwen { "mlx-qwen3-asr" } else { "whisper.cpp" }.into(),
+            ready,
+            reason: if ready {
+                String::new()
+            } else {
+                "模型、运行环境或对齐依赖未就绪".into()
+            },
+        };
+        if let Some(existing) = choices.iter_mut().find(|m| m.path == choice.path) {
+            *existing = choice;
+        } else {
+            choices.push(choice);
+        }
+    }
     for model in model_catalog()
         .iter()
         .filter(|m| matches!(m.kind.as_str(), "whisper" | "qwen-asr") && m.installed(&models))

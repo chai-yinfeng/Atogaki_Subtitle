@@ -71,3 +71,11 @@
 .image-studio-footer { flex:none; margin-top:24px; padding-top:20px; border-top:1px solid var(--border); display:flex; justify-content:space-between; gap:16px; }
 @media(min-width:1000px) { .image-studio-previews { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }.image-studio-previews .preview-note { grid-column:1/-1; } }
 @media(max-width:760px) { .image-studio-body { grid-template-columns:minmax(0,1fr); }.image-theme-studio { padding:16px; }.image-studio-controls { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }.image-studio-controls details,.image-studio-status { grid-column:1/-1; } }
+.custom-models { margin:20px 0 28px; padding-bottom:20px; border-bottom:1px solid var(--border); }
+.custom-model-import { margin-top:16px; }.custom-model-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; padding-block:12px; }
+.custom-model-fields label { display:grid; gap:7px; }.custom-model-fields .custom-model-path { grid-column:1; }.custom-model-fields>[data-custom-pick] { align-self:end; justify-self:start; }.custom-model-fields>[data-custom-add] { justify-self:start; }
+.custom-model-message { font-size:12px; margin:10px 0; }.custom-model-list { display:grid; gap:10px; }
+.registered-model { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; padding:14px; border:1px solid var(--border); border-radius:8px; min-width:0; }
+.registered-model>div:first-child { display:grid; align-content:start; gap:5px; min-width:0; }.registered-model strong { overflow-wrap:anywhere; font-size:13px; }.registered-model span,.registered-model details { color:var(--muted-foreground); font-size:12px; }.registered-model summary { padding:2px 0; font-size:11px; }.registered-model details p { overflow-wrap:anywhere; margin-top:8px; }
+.registered-model-actions { display:flex; gap:6px; align-self:start; }.registered-model-actions button { min-height:28px; padding:4px 8px; font-size:12px; }
+@media(max-width:700px) { .registered-model { grid-template-columns:minmax(0,1fr); }.custom-model-fields { grid-template-columns:minmax(0,1fr); } }
