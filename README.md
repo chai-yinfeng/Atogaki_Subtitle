@@ -23,7 +23,7 @@ macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`
 
 媒体、模型、词典包、任务、学习资料和编辑结果默认保留在设备上。只有启用云端字幕翻译时，待翻译的原文字幕及有限的相邻上下文会发送给所选 provider；Gemini 局部识别需另行确认确切音频上传范围；只有用户主动查询在线词典时，所选文本才会发送给对应词典 API。
 
-开发主线已整合在线采集、控制面板和可修订字幕：日语 SenseVoice 草稿 → Qwen3-ASR 1.7B 8bit 确认 → Hy-MT2／Index-Translate 本地翻译。它仍未通过在线语义验收，新机 runtime／草稿准备闭环也未完成；不属于 v0.1.3 的稳定安装能力。在线面板尚无云端翻译入口。当前合同与实际边界见[在线计划](docs/online-asr-plan.md)，不要用早期分支报告判断今天是否已接入。
+开发主线已整合在线采集、主窗口控制和可修订字幕：One Pass 使用 Qwen3-ASR 1.7B 8bit＋DFlash，Two Pass 使用 SenseVoice／Zipformer 草稿 → Qwen 确认，随后由 Hy-MT2／Index-Translate 本地翻译。模式、语言和加速边界见[模型与使用说明](docs/model-usage.md)。它仍未通过在线语义验收，新机 runtime／草稿准备闭环也未完成；不属于 v0.1.3 的稳定安装能力。在线面板尚无云端翻译入口。当前合同与实际边界见[在线计划](docs/online-asr-plan.md)，不要用早期分支报告判断今天是否已接入。
 
 ## v0.1.3 统一字幕编辑与收听
 

@@ -1,6 +1,6 @@
 # 0078：按用途管理模型与 Qwen 多文件包
 
-日期：2026-11-13。状态：accepted，用户确认整理模型分类并保留按需测试的量化候选。
+日期：2026-11-13。状态：accepted，用户确认整理模型分类并保留按需测试的量化候选。2026-11-17 分组交互按下方后继记录调整；旧的“其他”分组不再适用。
 
 ## 决策与用途
 
@@ -36,3 +36,11 @@ SenseVoice／Zipformer 草稿和在线 ONNX VAD 先显示既有包的状态，�
 Voxt 是开源语音输入 App，可学习其 native MLX 推理、缓存、模型管理和分发实现。用户主动停止口述通常提供较完整意群；该体验不能直接证明连续电台中的上下文边界、翻译修订和正确性已解决。性能比较必须注明模型 revision、量化、输入、硬件、冷／热启动以及停止后等待或连续字幕延迟的统计口径。
 
 来源：[Voxt 实现与模型](https://github.com/sgl-project/sglang-omni/blob/main/Voxt/README.md)、[0.6B 4bit](https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-4bit/tree/313d850181767edf09f00a9c289becca70e58cd0)、[1.7B 8bit](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit/tree/a8379a2e2f9e313c9292cdf1af4055ab56d50d55)。原始 Qwen 和草稿文件延续 `experiments/online/model-pins.json` 的固定版本。
+
+## 2026-11-17：两层分组与用途对称性
+
+用户要求模型按用途和系列显示，不再将可选模型单独归入“其他 Whisper／Qwen”。当前界面保留用途 → 系列两层（草稿／VAD 等无需额外套空系列），转录系列内直接列出全部在用候选；常用候选在卡片上显示“推荐”标签，推荐不再增加折叠层级。继续隐藏未安装的已淘汰模型，保留已安装旧模型的管理。下载、取消、选择、卸载沿用既有会话，未改变模型文件或识别参数。
+
+用户明确要求 Qwen 补齐桌面离线转录，不能把下载和入口之间的不对称交给用户理解。此项是已确认需求，尚未实现：当前桌面离线仍为 Whisper，Qwen 的现有 MLX worker／模型包可复用，但离线任务 provider、冻结配置、检查点／恢复、字幕时间轴与后续翻译须一起接通。细粒度时间轴需要另外的 ForcedAligner 模型，不能将已有块边界冒称词级／精确字幕时间；用户已确认首版增加 ForcedAligner，提供完整字幕打轴；不采用 VAD 粗边界作为首版替代。
+
+在线 SenseVoice → Qwen 已接通 ja／zh／en／ko 的通用 language 参数；不把共享包历史 ID draft-ja 当成只支持日语，也不把支持范围写成 Qwen 全部语言。日语质量证据与其他语言可运行范围分开，SenseVoice 继续标为周期重识别而非原生流式。后续应以共用能力定义约束入口和 worker，不增加空转的另一套选择接口。

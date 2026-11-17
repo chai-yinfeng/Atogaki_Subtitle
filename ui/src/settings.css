@@ -23,7 +23,12 @@
 .provider-editor { display:grid; gap:16px; padding-top:12px; }
 .settings-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }.settings-span { grid-column:1/-1; }
 .local-model-choice { max-width:380px; margin:16px 0; }
-.model-catalog,.model-group-list { display:grid; gap:12px; }.model-group { border-bottom:1px solid var(--border); padding:6px 0; }
+.model-catalog,.model-group-list { display:grid; gap:12px; }.model-group { min-width:0; border:0; border-bottom:1px solid var(--border); border-radius:0; padding:6px 0 12px; }
+.model-group > summary { padding:10px 4px; font-weight:600; }
+.model-group .model-group { margin-left:12px; padding-left:16px; border-left:1px solid var(--border); border-bottom:0; background:transparent; }
+.model-group[open] > .model-group-list { margin-top:8px; }
+.model-card-title { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.model-card .model-recommendation { flex:none; padding:2px 7px; border:1px solid var(--border); border-radius:5px; background:var(--secondary); color:var(--foreground); font-size:11px; line-height:1.4; }
 .model-card { border:1px solid var(--border); background:var(--card); border-radius:8px; padding:14px; }
 .model-card>div:first-child { display:grid; gap:5px; }.model-card span { font-size:12px; color:var(--muted-foreground); }.model-card-action { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; }.model-card-action>div { display:flex; gap:6px; }
 .theme-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }

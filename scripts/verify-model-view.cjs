@@ -5,7 +5,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
  try{
   const page=await browser.newPage({viewport:{width:960,height:640}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
   await page.setContent('<style>.hidden{display:none!important} .model-card{padding:10px} .model-card span{display:block}</style><input id="other" aria-label="Other input"><div id="models"></div>');
-  await page.addStyleTag({path:'ui/src/styles.css'});
+  // Inline entrypoint @imports have no base URL in an isolated about:blank fixture.
+  for(const name of ['theme-tokens','feature-styles','primitives','app-shell','settings'])await page.addStyleTag({path:`ui/src/${name}.css`});
+  await page.addStyleTag({content:'body{overflow:auto}'});
   await page.evaluate(async source=>{
    const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));const {mountModelManagementView}=await import(url);URL.revokeObjectURL(url);
    const state=window.__view={catalog:['a','b'].map(id=>({id,kind:'whisper',name:'Model <'+id+'>',sizeLabel:'1 KiB',recommendedFor:'fixture <text>'})),downloads:[{modelId:'a',status:'downloading',downloadedBytes:1,totalBytes:4},{modelId:'b',status:'done',downloadedBytes:4,totalBytes:4,active:false}],busy:false,visit:1,dead:false,calls:[],errors:[],release:null,reject:null};
@@ -30,17 +32,20 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
    const state=window.__grouped={catalog,downloads:[],busy:false,calls:[]};
    state.view=mountModelManagementView(document.querySelector('#models'),{visit:()=>1,state:()=>state,formatBytes:n=>n+' bytes',error:text=>{throw Error(text)},action:async(...args)=>state.calls.push(args)});
   },{source:stripTypeScriptTypes(fs.readFileSync('ui/src/model-management-view.ts','utf8')),catalog});
-  assert.equal(await page.locator('#models > [data-model-group]').count(),4);
+  assert.deepEqual(await page.locator('#models > [data-model-group]').evaluateAll(nodes=>nodes.map(node=>node.dataset.modelGroup)),['acceleration','transcription','draft','translation','vad']);
   assert.equal(await primary('whisper-medium').isVisible(),false);
   await page.locator('[data-model-group="transcription"] > summary').click();
   assert.equal(await primary('whisper-medium').isVisible(),true);
-  assert.equal(await primary('whisper-small').isVisible(),false);
+  assert.equal(await primary('whisper-small').isVisible(),true);
+  assert.equal(await page.locator('[data-model-card="whisper-medium"] [data-recommended]').isVisible(),true);
+  assert.equal(await page.locator('[data-model-card="whisper-small"] [data-recommended]').isVisible(),false);
+  assert.equal(await page.locator('[data-model-group$="/other"]').count(),0);
   assert.equal(await page.locator('[data-model-card="hy-mt2-7b-q4-k-m"]').count(),0);
   const qwen=page.locator('[data-model-group="transcription/Qwen3-ASR"]');
   assert.equal(await primary('qwen-0.6b').isVisible(),false);await qwen.locator(':scope > summary').click();
   assert.equal(await primary('qwen-1.7b-8bit').isVisible(),true);
-  assert.equal(await primary('qwen-0.6b').isVisible(),false);
-  await page.locator('[data-model-group="transcription/Qwen3-ASR/other"] > summary').click();
+  assert.equal(await primary('qwen-0.6b').isVisible(),true);
+  assert.equal(await page.locator('[data-model-card="qwen-1.7b-8bit"] [data-recommended]').isVisible(),true);
   for(const id of ['qwen-0.6b','qwen-0.6b-4bit','qwen-1.7b-8bit'])assert.equal(await primary(id).isVisible(),true);
   await primary('qwen-0.6b-4bit').click();assert.deepEqual(await page.evaluate(()=>window.__grouped.calls),[['start','qwen-0.6b-4bit']]);
   await page.evaluate(()=>{window.__grouped.downloads=[{modelId:'qwen-0.6b-4bit',status:'done',active:false}];window.__grouped.view.render()});
@@ -52,6 +57,6 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
   assert.equal(await page.locator('[data-model-card="draft-ja"] [data-model-action="uninstall"]').isVisible(),false);
   await page.evaluate(()=>window.__grouped.view.dispose());
   assert.deepEqual(errors,[]);
-  console.log('PASS: stable model controls and focus; four collapsed categories, Medium first, Qwen variants, installed package actions and environment-managed drafts');
+  console.log('PASS: stable model controls and focus; collapsed categories, two-level families without other groups, recommendation tags, Qwen variants, installed package actions and environment-managed drafts');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -8,7 +8,7 @@ type Options = {
   formatBytes(bytes: number): string;
   error(text: string): void;
 };
-type Card = { node: HTMLElement; name: HTMLElement; description: HTMLElement; progress: HTMLProgressElement; status: HTMLElement; primary: HTMLButtonElement; uninstall: HTMLButtonElement };
+type Card = { node: HTMLElement; name: HTMLElement; recommendation: HTMLElement; description: HTMLElement; progress: HTMLProgressElement; status: HTMLElement; primary: HTMLButtonElement; uninstall: HTMLButtonElement };
 const text = (node: HTMLElement, value: string) => { if (node.textContent !== value) node.textContent = value; };
 const flag = (node: HTMLElement, name: string, value: boolean) => { if (node.classList.contains(name) !== value) node.classList.toggle(name, value); };
 const disabled = (node: HTMLButtonElement, value: boolean) => { if (node.disabled !== value) node.disabled = value; };
@@ -36,10 +36,10 @@ export function mountModelManagementView(root: HTMLElement, options: Options) {
   let disposed = false;
   const create = (id: string): Card => {
     const node = document.createElement("article"); node.className = "model-card"; node.dataset.modelCard = id;
-    node.innerHTML = '<div><strong data-name></strong><span data-description></span></div><progress max="1" class="hidden"></progress><div class="model-card-action"><span data-status tabindex="-1"></span><div><button type="button" data-primary></button><button type="button" class="secondary" data-model-action="uninstall">卸载</button></div></div>';
+    node.innerHTML = '<div><div class="model-card-title"><strong data-name></strong><span data-recommended class="model-recommendation hidden">推荐</span></div><span data-description></span></div><progress max="1" class="hidden"></progress><div class="model-card-action"><span data-status tabindex="-1"></span><div><button type="button" data-primary></button><button type="button" class="secondary" data-model-action="uninstall">卸载</button></div></div>';
     const primary = node.querySelector<HTMLButtonElement>("[data-primary]")!, uninstall = node.querySelector<HTMLButtonElement>("[data-model-action=uninstall]")!;
     primary.dataset.modelId = id; uninstall.dataset.modelId = id;
-    return { node, primary, uninstall, name: node.querySelector("[data-name]")!, description: node.querySelector("[data-description]")!, progress: node.querySelector("progress")!, status: node.querySelector("[data-status]")! };
+    return { node, primary, uninstall, name: node.querySelector("[data-name]")!, recommendation: node.querySelector("[data-recommended]")!, description: node.querySelector("[data-description]")!, progress: node.querySelector("progress")!, status: node.querySelector("[data-status]")! };
   };
   const render = () => {
     if (disposed) return;
@@ -66,15 +66,11 @@ export function mountModelManagementView(root: HTMLElement, options: Options) {
         const familyKey = `${key}/${family}`, first = !used.has(familyKey);
         const branch = group(familyKey, family, family === "Whisper", parent);
         if (first) add(parent, branch.node); used.add(familyKey); parent = branch.list;
-        if (model.optional || model.retired) {
-          const extraKey = `${familyKey}/other`, firstExtra = !used.has(extraKey);
-          const extra = group(extraKey, `其他 ${family} 模型`, false, parent);
-          if (firstExtra) add(parent, extra.node); used.add(extraKey); parent = extra.list;
-        }
       }
       const source = download?.source ? ` · ${download.source}` : "";
       const status = installed ? `${download.active ? "已下载 · 当前使用" : "已下载"}${source}` : download?.status === "failed" ? `失败：${download.error ?? "未知错误"}${source}` : download?.status === "cancelled" ? `已取消；保留临时文件供续传${source}` : download?.status === "cancelling" ? `正在取消…${source}` : download?.status === "downloading" ? `${options.formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${options.formatBytes(download.totalBytes)}` : ""}${source}` : download?.status === "queued" ? `等待下载${source}` : "";
       text(card.name, model.name); text(card.description, `${model.sizeLabel} · ${model.recommendedFor}`); text(card.status, status || "未下载");
+      flag(card.recommendation, "hidden", key !== "transcription" || model.optional !== false || Boolean(model.retired));
       const label = `${model.name}：${status || "未下载"}`; if (card.status.getAttribute("aria-label") !== label) card.status.setAttribute("aria-label", label);
       const progressLabel = `${model.name} 下载进度`; if (card.progress.getAttribute("aria-label") !== progressLabel) card.progress.setAttribute("aria-label", progressLabel);
       flag(card.status, "warning", download?.status === "failed");
