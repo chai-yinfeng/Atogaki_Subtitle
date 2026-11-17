@@ -286,7 +286,7 @@ impl ModelDownloadService {
             .find(|model| model.id == model_id)
             .ok_or_else(|| anyhow!("unknown model: {model_id}"))?;
         if !model.selectable {
-            bail!("请在在线控制面板选择识别模型；离线文件转录尚未接入此模型");
+            bail!("请在对应任务或在线字幕的模型列表中选择；此模型不使用全局 Whisper／VAD 路径");
         }
         let output_path = self.models_directory.join(&model.file_name);
         self.verify_package(model, &output_path).await?;

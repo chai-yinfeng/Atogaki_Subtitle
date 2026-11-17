@@ -18,7 +18,7 @@
 
 ## 模型与运行环境
 
-模型目录加入“字幕对齐”类别，固定官方 revision c7cbfc2048c462b0d63a45797104fc9db3ad62b7，权重约 1.84 GB，所有文件由原下载队列逐项 SHA-256 校验。对齐是明确新增的依赖，不使用 VAD 粗边界冒充完整打轴。
+模型卡片同步说明在线／离线两种用途，不再显示“离线尚未接入”；1.7B 8bit 名称去掉仅限在线的暗示。模型目录加入“字幕对齐”类别，固定官方 revision c7cbfc2048c462b0d63a45797104fc9db3ad62b7，权重约 1.84 GB，所有文件由原下载队列逐项 SHA-256 校验。对齐是明确新增的依赖，不使用 VAD 粗边界冒充完整打轴。
 
 日语／韩语分词复用 upstream 的 nagisa／soynlp，按现有 uv 模式在 experiments/online/envs/qwen-alignment 固定版本。prepare-qwen-alignment.py 从已验证的 site-packages 导入独立 runtimes/qwen-alignment，拒绝覆盖；不替换原在线 Python 包。App 在缺少运行环境、对齐依赖标记或模型时禁用 Qwen 选项并说明缺项。全新机器的 Python runtime 自动安装仍未完成，不因本机导入成功宣称通用分发闭环完成。
 
