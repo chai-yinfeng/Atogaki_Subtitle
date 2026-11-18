@@ -18,11 +18,13 @@ use tokio::{
 };
 
 use crate::{
-    domain::render::RenderOptions, infrastructure::child_process::sidecar_command,
+    domain::render::{RenderOptions, RenderProfile},
+    infrastructure::child_process::sidecar_command,
     interface::cli::RecordArgs,
 };
 
 const VIDEOTOOLBOX_QUALITY: u8 = 65;
+const SHARE_QUALITY: u8 = 80;
 const MPEG4_QUALITY: u8 = 3;
 const SOURCE_BITRATE_HEADROOM_NUMERATOR: u64 = 6;
 const SOURCE_BITRATE_HEADROOM_DENOMINATOR: u64 = 5;
@@ -41,6 +43,9 @@ pub struct MediaCapabilities {
     pub videotoolbox_encoder: bool,
     pub mpeg4_encoder: bool,
     pub ready_for_hard_subtitles: bool,
+    pub ready_for_quality_render: bool,
+    pub ready_for_prores: bool,
+    pub ready_for_soft_matroska: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -138,6 +143,7 @@ pub async fn render_ass_preview_frame(
 pub struct MediaProbe {
     pub duration_ms: u64,
     pub has_video: bool,
+    pub hdr_video: bool,
     pub video_bitrate_bps: Option<u64>,
     pub width: Option<u32>,
     pub height: Option<u32>,
@@ -150,6 +156,7 @@ pub enum RenderEncoder {
     VideoToolbox,
     Mpeg4,
     SubtitleMux,
+    ProRes,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -219,6 +226,8 @@ pub async fn inspect_capabilities(ffmpeg: &Path) -> Result<MediaCapabilities> {
     let ass_filter = supports_filter(ffmpeg, "ass").await?;
     let videotoolbox_encoder = supports_encoder(ffmpeg, "h264_videotoolbox").await?;
     let mpeg4_encoder = supports_encoder(ffmpeg, "mpeg4").await?;
+    let ready_for_prores = ass_filter && supports_encoder(ffmpeg, "prores_ks").await?;
+    let ready_for_soft_matroska = supports_codec_component(ffmpeg, "-muxers", "matroska").await?;
 
     Ok(MediaCapabilities {
         binary_path: ffmpeg.display().to_string(),
@@ -227,6 +236,11 @@ pub async fn inspect_capabilities(ffmpeg: &Path) -> Result<MediaCapabilities> {
         videotoolbox_encoder,
         mpeg4_encoder,
         ready_for_hard_subtitles: ass_filter && (videotoolbox_encoder || mpeg4_encoder),
+        ready_for_quality_render: ass_filter
+            && videotoolbox_encoder
+            && cfg!(all(target_os = "macos", target_arch = "aarch64")),
+        ready_for_prores,
+        ready_for_soft_matroska,
     })
 }
 
@@ -266,9 +280,9 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
             "-v",
             "error",
             "-select_streams",
-            "v:0",
+            "V:0",
             "-show_entries",
-            "stream=index,bit_rate,width,height",
+            "stream=index,bit_rate,width,height,color_transfer",
             "-of",
             "default=noprint_wrappers=1",
         ])
@@ -319,6 +333,12 @@ pub async fn probe_media(ffmpeg: &Path, input: &Path) -> Result<MediaProbe> {
     Ok(MediaProbe {
         duration_ms,
         has_video,
+        hdr_video: video_fields.lines().any(|line| {
+            matches!(
+                line,
+                "color_transfer=smpte2084" | "color_transfer=arib-std-b67"
+            )
+        }),
         video_bitrate_bps,
         width,
         height,
@@ -333,7 +353,7 @@ fn parse_probe_field<T: std::str::FromStr>(fields: &str, prefix: &str) -> Option
         .and_then(|value| value.parse::<T>().ok())
 }
 
-fn ffprobe_path(ffmpeg: &Path) -> PathBuf {
+pub(crate) fn ffprobe_path(ffmpeg: &Path) -> PathBuf {
     if let Some(configured) = std::env::var_os("ATOGAKI_FFPROBE").filter(|value| !value.is_empty())
     {
         return PathBuf::from(configured);
@@ -514,28 +534,118 @@ pub async fn render_subtitles_with_progress(
         anyhow::bail!("ASS subtitle file does not exist: {}", ass.display());
     }
 
-    if !supports_filter(ffmpeg, "ass").await? {
-        anyhow::bail!(
-            "hard subtitle rendering requires the bundled FFmpeg sidecar with the libass/ass filter; select soft subtitles explicitly if the sidecar is unavailable"
-        );
-    }
     let execution = RenderExecution {
         duration_ms,
         progress_sender,
         cancelled,
     };
-    let source_video_bitrate_bps = probe_media(ffmpeg, input).await?.video_bitrate_bps;
-    burn_ass(
-        ffmpeg,
-        input,
-        ass,
-        output,
-        options
-            .target_video_bitrate_bps
-            .or_else(|| source_relative_target_bitrate(source_video_bitrate_bps)),
-        &execution,
-    )
-    .await
+    if options.profile == RenderProfile::SoftMatroska {
+        let mut cmd = sidecar_command(ffmpeg);
+        cmd.args(["-y", "-i"]).arg(input).arg("-i").arg(ass);
+        cmd.args([
+            "-map", "0:V:0", "-map", "0:a?", "-map", "1:s:0", "-c", "copy",
+        ]);
+        cmd.args(["-progress", "pipe:1", "-nostats"]).arg(output);
+        execute_render(cmd, "ffmpeg mux ASS into MKV", &execution).await?;
+        return Ok(RenderOutcome {
+            encoder: RenderEncoder::SubtitleMux,
+            hardware_accelerated: false,
+            audio_encoder: "copy".to_string(),
+            fallback_reason: None,
+            output_path: output.display().to_string(),
+        });
+    }
+
+    if !supports_filter(ffmpeg, "ass").await? {
+        anyhow::bail!(
+            "hard subtitle rendering requires the bundled FFmpeg sidecar with the libass/ass filter; select soft subtitles explicitly if the sidecar is unavailable"
+        );
+    }
+    let probe = probe_media(ffmpeg, input).await?;
+    let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
+    let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
+    if probe.hdr_video && options.profile != RenderProfile::Bitrate {
+        anyhow::bail!(
+            "当前画质优先和 ProRes 烧录仅支持 SDR 片源。HDR 视频可导出独立字幕或封装 MKV 软字幕。"
+        );
+    }
+    match options.profile {
+        RenderProfile::Bitrate => {
+            burn_ass_with_encoder(
+                ffmpeg,
+                input,
+                output,
+                &filter,
+                options
+                    .target_video_bitrate_bps
+                    .or_else(|| source_relative_target_bitrate(probe.video_bitrate_bps)),
+                &execution,
+            )
+            .await
+        }
+        RenderProfile::Quality => {
+            let render = |audio| {
+                let mut cmd = sidecar_command(ffmpeg);
+                cmd.args(burn_args(
+                    input,
+                    output,
+                    &filter,
+                    HardSubtitleEncoder::VideoToolbox,
+                    audio,
+                    None,
+                    SHARE_QUALITY,
+                ));
+                execute_render(cmd, "FFmpeg VideoToolbox 画质优先烧录", &execution)
+            };
+            let audio = match render(AudioEncoder::Copy).await {
+                Ok(()) => AudioEncoder::Copy,
+                Err(error) if audio_copy_failed(&error.to_string()) => {
+                    render(AudioEncoder::Aac).await?;
+                    AudioEncoder::Aac
+                }
+                Err(error) => return Err(error),
+            };
+            Ok(render_outcome(
+                output,
+                HardSubtitleEncoder::VideoToolbox,
+                audio,
+                None,
+            ))
+        }
+        RenderProfile::ProRes => {
+            let mut cmd = sidecar_command(ffmpeg);
+            cmd.args(["-y", "-i"]).arg(input);
+            cmd.args([
+                "-map",
+                "0:V:0",
+                "-map",
+                "0:a?",
+                "-vf",
+                &filter,
+                "-c:v",
+                "prores_ks",
+                "-profile:v",
+                "3",
+                "-pix_fmt",
+                "yuv422p10le",
+                "-c:a",
+                "pcm_s24le",
+                "-progress",
+                "pipe:1",
+                "-nostats",
+            ])
+            .arg(output);
+            execute_render(cmd, "FFmpeg ProRes 422 HQ 烧录", &execution).await?;
+            Ok(RenderOutcome {
+                encoder: RenderEncoder::ProRes,
+                hardware_accelerated: false,
+                audio_encoder: "pcm_s24le".to_string(),
+                fallback_reason: None,
+                output_path: output.display().to_string(),
+            })
+        }
+        RenderProfile::SoftMatroska => unreachable!("already handled before filtering"),
+    }
 }
 
 fn source_relative_target_bitrate(source_video_bitrate_bps: Option<u64>) -> Option<u64> {
@@ -543,27 +653,6 @@ fn source_relative_target_bitrate(source_video_bitrate_bps: Option<u64>) -> Opti
         bitrate.saturating_mul(SOURCE_BITRATE_HEADROOM_NUMERATOR)
             / SOURCE_BITRATE_HEADROOM_DENOMINATOR
     })
-}
-
-async fn burn_ass(
-    ffmpeg: &Path,
-    input: &Path,
-    ass: &Path,
-    output: &Path,
-    target_video_bitrate_bps: Option<u64>,
-    execution: &RenderExecution,
-) -> Result<RenderOutcome> {
-    let absolute_ass = ass.canonicalize().unwrap_or_else(|_| ass.to_path_buf());
-    let filter = format!("ass=filename='{}'", escape_filter_path(&absolute_ass));
-    burn_ass_with_encoder(
-        ffmpeg,
-        input,
-        output,
-        &filter,
-        target_video_bitrate_bps,
-        execution,
-    )
-    .await
 }
 
 async fn burn_ass_with_encoder(
@@ -765,10 +854,15 @@ async fn run_burn_command(
         encoding.video,
         encoding.audio,
         target_video_bitrate_bps,
+        VIDEOTOOLBOX_QUALITY,
     ));
+    execute_render(cmd, "ffmpeg render", execution).await
+}
+
+async fn execute_render(cmd: Command, name: &str, execution: &RenderExecution) -> Result<()> {
     run_render_command(
         cmd,
-        "ffmpeg render",
+        name,
         execution.duration_ms,
         execution.progress_sender.clone(),
         Arc::clone(&execution.cancelled),
@@ -783,6 +877,7 @@ fn burn_args(
     encoder: HardSubtitleEncoder,
     audio_encoder: AudioEncoder,
     target_video_bitrate_bps: Option<u64>,
+    videotoolbox_quality: u8,
 ) -> Vec<OsString> {
     let mut args = vec![
         "-y".into(),
@@ -806,7 +901,7 @@ fn burn_args(
             append_video_bitrate(
                 &mut args,
                 target_video_bitrate_bps,
-                VIDEOTOOLBOX_QUALITY,
+                videotoolbox_quality,
                 true,
             );
         }
@@ -957,16 +1052,24 @@ async fn supports_filter(ffmpeg: &Path, filter: &str) -> Result<bool> {
 }
 
 async fn supports_encoder(ffmpeg: &Path, encoder: &str) -> Result<bool> {
+    supports_codec_component(ffmpeg, "-encoders", encoder).await
+}
+
+async fn supports_codec_component(ffmpeg: &Path, query: &str, name: &str) -> Result<bool> {
     let output = sidecar_command(ffmpeg)
-        .args(["-hide_banner", "-encoders"])
+        .args(["-hide_banner", query])
         .output()
         .await
-        .context("failed to query ffmpeg encoders")?;
-
+        .with_context(|| format!("failed to query ffmpeg {query}"))?;
+    if !output.status.success() {
+        anyhow::bail!("ffmpeg {query} exited with {}", output.status);
+    }
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(stdout
         .lines()
-        .any(|line| line.split_whitespace().any(|part| part == encoder)))
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .flat_map(|names| names.split(','))
+        .any(|value| value == name))
 }
 
 async fn run_render_command(
@@ -1104,6 +1207,7 @@ mod tests {
             encoder,
             AudioEncoder::Copy,
             None,
+            super::VIDEOTOOLBOX_QUALITY,
         )
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())
@@ -1153,6 +1257,7 @@ mod tests {
             HardSubtitleEncoder::VideoToolbox,
             AudioEncoder::Copy,
             Some(560_698),
+            super::VIDEOTOOLBOX_QUALITY,
         )
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())

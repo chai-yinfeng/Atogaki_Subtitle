@@ -1,3 +1,4 @@
+import { videoOutputExtension, videoProfileAvailable } from "./video-render-types.ts";
 import type { createVideoRenderBackend } from "./video-render-backend";
 import type { MediaCapabilities, VideoRender, VideoRenderEstimate, VideoRenderQuality } from "./video-render-types";
 type Draft = { outputPath: string; track: VideoRender["subtitle_track"]; quality: VideoRenderQuality };
@@ -21,15 +22,20 @@ export function createVideoRenderSession(options: Options) {
     const context = options.context();
     return !disposed && !!visit && generation === ticket && context?.jobId === visit.jobId && context.navigation === visit.navigation;
   };
-  const canSubmit = () => current(generation) && !submitting && !picking && !!capabilities?.ready_for_hard_subtitles;
+  const canSubmit = () => {
+    if (!current(generation) || submitting || picking || !capabilities) return false;
+    const { quality } = options.view.read();
+    const hdr = estimates.find(item => item.quality === quality)?.hdr_video;
+    return videoProfileAvailable(quality, capabilities) && !(hdr && (quality === "quality" || quality === "prores"));
+  };
   const busy = () => options.view.busy(submitting || picking, canSubmit());
   const guard = () => {
     const context = options.context();
     if (!context || !options.available()) return false;
-    if (options.dirty()) { options.status("请先保存各段尚未保存的修改，再烧录视频。", true); return false; }
+    if (options.dirty()) { options.status("请先保存各段尚未保存的修改，再导出视频。", true); return false; }
     const staleCount = options.staleCount();
-    if (staleCount) { options.status(`有 ${staleCount} 段译文已过期，请重译或修正后再烧录。`, true); return false; }
-    if (!context.videoAvailable) { options.status("当前任务没有可烧录的视频源；如果原文件已移动，请先在字幕编辑中重新定位。", true); return false; }
+    if (staleCount) { options.status(`有 ${staleCount} 段译文已过期，请重译或修正后再导出。`, true); return false; }
+    if (!context.videoAvailable) { options.status("当前任务没有可用的视频源；如果原文件已移动，请先在字幕编辑中重新定位。", true); return false; }
     return true;
   };
   const refresh = () => {
@@ -39,7 +45,7 @@ export function createVideoRenderSession(options: Options) {
     const jobId = visit!.jobId;
     const promise = (async () => {
       try { const result = await options.backend.list(jobId); if (current(ticket)) { renders = result; options.view.history(); } }
-      catch (error) { if (current(ticket)) options.view.message(`无法读取烧录记录：${String(error)}`); }
+      catch (error) { if (current(ticket)) options.view.message(`无法读取导出记录：${String(error)}`); }
       finally { if (historyRequest?.ticket === ticket) historyRequest = null; }
     })();
     historyRequest = { ticket, promise }; return promise;
@@ -62,18 +68,20 @@ export function createVideoRenderSession(options: Options) {
       stopPoll = options.repeat(() => { if (current(ticket) && renders.some(r => r.status === "queued" || r.status === "running")) void refresh(); });
       await Promise.all([
         options.backend.capabilities().then(result => { if (current(ticket)) { capabilities = result; options.view.capabilities(); busy(); } }).catch(error => { if (current(ticket)) { capabilities = null; options.view.capabilities(`ffmpeg 检查失败：${String(error)}`); busy(); } }),
-        options.backend.estimates(jobId).then(result => { if (current(ticket)) { estimates = result; options.view.estimates(); } }).catch(error => { if (current(ticket)) options.view.estimates(`无法读取视频规格：${String(error)}`); }),
+        options.backend.estimates(jobId).then(result => { if (current(ticket)) { estimates = result; options.view.estimates(); busy(); } }).catch(error => { if (current(ticket)) options.view.estimates(`无法读取视频规格：${String(error)}`); }),
         refresh(),
       ]);
     },
-    outputChanged() { outputRevision++; },
+    outputChanged() { outputRevision++; busy(); },
     async chooseOutput() {
       const ticket = generation; if (!current(ticket) || submitting || picking) return;
       const path = visit!.inputPath, separator = path ? Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) : -1;
+      const revision = outputRevision;
       picking = true; busy(); options.view.message("正在打开视频保存面板…");
       try {
         const selection = await options.backend.pick(path && separator > 0 ? path.slice(0, separator) : null, options.suggestedName());
         if (!current(ticket)) return;
+        if (revision !== outputRevision) { options.view.message("导出选项已变化，请重新选择输出位置。"); return; }
         if (!selection) { options.view.message("已取消选择。"); return; }
         options.view.output(selection.path); outputRevision++;
         options.view.message(selection.alreadyExists ? "目标文件已经存在，开始前会再次确认覆盖。" : "已选择输出位置。");
@@ -88,26 +96,30 @@ export function createVideoRenderSession(options: Options) {
         const latest = options.view.read();
         return revision === outputRevision && latest.outputPath.trim() === draft.outputPath && latest.track === draft.track && latest.quality === draft.quality;
       };
-      if (!draft.outputPath.toLowerCase().endsWith(".mp4")) { options.view.message("输出路径必须以 .mp4 结尾。"); return; }
+      const extension = videoOutputExtension(draft.quality);
+      if (!draft.outputPath.toLowerCase().endsWith(`.${extension}`)) {
+        options.view.message(`输出路径必须以 .${extension} 结尾。`);
+        return;
+      }
       submitting = true; busy();
       try {
         let overwriteExisting = false;
         const exists = await options.backend.outputExists(draft.outputPath);
         if (!current(ticket)) return;
-        if (!unchanged()) { options.view.message("输出或烧录选项已变化，请重新确认后开始。"); return; }
+        if (!unchanged()) { options.view.message("输出或导出选项已变化，请重新确认后开始。"); return; }
         if (!guard()) return;
         if (exists) {
-          overwriteExisting = await options.confirm({ title: "覆盖已有视频？", message: "目标视频已经存在。只有新视频烧录成功后，Atogaki 才会安全替换它。", confirmLabel: "烧录并替换", danger: true });
+          overwriteExisting = await options.confirm({ title: "覆盖已有视频？", message: "目标视频已经存在。只有新视频导出成功后，Atogaki 才会安全替换它。", confirmLabel: "导出并替换", danger: true });
           if (!current(ticket)) return;
           if (!overwriteExisting) { options.view.message("已取消，现有视频不会被修改。"); return; }
         }
         if (!current(ticket) || !guard()) return;
-        if (!unchanged()) { options.view.message("输出或烧录选项已变化，请重新确认后开始。"); return; }
-        options.view.message("正在准备字幕并创建烧录任务…");
+        if (!unchanged()) { options.view.message("输出或导出选项已变化，请重新确认后开始。"); return; }
+        options.view.message("正在准备字幕并创建导出任务…");
         await options.backend.submit({ sourceJobId: visit!.jobId, outputPath: draft.outputPath, subtitleTrack: draft.track, quality: draft.quality, overwriteExisting });
         if (!current(ticket)) return;
-        options.view.message("烧录任务已提交，可关闭窗口继续校对。"); await refresh();
-      } catch (error) { if (current(ticket)) options.view.message(unchanged() ? `提交失败：${String(error)}` : "输出或烧录选项已变化，请重新确认后开始。"); }
+        options.view.message("导出任务已提交，可关闭窗口继续校对。"); await refresh();
+      } catch (error) { if (current(ticket)) options.view.message(unchanged() ? `提交失败：${String(error)}` : "输出或导出选项已变化，请重新确认后开始。"); }
       finally { if (current(ticket)) { submitting = false; busy(); } }
     },
     async cancel(renderId: string) {
@@ -115,7 +127,7 @@ export function createVideoRenderSession(options: Options) {
       if (!current(ticket) || submitting || cancelling.size || !renders.some(r => r.id === renderId && (r.status === "queued" || r.status === "running"))) return;
       cancelling.add(renderId);
       try {
-        const accepted = await options.confirm({ title: "取消视频烧录？", message: "FFmpeg 会停止，临时输出会被清理；已完成的源任务和字幕不会改变。", confirmLabel: "取消烧录", danger: true });
+        const accepted = await options.confirm({ title: "取消视频导出？", message: "FFmpeg 会停止，临时输出会被清理；已完成的源任务和字幕不会改变。", confirmLabel: "取消导出", danger: true });
         if (!accepted || !current(ticket) || !renders.some(r => r.id === renderId && (r.status === "queued" || r.status === "running"))) return;
         await options.backend.cancel(renderId);
         if (current(ticket)) { options.view.message("已请求取消，正在停止 FFmpeg 并清理临时文件。"); await refresh(); }

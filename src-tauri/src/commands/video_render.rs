@@ -99,13 +99,18 @@ pub(crate) async fn pick_video_output_file(
     initial_directory: Option<String>,
     suggested_name: String,
 ) -> Result<Option<VideoOutputSelection>, String> {
+    let (format_label, extension) = match suggested_name.rsplit_once('.').map(|(_, ext)| ext) {
+        Some("mkv") => ("MKV 软字幕视频", "mkv"),
+        Some("mov") => ("ProRes MOV 视频", "mov"),
+        _ => ("MP4 视频", "mp4"),
+    };
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let mut picker = app
         .dialog()
         .file()
         .set_parent(&window)
         .set_title("导出带字幕视频")
-        .add_filter("MP4 视频", &["mp4"])
+        .add_filter(format_label, &[extension])
         .set_file_name(suggested_name);
     let initial_directory = initial_directory
         .map(PathBuf::from)

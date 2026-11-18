@@ -222,5 +222,6 @@ fn render_options(args: RenderArgsCommon) -> RenderOptions {
         video_preset: args.video_preset,
         target_video_bitrate_bps: None,
         soft_subtitles: args.soft_subtitles,
+        profile: atogaki_subtitle::domain::render::RenderProfile::Bitrate,
     }
 }

@@ -17,7 +17,7 @@ export function taskToolsTemplate(fileManagerLabel: string): string {
           <strong>任务进度</strong><span>识别进度与只读预览</span>
         </button>
         <button id="workspace-tab-export" class="workspace-section-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-export-panel" data-workspace-section="export">
-          <strong>导出成品</strong><span>字幕文件与烧录视频</span>
+          <strong>导出成品</strong><span>字幕文件与带字幕视频</span>
         </button>
       </nav>
       <p id="workspace-action-message" class="workspace-action-message" role="status"></p>
@@ -120,7 +120,7 @@ export function taskToolsTemplate(fileManagerLabel: string): string {
             <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 ${fileManagerLabel} 中显示</button></div>
           </article>
           <article class="export-card">
-            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>需要将字幕固定到画面时使用；重新编码可能损失画质。烧录使用提交时已保存的字幕和样式，提交后可继续编辑。</p></div>
+            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>可封装软字幕并保留主视频画质，也可烧录为分享成片或后期中间文件。</p></div>
             <div class="export-card-actions"><button id="render-video" type="button">导出带字幕视频…</button></div>
           </article>
         </div>

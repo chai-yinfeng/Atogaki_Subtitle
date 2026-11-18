@@ -15,7 +15,10 @@ use uuid::Uuid;
 
 use crate::{
     application::LocalWorkspaceService,
-    domain::{render::RenderOptions, subtitle::SubtitleTrack},
+    domain::{
+        render::{RenderOptions, RenderProfile},
+        subtitle::SubtitleTrack,
+    },
     infrastructure::{
         local_db::{LocalDatabase, LocalRenderJobRecord, NewLocalRenderJob},
         media::{self, RenderCancelled, RenderEncoder},
@@ -30,6 +33,9 @@ pub enum LocalRenderQuality {
     Compact,
     Balanced,
     High,
+    Quality,
+    SoftMatroska,
+    ProRes,
 }
 
 impl LocalRenderQuality {
@@ -38,14 +44,36 @@ impl LocalRenderQuality {
             Self::Compact => "compact",
             Self::Balanced => "balanced",
             Self::High => "high",
+            Self::Quality => "quality",
+            Self::SoftMatroska => "soft_matroska",
+            Self::ProRes => "prores",
         }
     }
 
-    fn apply_to(self, balanced_bitrate: u64) -> u64 {
-        match self {
+    fn target_bitrate(self, balanced_bitrate: u64) -> Option<u64> {
+        let bitrate = match self {
             Self::Compact => balanced_bitrate.saturating_mul(5) / 8,
             Self::Balanced => balanced_bitrate,
             Self::High => balanced_bitrate.saturating_mul(3) / 2,
+            Self::Quality | Self::SoftMatroska | Self::ProRes => return None,
+        };
+        Some(bitrate.max(250_000))
+    }
+
+    fn profile(self) -> RenderProfile {
+        match self {
+            Self::Compact | Self::Balanced | Self::High => RenderProfile::Bitrate,
+            Self::Quality => RenderProfile::Quality,
+            Self::SoftMatroska => RenderProfile::SoftMatroska,
+            Self::ProRes => RenderProfile::ProRes,
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::SoftMatroska => "mkv",
+            Self::ProRes => "mov",
+            _ => "mp4",
         }
     }
 }
@@ -56,9 +84,10 @@ pub struct LocalRenderEstimate {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: u64,
-    pub target_video_bitrate_bps: u64,
+    pub target_video_bitrate_bps: Option<u64>,
+    pub hdr_video: bool,
     pub estimated_audio_bitrate_bps: u64,
-    pub estimated_size_bytes: u64,
+    pub estimated_size_bytes: Option<u64>,
     pub bitrate_source: String,
 }
 
@@ -83,7 +112,8 @@ pub struct LocalRenderService {
 struct QueuedRender {
     record: LocalRenderJobRecord,
     duration_ms: u64,
-    target_video_bitrate_bps: u64,
+    target_video_bitrate_bps: Option<u64>,
+    profile: RenderProfile,
     overwrite_existing: bool,
     cancelled: Arc<AtomicBool>,
 }
@@ -135,6 +165,9 @@ impl LocalRenderService {
             LocalRenderQuality::Compact,
             LocalRenderQuality::Balanced,
             LocalRenderQuality::High,
+            LocalRenderQuality::Quality,
+            LocalRenderQuality::SoftMatroska,
+            LocalRenderQuality::ProRes,
         ]
         .into_iter()
         .map(|quality| render_estimate(probe, quality))
@@ -142,7 +175,11 @@ impl LocalRenderService {
     }
 
     pub async fn submit(&self, request: LocalRenderRequest) -> Result<LocalRenderJobRecord> {
-        validate_output_path(&request.output_path, request.overwrite_existing)?;
+        validate_output_path(
+            &request.output_path,
+            request.quality.extension(),
+            request.overwrite_existing,
+        )?;
         let workspace = self.workspace.get_job(&request.source_job_id).await?;
         if workspace.job.status != "done" {
             bail!(
@@ -166,17 +203,22 @@ impl LocalRenderService {
         }
 
         let capabilities = self.capabilities().await?;
-        if !capabilities.ready_for_hard_subtitles {
-            bail!(
-                "configured ffmpeg cannot burn subtitles: libass={}, hardware H.264={}, MPEG-4={}",
-                capabilities.ass_filter,
-                capabilities.videotoolbox_encoder,
-                capabilities.mpeg4_encoder
-            );
+        let profile = request.quality.profile();
+        let supported = match profile {
+            RenderProfile::Bitrate => capabilities.ready_for_hard_subtitles,
+            RenderProfile::Quality => capabilities.ready_for_quality_render,
+            RenderProfile::SoftMatroska => capabilities.ready_for_soft_matroska,
+            RenderProfile::ProRes => capabilities.ready_for_prores,
+        };
+        if !supported {
+            bail!("当前系统或内置 FFmpeg 不支持所选视频导出格式。");
         }
         let probe = media::probe_media(&self.ffmpeg, &input_path).await?;
         if !probe.has_video {
             bail!("the selected task contains audio only; video subtitle rendering is unavailable");
+        }
+        if probe.hdr_video && matches!(profile, RenderProfile::Quality | RenderProfile::ProRes) {
+            bail!("该烧录模式仅支持 SDR 片源。HDR 视频可导出独立字幕或 MKV 软字幕。");
         }
         let estimate = render_estimate(probe, request.quality);
 
@@ -234,6 +276,7 @@ impl LocalRenderService {
                 record: record.clone(),
                 duration_ms: probe.duration_ms,
                 target_video_bitrate_bps: estimate.target_video_bitrate_bps,
+                profile,
                 overwrite_existing: request.overwrite_existing,
                 cancelled,
             })
@@ -316,8 +359,9 @@ async fn run_render_worker(
         let options = RenderOptions {
             video_crf: 20,
             video_preset: "medium".to_string(),
-            target_video_bitrate_bps: Some(render.target_video_bitrate_bps),
+            target_video_bitrate_bps: render.target_video_bitrate_bps,
             soft_subtitles: false,
+            profile: render.profile,
         };
         let result = media::render_subtitles_with_progress(
             &ffmpeg,
@@ -334,6 +378,10 @@ async fn run_render_worker(
         let _ = progress_task.await;
 
         match result {
+            Ok(_) if render.cancelled.load(Ordering::Relaxed) => {
+                let _ = fs::remove_file(&temporary_path);
+                let _ = database.cancel_render(&render_id).await;
+            }
             Ok(outcome) => {
                 if let Err(error) = install_rendered_output(
                     &temporary_path,
@@ -348,6 +396,7 @@ async fn run_render_worker(
                         RenderEncoder::VideoToolbox => "videotoolbox",
                         RenderEncoder::Mpeg4 => "mpeg4",
                         RenderEncoder::SubtitleMux => "subtitle_mux",
+                        RenderEncoder::ProRes => "prores",
                     };
                     let _ = database
                         .finish_render(
@@ -392,22 +441,25 @@ fn render_estimate(probe: media::MediaProbe, quality: LocalRenderQuality) -> Loc
             (baseline, "resolution_fallback")
         }
     };
-    let target_video_bitrate_bps = quality.apply_to(balanced_bitrate).max(250_000);
+    let target_video_bitrate_bps = quality.target_bitrate(balanced_bitrate);
     let estimated_audio_bitrate_bps = probe
         .audio_bitrate_bps
         .unwrap_or(AUDIO_FALLBACK_BITRATE_BPS);
-    let estimated_size_bytes = target_video_bitrate_bps
-        .saturating_add(estimated_audio_bitrate_bps)
-        .saturating_mul(probe.duration_ms)
-        .saturating_div(8_000)
-        .saturating_mul(102)
-        .saturating_div(100);
+    let estimated_size_bytes = target_video_bitrate_bps.map(|bitrate| {
+        bitrate
+            .saturating_add(estimated_audio_bitrate_bps)
+            .saturating_mul(probe.duration_ms)
+            .saturating_div(8_000)
+            .saturating_mul(102)
+            .saturating_div(100)
+    });
     LocalRenderEstimate {
         quality: quality.key().to_string(),
         width: probe.width,
         height: probe.height,
         duration_ms: probe.duration_ms,
         target_video_bitrate_bps,
+        hdr_video: probe.hdr_video,
         estimated_audio_bitrate_bps,
         estimated_size_bytes,
         bitrate_source: bitrate_source.to_string(),
@@ -422,9 +474,13 @@ fn subtitle_track_key(track: SubtitleTrack) -> &'static str {
     }
 }
 
-fn validate_output_path(output: &Path, overwrite_existing: bool) -> Result<()> {
-    if output.extension().and_then(|extension| extension.to_str()) != Some("mp4") {
-        bail!("video render output must use the .mp4 extension");
+fn validate_output_path(output: &Path, extension: &str, overwrite_existing: bool) -> Result<()> {
+    if !output
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case(extension))
+    {
+        bail!("输出路径必须以 .{extension} 结尾。");
     }
     let parent = output
         .parent()
@@ -455,7 +511,11 @@ fn temporary_output_path(output: &Path, render_id: &str) -> PathBuf {
         .file_stem()
         .and_then(|name| name.to_str())
         .unwrap_or("Atogaki");
-    output.with_file_name(format!(".{file_name}.{render_id}.partial.mp4"))
+    let extension = output
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mp4");
+    output.with_file_name(format!(".{file_name}.{render_id}.partial.{extension}"))
 }
 
 fn install_rendered_output(
@@ -467,18 +527,33 @@ fn install_rendered_output(
     if !temporary.is_file() {
         bail!("render completed without producing {}", temporary.display());
     }
-    if !output.exists() {
-        return fs::rename(temporary, output)
-            .with_context(|| format!("failed to move completed render to {}", output.display()));
-    }
+    let existing = match output.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return fs::rename(temporary, output).with_context(|| {
+                format!("failed to move completed render to {}", output.display())
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
     if !overwrite_existing {
         bail!(
             "video render output appeared while rendering: {}",
             output.display()
         );
     }
+    if !existing.is_file() {
+        bail!(
+            "refusing to replace a non-file output: {}",
+            output.display()
+        );
+    }
 
-    let backup = output.with_file_name(format!(".atogaki-{render_id}.previous.mp4"));
+    let extension = output
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mp4");
+    let backup = output.with_file_name(format!(".atogaki-{render_id}.previous.{extension}"));
     let _ = fs::remove_file(&backup);
     fs::rename(output, &backup)
         .with_context(|| format!("failed to protect existing output {}", output.display()))?;
@@ -521,6 +596,7 @@ mod tests {
         let probe = MediaProbe {
             duration_ms: 60_000,
             has_video: true,
+            hdr_video: false,
             video_bitrate_bps: Some(4_000_000),
             width: Some(1920),
             height: Some(1080),
@@ -531,10 +607,10 @@ mod tests {
         let balanced = render_estimate(probe, LocalRenderQuality::Balanced);
         let high = render_estimate(probe, LocalRenderQuality::High);
 
-        assert_eq!(compact.target_video_bitrate_bps, 3_000_000);
-        assert_eq!(balanced.target_video_bitrate_bps, 4_800_000);
-        assert_eq!(high.target_video_bitrate_bps, 7_200_000);
-        assert_eq!(balanced.estimated_size_bytes, 37_699_200);
+        assert_eq!(compact.target_video_bitrate_bps, Some(3_000_000));
+        assert_eq!(balanced.target_video_bitrate_bps, Some(4_800_000));
+        assert_eq!(high.target_video_bitrate_bps, Some(7_200_000));
+        assert_eq!(balanced.estimated_size_bytes, Some(37_699_200));
         assert_eq!(balanced.bitrate_source, "source_bitrate");
         assert_eq!((balanced.width, balanced.height), (Some(1920), Some(1080)));
     }
@@ -551,7 +627,7 @@ mod tests {
         fs::write(&output, b"old").unwrap();
         fs::write(&temporary, b"new").unwrap();
 
-        validate_output_path(&output, true).unwrap();
+        validate_output_path(&output, "mp4", true).unwrap();
         install_rendered_output(&temporary, &output, "render-test", true).unwrap();
 
         assert_eq!(fs::read(&output).unwrap(), b"new");
@@ -578,7 +654,13 @@ mod tests {
                 "-f",
                 "lavfi",
                 "-i",
-                "color=c=navy:s=640x360:d=1",
+                "testsrc2=s=640x360:r=24:d=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1",
+                "-c:a",
+                "aac",
                 "-c:v",
                 "mpeg4",
                 "-pix_fmt",
@@ -703,6 +785,127 @@ mod tests {
             String::from_utf8_lossy(&decoded.stderr)
         );
 
+        let capabilities = service.capabilities().await.unwrap();
+        assert!(capabilities.ready_for_soft_matroska && capabilities.ready_for_prores);
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            assert!(capabilities.ready_for_quality_render);
+        }
+        for (profile, expected_encoder, supported) in [
+            (
+                LocalRenderQuality::SoftMatroska,
+                "subtitle_mux",
+                capabilities.ready_for_soft_matroska,
+            ),
+            (
+                LocalRenderQuality::Quality,
+                "videotoolbox",
+                capabilities.ready_for_quality_render,
+            ),
+            (
+                LocalRenderQuality::ProRes,
+                "prores",
+                capabilities.ready_for_prores,
+            ),
+        ] {
+            if !supported {
+                continue;
+            }
+            let path = root.join(format!("{}.{}", profile.key(), profile.extension()));
+            let queued = service
+                .submit(LocalRenderRequest {
+                    source_job_id: manifest.job_id.clone(),
+                    output_path: path.clone(),
+                    subtitle_track: SubtitleTrack::Bilingual,
+                    quality: profile,
+                    overwrite_existing: false,
+                })
+                .await
+                .unwrap();
+            let rendered = tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    let record = database.get_render_job(&queued.id).await.unwrap().unwrap();
+                    if record.status != "queued" && record.status != "running" {
+                        break record;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(rendered.status, "done", "{:?}", rendered.error_message);
+            assert_eq!(rendered.encoder.as_deref(), Some(expected_encoder));
+            let probe = |file: &std::path::Path, args: &[&str]| {
+                let ffprobe = crate::infrastructure::media::ffprobe_path(&desktop_ffmpeg_path());
+                let result = Command::new(ffprobe)
+                    .args(["-v", "error"])
+                    .args(args)
+                    .arg(file)
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                String::from_utf8(result.stdout).unwrap()
+            };
+            let streams = probe(
+                &path,
+                &[
+                    "-show_entries",
+                    "stream=codec_name,profile,pix_fmt",
+                    "-of",
+                    "compact",
+                ],
+            );
+            match profile {
+                LocalRenderQuality::SoftMatroska => {
+                    assert!(streams.contains("codec_name=ass"), "{streams}");
+                    for stream in ["v:0", "a:0"] {
+                        let args = [
+                            "-select_streams",
+                            stream,
+                            "-show_packets",
+                            "-show_data_hash",
+                            "sha256",
+                            "-show_entries",
+                            "packet=data_hash",
+                            "-of",
+                            "csv=p=0",
+                        ];
+                        let copied = probe(&path, &args);
+                        assert!(!copied.trim().is_empty());
+                        // AAC priming metadata may differ between containers; compare encoded packets.
+                        assert_eq!(
+                            copied
+                                .lines()
+                                .filter_map(|line| line
+                                    .split(',')
+                                    .find(|field| field.starts_with("SHA256:")))
+                                .collect::<Vec<_>>(),
+                            probe(&input, &args)
+                                .lines()
+                                .filter_map(|line| line
+                                    .split(',')
+                                    .find(|field| field.starts_with("SHA256:")))
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                }
+                LocalRenderQuality::Quality => {
+                    assert!(streams.contains("codec_name=h264"), "{streams}")
+                }
+                LocalRenderQuality::ProRes => {
+                    assert!(
+                        streams.contains("codec_name=prores|profile=HQ|pix_fmt=yuv422p10le"),
+                        "{streams}"
+                    );
+                    assert!(streams.contains("codec_name=pcm_s24le"), "{streams}");
+                }
+                _ => unreachable!(),
+            }
+        }
+
         // Enter the worker with explicit queue records so invalid frozen ASS
         // and queued cancellation are deterministic, without racing submit.
         for (suffix, cancelled, expected_status) in [
@@ -737,7 +940,8 @@ mod tests {
                 .send(super::QueuedRender {
                     record,
                     duration_ms: 1000,
-                    target_video_bitrate_bps: 1_000_000,
+                    target_video_bitrate_bps: Some(1_000_000),
+                    profile: crate::domain::render::RenderProfile::Bitrate,
                     overwrite_existing: true,
                     cancelled: flag,
                 })
