@@ -8,6 +8,7 @@ type Source = {
   resumeMs: number;
   playbackRate: number;
   deferAudioLoad?: boolean;
+  configureVideo?(video: HTMLVideoElement, signal: AbortSignal): void;
 };
 type Options = {
   currentJob(jobId: string): boolean;
@@ -148,6 +149,7 @@ export function createMediaPlayer(options: Options, environment: Environment = {
       element.defaultPlaybackRate = rate; element.playbackRate = rate; element.volume = volume; element.muted = muted;
       source.host.replaceChildren(element);
       element.src = /^http:\/\/127\.0\.0\.1:\d+\/media\/[a-f0-9-]+$/.test(path) ? path : options.resolve(path);
+      if (!audio) source.configureVideo?.(element as HTMLVideoElement, abort.signal);
       options.changed();
       const display = source.inputPath ?? path;
       source.message.textContent = !fallback

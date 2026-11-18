@@ -82,6 +82,7 @@ import { createProcessingBackend } from "./editor-processing-backend";
 import type { AsrQualitySignal } from "./editor-processing-types";
 import { createEditorWaveform } from "./editor-waveform";
 import { createMediaPlayer } from "./media-player";
+import { attachListeningVideoCaptions } from "./listening-video-captions";
 import type { TimingGesture } from "./timeline-timing";
 import { mountTimelineGestures } from "./editor-timeline-gestures";
 import { mountEditorTimeline } from "./editor-timeline-view";
@@ -440,7 +441,7 @@ app.innerHTML = `
             <label>速度<select id="listening-playback-rate"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
           </div>
           <details class="listening-playback-info"><summary>播放信息与快捷键</summary>
-          <p class="shortcut-help">快捷键：空格/K 播放暂停 · ←/J 与 →/L 跳 5 秒 · [ ] 切换字幕 · , . 调整速度 · O 开关悬浮字幕</p>
+          <p class="shortcut-help">快捷键：空格/K 播放暂停 · ←/J 与 →/L 跳 5 秒 · [ ] 切换字幕 · , . 调整速度 · O 开关悬浮字幕。视频全屏时默认显示双语，可从播放器字幕菜单切换。</p>
           <p id="listening-media-message" class="media-message">从节目列表选择一个已翻译任务。</p>
           </details>
           </div>
@@ -3517,8 +3518,13 @@ function mountMedia(
   resumeMs = 0,
 ): void {
   if (!host || !message || !activeDetail) return;
-  mediaPlayer.mount({ jobId: activeDetail.job.job_id, inputPath: activeDetail.job.input_path,
-    primaryPath, fallbackPath, host, message, resumeMs, deferAudioLoad: currentArea === "karaoke", playbackRate: Number(activePlaybackRateSelect()?.value || "1") });
+  const { job, segments } = activeDetail;
+  mediaPlayer.mount({ jobId: job.job_id, inputPath: job.input_path,
+    primaryPath, fallbackPath, host, message, resumeMs, deferAudioLoad: currentArea === "karaoke", playbackRate: Number(activePlaybackRateSelect()?.value || "1"),
+    configureVideo: host === listeningMediaHost
+      ? (video, signal) => attachListeningVideoCaptions(video, segments, job.target_language, signal)
+      : undefined,
+  });
 }
 
 function cloneSubtitleSegments(segments: SubtitleSegment[]): SubtitleSegment[] {
