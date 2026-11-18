@@ -30,6 +30,7 @@ _更新：2026-11-17。_
 | 恢复与阶段执行 | [0045](decisions/0045-resumable-offline-workflows.md)、[0052](decisions/0052-staged-concurrency-and-early-translation.md) |
 | 统一编辑器／跟随 | [0055](decisions/0055-unified-subtitle-editor.md)–[0058](decisions/0058-compact-editor-and-playback-follow.md)；布局与跟随以后继 0058 为准 |
 | Rust 模块／接缝／结构撤销 | [0059](decisions/0059-desktop-command-and-repository-modules.md)、[0060](decisions/0060-overlap-alignment-before-acoustic-selection.md)、[0061](decisions/0061-transactional-structure-undo-metadata.md) |
+| 收听全屏与视频导出 | [0088](decisions/0088-listening-fullscreen-and-video-export-profiles.md)、[0042](decisions/0042-explicit-video-export-quality.md) |
 | 媒体传输／按需加载 | [0054](decisions/0054-request-batching-and-loopback-media.md)、[0062](decisions/0062-editor-audio-demand-loading.md) |
 | 学习来源与词典 | [0032](decisions/0032-learning-reader-and-source-backed-collections.md)–[0036](decisions/0036-ecdict-pinned-base-data.md) |
 | 研究晋升 | [0044](decisions/0044-stable-desktop-scope-and-cli-experiments.md)；在线分支的后继接入与限制见[系统回顾](system-review-2026-11-11.md#审阅范围与分支事实) |
@@ -39,6 +40,8 @@ _更新：2026-11-17。_
 - 主窗口与默认视觉以[0083 Neutral 重设计](decisions/0083-neutral-shell-and-embedded-online.md)为准；在线显示与界面配置：[0081 整组阅读退场](decisions/0081-online-caption-page-retirement.md)、[0082 紧凑设置与主题](decisions/0082-compact-purpose-based-desktop-settings.md)。
 
 ## 在线实现与研究入口
+
+- [2026-11-18 在线同传、日语学习与离线校对](research/2026-11-18-subtitle-and-learning-options.md)：未定型候选、公开价格、国内开通条件、本地语言解析和开源校对流程。
 
 - [当前翻译正确性基线](evaluation.md)、[唯一素材名单](../experiments/online/datasets/japanese-radio/confirmed-text-baseline.json)：只用用户校正原文及明确前文，参考后文为空；五段既有裁片，未校正模型输出及旧角色不参与当前结果。
 - [在线处理计划](online-asr-plan.md)：当前 F／H／G／R、源时钟分组与阶段调度；早期提案按后继记录阅读。

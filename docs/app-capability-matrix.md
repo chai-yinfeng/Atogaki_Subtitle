@@ -21,11 +21,11 @@ _冻结日期：2026-09-18_
 3. Gemini selected range → Hy-MT2：云端生成候选原文，经用户采用后在本地翻译。
 4. Gemini selected range → 云端 translation：云端 ASR 与云端翻译分别授权；选择其中一个不会自动授权另一个。
 
-桌面 App 同时稳定保留任务队列、run／质量信号审查、字幕与时间轴编辑、translation stale 保护、学习资料、SRT／ASS 导出和视频烧录。
+桌面 App 同时稳定保留任务队列、run／质量信号审查、字幕与时间轴编辑、translation stale 保护、学习资料、SRT／ASS 导出和带字幕视频。视频导出提供 MKV 软字幕、Apple Silicon 画质优先 MP4、ProRes 422 HQ MOV 和原有码率烧录档，详见[0088](decisions/0088-listening-fullscreen-and-video-export-profiles.md)。
 
 字幕校对使用同一紧凑工作面：左侧视频，右侧波形时间轴与上下排列的原译文编辑，下方整宽虚拟列表；视频／波形独立折叠，面板比例可调。默认跟随播放，手动选择或聚焦编辑后锁定，恢复前保护草稿与时间输入。完整识别任务直接进入字幕编辑，处理中任务保留只读进度；翻译、复核与导出按需打开。当前交互以 [0058](decisions/0058-compact-editor-and-playback-follow.md) 为准，生命周期见 [0057](decisions/0057-editor-view-lifecycles.md)，模块整理不扩大平台或制作能力范围。
 
-收听页提供节目列表、播放器与全文阅读，使用上一句／下一句、±5 秒、播放暂停和倍速；循环、A/B 与句首／句尾试听仅保留在编辑工作流。学习区的 Anki 导出为当前语言单词本的 TSV 文本资料，包含收藏文本、填写的词义、来源例句／译文、节目名、时间码、语言与类型，不嵌入音视频。
+收听页提供节目列表、播放器与全文阅读，视频全屏默认显示双语轨道，使用上一句／下一句、±5 秒、播放暂停和倍速；循环、A/B 与句首／句尾试听仅保留在编辑工作流。学习区的 Anki 导出为当前语言单词本的 TSV 文本资料，包含收藏文本、填写的词义、来源例句／译文、节目名、时间码、语言与类型，不嵌入音视频。
 
 以下是v0.1.3已发行桌面的范围边界；2026-11-02批准推进的在线功能见下方新增计划，不将计划冒称已发行。原边界为：Gemini 全片新任务、Gemini Live、Muse Voice Transcribe、实时音频采集、E2E live translate、新 ASR／MT 模型试验、可变 prefix-commit policy，以及只为跑 benchmark 暴露的参数。它们先通过 CLI/evaluation harness 产出可复现 artifact 和报告。
 
