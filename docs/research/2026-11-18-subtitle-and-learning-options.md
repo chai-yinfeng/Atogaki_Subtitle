@@ -21,7 +21,7 @@ Gummy 旧版价目约 ¥0.54／小时／单项，转写与翻译都开约 ¥1.08
 
 ### 凭据与首次连通测试
 
-桌面现有 Gemini 文本翻译与局部音频转录共用 macOS 钥匙串项，由应用设置保存。仓库只保存 provider 实现与非秘密设置约定。2026-11-18 本机核对存在配置标记和对应钥匙串项，未读取或输出 Key，未做联网鉴权。现有文本和局部转录入口不会打开 Gemini Live。端到端测试要另开 Live WebSocket，用合成日语验证该 Key 对应项目的模型权限、地域、配额和转写回包。百炼测试需正常开通的北京区 API Key 与同地域端点；当前 App 无 DashScope 配置入口，可用官方示例或隔离测试脚本。两个云端方案都应先用短合成音频。 [共享凭据](../decisions/0046-gemini-text-translation-and-shared-credential.md) · [Gemini Live 指南](https://aistudio.google.com/docs/live-api/live-translate) · [百炼 API Key](https://help.aliyun.com/zh/model-studio/get-api-key)
+桌面现有 Gemini 文本翻译与局部音频转录共用 macOS 钥匙串项，由应用设置保存。仓库只保存 provider 实现与非秘密设置约定。2026-11-18 本机核对存在配置标记和对应钥匙串项，未读取或输出 Key，未做联网鉴权。现有文本和局部转录入口不会打开 Gemini Live。端到端测试要另开 Live WebSocket，用合成日语验证该 Key 对应项目的模型权限、地域、配额和转写回包。Google 当前会拒绝未限制的标准 Key，若旧凭据握手失败应一并核对类型与限制。百炼测试需正常开通的北京区 API Key、对应业务空间 ID（Workspace ID）和同地域端点；当前 App 无 DashScope 配置入口，可用官方示例或隔离测试脚本。两个云端方案都应先用短合成音频。 [共享凭据](../decisions/0046-gemini-text-translation-and-shared-credential.md) · [Gemini Live 指南](https://aistudio.google.com/docs/live-api/live-translate) · [Google Key 类型与限制](https://aistudio.google.com/docs/api-key) · [百炼 WebSocket 与业务空间](https://help.aliyun.com/zh/model-studio/qwen3-5-livetranslate-flash-realtime)
 
 
 ## 日语学习
