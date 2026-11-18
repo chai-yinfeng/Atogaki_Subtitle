@@ -4,6 +4,8 @@ _核对：2026-11-15。生产实现已整合 main；本目录不是另一套待�
 
 当前测试只采用[用户校正文本名单](datasets/japanese-radio/confirmed-text-baseline.json)及绑定裁片，条件见[评测合同](../../docs/evaluation.md)。校正文本 MT 阶段固定 G/H、后文为空，已收用户反馈；后继用户已授权在同五段裁片做 native／Python 与 DFlash／DSpark 实验，分别保存结果，不把新 ASR 输出反写人工原文。下表的 ASR／离线／参考台账／历史回放仍可解释旧结果，但不参与这轮质量统计；`screening.json` 的候选角色已标为历史，不能因音频已准备就自动加入。
 
+2026-11-18 盘点：冷置的研究入口包括 Whisper Streaming／SimulStreaming、独立 C++ 对照、Qwen／Whisper 候选筛选、Gemini／OCR 参考、DSpark 和源时钟探针。它们不进桌面包，保留作为历史研究工具；旧试听池与回归生成物已退出活跃输入。现行 worker 回放、候选 DFlash 比较、强制对齐依赖及共享生产模块的测试仍用于回归，不按目录整体删除。详见[清理与保留边界](../../docs/local-artifact-retention.md#2026-11-18评测数据收拢)。
+
 当前合同见[在线计划](../../docs/online-asr-plan.md)、[0076](../../docs/decisions/0076-source-driven-retranslation-and-stage-admission.md)和[0079](../../docs/decisions/0079-qwen-17b-8bit-online-baseline.md)。桌面与回放共用 `src/infrastructure/online_worker/`，`run_two_pass.py` 是薄入口；`retranslation.py` 是仍被研究工具和测试使用的导入桥，不是第二份生产实现。`--pcm-stdin` 不默认保存音频／事件，文件回放输出需使用新的私有目录。
 
 2026-11-16 按用户要求接入本地 App 试用：`qwen_speculative.py`／`qwen_prefix_cache.py` 已改为共享 worker 模块的导入桥，旧实验不再持有另一份解码源码；相同 patch／测试目标指向共享模块。正式 worker 显式传 `--speculative-model /path/to/managed/dflash` 才采用单路日语 DFlash＋音频缓存，并使用现有 Retranslation 预译；默认 CLI 保留原双模型，实验的强制文字前缀选项不进入桌面配置。试用范围见[0080](../../docs/decisions/0080-local-dflash-app-trial.md)。
