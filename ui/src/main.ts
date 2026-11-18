@@ -100,6 +100,7 @@ import "./online-view.css";
 import {mountOnlineView} from "./online-view";
 import {mountSheet, mountNavigationToggle} from "./app-panels";
 import {usageGuide} from "./usage-guide";
+import {mountDesktopUpdate} from "./desktop-update";
 import {mountTaskOrdering} from "./task-ordering";
 import {mountCustomModels,type RegisteredModel} from "./custom-models";
 import {mountOfflineModels,type OfflineModelChoice} from "./offline-models";
@@ -122,7 +123,7 @@ import { applyTheme, readTheme, candidateLabel } from "./themes";
 applyTheme(readTheme());
 import { matchesQuery, highlightSaved } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
-let playbackLoop: {startMs:number;endMs:number;repeat:boolean} | null = null;
+let playbackLoop: {startMs:number;endMs:number;repeat:boolean;manual?:boolean} | null = null;
 let loopStartMs: number | null = null;
 let taskTitleQuery = "";
 let learningQuery = "";
@@ -374,8 +375,7 @@ app.innerHTML = `
     <div class="app-content">
     <div class="app-topbar"><button id="toggle-navigation" type="button" class="quiet" aria-controls="app-navigation" aria-expanded="true">收起导航栏</button></div>
     <div id="home-view" class="app-page">
-      <div class="page-heading"><div><h2>工作台</h2><p>导入媒体，创建双语字幕。</p></div><button id="open-recent-jobs" type="button" class="secondary" aria-haspopup="dialog" aria-controls="recent-jobs-drawer">最近任务</button></div>
-      <p class="data-path hidden" id="data-path"></p>
+      <div class="page-heading"><div><h2>工作台</h2><p>导入媒体，创建双语字幕。</p></div><button id="open-recent-jobs" type="button" class="secondary" aria-haspopup="dialog" aria-controls="recent-jobs-drawer">任务列表</button></div>
       <section class="create-task" aria-labelledby="create-heading">
         <div class="section-heading"><h2 id="create-heading">新建转写任务</h2><span>本地执行</span></div>
         <form id="task-form">
@@ -405,7 +405,7 @@ app.innerHTML = `
       </section>
     </div>
     <dialog id="recent-jobs-drawer" class="task-sheet" aria-labelledby="jobs-heading">
-      <div class="sheet-heading"><h2 id="jobs-heading">最近任务</h2><button id="close-recent-jobs" type="button" class="secondary">关闭</button></div>
+      <div class="sheet-heading"><h2 id="jobs-heading">任务列表</h2><button id="close-recent-jobs" type="button" class="secondary">关闭</button></div>
       <span id="job-count" class="sheet-count"></span>
       <p id="job-management-message" class="job-management-message" role="status"></p>
       <div id="job-list" class="job-list" aria-live="polite"></div>
@@ -579,7 +579,8 @@ const taskDrawer=document.querySelector<HTMLDialogElement>("#recent-jobs-drawer"
 const taskSheet=mountSheet(taskDrawer,[document.getElementById("open-recent-jobs")!,document.getElementById("editor-open-tasks")!],document.getElementById("close-recent-jobs")!);
 const listeningDrawer=document.querySelector<HTMLDialogElement>("#listening-library-drawer")!;
 const listeningSheet=mountSheet(listeningDrawer,[document.getElementById("open-listening-library")!],document.getElementById("close-listening-library")!);
-const guideSheet=mountSheet(document.querySelector<HTMLDialogElement>("#usage-guide")!,[document.getElementById("open-usage-guide")!],document.getElementById("close-usage-guide")!);
+const guideDialog=document.querySelector<HTMLDialogElement>("#usage-guide")!;
+const guideSheet=mountSheet(guideDialog,[document.getElementById("open-usage-guide")!],document.getElementById("close-usage-guide")!);
 const navigationToggle=mountNavigationToggle(document.querySelector<HTMLElement>(".shell")!,document.getElementById("app-navigation")!,document.querySelector<HTMLButtonElement>("#toggle-navigation")!);
 const homeView = document.querySelector<HTMLDivElement>("#home-view");
 const listeningView = document.querySelector<HTMLElement>("#listening-view");
@@ -593,7 +594,7 @@ const openSubtitleEditorButton = workspaceView.querySelector<HTMLButtonElement>(
 const jobList = document.querySelector<HTMLDivElement>("#job-list");
 const jobCount = document.querySelector<HTMLSpanElement>("#job-count");
 const jobManagementMessage = document.querySelector<HTMLParagraphElement>("#job-management-message");
-const dataPath = document.querySelector<HTMLParagraphElement>("#data-path");
+const dataPath = document.querySelector<HTMLElement>("#data-path");
 const karaokeJobTitle = document.querySelector<HTMLHeadingElement>("#karaoke-job-title");
 const karaokeOpenWorkspaceButton = document.querySelector<HTMLButtonElement>("#karaoke-open-workspace");
 const karaokeMediaHost = document.querySelector<HTMLDivElement>("#karaoke-media-host");
@@ -996,6 +997,7 @@ const editorFollow = mountEditorFollow<SubtitleSegment>(editorRoot, {
   busy: () => workspaceActionBusy, jobId: () => activeDetail?.job.job_id ?? null,
   navigation: () => navigationRequestId, active: () => currentArea === "karaoke",
   flush: flushEditorStructureDrafts, time: formatPreciseTime, status: setSubtitleEditAction,
+  timelineFollowing: () => karaokeFollowPlayhead,
   resumed: () => {
     karaokeFollowPlayhead = true;
     syncTimelineFollowState();
@@ -1270,11 +1272,6 @@ const editorControls = mountEditorControls(editorRoot, {
     else if (action === "previous" || action === "next") { const id = editorSession.adjacent(visibleEditorCues(), action === "previous" ? -1 : 1); if (id && selectEditorCue(id)) editorCueList.reveal(id); }
     else if (action === "reveal-playing") { editorSession.listAutoScroll = true; editorCueList.reveal(editorSession.playbackCueId); syncEditorFollow(); }
     else if (action === "follow") void resumeEditorFollow();
-    else if (action === "follow-waveform") {
-      karaokeFollowPlayhead = !karaokeFollowPlayhead;
-      syncTimelineFollowState();
-      updateKaraokePosition(mediaPlayer.positionMs);
-    }
     else if (action === "translate") { const cue = karaokeDraftSegment(); if (cue && karaokeTimingMessage) void subtitleTranslation.single(cue); }
     else if (action === "glossary" && !workspaceGlossary?.value) { void showEditorTools("translation"); setWorkspaceAction("请选择要保存修正规则的词表，再返回编辑加入修正。"); }
     else if (action === "glossary") { const cue = karaokeDraftSegment(); if (cue && karaokeCurrentSource && karaokeTimingMessage) captureGlossaryCorrection(cue, karaokeCurrentSource, karaokeTimingMessage); }
@@ -1509,7 +1506,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
   overwriteSettingsField(settingsModelMirror, settings.modelMirrorUrl ?? "");
   providerFields?.load(settings);
   overwriteSettingsField(settingsApiKey, "");
-  if (modelsDirectory) modelsDirectory.textContent = `下载目录：${settings.modelsDirectory}`;
+  if (modelsDirectory) modelsDirectory.textContent = settings.modelsDirectory;
   if (modelReadiness) {
     const recognition = settings.whisperModelReady
       ? settings.vadModelReady ? "Whisper 与 VAD 已就绪" : "Whisper 已就绪 · VAD 可选"
@@ -1589,7 +1586,7 @@ const settingsLoad = createDesktopSettingsLoad({
   dictionariesAccepted: ({ catalog, downloads, credentials, directory }) => {
     if (dictionaryDownloadMessage?.textContent?.startsWith("无法读取词典配置：")) dictionaryDownloadMessage.textContent = "";
     availableDictionaries = catalog; dictionaryDownloads = downloads; dictionaryCredentials = credentials;
-    if (dictionaryDirectoryLabel) dictionaryDirectoryLabel.textContent = `目录：${directory}`;
+    if (dictionaryDirectoryLabel) dictionaryDirectoryLabel.textContent = directory;
     renderDictionaryCatalog(); renderDictionaryCredentials(); dictionaryDownloadSession?.observe();
   },
   onboard: () => { settingsView?.open(false); modelManagement?.observe(); dictionaryDownloadSession?.observe(); },
@@ -2329,6 +2326,8 @@ function assertPlaybackCanStop(): void {
   }
 }
 
+let listeningResume: { jobId: string; positionMs: number } | null = null;
+
 async function stopActivePlayback(): Promise<void> {
   assertPlaybackCanStop();
   if ([...subtitleDrafts.entries.values()].some(draft => draft.saved.job_id === activeDetail?.job.job_id && draft.composing)) throw new Error("请先完成输入法选字，再离开编辑器");
@@ -2360,7 +2359,10 @@ async function stopActivePlayback(): Promise<void> {
     playbackPositionSaveTimer = null;
   }
   await mediaPlayer.stop(async (media, positionMs) => {
-    if (area === "listening" && detail) await savePlaybackPosition(detail.job.job_id, media, positionMs);
+    if (area === "listening" && detail) {
+      listeningResume = { jobId: detail.job.job_id, positionMs };
+      await savePlaybackPosition(detail.job.job_id, media, positionMs);
+    }
     else if (area === "karaoke" && detail) karaokeResumeMs = Math.round(positionMs);
   });
   activeSegmentId = null;
@@ -2374,10 +2376,15 @@ const areaNavigation = createAreaNavigation<JobDetail>({
   area: () => currentArea,
   stop: stopActivePlayback,
   apply: area => {
+    // Clear the old cue while the shared player is detached.
     activeDetail = null;
     subtitleList?.replaceChildren();
     listeningSubtitleList?.replaceChildren();
     currentArea = area;
+    if (area === "listening") {
+      if (listeningCurrentSource) listeningCurrentSource.textContent = "原文字幕";
+      if (listeningCurrentTranslation) listeningCurrentTranslation.textContent = "简体中文翻译";
+    }
     if(taskDrawer.open)taskDrawer.close();
     if(listeningDrawer.open)listeningDrawer.close();
     onlineView.classList.toggle("hidden",area!=="online");
@@ -3173,6 +3180,7 @@ function paintKaraokeTimeline(): void {
     selectedCueId: editorSession.selectedCueId, playbackCueId: editorSession.playbackCueId,
     draggedCueId: drag ? all[drag.segmentIndex]?.id ?? null : null,
     gain: karaokeWaveformGain, currentMs: Math.round(mediaPlayer.positionMs),
+    loop: loopStartMs === null ? null : { aMs: loopStartMs, bMs: playbackLoop?.manual ? playbackLoop.endMs : null },
     emptyMessage: activeDetail ? "正在准备波形…" : "选择一个字幕任务",
   });
 }
@@ -3282,9 +3290,7 @@ function updateKaraokePosition(milliseconds: number): void {
   editorCueList.mark(editorSession.selectedCueId, editorSession.playbackCueId, editorSession.listAutoScroll);
   if (previousId !== editorSession.selectedCueId || previousPlayback !== editorSession.playbackCueId) syncEditorSelectionMessage();
   if (karaokeSegmentTime) {
-    const value = segment
-      ? `${formatPreciseTime(segment.start_ms)} → ${formatPreciseTime(segment.end_ms)} · #${segment.segment_index + 1}`
-      : "当前没有字幕";
+    const value = segment ? `#${segment.segment_index + 1}` : "当前没有字幕";
     if (karaokeSegmentTime.textContent !== value) karaokeSegmentTime.textContent = value;
   }
   if (!currentCueEditor.dirty && !currentCueEditor.matches(segment)) currentCueEditor.sync(segment);
@@ -3327,12 +3333,7 @@ function updateTimelinePosition(milliseconds: number): void {
 }
 
 function syncTimelineFollowState(): void {
-  const state = document.querySelector<HTMLButtonElement>("#editor-wave-follow-state");
-  if (state) {
-    state.textContent = karaokeFollowPlayhead ? "视窗跟随中" : "恢复视窗跟随";
-    state.setAttribute("aria-pressed", String(karaokeFollowPlayhead));
-    state.title = karaokeFollowPlayhead ? "暂停波形视窗跟随" : "只恢复波形视窗跟随，不切换当前编辑段";
-  }
+  editorFollow.sync();
 }
 
 function seekKaraokeBy(milliseconds: number): void {
@@ -4399,7 +4400,12 @@ async function applyPreviewedGlossary(): Promise<void> {
 }
 
 document.querySelector<HTMLButtonElement>("#show-workbench")?.addEventListener("click", () => void showTopLevelArea("workbench"));
-document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", () => void showTopLevelArea("listening"));
+document.querySelector<HTMLButtonElement>("#show-listening")?.addEventListener("click", async () => {
+  if (currentArea === "listening") return;
+  await showTopLevelArea("listening");
+  const resume = listeningResume;
+  if (listeningView && !listeningView.classList.contains("hidden") && resume) await openListeningJob(resume.jobId, resume.positionMs);
+});
 document.querySelector<HTMLButtonElement>("#show-learning")?.addEventListener("click", () => void showTopLevelArea("learning"));
 document.querySelector<HTMLButtonElement>("#refresh-learning")?.addEventListener("click", () => void refreshLearningItems());
 learningLanguageTabs?.addEventListener("click", (event) => {
@@ -4738,7 +4744,7 @@ function runPlaybackLoopAction(action: LoopAction): LoopMessage | null {
     loopStartMs = time; playbackLoop = null;
   } else if (action === "b") {
     if (loopStartMs === null || time <= loopStartMs) return { message: "请先设置早于 B 的 A 点", local: true };
-    playbackLoop = { startMs: loopStartMs, endMs: time, repeat: true };
+    playbackLoop = { startMs: loopStartMs, endMs: time, repeat: true, manual: true };
   } else if (cue) {
     playbackLoop = action === "sentence"
       ? { startMs: cue.start_ms, endMs: cue.end_ms, repeat: true }
@@ -4750,6 +4756,7 @@ function runPlaybackLoopAction(action: LoopAction): LoopMessage | null {
     mediaPlayer.seek(playbackLoop.startMs);
     void media.play();
   }
+  renderKaraokeTimeline();
   return { message: playbackLoop
     ? `${playbackLoop.repeat ? "循环" : "试听"} ${formatPreciseTime(playbackLoop.startMs)} → ${formatPreciseTime(playbackLoop.endMs)}`
     : loopStartMs !== null ? `A: ${formatPreciseTime(loopStartMs)}` : "循环已关闭" };
@@ -4832,11 +4839,16 @@ const desktopStartup = createDesktopStartup({
     { name: "任务摘要", run: refresh },
   ],
   directory: settingsBackend.dataDirectory,
-  directoryAccepted: path => { if (dataPath) dataPath.textContent = `本地数据：${path}`; },
+  directoryAccepted: path => { if (dataPath) dataPath.textContent = path; },
   directoryFailed: () => { if (dataPath) dataPath.textContent = "本地数据目录暂不可用。"; },
   failed: (name, error) => { if (settingsMessage) settingsMessage.textContent = `${name}初始化失败：${String(error)}`; },
 });
 desktopStartup.mount();
+mountDesktopUpdate(settingsDialog!, async () => {
+  if (settingsDirtyFields.size || workspaceActionBusy || (currentArea === "karaoke" && editorTimingDirty()) || subtitleTranslation.busy) return false;
+  await subtitleDrafts.flushAll();
+  return ![...subtitleDrafts.entries.values()].some(draft => draft.composing || subtitleDrafts.pending(draft));
+});
 
 // Capture is owned by Rust, independent of the currently visible main page.
 document.getElementById("open-online")?.addEventListener("click",()=>void showTopLevelArea("online"));

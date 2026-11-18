@@ -1,6 +1,6 @@
 # 发布说明
 
-_最后更新：2026-11-14；稳定版发行材料与开发配置分别说明。_
+_最后更新：2026-11-17；稳定版发行材料与开发配置分别说明。_
 
 macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x86_64 只保留既有未签名预发布历史基线，当前不构建或验收 Windows。
 
@@ -8,6 +8,12 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 2026-11-13 起暂停 Windows 开发与发行维护；Windows workflow 在仓库端停用，源码仅保留手动入口，无 push／PR 自动触发。以下 Windows 流程是历史／恢复时参考，不是当前发布门禁。macOS Release／DMG 及 ad-hoc 签名分发流程保持。恢复 Windows 见[0077](decisions/0077-pause-windows-development.md)。
 
 ## macOS Apple Silicon
+
+### 应用内更新
+
+准备完整的五个独立 sidecar 和许可证声明后，用支持 `--app-version` 的 Tauri CLI（2.12+）运行 `./scripts/build-macos-update.sh /绝对路径/发行目录`。从发行密钥存储设置 `TAURI_SIGNING_PRIVATE_KEY`、所需的 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，并导出 `ATOGAKI_UPDATER_PUBLIC_KEY`（公钥内容）。不得提交私钥或口令。持续使用与首版内置公钥匹配的发行密钥；丢失密钥或轮换前需另定迁移流程。
+
+脚本生成 DMG、SHA-256、绑定版本签名的 `Atogaki-vX.Y.Z-macos-arm64.app.tar.gz`、`.sig` 与 `latest.json`，不会上传。沿用下面的 DMG 和源码归档验收，随后把全部资产放在同一个正式 `vX.Y.Z` Release。确保 GitHub 将它标记为最新正式版。首次应手动安装含公钥的 DMG；验收时从该版检查下一版，分别验证正常替换、被篡改包拒绝安装、数据保留、重启及系统音频授权。普通开发包未内置公钥时保持关闭。更新签名不改变 macOS 的 ad-hoc 签名；更新后系统音频可能要求重新允许。首个可用更新频道尚未发布。
 
 ### 产物边界
 

@@ -20,7 +20,23 @@ export function mountEditorControls(root: HTMLElement, options: Options) {
   const events = new AbortController();
   const click = (selector: string, handler: () => void) => root.querySelector(selector)?.addEventListener("click", handler, { signal: events.signal });
   const search = root.querySelector<HTMLInputElement>("#editor-search");
+  const searchToggle = root.querySelector<HTMLButtonElement>("#editor-search-toggle");
   const filter = root.querySelector<HTMLSelectElement>("#editor-filter");
+  const setSearchOpen = (open: boolean) => {
+    if (!search || !searchToggle) return;
+    search.hidden = !open;
+    searchToggle.setAttribute("aria-expanded", String(open));
+    if (open) search.focus();
+    else {
+      if (search.value) { search.value = ""; options.query(""); }
+      searchToggle.focus();
+    }
+  };
+  searchToggle?.addEventListener("click", () => setSearchOpen(!!search?.hidden), { signal: events.signal });
+  search?.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    event.preventDefault(); event.stopPropagation(); setSearchOpen(false);
+  }, { signal: events.signal });
   search?.addEventListener("input", () => options.query(search.value), { signal: events.signal });
   filter?.addEventListener("change", () => options.filter(filter.value as CueFilter), { signal: events.signal });
   root.addEventListener("click", event => {

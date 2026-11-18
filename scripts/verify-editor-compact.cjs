@@ -28,12 +28,35 @@ const fs=require('node:fs'), path=require('node:path');
   return geometry;
  };
  console.log('1180',await check());await p.screenshot({path:path.join(output,'compact-1180.png')});
+ const toolbar = await p.evaluate(()=>{
+   const center=id=>{const r=document.getElementById(id).getBoundingClientRect();return r.top+r.height/2;};
+   return {wave:Math.abs(center('karaoke-zoom')-center('karaoke-window-back')), filter:Math.abs(center('editor-search-toggle')-center('editor-filter')), timing:document.getElementById('editor-cue-start').offsetWidth};
+ });
+ assert.ok(toolbar.wave<2 && toolbar.filter<2 && toolbar.timing<120);
+ const canvas=p.locator('#karaoke-waveform');
+ await canvas.evaluate(canvas=>{
+   const ctx=canvas.getContext('2d'), text=ctx.fillText.bind(ctx), clear=ctx.clearRect.bind(ctx);
+   window.__abFlags=[];
+   ctx.clearRect=(...args)=>{window.__abFlags=[];return clear(...args);};
+   ctx.fillText=(value,...args)=>{if(value==='A'||value==='B')window.__abFlags.push(value);return text(value,...args);};
+ });
+ await require('./load-editor-test-media.cjs')(p);
+ await p.waitForFunction(()=>document.querySelector('#karaoke-media-host audio')?.readyState>=1);
+ const setPoint=async seconds=>p.locator('#karaoke-media-host audio').evaluate(async(a,t)=>{
+   a.pause();await new Promise(resolve=>{a.addEventListener('seeked',resolve,{once:true});a.currentTime=t;});
+ },seconds);
+ const loop=action=>p.locator(`#karaoke-view [data-loop="${action}"]`).click();
+ const flags=(expected)=>p.waitForFunction(expected=>JSON.stringify(window.__abFlags)===expected,JSON.stringify(expected));
+ await setPoint(3);await loop('a');await flags(['A']);
+ await setPoint(5);await loop('b');await flags(['A','B']);
+ await setPoint(4);await loop('a');await flags(['A']);
+ await loop('off');await flags([]);
  assert.equal(await p.locator('#karaoke-toggle-playback').isVisible(),true);
  const source=p.locator('#karaoke-current-source');await source.focus();
  await p.locator('.editor-menu summary').click(); await p.locator('#karaoke-insert-block').focus(); await p.keyboard.press('Escape');
  assert.equal(await p.locator('.editor-menu').evaluate(menu=>menu.open),false);
  assert.equal(await p.evaluate(()=>document.activeElement.tagName),'SUMMARY');
- await p.locator('.editor-menu summary').click(); await p.locator('#editor-search').click();
+ await p.locator('.editor-menu summary').click(); await p.locator('#editor-search-toggle').click();
  assert.equal(await p.locator('.editor-menu').evaluate(menu=>menu.open),false);
  // Folded media keeps a usable transport and the same media element.
  await p.locator('#karaoke-media-host audio').evaluate(audio=>window.__sameAudio=audio);
@@ -75,7 +98,7 @@ const fs=require('node:fs'), path=require('node:path');
  assert.ok(await p.locator('.editor-cue-row').count()<=40);
  await p.locator('[data-editor-action="back"]').click();
  assert.equal(await p.locator('.shell > header').isVisible(),true);
- assert.equal(await p.locator('.shell').evaluate(e=>getComputedStyle(e).getPropertyValue('--surface').trim()),'#fff');
+ assert.match(await p.locator('.shell').evaluate(e=>getComputedStyle(e).getPropertyValue('--surface').trim()),/^#fff(?:fff)?$/i);
  assert.equal(await p.locator('body').evaluate(e=>getComputedStyle(e).backgroundImage),'none');
  assert.deepEqual(errors,[]);console.log('PASS: compact geometry, migration, menus, fold transport, resizing, large type, palette isolation, 10k follow and scroll');
  await b.close();

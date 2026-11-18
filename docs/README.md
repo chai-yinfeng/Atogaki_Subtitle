@@ -76,3 +76,4 @@ _更新：2026-11-17。_
 - [0085：亮暗主题与图片配色编辑器](decisions/0085-light-dark-and-image-theme-studio.md)
 
 - [0086：按名称导入本机识别模型](decisions/0086-named-local-model-registration.md)
+- [0087：从正式 GitHub Release 安装桌面更新](decisions/0087-desktop-update-and-permission.md)

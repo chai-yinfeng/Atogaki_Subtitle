@@ -1,8 +1,9 @@
 /** Shared sheet interaction; opening or closing a panel never changes playback. */
-export function mountSheet(dialog: HTMLDialogElement, triggers: HTMLElement[], closeButton: HTMLElement) {
+export function mountSheet(dialog: HTMLDialogElement, triggers: HTMLElement[], closeButton: HTMLElement, canClose = () => true) {
   const events = new AbortController();
   let opener: HTMLElement | null = null;
-  const close = () => dialog.close();
+  const close = () => { if (canClose()) dialog.close(); };
+  dialog.addEventListener("cancel", event => { if (!canClose()) event.preventDefault(); }, { signal: events.signal });
   const open = (trigger: HTMLElement) => {
     opener = trigger;
     if (!dialog.open) dialog.showModal();

@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -24,6 +24,7 @@ pub struct DesktopOnlineSession {
     pub data_dir: PathBuf,
     events: Arc<Mutex<Vec<CaptionEvent>>>,
     pub caption_locked: Arc<AtomicBool>,
+    pub caption_opacity: Arc<AtomicU8>,
     #[cfg(target_os = "macos")]
     panel: Arc<Mutex<Option<usize>>>,
 }
@@ -34,6 +35,7 @@ impl DesktopOnlineSession {
             data_dir,
             events: Arc::default(),
             caption_locked: Arc::default(),
+            caption_opacity: Arc::new(AtomicU8::new(100)),
             #[cfg(target_os = "macos")]
             panel: Arc::default(),
         }
@@ -94,6 +96,7 @@ pub struct Snapshot {
     events: Vec<CaptionEvent>,
     caption_locked: bool,
     caption_visible: bool,
+    caption_opacity: u8,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -385,6 +388,7 @@ pub async fn online_snapshot(
         events: state.events.lock().map_err(|e| e.to_string())?.clone(),
         caption_locked: state.caption_locked.load(Ordering::Relaxed),
         caption_visible,
+        caption_opacity: state.caption_opacity.load(Ordering::Relaxed),
     })
 }
 #[tauri::command]
@@ -537,9 +541,14 @@ pub async fn start_online_session(
 }
 #[tauri::command]
 pub async fn stop_online_session(
+    app: AppHandle,
     state: State<'_, DesktopOnlineSession>,
 ) -> Result<OnlineSessionStatus, String> {
-    state.service.stop().await.map_err(|e| format!("{e:#}"))
+    let status = state.service.stop().await.map_err(|e| format!("{e:#}"));
+    let hidden = hide_online_captions(app, state);
+    let status = status?;
+    hidden?;
+    Ok(status)
 }
 #[tauri::command]
 pub fn open_online_captions(
@@ -558,8 +567,7 @@ pub fn open_online_captions(
         .title("Atogaki · 在线字幕")
         .accept_first_mouse(true)
         .inner_size(920., 280.)
-        .transparent(false)
-        .background_color(tauri::window::Color(35, 35, 38, 255))
+        .transparent(true)
         .min_inner_size(420., 200.)
         .decorations(false)
         .always_on_top(true)
@@ -660,6 +668,19 @@ pub fn set_online_caption_locked(
             })
             .map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_online_caption_opacity(
+    app: AppHandle,
+    state: State<'_, DesktopOnlineSession>,
+    percent: u8,
+) -> Result<(), String> {
+    let percent = percent.clamp(35, 100);
+    state.caption_opacity.store(percent, Ordering::Relaxed);
+    app.emit_to("online-captions", "online-caption-opacity", percent)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 

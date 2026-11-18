@@ -94,8 +94,8 @@ test('B accumulates in background and appears at its latest revision with no A t
  model.accept(event(3,source('b',4,12,'long B','source_draft')));
  model.accept(event(4,translation('B',4,8,'B short','translation_draft',['b'])));
  model.accept(event(5,translation('B',4,12,'B latest complete snapshot','translation_draft',['b'])));
- assert.deepEqual(at(2999).sourceParts.map(e=>e.text),['a']);
- const frame=at(3000);
+ assert.deepEqual(at(stableReadingMs-1).sourceParts.map(e=>e.text),['a']);
+ const frame=at(stableReadingMs);
  assert.deepEqual(frame.sourceParts.map(e=>e.text),['long B']);
  assert.deepEqual(frame.translationParts.map(e=>e.text),['B latest complete snapshot']);
 });
@@ -104,7 +104,7 @@ test('B may have source only when A leaves; old translation is not carried acros
  model.accept(event(1,source('a',0,4)));
  model.accept(event(2,translation('A',0,4,'A','translation_final',['a'])));at(0);
  model.accept(event(3,source('b',4,9,'B original','source_draft')));
- const frame=at(3000);
+ const frame=at(stableReadingMs);
  assert.deepEqual(frame.sourceParts.map(e=>e.text),['B original']);
  assert.deepEqual(frame.translationParts,[]);
 });
@@ -112,9 +112,9 @@ test('a queued final starts its reading time when displayed, not when received',
  const {model,at}=fixture();
  model.accept(event(1,translation('A',0,4)));
  model.accept(event(2,translation('B',4,8)));at(0);
- assert.equal(at(3000).translationParts[0].group_id,'B');
- assert.equal(at(5999).translationParts[0].group_id,'B');
- assert.deepEqual(at(6000).translationParts,[]);
+ assert.equal(at(stableReadingMs).translationParts[0].group_id,'B');
+ assert.equal(at(2*stableReadingMs-1).translationParts[0].group_id,'B');
+ assert.deepEqual(at(2*stableReadingMs).translationParts,[]);
 });
 test('late MT final has its full reading time even after a long audio pause',()=>{
  const {model,at}=fixture();
@@ -122,14 +122,39 @@ test('late MT final has its full reading time even after a long audio pause',()=
  assert.equal(at(20000).translationParts[0].text,'preview');
  model.accept(event(2,translation('A',0,4,'final')));
  assert.equal(at(25000).translationParts[0].text,'final');
- assert.equal(at(27999).translationParts[0].text,'final');
- assert.deepEqual(at(28000).translationParts,[]);
+ assert.equal(at(25000+stableReadingMs-1).translationParts[0].text,'final');
+ assert.deepEqual(at(25000+stableReadingMs).translationParts,[]);
+});
+test('an unchanged final uses time already spent reading the visible draft',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,translation('A',0,4,'同一句','translation_draft')));
+ model.observeTranslation(at(0).translationParts[0]);
+ model.accept(event(2,translation('A',0,4,'同一句')));
+ assert.equal(at(800).translationParts[0].kind,'translation_final');
+ assert.deepEqual(at(stableReadingMs).translationParts,[]);
+});
+test('an unchanged late final advances immediately to the next ready group',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,translation('A',0,4,'同一句','translation_draft')));
+ model.observeTranslation(at(0).translationParts[0]);
+ model.accept(event(2,translation('A',0,4,'同一句')));
+ model.accept(event(3,translation('B',4,8,'下一句','translation_draft')));
+ assert.equal(at(2500).translationParts[0].group_id,'B');
+});
+test('the same words with a new boundary still get one full reading window',()=>{
+ const {model,at}=fixture();
+ model.accept(event(1,translation('A',0,6,'同一句','translation_draft')));
+ model.observeTranslation(at(0).translationParts[0]);
+ model.accept(event(2,translation('A',0,4,'同一句')));
+ assert.equal(at(2500).translationParts[0].kind,'translation_final');
+ assert.equal(at(2500+stableReadingMs-1).translationParts[0].group_id,'A');
+ assert.deepEqual(at(2500+stableReadingMs).translationParts,[]);
 });
 test('snapshots do not restart a reading timer or resurrect an expired page',()=>{
  const {model,at}=fixture();
  const final=event(1,translation('A',0,4));model.accept(final);at(0);
- model.snapshot({status:status('s'),events:[final]});at(2000);
- assert.deepEqual(at(3000).translationParts,[]);
+ model.snapshot({status:status('s'),events:[final]});at(stableReadingMs-1);
+ assert.deepEqual(at(stableReadingMs).translationParts,[]);
  model.snapshot({status:status('s'),events:[final,event(2,translation('A',0,4,'late draft','translation_draft'))]});
  assert.deepEqual(at(4000).translationParts,[]);
 });
@@ -157,10 +182,10 @@ test('paired source remains available after live ASR map eviction',()=>{
  model.accept(event(1,source('a',0,4)));
  model.accept(event(2,translation('A',0,4,'A','translation_final',['a'])));at(0);
  for(let i=1;i<=70;i++)model.accept(event(i+2,source('s'+i,i+4,i+5)));
- assert.deepEqual(at(1000).sourceParts.map(e=>e.text),['a']);
+ assert.deepEqual(at(stableReadingMs-1).sourceParts.map(e=>e.text),['a']);
 });
 test('new session resets both the page boundary and reading clock',()=>{
- const {model,at}=fixture();model.accept(event(1,translation('A',0,4)));at(0);at(3000);
+ const {model,at}=fixture();model.accept(event(1,translation('A',0,4)));at(0);at(stableReadingMs);
  model.snapshot({status:status('new'),events:[event(1,translation('N',0,2),'new')]});
  assert.equal(at(4000).translationParts[0].group_id,'N');
  assert.deepEqual(at(7000).translationParts,[]);

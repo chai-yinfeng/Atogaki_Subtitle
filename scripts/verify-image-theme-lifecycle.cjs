@@ -39,7 +39,17 @@ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCA
    const studio=async()=>{await page.locator('#open-settings').click();await page.locator('[data-settings-tab="appearance"]').click();await page.locator('[data-open-image-studio]').click();};
    if(mode==='normal'){
     await page.waitForFunction(()=>document.documentElement.dataset.imageTheme==='palette');assert.equal((await config()).enabled,true);
+    assert.match(await page.locator('.shell').evaluate(e=>getComputedStyle(e).backgroundImage),/url\(/);
     await studio();assert.equal(await page.locator('[data-preview-mode]').count(),2);
+    await page.locator('.image-seed').first().click();
+    const outlineFits = selector => page.locator(selector).evaluate(el => {
+     const clip=el.closest('.image-studio-body').getBoundingClientRect(), rect=el.getBoundingClientRect(), style=getComputedStyle(el);
+     const outset=(parseFloat(style.outlineWidth)||0)+(parseFloat(style.outlineOffset)||0);
+     return rect.left-outset>=clip.left && rect.right+outset<=clip.right;
+    });
+    assert.equal(await outlineFits('.image-seed[aria-pressed="true"]'),true);
+    await page.locator('[data-image-template]').focus();
+    assert.equal(await outlineFits('[data-image-template]'),true);
     await page.locator('[data-image-name]').fill('未应用名称');await page.keyboard.press('Escape');assert.equal((await config()).displayName,'合成主题');
     await page.emulateMedia({colorScheme:'dark'});await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
     assert.equal((await config()).enabled,true);
@@ -63,10 +73,14 @@ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCA
      await page.waitForFunction(()=>document.querySelector('.image-studio-status').textContent.includes('配色已生成'));
      assert.equal(await config(),null);assert.equal(await page.evaluate(()=>document.documentElement.dataset.imageTheme),undefined);
      await page.locator('[data-image-name]').fill('我的电台');await page.locator('[data-image-template]').selectOption('dark');
+     await page.locator('[data-image-opacity]').fill('60');
+     assert.equal(await page.locator('[data-image-opacity-value]').textContent(),'60%');
      const applyBounds=await page.locator('[data-apply-image]').boundingBox();assert.ok(applyBounds.y+applyBounds.height<=760);
      await page.screenshot({path:'/tmp/atogaki-image-studio-preview.png'});
      await page.locator('[data-apply-image]').click();await page.waitForFunction(()=>document.documentElement.dataset.imageTheme==='palette');
      assert.equal((await config()).displayName,'我的电台');assert.equal(await page.locator('#image-theme-studio').evaluate(e=>e.open),false);
+     assert.equal((await config()).imageOpacity,60);
+     assert.match(await page.locator('.shell').evaluate(e=>getComputedStyle(e).backgroundImage),/url\(/);
      await page.screenshot({path:'/tmp/atogaki-image-theme-applied.png'});
      await page.locator('[data-open-image-studio]').click();await page.locator('[data-reset-image]').click();
      assert.equal((await config()).enabled,false);assert.equal((await config()).displayName,'我的电台');

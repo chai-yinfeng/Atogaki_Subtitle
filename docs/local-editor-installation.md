@@ -1,6 +1,20 @@
 # 本机安装与回退记录
 
-最新安装为 2026-11-17 的侧栏／主题／命名模型试用版，代码提交 `b5c81b8`，包含此前离线 Qwen／ForcedAligner；App 版本号仍为 0.1.3，没有修改公开 Release。以下按日期保留历史记录。
+最新安装为 2026-11-17 的 v0.1.4 更新起始版：内置发行公钥，使用光较柔和的百日红插画图标。已覆盖安装并打开，旧版保留于 `/Applications/.Atogaki.previous-20261117-updater`。SQLite quick_check 为 ok，13 个任务与 6,887 段字幕计数一致。较高版本的实际更新独立核验。
+
+同日再次试装 v0.1.4：添加 macOS 原生图标目录并重新注册该 App；通过 NSWorkspace 读取已安装应用的系统图标，确认返回百日红图案且没有独立灰底。旧 ICNS 保留作为回退。更新操作移至「设置 → 更新」，使用说明只保留流程和权限提示。生产构建、382 项前端测试及更新 WebKit 回归通过；本机替换前后 13 个任务及 6,887 段字幕计数一致。未发布 Release。
+
+同日再次试装 v0.1.4：压缩编辑器工具栏，波形时间轴显示手动循环的 A/B 点和区间。WebKit 验证了布局与 A → A/B → 重置 A → 关闭的显示过程；382 项前端测试和生产构建通过。已覆盖并打开正式路径，保留 `/Applications/.Atogaki.previous-20261117-editor-ab`。任务与字幕计数仍为 13 和 6,887，保留发行公钥，未发布 Release。
+
+## 2026-11-17：百日红信纸图标试装
+
+用户确认构图后，使用 imagegen 补充细胶片颗粒、柔和暗角和透明外缘，以 Tauri 转换为 macOS ICNS 和 PNG，并检查 32 像素预览。构建 complete App，核对五个 sidecar、图标与 deep／strict 签名后覆盖安装并打开。上一版保留于 `/Applications/.Atogaki.previous-20261117-icon`。SQLite quick_check 为 ok，安装前后 13 个任务和 6,887 段字幕计数一致。该试装包未内置发行公钥，正式应用内更新仍需签名发行与跨版本试装。
+
+## 2026-11-17：字幕窗、主题和编辑器试装
+
+按用户要求从当前工作区构建 macOS complete App，核对五个 sidecar 和 deep／strict ad hoc 签名后覆盖 `/Applications/Atogaki.app` 并打开。保留前版 `/Applications/.Atogaki.previous-20261117-subtitle-polish`。安装前完成 SQLite 一致性备份，替换前后 quick_check 均为 ok，13 个任务与 6,887 段字幕计数一致。备份与检查记录在忽略目录 `local-artifacts/evaluation/desktop-polish-20261117/`。
+
+供用户体验字幕窗开始／停止联动、不透明度、暖色亮暗主题与图片背景、紧凑编辑工具栏和统一跟随入口。应用内更新入口随包安装，未配置发行公钥；未验证真实更新或跨构建系统音频授权。图标沿用旧版。
 
 ## 2026-11-17：侧栏、图片主题与命名模型试装
 

@@ -37,7 +37,7 @@ export function mountDesktopSettingsView(dialog: HTMLDialogElement, options: Opt
   form.addEventListener("click", event => {
     const target = event.target;
     if (!(target instanceof Element)) return;
-    const button = target.closest<HTMLButtonElement>("button"); if (!button || button.disabled) return;
+    const button = target.closest<HTMLButtonElement>("button"); if (!button || button.disabled || dialog.dataset.installing) return;
     if (button.id === "close-settings") dialog.close();
     else if (button.id === "finish-settings") options.save(true);
     else if (button.dataset.settingsTab) selectPage(button.dataset.settingsTab);
@@ -49,7 +49,7 @@ export function mountDesktopSettingsView(dialog: HTMLDialogElement, options: Opt
   };
   form.addEventListener("input", dirty, { signal: events.signal });
   form.addEventListener("change", dirty, { signal: events.signal });
-  form.addEventListener("submit", event => { event.preventDefault(); options.save(false); }, { signal: events.signal });
+  form.addEventListener("submit", event => { event.preventDefault(); if (!dialog.dataset.installing) options.save(false); }, { signal: events.signal });
   window.addEventListener("atogaki-theme-change", syncTheme, { signal: events.signal });
   syncTheme();
   return {

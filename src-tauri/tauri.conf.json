@@ -1,7 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Atogaki",
-  "version": "0.1.3",
+  "version": "0.1.4",
+  "plugins": {
+    "updater": { "pubkey": "", "requireSignedVersion": true }
+  },
   "identifier": "com.chai-yinfeng.atogaki",
   "build": {
     "beforeBuildCommand": {

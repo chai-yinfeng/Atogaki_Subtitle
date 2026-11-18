@@ -19,7 +19,7 @@ export type LiveEvent = {
   provisional?: boolean;
 };
 export type CaptionEvent = { sessionId: string; sequence: number; event: LiveEvent };
-export type OnlineSnapshot = { status: OnlineStatus; events: CaptionEvent[]; captionLocked?: boolean; captionVisible?: boolean };
+export type OnlineSnapshot = { status: OnlineStatus; events: CaptionEvent[]; captionLocked?: boolean; captionVisible?: boolean; captionOpacity?: number };
 export const phaseLabel: Record<string, string> = {
   idle: "未开始", loading: "正在加载模型", requesting_audio: "等待系统音频权限",
   running: "正在接收系统音频", stopping: "正在停止采集", draining: "正在完成最后一段",
@@ -29,7 +29,9 @@ export const activePhase = (phase: string) => ["loading", "requesting_audio", "r
 
 const endOf = (event: LiveEvent) => event.end_s ?? event.start_s ?? 0;
 const settled = (event: LiveEvent) => event.kind === "translation_final" || event.kind === "translation_failed";
-export const stableReadingMs = 3000;
+export const stableReadingMs = 1000;
+const sameReading = (a: LiveEvent, b: LiveEvent) => a.group_id === b.group_id &&
+  a.text === b.text && a.start_s === b.start_s && a.end_s === b.end_s;
 const byTime = (a: LiveEvent, b: LiveEvent) => (a.start_s ?? 0) - (b.start_s ?? 0);
 
 /** Keep settled captions independently of the rolling event transport buffer. */
@@ -46,6 +48,7 @@ export class OnlineCaptions {
   private displayAfter = -Infinity;
   private page: LiveEvent | null = null;
   private pageDeadline: number | null = null;
+  private shownDraft: { event: LiveEvent; since: number } | null = null;
 
   private clock: () => number;
   constructor(clock: () => number = () => performance.now()) { this.clock = clock; }
@@ -63,6 +66,7 @@ export class OnlineCaptions {
       this.displayAfter = -Infinity;
       this.page = null;
       this.pageDeadline = null;
+      this.shownDraft = null;
     }
     this.status = snapshot.status;
     this.translationEnabled = snapshot.status.translationEnabled ?? true;
@@ -71,6 +75,15 @@ export class OnlineCaptions {
     if (changed && this.groups.size) {
       this.page = [...this.groups.values()].map(e => e.event).sort(byTime).at(-1)!;
       this.displayAfter = this.page.start_s ?? -Infinity;
+    }
+  }
+
+  /** Record what the view actually painted, after draft revision gating. */
+  observeTranslation(event: LiveEvent | undefined): void {
+    if (!event || event.kind !== "translation_draft" || !event.text) {
+      this.shownDraft = null;
+    } else if (!this.shownDraft || !sameReading(this.shownDraft.event, event)) {
+      this.shownDraft = { event, since: this.clock() };
     }
   }
 
@@ -158,15 +171,18 @@ export class OnlineCaptions {
   private readingPage(parts: LiveEvent[]): LiveEvent | null {
     const now = this.clock();
     if (this.page) this.page = parts.find(e => e.group_id === this.page!.group_id) ?? this.page;
-    if (this.pageDeadline !== null && now >= this.pageDeadline) {
+    if (!this.page) this.page = parts.find(e => endOf(e) > this.displayAfter) ?? null;
+    while (this.page && settled(this.page)) {
+      if (this.pageDeadline === null) {
+        const draft = this.shownDraft;
+        const unchanged = this.page.kind === "translation_final" && draft && sameReading(draft.event, this.page);
+        this.pageDeadline = (unchanged ? draft.since : now) + stableReadingMs;
+      }
+      if (now < this.pageDeadline) break;
       this.displayAfter = Math.max(this.displayAfter, endOf(this.page!));
-      this.page = null;
+      this.page = parts.find(e => endOf(e) > this.displayAfter) ?? null;
       this.pageDeadline = null;
     }
-    if (!this.page) this.page = parts.find(e => endOf(e) > this.displayAfter) ?? null;
-    // Start when the final is first displayed, including a final that waited
-    // behind A. Replayed snapshots must not restart this clock.
-    if (this.page && settled(this.page) && this.pageDeadline === null) this.pageDeadline = now + stableReadingMs;
     return this.page;
   }
 }

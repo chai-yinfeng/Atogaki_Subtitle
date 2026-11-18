@@ -47,7 +47,7 @@ const { webkit } = require(process.env.ATOGAKI_PLAYWRIGHT_MODULE || 'playwright'
     await page.locator('#karaoke-current-source').fill('局部保存仍更新可见摘要');
     await page.locator('#karaoke-save-text').click();
     await page.waitForFunction(()=>document.querySelector('[data-cue-id="cue-100"] .cue-source')?.textContent==='局部保存仍更新可见摘要');
-    await page.locator('#editor-search').fill('局部保存仍更新可见摘要');
+    await page.locator('#editor-search-toggle').click();await page.locator('#editor-search').fill('局部保存仍更新可见摘要');
     assert.equal(await page.locator('.editor-cue-row').count(),1);
     assert.equal(await page.locator('.editor-cue-row').getAttribute('aria-rowindex'),'1');
     assert.equal(await page.locator('.editor-cue-row').evaluate(row=>row.offsetTop),0);

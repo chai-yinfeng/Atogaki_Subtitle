@@ -7,7 +7,7 @@ export function desktopSettingsTemplate(): string {
           <div><p class="eyebrow">SETTINGS</p><h2>设置</h2></div>
           <button id="close-settings" type="button" class="secondary">关闭</button>
         </div>
-<nav class="settings-tabs" aria-label="设置分区"><button type="button" class="secondary" data-settings-tab="appearance" aria-pressed="false">外观</button><button type="button" class="secondary active" data-settings-tab="transcription" aria-pressed="true">识别</button><button type="button" class="secondary" data-settings-tab="translation" aria-pressed="false">翻译</button><button type="button" class="secondary" data-settings-tab="models" aria-pressed="false">存储</button><button type="button" class="secondary" data-settings-tab="dictionary" aria-pressed="false">词典</button><button type="button" class="secondary" data-settings-tab="network" aria-pressed="false">网络与高级</button></nav>
+<nav class="settings-tabs" aria-label="设置分区"><button type="button" class="secondary" data-settings-tab="appearance" aria-pressed="false">外观</button><button type="button" class="secondary active" data-settings-tab="transcription" aria-pressed="true">识别</button><button type="button" class="secondary" data-settings-tab="translation" aria-pressed="false">翻译</button><button type="button" class="secondary" data-settings-tab="models" aria-pressed="false">存储</button><button type="button" class="secondary" data-settings-tab="dictionary" aria-pressed="false">词典</button><button type="button" class="secondary" data-settings-tab="network" aria-pressed="false">网络与高级</button><button type="button" class="secondary" data-settings-tab="updates" aria-pressed="false">更新</button></nav>
 <div class="settings-content">
 <section data-settings-page="appearance" class="settings-section hidden appearance-settings"><h3>外观</h3><div class="theme-options"><button type="button" data-app-theme="light"><span class="theme-swatch light-swatch"></span><strong>亮色</strong></button><button type="button" data-app-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>暗色</strong></button><button type="button" data-app-theme="system"><span class="theme-swatch system-swatch"></span><strong>跟随系统</strong></button></div></section>
         <section data-settings-page="transcription" class="settings-section">
@@ -27,9 +27,9 @@ export function desktopSettingsTemplate(): string {
           </details>
         </section>
 ${translationProviderTemplate()}
-<section data-settings-page="models" class="settings-section hidden"><h3>存储</h3><span id="models-directory"></span></section>
+<section data-settings-page="models" class="settings-section hidden"><h3>存储</h3><dl class="settings-storage-paths"><div><dt>应用数据与任务</dt><dd id="data-path">正在读取…</dd></div><div><dt>下载的模型</dt><dd id="models-directory">正在读取…</dd></div><div><dt>离线词典</dt><dd id="dictionary-directory">正在读取…</dd></div></dl></section>
         <section data-settings-page="dictionary" class="settings-section hidden">
-          <div class="settings-section-heading"><div><strong>词典</strong><span>离线包由你明确点击后下载到正式应用数据目录；商业词典的 Key 分来源保存。</span></div><span id="dictionary-directory"></span></div>
+          <div class="settings-section-heading"><div><strong>词典</strong><span>离线词典按需下载；目录可在「存储」查看。</span></div></div>
           <div>
             <strong class="settings-subheading">离线词典包</strong>
             <p class="settings-message">JMdict 与 Tomoshi 用于日语；ECDICT 基础数据用于英语。ECDICT 属于社区汇总数据，下载会复用上方代理设置并校验固定版本摘要。</p>
@@ -71,6 +71,7 @@ ${translationProviderTemplate()}
           <div class="network-test-row"><button id="test-network" type="button" class="secondary">测试当前网络配置</button><span>测试只检查当前输入，不会切换或保存模式；修改后请点击“保存配置”。该代理也用于云端翻译。</span></div>
           <div id="network-test-results" class="network-test-results" role="status"></div>
         </section>
+<section data-settings-page="updates" class="settings-section hidden"><h3>App 更新</h3><div class="actions"><button id="check-app-update" type="button" class="secondary">检查更新</button><button id="install-app-update" type="button" hidden>下载并重启</button></div><p id="app-update-status" class="settings-message" role="status" aria-live="polite">从 GitHub 检查正式版本。</p></section>
 </div>
         <div class="settings-footer">
           <div class="settings-status"><span id="settings-message" role="status"></span><span id="model-download-message" class="settings-message" role="status"></span></div>

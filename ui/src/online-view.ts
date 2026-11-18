@@ -34,7 +34,7 @@ root.innerHTML=`<section class="online-card">
 
 <button id="online-refresh" class="secondary wide" type="button">刷新模型／词表</button>
 </div></details>
-<label class="check overlay-lock"><input type="checkbox" id="online-lock">锁定字幕窗（鼠标穿透）</label><p class="help">系统音频 · 不保存录音</p></aside>`:""}<div class="caption-workspace">
+<details class="online-settings"><summary>字幕窗设置</summary><div class="configuration"><label class="check wide"><input type="checkbox" id="online-lock">锁定字幕窗（鼠标穿透）</label><label class="wide">字幕底色不透明度 <output id="online-opacity-value">100%</output><input id="online-opacity" type="range" min="35" max="100" value="100" aria-label="字幕底色不透明度"></label></div></details><p class="help">系统音频 · 不保存录音</p></aside>`:""}<div class="caption-workspace">
 <p id="online-status" role="status">正在读取会话状态…</p>
 <section id="source-track" class="track"><div class="track-heading"><span class="badge">原文</span><span id="source-state" class="track-state"></span></div><p id="source-text">等待语音…</p></section>
 <section id="translation-track" class="track"><div class="track-heading"><span class="badge">译文</span><span id="translation-state" class="track-state"></span></div><p id="translation-text">等待翻译…</p></section>
@@ -46,6 +46,7 @@ const set=(id:string,text:string)=>{const node=find(id);if(node.textContent!==te
 let preferences=readOnlinePreferences();
 let choices:Choices|null=null, busy=false, message="", disposed=false;
 let pendingCaptionSession:string|null=null;
+let openingCaption:Promise<void>|null=null;
 let captionLocked=false, lockBusy=false;
 let captionVisible=false, captionBusy=false;
 let displayedSession:string|null=null;
@@ -91,23 +92,24 @@ function render():void {
   const toggle=find<HTMLButtonElement>("online-toggle-controls");toggle.textContent=controlsCollapsed?"显示设置":"收起设置";toggle.setAttribute("aria-expanded",String(!controlsCollapsed));
  }
  if(control){const lock=find<HTMLInputElement>("online-lock");lock.disabled=lockBusy;if(!lockBusy)lock.checked=captionLocked;}
- if(control){const toggle=find<HTMLButtonElement>("online-hide");toggle.disabled=captionBusy;toggle.textContent=captionVisible?"隐藏字幕窗":"显示字幕窗";toggle.setAttribute("aria-pressed",String(captionVisible));}
+ if(control){const toggle=find<HTMLButtonElement>("online-hide");toggle.disabled=busy||captionBusy;toggle.textContent=captionVisible?"隐藏字幕窗":"显示字幕窗";toggle.setAttribute("aria-pressed",String(captionVisible));}
  set("online-status",message||state.error||`${phaseLabel[state.phase]||state.phase}${model.translationFailures?" · 部分片段翻译失败，原文已保留":""}`);
  if(displayedSession!==state.sessionId){
   displayedSession=state.sessionId;
   for(const prefix of ["source","translation"] as const){trackNodes[prefix].clear();find(`${prefix}-text`).replaceChildren();}
  }
  const shownTranslations=renderTrack("translation",t.translationParts);
+ model.observeTranslation(shownTranslations[0]);
  renderTrack("source",model.tracks(shownTranslations).sourceParts);
  if(!control)return;
- if(state.phase==="running"&&pendingCaptionSession===state.sessionId){pendingCaptionSession=null;void invoke("open_online_captions").catch(e=>{message=String(e);render();});}
+ if(state.phase==="running"&&pendingCaptionSession===state.sessionId){pendingCaptionSession=null;openingCaption=invoke<void>("open_online_captions").catch(e=>{message=String(e);render();}).finally(()=>{openingCaption=null;});}
  const active=activePhase(state.phase);
  const mode=recognitionMode(), single=mode==="one-pass";
  const draft=choices?.drafts.find(x=>x.id===find<HTMLSelectElement>("online-draft-model").value&&x.language===find<HTMLSelectElement>("online-language").value);
  const target=choices?.finals.find(x=>x.id===find<HTMLSelectElement>("online-model").value);
  const ready=target?.ready&&(single?choices?.accelerationReady&&target.id==="qwen-1.7b-8bit":draft?.ready);
  find<HTMLButtonElement>("online-start").disabled=busy||active||!choices?.runtimeReady||!ready;
- find<HTMLButtonElement>("online-stop").disabled=busy||!active;
+ find<HTMLButtonElement>("online-stop").disabled=busy||captionBusy||!active;
  for(const id of ["online-language","online-model","online-draft-model","online-translate","online-drafts","online-translator","online-glossary","online-scene","online-refresh"]) (find(id) as HTMLInputElement).disabled=active||busy;
  for(const input of root.querySelectorAll<HTMLInputElement>('input[name="recognition-mode"]'))input.disabled=active||busy;
  find("online-draft-field").hidden=single;
@@ -124,7 +126,8 @@ function render():void {
  set("online-timing",timings.length?`${timings.join(" · ")}（从对应音频段结束计）`:"延迟随定稿更新；草稿出现速度与定稿等待分别观察。");
 
 }
-async function refresh():Promise<void>{try{const snapshot=await invoke<OnlineSnapshot>("online_snapshot");if(disposed)return;captionLocked=snapshot.captionLocked??false;captionVisible=snapshot.captionVisible??false;model.snapshot(snapshot);render();}catch(e){message=String(e);render();}}
+const paintCaptionOpacity=(percent:number)=>root.style.setProperty("--caption-background-alpha",String(percent/100));
+async function refresh():Promise<void>{try{const snapshot=await invoke<OnlineSnapshot>("online_snapshot");if(disposed)return;captionLocked=snapshot.captionLocked??false;captionVisible=snapshot.captionVisible??false;if(!control&&snapshot.captionOpacity!==undefined)paintCaptionOpacity(snapshot.captionOpacity);model.snapshot(snapshot);render();}catch(e){message=String(e);render();}}
 function filterGlossaries():void {
  const select=find<HTMLSelectElement>("online-glossary"), language=find<HTMLSelectElement>("online-language").value;
  for(const option of select.options)option.disabled=!!option.value&&option.dataset.language!==language;
@@ -168,6 +171,11 @@ async function loadChoices():Promise<void>{
 async function mount():Promise<void>{
 const release=await listen<CaptionEvent>("online-session-event",({payload})=>{model.accept(payload);render();});
 if(disposed){release();return;}unlisten=release;
+if(!control){
+ const releaseOpacity=await listen<number>("online-caption-opacity",({payload})=>paintCaptionOpacity(payload));
+ if(disposed){releaseOpacity();return;}
+ unlisten=()=>{release();releaseOpacity();};
+}
 if(control){
  root.querySelector<HTMLInputElement>('input[name="recognition-mode"][value="'+preferences.recognitionMode+'"]')!.checked=true;
  find<HTMLInputElement>("online-translate").checked=preferences.translate;
@@ -176,6 +184,15 @@ if(control){
   const locked=find<HTMLInputElement>("online-lock").checked;lockBusy=true;render();
   try{await invoke("set_online_caption_locked",{locked});captionLocked=locked;}catch(e){message=String(e);}finally{lockBusy=false;await refresh();}
  };
+ const opacity=find<HTMLInputElement>("online-opacity");
+ try{const value=localStorage.getItem("atogaki.onlineCaptionOpacity");if(value!==null)opacity.value=value;}catch{}
+ const applyOpacity=()=>{
+  set("online-opacity-value",`${opacity.value}%`);
+  void invoke("set_online_caption_opacity",{percent:opacity.valueAsNumber}).catch(e=>{message=String(e);render();});
+ };
+ opacity.addEventListener("input",applyOpacity,{signal:events.signal});
+ opacity.addEventListener("change",()=>{try{localStorage.setItem("atogaki.onlineCaptionOpacity",opacity.value);}catch{}},{signal:events.signal});
+ if(opacity.value!=="100")applyOpacity();
  try{
   await loadChoices();
   if(!choices?.translationReady)find<HTMLInputElement>("online-translate").checked=false;
@@ -208,7 +225,7 @@ if(control){
   find<HTMLInputElement>("online-drafts").checked=preferences.translationDrafts;
   filterModels();filterGlossaries();render();
  },{signal:events.signal});
- find("online-stop").onclick=async()=>{busy=true;message="";render();try{await invoke("stop_online_session");}catch(e){message=String(e);}finally{busy=false;await refresh();}};
+ find("online-stop").onclick=async()=>{busy=true;pendingCaptionSession=null;message="";render();try{await openingCaption;await invoke("stop_online_session");}catch(e){message=String(e);}finally{busy=false;await refresh();}};
  find("online-language").onchange=()=>{filterGlossaries();filterModels();remember();render();};
  for(const input of root.querySelectorAll<HTMLInputElement>('input[name="recognition-mode"]'))input.onchange=()=>{filterModels();remember();render();};
  find("online-model").onchange=()=>{remember();render();};

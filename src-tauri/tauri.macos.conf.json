@@ -2,6 +2,7 @@
   "bundle": {
     "icon": [
       "icons/icon.icns"
-    ]
+    ],
+    "resources": { "icons/macos/Assets.car": "Assets.car" }
   }
 }

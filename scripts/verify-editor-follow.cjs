@@ -57,7 +57,7 @@ const assert = require('node:assert/strict');
  assert.equal(await follow.getAttribute('aria-pressed'),'false'); assert.equal(await source.inputValue(),'保留失败草稿');
  await page.evaluate(()=>window.__test.fail=false); await follow.click();
  assert.equal(await follow.getAttribute('aria-pressed'),'true');
- await seek(7); await page.locator('#editor-search').fill('第 1 句');
+ await seek(7); await page.locator('#editor-search-toggle').click(); await page.locator('#editor-search').fill('第 1 句');
  assert.match(await source.inputValue(),/第 3 句/);
  assert.match(await page.locator('#editor-selection-message').innerText(),/不在筛选/);
  assert.equal(await page.locator('#editor-search').inputValue(),'第 1 句');

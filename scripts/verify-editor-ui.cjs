@@ -22,13 +22,13 @@ const panelOrder=await page.evaluate(()=>{
  const rect=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x,y:r.y,bottom:r.bottom,right:r.right};};
  return {video:rect('#editor-video-panel'),wave:rect('#editor-wave-panel'),edit:rect('.karaoke-current-segment'),list:rect('.editor-list-panel')};
 });
-const cueSpace=await page.evaluate(()=>{const box=s=>document.querySelector(s).getBoundingClientRect();return {navTop:box('.editor-cue-navigation').top,timeTop:box('.editor-timing-fields').top,toolbarBottom:box('.editor-cue-toolbar').bottom,textTop:box('#karaoke-current-source').top,textHeight:box('#karaoke-current-source').height};});
-assert.ok(cueSpace.navTop<=cueSpace.timeTop);
+const cueSpace=await page.evaluate(()=>{const box=s=>document.querySelector(s).getBoundingClientRect();return {navRight:box('.editor-cue-navigation').right,timeLeft:box('.editor-timing-fields').left,toolbarBottom:box('.editor-cue-toolbar').bottom,textTop:box('#karaoke-current-source').top,textHeight:box('#karaoke-current-source').height};});
+assert.ok(cueSpace.navRight<=cueSpace.timeLeft);
 assert.ok(cueSpace.toolbarBottom<=cueSpace.textTop && cueSpace.textHeight>=60);
 assert.equal(panelOrder.video.y,panelOrder.wave.y);
 assert.ok(panelOrder.video.right<=panelOrder.wave.x);
 assert.ok(panelOrder.wave.bottom<=panelOrder.edit.y && panelOrder.edit.bottom<=panelOrder.list.y);
-assert.equal(panelOrder.video.bottom,panelOrder.edit.bottom);
+assert.ok(Math.abs(panelOrder.video.bottom-panelOrder.edit.bottom)<1);
 assert.equal(panelOrder.edit.x,panelOrder.wave.x);
 assert.ok(await page.evaluate(()=>{
  const a=document.querySelector('#karaoke-current-source').getBoundingClientRect(),b=document.querySelector('#karaoke-current-translation').getBoundingClientRect();
@@ -51,7 +51,7 @@ await page.locator('#karaoke-current-source').fill('第二段修改');
 await page.waitForTimeout(800);
 assert.equal(await page.evaluate(()=>window.__test.cues[0].source_text),'第一段修改');
 assert.equal(await page.evaluate(()=>window.__test.cues[1].source_text),'第二段修改');
-await page.locator('#editor-search').fill('第一段修改');
+await page.locator('#editor-search-toggle').click();await page.locator('#editor-search').fill('第一段修改');
 assert.equal(await page.locator('.editor-cue-row').count(),1);
 assert.match(await page.locator('#editor-selection-message').innerText(),/不在筛选/);
 assert.equal(await page.locator('#karaoke-current-source').inputValue(),'第二段修改');

@@ -3,10 +3,10 @@
 @import "./online-view.css";
 /* Standalone view is retained for component verification and the caption entry. */
 body[data-view=control] { padding:20px; overflow:auto; }
-html[data-view=caption],body[data-view=caption] { height:100%; overflow:hidden; background:#232326; }
+html[data-view=caption],body[data-view=caption] { height:100%; overflow:hidden; background:transparent; }
 body[data-view=caption] #online-root { height:100%; }
 .online-panel[data-view=caption] { color:#f0f3f5; }
-.online-panel[data-view=caption] .online-card { position:relative; display:grid; grid-template-rows:32px minmax(0,1fr); height:100%; gap:6px; padding:8px 14px; border:1px solid #ffffff24; border-radius:8px; background:#232326; }
+.online-panel[data-view=caption] .online-card { position:relative; display:grid; grid-template-rows:32px minmax(0,1fr); height:100%; gap:6px; padding:8px 14px; border:1px solid #ffffff24; border-radius:8px; background:rgb(35 35 38 / var(--caption-background-alpha,1)); }
 .online-panel[data-view=caption] header { height:32px; margin:0; opacity:0; cursor:grab; user-select:none; }.online-panel[data-view=caption] header strong { font-size:12px; font-weight:500; pointer-events:none; }.online-panel[data-view=caption] header button { min-height:24px; padding:3px 8px; font-size:12px; background:transparent; border-color:#ffffff33; color:inherit; }
 .online-panel[data-view=caption] .online-card:hover header,.online-panel[data-view=caption] .online-card:focus-within header { opacity:1; }
 .online-panel[data-view=caption] #online-status { position:absolute; top:15px; left:170px; right:84px; height:18px; margin:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; pointer-events:none; font-size:11px; color:#b5d5ca; opacity:0; }

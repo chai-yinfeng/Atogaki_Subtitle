@@ -4,7 +4,7 @@ import {paletteVariables,type ImagePalette,type ColorRoles,type RGB,hex} from '.
 import {extractMaterialPalette,materialVariables} from './material-palette';
 import {mountSheet} from './app-panels';
 
-type ImageTheme={version:1;name:string;displayName:string;palette:ImagePalette;seed?:RGB;roles?:ColorRoles;template:AppTheme;fit:'contain'|'cover';strength:number;credit:string;source:string;enabled:boolean};
+type ImageTheme={version:1;name:string;displayName:string;palette:ImagePalette;seed?:RGB;roles?:ColorRoles;template:AppTheme;fit:'contain'|'cover';strength:number;imageOpacity?:number;credit:string;source:string;enabled:boolean};
 const KEY='atogaki.appearance.imageTheme';
 const color=(value:unknown):value is RGB=>Array.isArray(value)&&value.length===3&&value.every(c=>typeof c==='number'&&Number.isFinite(c)&&c>=0&&c<=255);
 export function readImageTheme():ImageTheme|null {
@@ -18,7 +18,9 @@ export function readImageTheme():ImageTheme|null {
 }
 const clone=(theme:ImageTheme|null):ImageTheme|null=>theme?structuredClone(theme):null;
 const seed=(theme:ImageTheme)=>theme.seed??theme.roles?.accent??theme.palette.accent;
+const imageOpacity=(theme:ImageTheme|null)=>Math.max(0,Math.min(100,Number.isFinite(theme?.imageOpacity)?theme!.imageOpacity!:35));
 export function mountImageThemes(host:HTMLElement) {
+ const shell=document.querySelector<HTMLElement>('.shell');
  let config=readImageTheme(),draft=clone(config),disposed=false,working=false,applying=false;
  let operation=0,application=0,renderGeneration=0;
  const events=new AbortController(),urls=new Set<string>(),images=new Set<HTMLImageElement>();
@@ -32,6 +34,7 @@ export function mountImageThemes(host:HTMLElement) {
  <label>名称<input data-image-name maxlength="100" placeholder="图片主题名称"></label>
  <div><span class="settings-subheading">配色方案</span><div class="image-seeds"></div></div>
  <label>应用时的明暗<select data-image-template><option value="light">亮色</option><option value="dark">暗色</option><option value="system">跟随系统</option></select></label>
+ <label>背景图片不透明度 <output data-image-opacity-value>35%</output><input data-image-opacity type="range" min="0" max="100" value="35"></label>
  <details><summary>图片与来源</summary><label>本机图片路径<input data-image-path placeholder="可选：粘贴完整路径"></label><button type="button" class="secondary" data-import-path>从路径导入</button><label>署名<input data-image-credit maxlength="300"></label><label>来源网页<input data-image-source maxlength="2000" placeholder="https://…"></label><button type="button" class="secondary" data-reveal-image>定位图片</button></details>
  <p class="image-studio-status" role="status"></p></aside>
  <section class="image-studio-previews" aria-label="亮暗主题预览">${['light','dark'].map(mode=>`<div><h3>${mode==='light'?'亮色':'暗色'}</h3><div class="theme-mini" data-preview-mode="${mode}"><aside>Atogaki<span>工作台</span><span class="selected">收听</span><span>在线字幕</span></aside><main><strong>正在收听</strong><section><span class="mini-muted">原文</span><p>言葉をたしかめながら、続きを聴く。</p><span class="mini-muted">译文</span><p>一边确认文字，一边继续收听。</p></section><div class="mini-toolbar"><span class="mini-primary">播放</span><span>节目列表</span></div><div class="mini-input">搜索字幕</div></main></div></div>`).join('')}<p class="preview-note">背景、文字、按钮与选中状态自动协调；仅预览，应用后生效。</p></section></div>
@@ -47,7 +50,7 @@ export function mountImageThemes(host:HTMLElement) {
  const clear=()=>{
   const keys=new Set([...Object.keys(paletteVariables({dominant:[0,0,0],accent:[0,0,0],swatches:[]})),...Object.keys(materialVariables([0,0,0],false))]);
   for(const key of keys)document.documentElement.style.removeProperty(key);
-  document.documentElement.style.removeProperty('--scene');delete document.documentElement.dataset.imageTheme;footer.replaceChildren();footer.classList.add('hidden');
+  shell?.style.removeProperty('--scene');shell?.style.removeProperty('--scene-scrim');delete document.documentElement.dataset.imageTheme;footer.replaceChildren();footer.classList.add('hidden');
  };
  const paint=(theme:ImageTheme)=>{
   for(const [key,value] of Object.entries(materialVariables(seed(theme),resolvedTheme(theme.template)==='dark')))document.documentElement.style.setProperty(key,value);
@@ -67,7 +70,10 @@ export function mountImageThemes(host:HTMLElement) {
   if(disposed||generation!==application)return false;
   if(!path)throw Error('本机图片副本已缺失，请重新导入');
   clear();applying=true;try{applyTheme(theme.template);}finally{applying=false;}
-  config=clone(theme);config!.enabled=true;paint(config!);credit();save();
+  config=clone(theme);config!.enabled=true;paint(config!);
+  shell?.style.setProperty('--scene',`url(${JSON.stringify(convertFileSrc(path))})`);
+  shell?.style.setProperty('--scene-scrim',`color-mix(in srgb,var(--background) ${100-imageOpacity(config)}%,transparent)`);
+  credit();save();
   window.dispatchEvent(new Event('atogaki-image-theme-change'));return true;
  };
  const fields=()=>{
@@ -78,6 +84,10 @@ export function mountImageThemes(host:HTMLElement) {
  };
  const preview=()=>{
   find<HTMLButtonElement>('[data-apply-image]').disabled=!draft||working;
+  const opacity=find<HTMLInputElement>('[data-image-opacity]');
+  opacity.disabled=!draft||working;opacity.value=String(imageOpacity(draft));
+  find('[data-image-opacity-value]').textContent=opacity.value+'%';
+  for(const element of studio.querySelectorAll<HTMLElement>('[data-preview-mode]'))element.style.setProperty('--scene-scrim',`color-mix(in srgb,var(--background) ${100-imageOpacity(draft)}%,transparent)`);
   const seeds=find('.image-seeds');seeds.replaceChildren();
   if(!draft)return;
   for(const rgb of draft.palette.swatches){
@@ -92,11 +102,16 @@ export function mountImageThemes(host:HTMLElement) {
   find<HTMLSelectElement>('[data-image-template]').value=theme?.template??'system';
   find<HTMLInputElement>('[data-image-credit]').value=theme?.credit??'';find<HTMLInputElement>('[data-image-source]').value=theme?.source??'';
   preview();
-  if(!theme){find('.image-theme-preview').classList.add('hidden');return;}
+  if(!theme){find('.image-theme-preview').classList.add('hidden');for(const element of studio.querySelectorAll<HTMLElement>('[data-preview-mode]'))element.removeAttribute('style');return;}
   let path:string|null;
   try{path=await invoke<string|null>('load_theme_image',{name:theme.name});}catch(error){if(disposed||generation!==renderGeneration)return;throw error;}
   if(disposed||generation!==renderGeneration||draft!==theme)return;
-  const image=find<HTMLImageElement>('.image-theme-preview');image.classList.toggle('hidden',!path);if(path)image.src=convertFileSrc(path);
+  const image=find<HTMLImageElement>('.image-theme-preview');image.classList.toggle('hidden',!path);
+  for(const element of studio.querySelectorAll<HTMLElement>('[data-preview-mode]')){
+   if(path)element.style.setProperty('--scene',`url(${JSON.stringify(convertFileSrc(path))})`);
+   else element.style.removeProperty('--scene');
+  }
+  if(path)image.src=convertFileSrc(path);
  };
  section.querySelector('[data-open-image-studio]')!.addEventListener('click',()=>{
   draft=clone(config);void render().catch(error=>message(String(error),true));
@@ -118,7 +133,7 @@ export function mountImageThemes(host:HTMLElement) {
   try{
    const imported=await invoke<{name:string;display_name:string}|null>('import_theme_image',{path});if(!current())return;if(!imported){message('已取消导入。');return;}
    const palette=await analyze(imported.name,current);if(!palette||!current())return;
-   draft={version:1,name:imported.name,displayName:imported.display_name,palette,seed:palette.accent,template:draft?.template??'system',fit:'contain',strength:.45,credit:'',source:'',enabled:false};
+   draft={version:1,name:imported.name,displayName:imported.display_name,palette,seed:palette.accent,template:draft?.template??'system',imageOpacity:imageOpacity(draft),fit:'contain',strength:.45,credit:'',source:'',enabled:false};
    await render();if(current())message('配色已生成；预览后点击应用。');
   }catch(error){if(current())message('导入失败：'+String(error),true);}finally{if(!disposed){working=false;preview();}}
  };
@@ -128,6 +143,9 @@ export function mountImageThemes(host:HTMLElement) {
  find('[data-reset-image]').onclick=()=>{invalidate();if(config)config.enabled=false;clear();save();message('已恢复基础主题，原图与配置保留。');sheet.close();};
  find('[data-reveal-image]').onclick=()=>{if(draft)void invoke('reveal_theme_image',{name:draft.name}).catch(error=>message(String(error),true));};
  studio.addEventListener('change',()=>{fields();preview();},{signal:events.signal});
+ find<HTMLInputElement>('[data-image-opacity]').addEventListener('input',event=>{
+  if(draft){draft.imageOpacity=(event.currentTarget as HTMLInputElement).valueAsNumber;preview();}
+ },{signal:events.signal});
  host.querySelectorAll('[data-app-theme]').forEach(button=>button.addEventListener('click',()=>{invalidate();if(config)config.enabled=false;clear();save();},{signal:events.signal}));
  window.addEventListener('atogaki-theme-change',()=>{
   if(applying||!config?.enabled)return;

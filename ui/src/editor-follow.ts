@@ -12,6 +12,7 @@ type FollowOptions<T extends EditorCue> = {
   time(ms: number): string;
   status(message: string, error?: boolean): void;
   resumed(): void;
+  timelineFollowing(): boolean;
 };
 
 /** Coordinate follow intent without owning a player, draft queue or backend. */
@@ -29,13 +30,14 @@ export function mountEditorFollow<T extends EditorCue>(root: HTMLElement, option
     if (events.signal.aborted) return;
     const id = session.selectedCueId;
     const hidden = id && !options.visible().some(cue => cue.id === id);
-    const mode = session.followPlayback ? (id ? "跟随播放中" : "当前位置没有字幕") : "已锁定编辑段";
+    const mode = session.followPlayback ? (!options.timelineFollowing() ? "时间轴跟随已暂停" : id ? "跟随播放中" : "当前位置没有字幕") : "已锁定编辑段";
     const text = `${mode}${hidden ? " · 当前段不在筛选结果中" : ""}${!session.listAutoScroll ? " · 列表自动滚动已暂停" : ""} · 单击锁定编辑，双击或时间码定位播放`;
     if (message.textContent !== text) message.textContent = text;
   };
   const sync = () => {
     if (events.signal.aborted) return;
-    const pressed = String(session.followPlayback), label = session.followPlayback ? "正在跟随播放" : "跟随播放";
+    const following = session.followPlayback && options.timelineFollowing();
+    const pressed = String(following), label = following ? "正在跟随播放" : "跟随播放";
     if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
     if (button.textContent !== label) button.textContent = label;
     if (reveal.hidden !== session.listAutoScroll) reveal.hidden = session.listAutoScroll;
@@ -67,7 +69,7 @@ export function mountEditorFollow<T extends EditorCue>(root: HTMLElement, option
     }, { signal: events.signal });
   }
   root.addEventListener("focusin", event => {
-    if ((event.target as HTMLElement).closest(".karaoke-current-segment")) lock();
+    if ((event.target as HTMLElement).closest(".karaoke-current-segment textarea, .karaoke-current-segment input")) lock();
   }, { signal: events.signal });
   return { lock, resume, sync, syncMessage, timingDirty,
     get timingRevision() { return timingRevision; },

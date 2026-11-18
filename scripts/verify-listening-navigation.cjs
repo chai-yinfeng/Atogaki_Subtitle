@@ -25,6 +25,8 @@ const assert=require('node:assert/strict');
   const home=async()=>{await page.locator('#show-workbench').click();await page.locator('.job-open').first().waitFor({state:'attached'});};
   await page.locator('.job-open').first().waitFor({state:'attached'});
   for(const held of ['get_playback_position','list_learning_items']) {
+   await page.reload();
+   await page.locator('.job-open').first().waitFor({state:'attached'});
    await page.evaluate(command=>{window.__listeningQA.hold=command;window.__listeningQA.resume=4500;},held);
    await listen();await page.waitForFunction(()=>window.__listeningQA.release);
    assert.equal(await audio.count(),0,'pending visit cannot mount media before all required reads complete');
@@ -37,8 +39,12 @@ const assert=require('node:assert/strict');
    assert.ok(await audio.evaluate(a=>a.currentTime>=8.9&&a.currentTime<9.2));
    assert.equal(await audio.count(),1);await home();assert.equal(await audio.count(),0);
    assert.equal(await page.evaluate(()=>window.__listeningQA.resume),9000,'leaving persists the current position');
+   await page.locator('#show-listening').click();
+   await page.waitForFunction(()=>{const a=document.querySelector('#listening-media-host audio');return a?.readyState>=1&&a.paused&&a.currentTime>=8.9;});
+   assert.equal(await page.locator('#listening-subtitle-list [data-segment-id]').count(),30);
+   assert.match(await page.locator('#listening-current-source').textContent(),/第 4 句/);
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS: held listening position/learning reads cannot replace a reopened same-job player; new position persists and exactly one media element is mounted');
+  console.log('PASS: stale reads cannot replace the current player; returning restores paused playback, subtitle list and current cue');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

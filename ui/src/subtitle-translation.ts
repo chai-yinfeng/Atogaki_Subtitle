@@ -66,6 +66,7 @@ export function createSubtitleTranslation<Detail>(options: Options<Detail>) {
     if (current(ticket)) options.acceptDetail(detail);
   };
   return {
+    get busy() { return activities.size > 0; },
     has(jobId: string) { return activities.has(jobId); },
     renderActivity,
     async single(cue: SubtitleSegment) {

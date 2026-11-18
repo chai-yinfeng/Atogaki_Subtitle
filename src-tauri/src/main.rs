@@ -4,6 +4,8 @@ mod commands;
 mod credential_store;
 mod custom_models;
 mod desktop_settings;
+#[cfg(target_os = "macos")]
+mod desktop_update;
 mod dictionary_download;
 mod dictionary_lookup;
 mod media_server;
@@ -184,7 +186,7 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
 ) -> Result<(), String> {
     use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
     use objc2_app_kit::{
-        NSBackingStoreType, NSPanel, NSScreenSaverWindowLevel, NSWindow, NSWindowButton,
+        NSBackingStoreType, NSColor, NSPanel, NSScreenSaverWindowLevel, NSWindow, NSWindowButton,
         NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo, NSSize, NSString};
@@ -287,6 +289,8 @@ pub(crate) fn show_caption_panel<R: tauri::Runtime>(
             unsafe { panel.setReleasedWhenClosed(false) };
             native_window.orderOut(None);
             if online {
+                panel.setOpaque(false);
+                panel.setBackgroundColor(Some(&NSColor::clearColor()));
                 panel.setIgnoresMouseEvents(locked);
             }
             if focus && !locked {
@@ -2187,7 +2191,12 @@ fn validated_data_dir_override(value: Option<OsString>) -> Result<Option<PathBuf
 }
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(desktop_update::DesktopUpdate::default());
+    builder
         .setup(move |app| {
             let media_registry = tauri::async_runtime::block_on(PlaybackMediaRegistry::start())?;
             let data_dir = validated_data_dir_override(std::env::var_os("ATOGAKI_DATA_DIR"))?
@@ -2320,10 +2329,15 @@ fn main() {
             online_session::online_session_status,
             online_session::online_choices,
             online_session::online_snapshot,
+            #[cfg(target_os = "macos")]
+            desktop_update::check_desktop_update,
+            #[cfg(target_os = "macos")]
+            desktop_update::install_desktop_update,
             online_session::open_online_captions,
             online_session::toggle_online_captions,
             online_session::hide_online_captions,
             online_session::set_online_caption_locked,
+            online_session::set_online_caption_opacity,
             online_session::start_online_session,
             online_session::stop_online_session,
             asr_credential_status,

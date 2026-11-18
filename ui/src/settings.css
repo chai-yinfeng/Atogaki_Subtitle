@@ -40,16 +40,16 @@
 @media(max-width:700px) { #settings-form { grid-template-columns:120px minmax(0,1fr); }.settings-content { padding:16px; }.settings-footer { flex-wrap:wrap; padding:12px; }.theme-options,.settings-grid { grid-template-columns:minmax(0,1fr); }.settings-tabs { padding:10px 6px; }.settings-path-row { grid-template-columns:minmax(0,1fr); }.settings-path-row button { justify-self:start; } }
 
 /* Image colours are edited in a wide studio, never in the settings sidebar. */
-.light-swatch { background:#fafafa; border:1px solid #d4d4d4; }
-.dark-swatch { background:#171717; border:1px solid #404040; }
-.system-swatch { background:linear-gradient(90deg,#fafafa 50%,#171717 50%); border:1px solid #a3a3a3; }
+.light-swatch { background:#fff; border:1px solid #dedede; }
+.dark-swatch { background:#252421; border:1px solid #514b43; }
+.system-swatch { background:linear-gradient(90deg,#fff 50%,#252421 50%); border:1px solid #a3a3a3; }
 .image-theme-editor { margin-top:24px; padding-top:24px; border-top:1px solid var(--border); }
 .image-theme-editor .settings-section-heading { margin:0; align-items:center; }
 .image-theme-editor .image-theme-status { font-size:12px; color:var(--muted-foreground); margin-top:12px; }
 .image-theme-studio { width:min(1120px,calc(100vw - 48px)); max-width:none; max-height:calc(100dvh - 48px); padding:24px; overflow:auto; }
 .image-theme-studio[open] { display:flex; flex-direction:column; }
 .image-theme-studio>.dialog-heading { margin-bottom:24px; }
-.image-studio-body { display:grid; grid-template-columns:240px minmax(0,1fr); gap:28px; min-width:0; min-height:0; overflow:auto; flex:1; padding-right:4px; }
+.image-studio-body { display:grid; grid-template-columns:240px minmax(0,1fr); gap:28px; min-width:0; min-height:0; overflow:auto; flex:1; padding:6px; }
 .image-studio-controls { display:grid; align-content:start; gap:20px; min-width:0; }
 .image-studio-controls label { display:grid; gap:7px; }
 .image-studio-controls details label { margin:12px 0; }
@@ -59,7 +59,9 @@
 .image-seed[aria-pressed=true] { outline:3px solid var(--ring); outline-offset:2px; }
 .image-studio-previews { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; align-content:start; min-width:0; }
 .image-studio-previews h3 { font-size:13px; font-weight:500; margin-bottom:10px; }
-.theme-mini { display:grid; grid-template-columns:80px minmax(0,1fr); background:var(--background); color:var(--foreground); min-height:220px; border:1px solid var(--border); border-radius:8px; overflow:hidden; font-size:11px; pointer-events:none; }
+.theme-mini { display:grid; grid-template-columns:80px minmax(0,1fr); background:linear-gradient(var(--scene-scrim),var(--scene-scrim)),var(--scene,none) center/cover,var(--background); color:var(--foreground); min-height:220px; border:1px solid var(--border); border-radius:8px; overflow:hidden; font-size:11px; pointer-events:none; }
+.theme-mini[data-preview-mode=light] { --scene-scrim:rgb(255 255 255 / .56); }
+.theme-mini[data-preview-mode=dark] { --scene-scrim:rgb(29 27 24 / .66); }
 .theme-mini>aside { background:var(--sidebar); border-right:1px solid var(--border); padding:14px 8px; display:flex; flex-direction:column; gap:10px; font-weight:600; }
 .theme-mini aside span { padding:5px; font-weight:400; }.theme-mini .selected { background:var(--accent); color:var(--accent-foreground); border-radius:4px; }
 .theme-mini>main { min-width:0; padding:16px; }.theme-mini main>strong { font-size:13px; }
@@ -79,3 +81,7 @@
 .registered-model>div:first-child { display:grid; align-content:start; gap:5px; min-width:0; }.registered-model strong { overflow-wrap:anywhere; font-size:13px; }.registered-model span,.registered-model details { color:var(--muted-foreground); font-size:12px; }.registered-model summary { padding:2px 0; font-size:11px; }.registered-model details p { overflow-wrap:anywhere; margin-top:8px; }
 .registered-model-actions { display:flex; gap:6px; align-self:start; }.registered-model-actions button { min-height:28px; padding:4px 8px; font-size:12px; }
 @media(max-width:700px) { .registered-model { grid-template-columns:minmax(0,1fr); }.custom-model-fields { grid-template-columns:minmax(0,1fr); } }
+.settings-storage-paths { display:grid; gap:0; margin:0; }
+.settings-storage-paths > div { display:grid; gap:5px; padding:12px 0; border-bottom:1px solid var(--border); }
+.settings-storage-paths dt { font-weight:600; }
+.settings-storage-paths dd { margin:0; color:var(--muted-foreground); overflow-wrap:anywhere; user-select:text; }

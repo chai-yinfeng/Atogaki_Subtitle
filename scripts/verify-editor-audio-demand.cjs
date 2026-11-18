@@ -11,7 +11,7 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright'),asse
   await page.locator('#karaoke-current-source').waitFor();await page.waitForTimeout(500);
   const audio=()=>page.locator('#karaoke-media-host audio');
   assert.equal(await audio().getAttribute('preload'),'none');assert.equal(requests.length,0,'opening editor must not fetch audio');
-  await page.locator('[data-editor-action="follow"]').click();await page.locator('#editor-search').fill('第 3 句');
+  await page.locator('[data-editor-action="follow"]').click();await page.locator('#editor-search-toggle').click();await page.locator('#editor-search').fill('第 3 句');
   await page.locator('[data-cue-id="cue-2"]').click();assert.equal(requests.length,0,'selecting text and following must not load media');
   await page.locator('#editor-search').fill('');
   await page.locator('.editor-menu > summary').click();await page.locator('#karaoke-insert-block').click();

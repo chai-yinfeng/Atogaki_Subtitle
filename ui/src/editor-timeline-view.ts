@@ -8,6 +8,7 @@ export type TimelineSnapshot = {
   playbackCueId: string | null;
   gain: number;
   currentMs: number;
+  loop?: { aMs: number; bMs: number | null } | null;
   emptyMessage: string;
 };
 /** Shared by paint and pointer hit testing, including compact canvas heights. */
@@ -186,6 +187,27 @@ export function mountEditorTimeline(canvas: HTMLCanvasElement, styleRoot: HTMLEl
       const right = Math.min(cssWidth, (playing.end_ms - start) / range * cssWidth);
       context.strokeStyle = "#b07800"; context.lineWidth = 2;
       context.strokeRect(left + 1, trackTop + 1, Math.max(2, right - left - 2), Math.max(2, trackHeight - 2));
+    }
+    const loop = snapshot.loop;
+    if (loop && range > 0) {
+      const xAt = (ms: number) => (ms - start) / range * cssWidth;
+      const a = xAt(loop.aMs), b = loop.bMs === null ? null : xAt(loop.bMs);
+      if (b !== null && b > 0 && a < cssWidth) {
+        const left = Math.max(0, a);
+        context.fillStyle = "rgba(35, 127, 163, .20)";
+        context.fillRect(left, rulerHeight, Math.min(cssWidth, b) - left, cssHeight - rulerHeight);
+      }
+      context.font = "bold 10px system-ui";
+      context.textAlign = "center";
+      for (const [x, label] of [[a, "A"], [b, "B"]] as const) {
+        if (x === null || x < 0 || x > cssWidth) continue;
+        const flag = Math.max(8, Math.min(cssWidth - 8, x));
+        context.fillStyle = "#20738c";
+        context.fillRect(x - 0.5, rulerHeight, 1, cssHeight - rulerHeight);
+        context.fillRect(flag - 8, rulerHeight - 12, 16, 12);
+        context.fillStyle = "#ffffff";
+        context.fillText(label, flag, rulerHeight - 3);
+      }
     }
     if (currentMs >= start && currentMs <= end) {
       const playheadX = (currentMs - start) / range * cssWidth;
