@@ -10,6 +10,7 @@ export type MediaCapabilities = {
   ready_for_soft_matroska: boolean;
 };
 
+export type VideoExportMode = "burn" | "soft_matroska";
 export type VideoRenderQuality = "compact" | "balanced" | "high" | "quality" | "soft_matroska" | "prores";
 
 export function videoOutputExtension(quality: VideoRenderQuality): string {

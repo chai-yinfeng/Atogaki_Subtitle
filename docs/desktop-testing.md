@@ -14,7 +14,7 @@ _最后更新：2026-11-18_
 
 对生产前端启动 Vite preview，沿用下文的 WebKit 环境变量。运行 `node scripts/verify-listening-fullscreen.cjs`，默认走元素全屏；指定 `ATOGAKI_HEADED=1 ATOGAKI_NATIVE_VIDEO_FULLSCREEN=1` 复测 WebKit 原生媒体全屏。脚本生成合成 H.264 视频，`ATOGAKI_TEST_FFMPEG` 可指定内置 FFmpeg。两条路径均检查全屏双语、拖动和倍速、退回原阅读区及播放器重建。可选 `ATOGAKI_FULLSCREEN_SCREENSHOT` 保存截图。
 
-`node scripts/verify-editor-render.cjs` 检查导出方式和说明、MP4／MKV／MOV 的保存路径、覆盖确认、进度、取消、关闭与过期字幕保护。带内置 FFmpeg 的实测使用 `ATOGAKI_FFMPEG=/absolute/path/to/ffmpeg cargo test --offline --lib lgpl_sidecar_renders_a_persisted_sqlite_workspace -- --ignored`，需要本机可访问 VideoToolbox 硬件。使用 ffprobe 比较 MKV 的源视频与 AAC 音频包哈希，并核对 H.264、ProRes 422 HQ 及 PCM 输出。
+`node scripts/verify-editor-render.cjs` 检查独立导出区的 MKV 封装与单独的烧录入口、MP4／MKV／MOV 保存路径、覆盖确认、进度、取消、关闭与过期字幕保护。带内置 FFmpeg 的实测使用 `ATOGAKI_FFMPEG=/absolute/path/to/ffmpeg cargo test --offline --lib lgpl_sidecar_renders_a_persisted_sqlite_workspace -- --ignored`，需要本机可访问 VideoToolbox 硬件。使用 ffprobe 比较 MKV 的源视频与 AAC 音频包哈希，并核对 H.264、ProRes 422 HQ 及 PCM 输出。
 
 ## 当前主窗口回归（2026-11-16）
 

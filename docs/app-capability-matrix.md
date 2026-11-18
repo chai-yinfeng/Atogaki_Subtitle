@@ -21,7 +21,7 @@ _冻结日期：2026-09-18_
 3. Gemini selected range → Hy-MT2：云端生成候选原文，经用户采用后在本地翻译。
 4. Gemini selected range → 云端 translation：云端 ASR 与云端翻译分别授权；选择其中一个不会自动授权另一个。
 
-桌面 App 同时稳定保留任务队列、run／质量信号审查、字幕与时间轴编辑、translation stale 保护、学习资料、SRT／ASS 导出和带字幕视频。视频导出提供 MKV 软字幕、Apple Silicon 画质优先 MP4、ProRes 422 HQ MOV 和原有码率烧录档，详见[0088](decisions/0088-listening-fullscreen-and-video-export-profiles.md)。
+桌面 App 同时稳定保留任务队列、run／质量信号审查、字幕与时间轴编辑、translation stale 保护、学习资料、SRT／ASS 导出和带字幕视频。独立导出提供 SRT／ASS 和可选的 MKV 软字幕封装；烧录可直接输出 MP4，或输出 ProRes 422 HQ MOV 中间文件，详见[0088](decisions/0088-listening-fullscreen-and-video-export-profiles.md)。
 
 字幕校对使用同一紧凑工作面：左侧视频，右侧波形时间轴与上下排列的原译文编辑，下方整宽虚拟列表；视频／波形独立折叠，面板比例可调。默认跟随播放，手动选择或聚焦编辑后锁定，恢复前保护草稿与时间输入。完整识别任务直接进入字幕编辑，处理中任务保留只读进度；翻译、复核与导出按需打开。当前交互以 [0058](decisions/0058-compact-editor-and-playback-follow.md) 为准，生命周期见 [0057](decisions/0057-editor-view-lifecycles.md)，模块整理不扩大平台或制作能力范围。
 

@@ -1,7 +1,7 @@
 import { videoRenderTemplate } from "./video-render-template";
 import { mountToolDialog } from "./task-tools";
 import type { createVideoRenderSession } from "./video-render-session";
-import { videoOutputExtension, videoProfileAvailable, type VideoRender, type VideoRenderQuality } from "./video-render-types";
+import { videoOutputExtension, videoProfileAvailable, type VideoExportMode, type VideoRender, type VideoRenderQuality } from "./video-render-types";
 type Session = ReturnType<typeof createVideoRenderSession>;
 /** One retained tool instance. Session owns all requests and polling. */
 export function mountVideoRenderView(root: HTMLElement, options: {
@@ -12,6 +12,7 @@ export function mountVideoRenderView(root: HTMLElement, options: {
   const dialog = template.content.firstElementChild as HTMLDialogElement; root.append(dialog);
   const query = <T extends HTMLElement>(selector: string) => dialog.querySelector<T>(selector)!;
   const track = query<HTMLSelectElement>("#video-subtitle-track"), quality = query<HTMLSelectElement>("#video-render-quality");
+  const title = query("#video-render-title"), format = query("#video-render-format");
   const path = query<HTMLInputElement>("#video-output-path"), message = query("#video-render-message");
   const capabilities = query("#media-capabilities"), estimate = query("#video-render-estimate"), list = query("#video-render-list");
   const submit = query<HTMLButtonElement>("#submit-video-render"), choose = query<HTMLButtonElement>("#choose-video-output");
@@ -22,17 +23,20 @@ export function mountVideoRenderView(root: HTMLElement, options: {
   const settle = (accepted: boolean) => { const resolve = resolveConfirm; resolveConfirm = null; confirmBoundary.close(); resolve?.(accepted); };
   const confirmBoundary = mountToolDialog(confirm, () => { const resolve = resolveConfirm; resolveConfirm = null; resolve?.(false); });
   const boundary = mountToolDialog(dialog, () => { settle(false); session?.close(); });
+  let mode: VideoExportMode = "burn";
+  const selectedQuality = () => mode === "soft_matroska" ? mode : quality.value as VideoRenderQuality;
   const rows = new Map<string, { node: HTMLElement; status: HTMLElement; details: HTMLElement; path: HTMLElement; progress: HTMLProgressElement; action: HTMLButtonElement }>();
   const text = (tag: string, value: string) => { const node = document.createElement(tag); node.textContent = value; return node; };
   const label = (value: VideoRender["subtitle_track"]) => value === "source" ? `仅${options.context()?.source ?? "原文"}原文` : value === "translation" ? `仅${options.context()?.target ?? "译文"}译文` : "原文＋译文";
   const suggestedName = () => {
     const safe = (options.context()?.name ?? "Atogaki").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").slice(0, 100) || "Atogaki";
-    return `${safe}.${track.value}.${videoOutputExtension(quality.value as VideoRenderQuality)}`;
+    return `${safe}.${track.value}.${videoOutputExtension(selectedQuality())}`;
   };
   const renderEstimate = (error?: string) => {
-    const value = session?.estimates.find(item => item.quality === quality.value);
-    const unavailable = !!session?.capabilities && !videoProfileAvailable(quality.value as VideoRenderQuality, session.capabilities);
-    const hdr = value?.hdr_video && (quality.value === "quality" || quality.value === "prores");
+    const profile = selectedQuality();
+    const value = session?.estimates.find(item => item.quality === profile);
+    const unavailable = !!session?.capabilities && !videoProfileAvailable(profile, session.capabilities);
+    const hdr = value?.hdr_video && (profile === "quality" || profile === "prores");
     estimate.classList.toggle("warning", !!error || unavailable || !!hdr);
     if (error || !value) { estimate.textContent = error ?? "正在读取源视频规格…"; return; }
     if (unavailable) { estimate.textContent = "当前系统或内置 FFmpeg 不支持所选导出方式。"; return; }
@@ -44,7 +48,7 @@ export function mountVideoRenderView(root: HTMLElement, options: {
     } else if (value.quality === "quality") {
       description = "VideoToolbox H.264 按画质分配码率。成品大小随画面复杂度变化。";
     } else if (value.quality === "prores") {
-      description = "烧录为 10-bit ProRes 422 HQ 和 PCM 音频，适合后期再次压制。文件通常很大。";
+      description = "烧录为 10-bit ProRes 422 HQ 和 PCM 音频。文件较大，导出后可用剪辑或转码工具再次压制。";
     } else {
       const size = value.estimated_size_bytes ?? 0;
       const formattedSize = size >= 1024 ** 3 ? `${(size / 1024 ** 3).toFixed(2)} GB` : `${(size / 1024 ** 2).toFixed(0)} MB`;
@@ -96,7 +100,7 @@ export function mountVideoRenderView(root: HTMLElement, options: {
   path.addEventListener("input", () => session?.outputChanged(), { signal: events.signal });
   track.addEventListener("change", () => { session?.outputChanged(); if (!path.value) path.placeholder = suggestedName(); }, { signal: events.signal });
   quality.addEventListener("change", () => {
-    const extension = videoOutputExtension(quality.value as VideoRenderQuality);
+    const extension = videoOutputExtension(selectedQuality());
     if (path.value.trim() && !path.value.trim().toLowerCase().endsWith(`.${extension}`)) path.value = "";
     path.placeholder = suggestedName();
     session?.outputChanged();
@@ -106,14 +110,19 @@ export function mountVideoRenderView(root: HTMLElement, options: {
   confirm.querySelector("[data-accept-render-confirmation]")!.addEventListener("click", () => settle(true), { signal: events.signal });
   return {
     suggestedName,
-    open() {
+    open(entry: VideoExportMode) {
       if (disposed) return;
+      mode = entry;
+      const soft = mode === "soft_matroska";
+      title.textContent = soft ? "封装 MKV 软字幕" : "烧录导出";
+      format.hidden = soft;
+      submit.textContent = soft ? "开始封装" : "开始烧录";
       track.querySelector('option[value="source"]')!.textContent = `仅${options.context()?.source ?? "原文"}原文`;
       track.querySelector('option[value="translation"]')!.textContent = `仅${options.context()?.target ?? "译文"}译文`;
       path.placeholder = suggestedName(); boundary.open();
     },
     close() { settle(false); boundary.close(); },
-    read: () => ({ outputPath: path.value, track: track.value as VideoRender["subtitle_track"], quality: quality.value as VideoRenderQuality }),
+    read: () => ({ outputPath: path.value, track: track.value as VideoRender["subtitle_track"], quality: selectedQuality() }),
     output(value: string) { path.value = value; }, message(value: string) { message.textContent = value; },
     capabilities: renderCapabilities, estimates: renderEstimate, history,
     busy(value: boolean, canSubmit: boolean) {
@@ -126,7 +135,10 @@ export function mountVideoRenderView(root: HTMLElement, options: {
       confirm.querySelector("[data-accept-render-confirmation]")!.textContent = value.confirmLabel;
       return new Promise(resolve => { resolveConfirm = resolve; confirmBoundary.open(); });
     },
-    bind(controller: Session, trigger: HTMLButtonElement | null) { session = controller; trigger?.addEventListener("click", () => { trigger.focus(); void session?.open(); }, { signal: events.signal }); },
+    bind(controller: Session, trigger: HTMLButtonElement | null, entry: VideoExportMode) {
+      session = controller;
+      trigger?.addEventListener("click", () => { trigger.focus(); void session?.open(entry); }, { signal: events.signal });
+    },
     dispose() { if (disposed) return; disposed = true; settle(false); events.abort(); confirmBoundary.dispose(); boundary.dispose(); rows.clear(); dialog.remove(); confirm.remove(); session = null; },
   };
 }

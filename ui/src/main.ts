@@ -680,6 +680,7 @@ const translatePendingButton = workspaceView.querySelector<HTMLButtonElement>("#
 const translateAllButton = workspaceView.querySelector<HTMLButtonElement>("#translate-all");
 const openSubtitleOverlayButton = document.querySelector<HTMLButtonElement>("#open-subtitle-overlay");
 const exportButton = workspaceView.querySelector<HTMLButtonElement>("#export-subtitles");
+const muxVideoButton = workspaceView.querySelector<HTMLButtonElement>("#mux-video-subtitles");
 const renderVideoButton = workspaceView.querySelector<HTMLButtonElement>("#render-video");
 const editSubtitleStylesButton = workspaceView.querySelector<HTMLButtonElement>("#edit-subtitle-styles");
 const revealExportButton = workspaceView.querySelector<HTMLButtonElement>("#reveal-export");
@@ -863,7 +864,8 @@ const videoRenderSession = createVideoRenderSession({
   repeat: tick => { const timer = window.setInterval(tick, 1000); return () => window.clearInterval(timer); },
   view: videoRenderView,
 });
-videoRenderView.bind(videoRenderSession, renderVideoButton);
+videoRenderView.bind(videoRenderSession, renderVideoButton, "burn");
+videoRenderView.bind(videoRenderSession, muxVideoButton, "soft_matroska");
 const subtitleStyleView = mountSubtitleStyleView(shell ?? document.body, {
   context: () => activeDetail ? { segments: activeDetail.segments, sourceLanguage: activeDetail.job.source_language } : null,
   fileUrl: convertFileSrc, time: formatTime,
@@ -2009,12 +2011,13 @@ function updateTranslationControls(): void {
     translateAllButton.disabled = taskBusy || !hasSegments || !translationStatus.configured;
   }
   if (exportButton) exportButton.disabled = taskBusy || !hasSegments;
-  if (renderVideoButton) {
+  for (const button of [renderVideoButton, muxVideoButton]) {
+    if (!button) continue;
     const inputPath = activeDetail?.job.input_path;
-    renderVideoButton.disabled =
+    button.disabled =
       taskBusy || !hasSegments || !inputPath || !activeDetail?.playback_path || isAudioPath(inputPath);
-    renderVideoButton.title = inputPath && isAudioPath(inputPath)
-      ? "音频任务不能烧录视频"
+    button.title = inputPath && isAudioPath(inputPath)
+      ? "当前任务是音频，没有可导出的视频"
       : inputPath && !activeDetail?.playback_path
         ? "原视频已移动，请先在字幕编辑中重新定位"
         : "";

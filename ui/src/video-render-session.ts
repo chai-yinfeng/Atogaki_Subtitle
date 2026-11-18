@@ -1,6 +1,6 @@
 import { videoOutputExtension, videoProfileAvailable } from "./video-render-types.ts";
 import type { createVideoRenderBackend } from "./video-render-backend";
-import type { MediaCapabilities, VideoRender, VideoRenderEstimate, VideoRenderQuality } from "./video-render-types";
+import type { MediaCapabilities, VideoRender, VideoRenderEstimate, VideoRenderQuality, VideoExportMode } from "./video-render-types";
 type Draft = { outputPath: string; track: VideoRender["subtitle_track"]; quality: VideoRenderQuality };
 type Context = { jobId: string; navigation: number; inputPath: string | null; videoAvailable: boolean };
 type Options = {
@@ -8,7 +8,7 @@ type Options = {
   backend: ReturnType<typeof createVideoRenderBackend>;
   confirm(value: { title: string; message: string; confirmLabel: string; danger: boolean }): Promise<boolean>;
   status(message: string, error?: boolean): void; fileManager: string;
-  view: { open(): void; close(): void; read(): Draft; output(path: string): void; message(text: string): void; capabilities(error?: string): void; estimates(error?: string): void; history(): void; busy(value: boolean, canSubmit: boolean): void };
+  view: { open(mode: VideoExportMode): void; close(): void; read(): Draft; output(path: string): void; message(text: string): void; capabilities(error?: string): void; estimates(error?: string): void; history(): void; busy(value: boolean, canSubmit: boolean): void };
   repeat(callback: () => void): () => void;
 };
 /** A render tool visit owns requests and polling, never the backend worker. */
@@ -59,11 +59,11 @@ export function createVideoRenderSession(options: Options) {
     get capabilities() { return capabilities; }, get estimates() { return estimates; }, get renders() { return renders; },
     get submitting() { return submitting; }, get canSubmit() { return canSubmit(); },
     refresh,
-    async open() {
+    async open(mode: VideoExportMode = "burn") {
       if (disposed || visit || !guard()) return;
       visit = { ...options.context()! }; const ticket = ++generation, jobId = visit.jobId;
       capabilities = null; estimates = []; renders = []; outputRevision++;
-      options.view.output(""); options.view.message(""); options.view.open();
+      options.view.output(""); options.view.message(""); options.view.open(mode);
       options.view.capabilities(); options.view.estimates(); options.view.history(); busy();
       stopPoll = options.repeat(() => { if (current(ticket) && renders.some(r => r.status === "queued" || r.status === "running")) void refresh(); });
       await Promise.all([

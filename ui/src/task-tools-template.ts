@@ -108,20 +108,23 @@ export function taskToolsTemplate(fileManagerLabel: string): string {
       </section>
       <section id="workspace-export-panel" class="workspace-panel hidden" role="tabpanel" aria-labelledby="workspace-tab-export" data-workspace-panel="export">
         <div class="module-heading">
-          <div><p class="eyebrow">DELIVERABLES</p><h2>导出成品</h2><p>每次导出都读取当前已保存的字幕；未保存草稿不会进入文件或视频。</p></div>
+          <div><h2>字幕导出</h2><p>导出使用当前已保存的字幕。</p></div>
         </div>
         <div class="export-grid">
           <article class="export-card">
-            <div><span class="module-number">01</span><h3>字体、样式与预览</h3><p>设置任务级原文／译文样式，并用最终烧录所用的 FFmpeg/libass 生成真实预览帧。</p></div>
-            <div class="export-card-actions"><button id="edit-subtitle-styles" type="button">设置并预览…</button></div>
+            <div><h3>独立导出</h3><p>SRT 或 ASS 搭配原视频播放。需要单个文件时，可把可开关的字幕轨封装进 MKV。</p></div>
+            <div class="export-card-actions">
+              <button id="export-subtitles" type="button">导出 SRT／ASS…</button>
+              <button id="mux-video-subtitles" type="button" class="secondary">封装 MKV 软字幕…</button>
+              <button id="reveal-export" type="button" class="secondary hidden">在 ${fileManagerLabel} 中显示</button>
+            </div>
           </article>
           <article class="export-card">
-            <div><span class="module-number">02</span><h3>字幕文件</h3><p>推荐搭配原视频播放，保留原视频画质。按需要导出原文、译文或双语字幕；SRT 保留文字和时间，ASS 还保留字幕样式。</p></div>
-            <div class="export-card-actions"><button id="export-subtitles" type="button">导出字幕…</button><button id="reveal-export" type="button" class="secondary hidden">在 ${fileManagerLabel} 中显示</button></div>
-          </article>
-          <article class="export-card">
-            <div><span class="module-number">03</span><h3>带字幕视频</h3><p>可封装软字幕并保留主视频画质，也可烧录为分享成片或后期中间文件。</p></div>
-            <div class="export-card-actions"><button id="render-video" type="button">导出带字幕视频…</button></div>
+            <div><h3>烧录导出</h3><p>将字幕写进画面。可直接导出 MP4，或输出 ProRes 中间文件供后期压制。</p></div>
+            <div class="export-card-actions">
+              <button id="render-video" type="button">烧录导出…</button>
+              <button id="edit-subtitle-styles" type="button" class="secondary">设置字幕样式并预览…</button>
+            </div>
           </article>
         </div>
       </section>
