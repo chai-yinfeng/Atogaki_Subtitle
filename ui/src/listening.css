@@ -45,3 +45,21 @@
 .listening-word-senses { list-style:none; padding:0; margin:0 0 8px; }
 .listening-word-senses li { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); }
 .listening-word-senses li button { flex:none; }
+
+.listening-cue-grammar { justify-self:start; min-height:24px; padding:2px 6px; font-size:11px; }
+.japanese-grammar-entry { display:grid; gap:8px; margin-block:12px; overflow-wrap:anywhere; }
+.japanese-grammar-entry h3,.japanese-grammar-entry h4,.japanese-grammar-entry p,.japanese-grammar-entry dl,.japanese-grammar-entry dd { margin:0; }
+.japanese-grammar-entry dt { margin-top:6px; font-weight:600; }
+.japanese-grammar-examples,.japanese-grammar-results { margin:0; padding:0; list-style:none; }
+.japanese-grammar-examples li { display:grid; gap:2px; margin-bottom:8px; }
+.japanese-grammar-examples span:last-child { color:var(--muted-foreground); }
+.japanese-grammar-related { display:flex; flex-wrap:wrap; gap:6px; }
+.japanese-grammar-search { display:flex; align-items:end; flex-wrap:wrap; gap:8px; padding-bottom:12px; }
+.japanese-grammar-search[hidden] { display:none; }
+.japanese-grammar-search label { display:grid; flex:1; min-width:110px; gap:5px; }
+.japanese-grammar-body { max-height:56vh; overflow:auto; overflow-wrap:anywhere; }
+.japanese-grammar-results { display:grid; gap:6px; }
+.japanese-grammar-results button { display:grid; width:100%; grid-template-columns:1fr auto; gap:4px; text-align:left; }
+.japanese-grammar-results button span { grid-column:1/-1; }
+.japanese-grammar-dialog footer { margin-top:12px; }
+#listening-grammar-preview .japanese-grammar-entry span { color:inherit; font-size:inherit; text-transform:none; }

@@ -146,6 +146,7 @@ pub struct LocalLearningItemRecord {
     pub target_language: String,
     pub item_type: String,
     pub source_text: String,
+    pub grammar_id: Option<String>,
     pub meaning_text: Option<String>,
     pub meaning_provider_id: Option<String>,
     pub meaning_source_label: Option<String>,
@@ -246,6 +247,20 @@ pub struct NewLocalLearningDictionarySelection {
     pub entry_id: String,
     pub lookup: NewLocalLearningLookupResult,
     pub sense_index: usize,
+}
+
+#[derive(Debug)]
+pub struct NewLocalLearningGrammarSelection {
+    pub grammar_id: String,
+    pub title: String,
+    pub meaning: String,
+    pub cues: Vec<LocalSubtitleSegmentRecord>,
+}
+
+enum LearningSelectionOrigin {
+    Manual,
+    Dictionary(NewLocalLearningDictionarySelection),
+    Grammar(NewLocalLearningGrammarSelection),
 }
 
 #[derive(Debug, Clone)]
@@ -960,7 +975,8 @@ impl LocalDatabase {
         &self,
         input: NewLocalLearningSelection,
     ) -> Result<LocalLearningItemDetail> {
-        self.save_learning_selection_inner(input, None).await
+        self.save_learning_selection_inner(input, LearningSelectionOrigin::Manual)
+            .await
     }
 
     pub async fn save_learning_dictionary_selection(
@@ -968,14 +984,23 @@ impl LocalDatabase {
         input: NewLocalLearningSelection,
         dictionary: NewLocalLearningDictionarySelection,
     ) -> Result<LocalLearningItemDetail> {
-        self.save_learning_selection_inner(input, Some(dictionary))
+        self.save_learning_selection_inner(input, LearningSelectionOrigin::Dictionary(dictionary))
+            .await
+    }
+
+    pub async fn save_learning_grammar_selection(
+        &self,
+        input: NewLocalLearningSelection,
+        grammar: NewLocalLearningGrammarSelection,
+    ) -> Result<LocalLearningItemDetail> {
+        self.save_learning_selection_inner(input, LearningSelectionOrigin::Grammar(grammar))
             .await
     }
 
     async fn save_learning_selection_inner(
         &self,
         input: NewLocalLearningSelection,
-        dictionary: Option<NewLocalLearningDictionarySelection>,
+        origin: LearningSelectionOrigin,
     ) -> Result<LocalLearningItemDetail> {
         if !matches!(input.item_type.as_str(), "selection" | "sentence") {
             return Err(anyhow!(
@@ -1018,7 +1043,54 @@ impl LocalDatabase {
             )
         })?;
 
-        let selected_text = utf16_slice(&source.source_text, start, end)?;
+        let (source_snapshot, translation_snapshot, end_ms) =
+            if let LearningSelectionOrigin::Grammar(grammar) = &origin {
+                anyhow::ensure!(
+                    source.source_language == "ja"
+                        && input.item_type == "selection"
+                        && grammar
+                            .cues
+                            .first()
+                            .is_some_and(|cue| cue.id == input.segment_id),
+                    "语法例句来源无效"
+                );
+                let first = &grammar.cues[0];
+                let last = grammar.cues.last().unwrap_or(first);
+                let current = Self::learning_cue_range(
+                    &mut tx,
+                    &input.job_id,
+                    first.segment_index,
+                    last.segment_index,
+                )
+                .await?;
+                anyhow::ensure!(
+                    current.len() == grammar.cues.len()
+                        && current.iter().zip(&grammar.cues).all(|(now, before)| now.id
+                            == before.id
+                            && now.source_text == before.source_text
+                            && now.start_ms == before.start_ms
+                            && now.end_ms == before.end_ms),
+                    "字幕已变化，请重新分析句型"
+                );
+                let text = current
+                    .iter()
+                    .map(|cue| cue.source_text.as_str())
+                    .collect::<String>();
+                let translation = current
+                    .iter()
+                    .map(|cue| cue.translated_text.as_deref())
+                    .collect::<Option<Vec<_>>>()
+                    .map(|parts| parts.join("\n"));
+                (text, translation, last.end_ms)
+            } else {
+                (
+                    source.source_text.clone(),
+                    source.translated_text.clone(),
+                    source.end_ms,
+                )
+            };
+
+        let selected_text = utf16_slice(&source_snapshot, start, end)?;
         let selected_text = selected_text.trim().to_string();
         if selected_text.is_empty() {
             return Err(anyhow!("learning selection cannot contain only whitespace"));
@@ -1030,58 +1102,71 @@ impl LocalDatabase {
                 "sentence collections must include the complete subtitle segment"
             ));
         }
-        let (headword, source_key, meaning_text, provider_id, provider_name) =
-            if let Some(dictionary) = &dictionary {
-                anyhow::ensure!(
-                    source.source_text == dictionary.source_snapshot
-                        && source.source_language == "ja"
-                        && input.item_type == "selection",
-                    "字幕已变化，请重新查词"
-                );
-                let lookup = &dictionary.lookup;
-                let sense = lookup
-                    .senses
-                    .get(dictionary.sense_index)
-                    .ok_or_else(|| anyhow!("词典义项已变化，请重新查词"))?;
-                let meaning = sense.definitions.join("；");
-                let source_key = format!(
-                    "\0dictionary:{}",
-                    serde_json::to_string(&(
-                        &lookup.provider_id,
-                        &dictionary.entry_id,
-                        dictionary.sense_index,
-                        &sense.definitions,
-                    ))?
-                );
-                (
-                    lookup.headword.as_str(),
-                    source_key,
-                    Some(meaning),
-                    Some(lookup.provider_id.as_str()),
-                    Some(lookup.provider_name.as_str()),
-                )
-            } else {
-                let meaning = (input.item_type == "sentence")
-                    .then(|| source.translated_text.clone())
-                    .flatten()
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty());
-                (
-                    selected_text.as_str(),
-                    selected_text.to_lowercase(),
-                    meaning,
+        let (headword, source_key, meaning_text, provider_id, provider_name, grammar_id) =
+            match &origin {
+                LearningSelectionOrigin::Dictionary(dictionary) => {
+                    anyhow::ensure!(
+                        source.source_text == dictionary.source_snapshot
+                            && source.source_language == "ja"
+                            && input.item_type == "selection",
+                        "字幕已变化，请重新查词"
+                    );
+                    let lookup = &dictionary.lookup;
+                    let sense = lookup
+                        .senses
+                        .get(dictionary.sense_index)
+                        .ok_or_else(|| anyhow!("词典义项已变化，请重新查词"))?;
+                    let meaning = sense.definitions.join("；");
+                    let source_key = format!(
+                        "\0dictionary:{}",
+                        serde_json::to_string(&(
+                            &lookup.provider_id,
+                            &dictionary.entry_id,
+                            dictionary.sense_index,
+                            &sense.definitions,
+                        ))?
+                    );
+                    (
+                        lookup.headword.as_str(),
+                        source_key,
+                        Some(meaning),
+                        Some(lookup.provider_id.as_str()),
+                        Some(lookup.provider_name.as_str()),
+                        None,
+                    )
+                }
+                LearningSelectionOrigin::Grammar(grammar) => (
+                    grammar.title.as_str(),
+                    format!("\0grammar:{}", grammar.grammar_id),
+                    Some(grammar.meaning.clone()),
                     None,
-                    None,
-                )
+                    Some("句型条目"),
+                    Some(grammar.grammar_id.as_str()),
+                ),
+                LearningSelectionOrigin::Manual => {
+                    let meaning = (input.item_type == "sentence")
+                        .then(|| source.translated_text.clone())
+                        .flatten()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty());
+                    (
+                        selected_text.as_str(),
+                        selected_text.to_lowercase(),
+                        meaning,
+                        None,
+                        None,
+                        None,
+                    )
+                }
             };
         let now = chrono::Utc::now().timestamp();
         let item_id = uuid::Uuid::new_v4().to_string();
         sqlx::query(
             "INSERT INTO local_learning_items (
                 id, source_language, target_language, item_type, source_text, source_key,
-                meaning_text, meaning_provider_id, meaning_source_label,
+                meaning_text, meaning_provider_id, meaning_source_label, grammar_id,
                 created_at_unix, updated_at_unix
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(source_language, target_language, item_type, source_key) DO UPDATE SET
                 meaning_provider_id = CASE WHEN local_learning_items.meaning_text IS NULL
                     THEN excluded.meaning_provider_id ELSE local_learning_items.meaning_provider_id END,
@@ -1099,6 +1184,7 @@ impl LocalDatabase {
         .bind(meaning_text)
         .bind(provider_id)
         .bind(provider_name)
+        .bind(grammar_id)
         .bind(now)
         .bind(now)
         .execute(&mut *tx)
@@ -1140,17 +1226,17 @@ impl LocalDatabase {
         .bind(&source.job_id)
         .bind(&source.segment_id)
         .bind(display_name)
-        .bind(&source.source_text)
-        .bind(&source.translated_text)
+        .bind(&source_snapshot)
+        .bind(&translation_snapshot)
         .bind(input.selection_start_utf16)
         .bind(input.selection_end_utf16)
         .bind(source.start_ms)
-        .bind(source.end_ms)
+        .bind(end_ms)
         .bind(now)
         .execute(&mut *tx)
         .await
         .context("failed to save learning item source")?;
-        if let Some(mut dictionary) = dictionary {
+        if let LearningSelectionOrigin::Dictionary(mut dictionary) = origin {
             dictionary.lookup.learning_item_id.clone_from(&item_id);
             Self::write_learning_lookup_result(&mut tx, &dictionary.lookup).await?;
         }
@@ -1161,6 +1247,50 @@ impl LocalDatabase {
         self.get_learning_item(&item_id)
             .await?
             .ok_or_else(|| anyhow!("saved learning item disappeared: {item_id}"))
+    }
+
+    pub async fn learning_grammar_context(
+        &self,
+        job_id: &str,
+        segment_id: &str,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        let mut tx = self.pool.begin().await?;
+        let index: Option<i64> = sqlx::query_scalar(
+            "SELECT s.segment_index FROM local_subtitle_segments s
+             JOIN local_jobs j ON j.job_id = s.job_id
+             WHERE s.job_id = ? AND s.id = ? AND j.source_language = 'ja'",
+        )
+        .bind(job_id)
+        .bind(segment_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let index = index.ok_or_else(|| anyhow!("没有找到可分析的日语字幕"))?;
+        Self::learning_cue_range(
+            &mut tx,
+            job_id,
+            index.saturating_sub(1),
+            index.saturating_add(1),
+        )
+        .await
+    }
+
+    async fn learning_cue_range(
+        connection: &mut sqlx::SqliteConnection,
+        job_id: &str,
+        first: i64,
+        last: i64,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        Ok(sqlx::query_as(
+            "SELECT id, job_id, segment_index, start_ms, end_ms, source_text, translated_text,
+                 source_edited, translation_edited, translation_stale, timing_edited
+             FROM local_subtitle_segments
+             WHERE job_id = ? AND segment_index BETWEEN ? AND ? ORDER BY segment_index",
+        )
+        .bind(job_id)
+        .bind(first)
+        .bind(last)
+        .fetch_all(connection)
+        .await?)
     }
 
     pub async fn list_learning_items(&self) -> Result<Vec<LocalLearningItemDetail>> {
@@ -1174,7 +1304,7 @@ impl LocalDatabase {
         .context("failed to expire learning dictionary results")?;
         let items = sqlx::query_as::<_, LocalLearningItemRecord>(
             "SELECT i.id, i.source_language, i.target_language, i.item_type,
-                    i.source_text, i.meaning_text, i.meaning_provider_id,
+                    i.source_text, i.grammar_id, i.meaning_text, i.meaning_provider_id,
                     i.meaning_source_label, COUNT(o.id) AS occurrence_count,
                     i.created_at_unix, i.updated_at_unix
              FROM local_learning_items i
@@ -2068,16 +2198,35 @@ mod tests {
             .await
             .unwrap();
         let before = old.list_segments(&job.id()).await.unwrap();
-        let saved = old
-            .save_learning_selection(NewLocalLearningSelection {
-                job_id: job.id(),
-                segment_id: segment.id.clone(),
-                item_type: "sentence".into(),
-                selection_start_utf16: 0,
-                selection_end_utf16: 4,
-            })
-            .await
-            .unwrap();
+        // Write the old schema directly so the fixture describes a database
+        // created before either the checkpoint or grammar migrations.
+        let saved_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO local_learning_items (
+                id, source_language, target_language, item_type, source_text, source_key,
+                meaning_text, created_at_unix, updated_at_unix
+             ) SELECT ?, source_language, target_language, 'sentence', '人工修正', '人工修正',
+                      '人工译文', 1, 1 FROM local_jobs WHERE job_id = ?",
+        )
+        .bind(&saved_id)
+        .bind(job.id())
+        .execute(&old.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO local_learning_occurrences (
+                id, learning_item_id, job_id, segment_id, job_display_name_snapshot,
+                segment_source_snapshot, segment_translation_snapshot,
+                selection_start_utf16, selection_end_utf16, start_ms, end_ms, created_at_unix
+             ) SELECT ?, ?, job_id, id, 'legacy task', source_text, translated_text,
+                      0, 4, start_ms, end_ms, 1 FROM local_subtitle_segments WHERE id = ?",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&saved_id)
+        .bind(&segment.id)
+        .execute(&old.pool)
+        .await
+        .unwrap();
         old.close().await;
         let upgraded = LocalDatabase::open(&path).await.unwrap();
         upgraded
@@ -2102,10 +2251,11 @@ mod tests {
                 .can_resume
         );
         let learning = upgraded
-            .get_learning_item(&saved.item.id)
+            .get_learning_item(&saved_id)
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(learning.item.grammar_id, None);
         assert_eq!(
             learning.occurrences[0].segment_id.as_deref(),
             Some(segment.id.as_str())

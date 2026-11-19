@@ -337,3 +337,14 @@ ATOGAKI_DICTIONARY_SMOKE_DIR=/absolute/path/to/qa-dictionaries \
 ```
 
 实词库验证覆盖「読んで／読み」原形与读音、两词形合并且来源时间独立、不同义项分别收藏、过期字幕拒绝写入，以及假名「はし」返回多个词条。真实节目的排序和使用体验由用户试用确认。
+
+## 收听日语句型
+
+构建前端并启动静态服务后，运行 `node scripts/verify-listening-grammar.cjs`。使用合成字幕与 IPC，覆盖未匹配时查目录、等级过滤、框选、跨行高亮、关联条目、收藏和回听。
+
+解析和收藏事务可用已校验的本机 Sudachi Core 包回归，词库目录应可写以便生成派生文件。用例是手写的正反例，未用作真实节目覆盖率统计。
+
+```sh
+ATOGAKI_DICTIONARY_SMOKE_DIR=/absolute/path/to/qa-dictionaries \
+  cargo test --locked --manifest-path src-tauri/Cargo.toml japanese_grammar -- --include-ignored
+```

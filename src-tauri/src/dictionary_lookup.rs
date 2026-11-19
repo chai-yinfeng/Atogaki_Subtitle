@@ -26,7 +26,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     desktop_settings::DesktopSettingsService,
-    japanese_morphology::{JapaneseMorphology, Word, hiragana},
+    japanese_morphology::{GrammarToken, JapaneseMorphology, Word, hiragana},
 };
 
 const INDEX_FILE: &str = "atogaki-dictionary-index.sqlite";
@@ -94,6 +94,12 @@ impl DictionaryLookupService {
             index_lock: Arc::new(Mutex::new(())),
             morphology: Arc::new(JapaneseMorphology::default()),
         }
+    }
+
+    pub(crate) async fn grammar_tokens(&self, text: String) -> Result<Vec<GrammarToken>> {
+        let morphology = self.morphology.clone();
+        let directory = self.directory.clone();
+        tokio::task::spawn_blocking(move || morphology.grammar_tokens(&directory, &text)).await?
     }
 
     pub(crate) async fn lookup_japanese(
@@ -245,6 +251,9 @@ impl DictionaryLookupService {
             .get_item(item_id)
             .await?
             .ok_or_else(|| anyhow!("学习条目不存在：{item_id}"))?;
+        if detail.item.grammar_id.is_some() {
+            bail!("请在学习区查看对应的句型条目");
+        }
         if detail.item.item_type == "sentence" {
             bail!("整句收藏不支持标准词典查询");
         }

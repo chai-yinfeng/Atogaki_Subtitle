@@ -40,7 +40,7 @@ docs/                        当前规范、验收、研究与历史
 
 SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依赖、词表、学习资料与非敏感设置。UUID 任务目录保存媒体派生物、冻结参数、原始识别、run／artifact 和恢复检查点。原始输入不随删除任务而删除；旧 `segments.json` 不覆盖已经编辑的 SQLite 字幕。
 
-密钥保存在系统凭据库，不写入 SQLite、任务产物或文档。云端文本翻译和音频上传分别授权，本地失败不自动切换云端。模型与词典按需下载到设备，不打入 Bundle；macOS 完整包携带 FFmpeg、ffprobe、whisper-cli、llama-server。Windows 仍有独立打包／实机边界。
+密钥保存在系统凭据库，不写入 SQLite、任务产物或文档。云端文本翻译和音频上传分别授权，本地失败不自动切换云端。模型、释义词典和词法包按需下载到设备；macOS 完整包携带 FFmpeg、ffprobe、whisper-cli、llama-server。Windows 仍有独立打包／实机边界。
 
 桌面本地播放通过只监听 loopback 的 token／Host／Origin 受限 Range 服务传输，和早期 Web Serve 产品外壳独立。保留媒体流式读取、唯一播放器和音频按需加载；见 [0054](decisions/0054-request-batching-and-loopback-media.md) 与 [0062](decisions/0062-editor-audio-demand-loading.md)。
 
@@ -51,7 +51,8 @@ SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依�
 - 翻译冻结实际目标、上下文、provider 与版本；目标／上下文变更使相关译文过期，人工译文受保护。源／译 cue 继续对应，不因网络打包变成多对多映射。
 - 结构编辑与撤销的来源、依赖、单调 revision 在同一事务恢复；会话 token 历史见 [0061](decisions/0061-transactional-structure-undo-metadata.md)。
 - 字幕样式共用于 ASS、libass 预览和烧录，SRT 保存文字与时间。开发分支支持 MKV 软字幕封装并复制主视频和音轨；烧录会重新编码。
-- 学习条目、来源例句和词典结果分层。任务删除后保留双语快照；查词／简明译义与字幕翻译、识别词表保持不同职责，见 [0032](decisions/0032-learning-reader-and-source-backed-collections.md)。
+- 学习条目、来源例句和词典结果分层。日语语法目录内置为只读资料，收听区使用现有 Sudachi 词库匹配正文与邻近字幕；已收藏句型用稳定条目 ID 和原媒体时间关联。见 [0090](decisions/0090-local-japanese-grammar-and-catalog.md)。
+- 任务删除后保留双语快照；查词／简明译义与字幕翻译、识别词表保持不同职责，见 [0032](decisions/0032-learning-reader-and-source-backed-collections.md)。
 
 <a id="下一阶段架构已决策尚未实现"></a>
 

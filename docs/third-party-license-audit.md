@@ -115,6 +115,8 @@ DeepL、DeepSeek 与自定义 OpenAI-compatible 服务都通过现有 HTTPS 客�
 
 收听日语查词加入 Apache-2.0 的 Sudachi 0.7.0，源码固定到 `5de0410`，ZIP 仅启用 flate2 解压。macOS arm64 的 Rust 声明按锁文件重生成。SudachiDict Core 20261015 由用户主动下载官方原始 ZIP，校验 SHA-256 后保留归档；包内 `LICENSE-2.0.txt` 与 `LEGAL` 记录 Apache-2.0、UniDic、NEologd 和其他上游归属。派生二进制仅供本机解析。
 
+离线语法目录内置 OpenJLPT 原始语法 JSON，固定到 `0d1d341`。其 NOTICE 将语法解释和例句归于 OpenJLPT contributors，使用 CC BY-SA 4.0。本项目的中文语法资料也按 CC BY-SA 4.0 提供。数据来源说明、原始 LICENSE 和 NOTICE 位于 App 的 `third-party/japanese-grammar/`。见[数据目录](../assets/japanese-grammar/README.md)。
+
 Merriam-Webster 是用户自带 Key 的非商业网络服务，不随 App 分发 SDK 或词典数据。API 结果仅由用户点击查询，缓存 24 小时；界面使用官方品牌规范提供且未修改的浅色背景 PNG Logo，以批准的 50px 尺寸显示。仓库文件 `ui/public/merriam-webster-logo.png` 来自 `https://dictionaryapi.com/images/info/branding-guidelines/MWLogo_LightBG_120x120_2x.png`，原始尺寸 240×240，SHA-256 为 `6ddee7e22cbe0686e9ae6de180eea8342ae89d4f0e923b39d409e6a0c76f49bd`。公开发行前必须再次确认非商业、每日每 reference 1,000 次、最多两个 reference、品牌展示和禁止比较／基准测试等当时条款；当前按来源切换的独立展示不得演变为自动排名。
 
 ## 每次 Release 的合规检查

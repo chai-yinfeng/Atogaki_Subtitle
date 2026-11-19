@@ -5,3 +5,7 @@ src-tauri/third-party/*.html text eol=lf
 # Preserve exact Archify output bytes for verification.
 docs/diagrams/atogaki-architecture.html whitespace=-blank-at-eol linguist-generated=true
 docs/diagrams/atogaki-architecture.svg whitespace=-blank-at-eol linguist-generated=true
+
+# Preserve the published OpenJLPT data and license bytes.
+assets/japanese-grammar/openjlpt/* linguist-vendored=true
+assets/japanese-grammar/openjlpt/LICENSE whitespace=-blank-at-eof

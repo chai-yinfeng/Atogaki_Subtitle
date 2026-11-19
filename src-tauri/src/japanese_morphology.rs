@@ -24,11 +24,22 @@ pub(crate) struct Word {
     pub unknown: bool,
 }
 
+#[derive(Debug)]
+pub(crate) struct GrammarToken {
+    pub start: usize,
+    pub end: usize,
+    pub surface: String,
+    pub lemma: String,
+    pub pos: String,
+    pub form: String,
+    pub unknown: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct JapaneseMorphology(Mutex<Option<Arc<JapaneseDictionary>>>);
 
 impl JapaneseMorphology {
-    pub(crate) fn words(&self, directory: &Path, text: &str) -> Result<Vec<Word>> {
+    fn tokenizer(&self, directory: &Path) -> Result<StatelessTokenizer<Arc<JapaneseDictionary>>> {
         let dictionary = {
             let mut cache = self
                 .0
@@ -45,7 +56,11 @@ impl JapaneseMorphology {
             }
         };
 
-        let tokenizer = StatelessTokenizer::new(dictionary);
+        Ok(StatelessTokenizer::new(dictionary))
+    }
+
+    pub(crate) fn words(&self, directory: &Path, text: &str) -> Result<Vec<Word>> {
+        let tokenizer = self.tokenizer(directory)?;
         let mut words = Vec::new();
         for mode in [Mode::C, Mode::A] {
             let list = tokenizer.tokenize(text, mode, false)?;
@@ -76,6 +91,35 @@ impl JapaneseMorphology {
             }
         }
         Ok(words)
+    }
+
+    /// A single ordered sequence with the punctuation and inflection data
+    /// needed for grammar rules. The dictionary view still uses both splits.
+    pub(crate) fn grammar_tokens(&self, directory: &Path, text: &str) -> Result<Vec<GrammarToken>> {
+        let tokenizer = self.tokenizer(directory)?;
+        let list = tokenizer.tokenize(text, Mode::A, false)?;
+        Ok(list
+            .iter()
+            .filter_map(|token| {
+                let start = token.begin();
+                let end = token.end();
+                let surface = text.get(start..end)?;
+                if surface.is_empty() || surface.chars().all(|ch| ch.is_whitespace() && ch != '\n')
+                {
+                    return None;
+                }
+                let features = token.part_of_speech();
+                Some(GrammarToken {
+                    start: text[..start].encode_utf16().count(),
+                    end: text[..end].encode_utf16().count(),
+                    surface: surface.into(),
+                    lemma: token.dictionary_form().into(),
+                    pos: features[0].clone(),
+                    form: features[5].clone(),
+                    unknown: token.is_oov(),
+                })
+            })
+            .collect())
     }
 }
 

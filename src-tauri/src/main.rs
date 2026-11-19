@@ -8,6 +8,7 @@ mod desktop_settings;
 mod desktop_update;
 mod dictionary_download;
 mod dictionary_lookup;
+mod japanese_grammar;
 mod japanese_morphology;
 mod media_server;
 mod model_download;
@@ -779,6 +780,58 @@ async fn save_listening_japanese_word(
         .save_japanese_word(request)
         .await
         .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+fn list_japanese_grammar() -> Vec<japanese_grammar::catalog::Summary<'static>> {
+    japanese_grammar::catalog::entries()
+        .iter()
+        .map(|entry| entry.summary())
+        .collect()
+}
+
+#[tauri::command]
+fn japanese_grammar_entry(id: &str) -> Result<japanese_grammar::catalog::Detail, String> {
+    use japanese_grammar::catalog::{self, Detail};
+    let entry = catalog::get(id).ok_or_else(|| "没有找到语法条目".to_owned())?;
+    Ok(Detail {
+        entry,
+        summary: entry.summary(),
+        related: entry
+            .related
+            .iter()
+            .filter_map(|id| catalog::get(id))
+            .map(|entry| entry.summary())
+            .collect(),
+    })
+}
+
+#[tauri::command]
+async fn analyze_listening_japanese_grammar(
+    state: State<'_, DesktopState>,
+    request: japanese_grammar::Request,
+) -> Result<japanese_grammar::Preview, String> {
+    japanese_grammar::preview(
+        &state.dictionary_lookup_service,
+        &state.learning_service,
+        &request,
+    )
+    .await
+    .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn save_listening_japanese_grammar(
+    state: State<'_, DesktopState>,
+    request: japanese_grammar::SaveRequest,
+) -> Result<LocalLearningItemDetail, String> {
+    japanese_grammar::save(
+        &state.dictionary_lookup_service,
+        &state.learning_service,
+        request,
+    )
+    .await
+    .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -2450,6 +2503,10 @@ fn main() {
             save_learning_selection,
             lookup_listening_japanese,
             save_listening_japanese_word,
+            list_japanese_grammar,
+            japanese_grammar_entry,
+            analyze_listening_japanese_grammar,
+            save_listening_japanese_grammar,
             save_asr_review_decision,
             commands::editor::save_playback_position,
             commands::subtitle_style::save_subtitle_styles,

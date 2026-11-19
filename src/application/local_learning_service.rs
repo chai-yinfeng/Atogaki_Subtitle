@@ -1,7 +1,8 @@
 use anyhow::{Result, anyhow};
 
 use crate::infrastructure::local_db::{
-    LocalDatabase, LocalLearningItemDetail, NewLocalLearningDictionarySelection,
+    LocalDatabase, LocalLearningItemDetail, LocalSubtitleSegmentRecord,
+    NewLocalLearningDictionarySelection, NewLocalLearningGrammarSelection,
     NewLocalLearningLookupResult, NewLocalLearningSelection,
 };
 
@@ -29,6 +30,26 @@ impl LocalLearningService {
     ) -> Result<LocalLearningItemDetail> {
         self.database
             .save_learning_dictionary_selection(input, dictionary)
+            .await
+    }
+
+    pub async fn grammar_context(
+        &self,
+        job_id: &str,
+        segment_id: &str,
+    ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
+        self.database
+            .learning_grammar_context(job_id, segment_id)
+            .await
+    }
+
+    pub async fn save_grammar_selection(
+        &self,
+        input: NewLocalLearningSelection,
+        grammar: NewLocalLearningGrammarSelection,
+    ) -> Result<LocalLearningItemDetail> {
+        self.database
+            .save_learning_grammar_selection(input, grammar)
             .await
     }
 
@@ -174,6 +195,7 @@ mod tests {
             source_language: "en".into(),
             target_language: "zh-Hans".into(),
             item_type: "phrase".into(),
+            grammar_id: None,
             source_text: "say \"hello\"\t世界".into(),
             meaning_text: Some("问候\n第二行".into()),
             meaning_provider_id: None,

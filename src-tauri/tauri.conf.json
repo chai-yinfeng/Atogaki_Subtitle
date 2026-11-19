@@ -62,6 +62,9 @@
     "resources": {
       "../LICENSE": "LICENSE",
       "third-party/": "third-party/",
+      "../assets/japanese-grammar/README.md": "third-party/japanese-grammar/README.md",
+      "../assets/japanese-grammar/openjlpt/LICENSE": "third-party/japanese-grammar/openjlpt/LICENSE",
+      "../assets/japanese-grammar/openjlpt/NOTICE.md": "third-party/japanese-grammar/openjlpt/NOTICE.md",
       "../src/infrastructure/online_worker/offline_asr.py": "online_worker/offline_asr.py",
       "../src/infrastructure/online_worker/__init__.py": "online_worker/__init__.py",
       "../src/infrastructure/online_worker/__main__.py": "online_worker/__main__.py",
