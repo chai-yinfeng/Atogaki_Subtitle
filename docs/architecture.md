@@ -3,7 +3,7 @@
 > 2026-11-13 平台范围：Windows 开发、自动 CI 与打包／验收已暂停；下文涉及 Windows 的技术边界或测试流程保留为历史／恢复参考。当前执行范围见[0077](decisions/0077-pause-windows-development.md)。
 
 
-_核对日期：2026-11-14；离线结构基线 `cf23b87`，在线整合基线 `e06a9c6`，后继模型默认见 0079。_
+_总图核对日期：2026-11-19，源码基线 `09e91b2`。_
 
 本文描述当前系统边界。逐次模块抽取与旧状态移入[清理前快照](archive/2026-11-11/architecture-before-review.md)，跨分支评估、Graphify 结果和同类工具见[系统回顾](system-review-2026-11-11.md)。2026-11-12 整合现有在线实现，不引入新的处理架构。
 
@@ -26,19 +26,11 @@ docs/                        当前规范、验收、研究与历史
 
 保留标准 Cargo 根布局。Tauri 和 CLI 复用根 library；平台界面通过应用用例调用处理能力。应用层目前直接依赖部分 infrastructure 类型，这是现有实现边界，不是完全解耦的 ports/adapters 架构。
 
-## 目标桌面架构
+## 当前桌面架构
 
-```mermaid
-flowchart TD
-    UI[桌面 UI / CLI] --> APP[application 用例与编排]
-    APP --> D[domain 字幕与格式规则]
-    APP --> DB[SQLite 工作区与索引]
-    APP --> ART[任务目录 / 不可变证据 / 检查点]
-    APP --> ASR[ASR provider / Whisper sidecar]
-    APP --> MT[本地或云端翻译 provider]
-    APP --> MEDIA[FFmpeg / libass]
-    DB --> LEARN[学习条目与来源快照]
-```
+[![Atogaki 当前桌面架构图](diagrams/atogaki-architecture.svg)](diagrams/atogaki-architecture.html)
+
+[交互式 HTML](diagrams/atogaki-architecture.html)和[图源 JSON](diagrams/atogaki-architecture.json)采用 Archify。图中引用用于定位固定提交中的实现。桌面概览将编辑与学习用例合并为一个组件，任务目录、系统凭据和可选查词出站请求可从图下说明与本文的数据边界查阅。更新涉及主路径、持久化或出站边界时，核对对应源码后同步更新图源、HTML、SVG 和 README 中的能力说明。
 
 `LocalTaskService` 管理任务与恢复，`JobRunner` 执行处理，`StageScheduler` 管理阶段资源；`LocalWorkspaceService` 管理字幕编辑、翻译写回与导出，`LocalRetranscriptionService` 管理候选，`LocalLearningService` 管理学习资料。样式、字体、烧录、词表分别由已有服务承担。`src-tauri/src/commands/` 只适配对应 IPC；桌面 `main.rs` 仍承担构造和部分命令，不能据已有拆分声称入口已完全收敛。
 
@@ -58,7 +50,7 @@ SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依�
 - cue ID 稳定，原文、译文与来源关系分开。未知词时间不插值冒充精确时间；接缝处理见 [0060](decisions/0060-overlap-alignment-before-acoustic-selection.md)。
 - 翻译冻结实际目标、上下文、provider 与版本；目标／上下文变更使相关译文过期，人工译文受保护。源／译 cue 继续对应，不因网络打包变成多对多映射。
 - 结构编辑与撤销的来源、依赖、单调 revision 在同一事务恢复；会话 token 历史见 [0061](decisions/0061-transactional-structure-undo-metadata.md)。
-- 字幕样式共用于 ASS、libass 预览和烧录；SRT 不承诺视觉样式，烧录会重新编码。
+- 字幕样式共用于 ASS、libass 预览和烧录，SRT 保存文字与时间。开发分支支持 MKV 软字幕封装并复制主视频和音轨；烧录会重新编码。
 - 学习条目、来源例句和词典结果分层。任务删除后保留双语快照；查词／简明译义与字幕翻译、识别词表保持不同职责，见 [0032](decisions/0032-learning-reader-and-source-backed-collections.md)。
 
 <a id="下一阶段架构已决策尚未实现"></a>
@@ -67,9 +59,9 @@ SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依�
 
 [0043](decisions/0043-layered-pipeline-and-task-scoped-asr-runs.md) 的数据分层、run／artifact、provenance／revision、语义组与依赖已经分批落地；旧[管线提案](archive/2026-11-11/pipeline-evolution.md)不再是待实施清单。当前主线仍含 Web Serve／Postgres 源码和默认依赖；[退役报告](legacy-web-retirement-impact.md)只完成分析，未执行隔离或删除。
 
-在线实现从 `codex/online-desktop-integration`（`e06a9c6`）整合进入开发主线，包含原生采集、Rust 会话、Python 推理 worker 与独立字幕显示。稳定发行仍为 v0.1.3，不能把源码整合和已有试装当成新版已发布。在线采集 → CPU 草稿／Qwen 确认 → 独立翻译分组／修订 → 展示的时钟和状态，不等同离线任务的检查点／人工工作区。具体责任、性能证据和仍需讨论的选择见[系统回顾](system-review-2026-11-11.md)。
+在线实现从 `codex/online-desktop-integration`（`e06a9c6`）整合进入开发主线，包含原生采集、Rust 会话、Python 推理 worker 与独立字幕显示。v0.1.4 已包含在线字幕的 One Pass／Two Pass 入口。运行环境准备、质量与延迟验收仍是独立事项。在线采集 → CPU 草稿／Qwen 确认 → 独立翻译分组／修订 → 展示的时钟和状态，不等同离线任务的检查点／人工工作区。具体责任、性能证据和仍需讨论的选择见[系统回顾](system-review-2026-11-11.md)。
 
-当前模型／后端与待实施边界统一看[在线合同](online-asr-plan.md)：默认确认 Qwen3-ASR 1.7B 8bit，在线本地翻译为 Hy-MT2／Index-Translate；离线已有云端文本 provider，在线面板未接云端。Gemini selected-range ASR、Gemini 文本翻译及尚未运行的音频端到端参考是不同路径。单路 Qwen 配投机解码、内存／重复计算专项、录音恢复和新机 runtime 闭环均未因文档整理而实施。
+当前模型／后端与待实施边界统一看[在线合同](online-asr-plan.md)：默认确认 Qwen3-ASR 1.7B 8bit，在线本地翻译为 Hy-MT2／Index-Translate；离线已有云端文本 provider，在线面板未接云端。Gemini selected-range ASR、Gemini 文本翻译及尚未运行的音频端到端参考是不同路径。开发版已接入 Qwen＋DFlash 的 One Pass；录音保存、转离线任务和新机 runtime 准备仍有待推进。
 
 ## 字幕编辑前端的渐进边界
 

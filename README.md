@@ -2,44 +2,28 @@
 
 Atogaki 是一个面向中文使用者的、本地优先的外语音视频理解与学习工作台。它通过识别、翻译、字幕校对、词典与可回看的媒体时间轴，把用户本机已有的节目整理成可以理解、复习和导出的双语资料。项目最初用于整理ヨルシカ「後書き」电台；字幕编辑、样式和烧录是建立可信资料的基础能力，但 Atogaki 目前不以替代完整视频字幕制作软件为目标。
 
-macOS Apple Silicon 是日常开发和完整体验基线，当前稳定版为 [`v0.1.3`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.3)，采用 ad-hoc 签名且尚未公证，最低声明 macOS 12.0。Windows 开发、自动 CI 与后续打包已从 2026-11-13 暂停；既有 Windows 11 x86_64 未签名历史基线为 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+macOS Apple Silicon 是日常开发和完整体验基线，已发布的 macOS 基线为 [`v0.1.4`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.4)，采用 ad-hoc 签名且尚未公证，最低声明 macOS 12.0。Windows 开发、自动 CI 与后续打包已从 2026-11-13 暂停；既有 Windows 11 x86_64 未签名历史基线为 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
-## 能做什么
+## 功能划分与架构
 
-当前模块边界与开发状态见[架构](docs/architecture.md)和[路线图](docs/roadmap.md)；[2026-11-11 系统回顾](docs/system-review-2026-11-11.md)区分稳定离线能力、在线集成分支及学习闭环，并记录同类工具与在线正确性／延迟的评估依据。
+[![Atogaki 桌面架构。Tauri 主进程连接离线任务、字幕与学习用例、在线字幕会话和本机媒体服务。](docs/diagrams/atogaki-architecture.svg)](docs/diagrams/atogaki-architecture.html)
 
-- 导入本机音频或视频，用内置 `whisper-cli` 和用户下载的 Whisper 模型在本地识别日语、英语或韩语。
-- 使用 Silero VAD 检测语音活动、减少静音段识别，并通过词表提高人名与作品名的一致性；VAD 不保证排除所有音乐或环境声。
-- 在播放器中按时间轴查看、跳转和编辑字幕；原文修改后会标记对应译文为待重译。
-- 可选使用 Hy-MT2 本地翻译、DeepL、DeepSeek 或 Gemini 将日语、英语或韩语翻译为简体中文；也可填写自定义 OpenAI-compatible Base URL 与模型。开发主线另有 Index-Translate 2B 本地翻译，未随 v0.1.3 发行。
-- 在任务内字幕编辑器中用波形调整时间、插入／删除、切分／合并字幕；文字自动保存，多个字幕草稿互不覆盖，并可撤销。
-- 为原文和译文设置字体、字号、颜色、描边、背景、位置与边距；FFmpeg/libass 真实预览、双语 ASS 和视频烧录共享同一套样式。
-- 在“收听”中连续阅读并按当前句跟随播放；选择词、短语、语法或整句保存到按语言分册的“学习”区域，并返回原节目时间。
-- 查询用户自行下载的 JMdict、Tomoshi、ECDICT 离线词典，或使用用户配置的 Merriam-Webster API；可选择词典释义作为学习条目的简明译义。
-- 按需导出原文、简体中文或双语 SRT/ASS，或把原文、译文、双语字幕烧录到 MP4。
-- 记录任务、失败阶段、重试来源和烧录历史；重启后会识别被中断的任务，并允许在同任务内从已提交检查点继续；无检查点的历史任务保留原重试入口。
-- 持久化工作台任务顺序；模型下载中断后可在下次启动通过 HTTP Range 安全续传。
-- 使用月夜／来信主题，或导入本机 PNG、JPEG、WebP。提取最多 12 个代表色，通过共享色盘分别设置场景底色、阅读面色与按钮强调色，预览后应用；图片不上传、不随软件分发。
+[交互架构图（下载 HTML 后用浏览器打开）](docs/diagrams/atogaki-architecture.html) · [Archify 图源](docs/diagrams/atogaki-architecture.json) · [架构详解](docs/architecture.md)
 
-媒体、模型、词典包、任务、学习资料和编辑结果默认保留在设备上。只有启用云端字幕翻译时，待翻译的原文字幕及有限的相邻上下文会发送给所选 provider；Gemini 局部识别需另行确认确切音频上传范围；只有用户主动查询在线词典时，所选文本才会发送给对应词典 API。
+| 功能区 | 职责与边界 |
+| --- | --- |
+| **工作台** | 导入本机音视频，安排识别、对齐和翻译任务。支持从已提交检查点恢复。完整原文进入统一字幕编辑器，可校对、调整时间、局部重识别和重译。候选经确认后才更新当前字幕。 |
+| **收听** | 播放已有任务，跟随双语字幕、定位原句并收藏。当前开发分支的视频全屏支持双语和仅译文字幕轨。 |
+| **学习** | 管理词句收藏、词典释义和可回听的来源例句。支持现有词典查询和文本 Anki TSV。日语自动分词、原形归并与句型解析还在调研。 |
+| **在线字幕** | 独立会话采集系统声音，用本地模型识别和翻译，并在主窗口或浮窗显示可修订字幕。v0.1.4 有 One Pass／Two Pass 入口，实时语义和延迟仍待验收。Gemini／百炼实时翻译、保存录音并转离线任务都还在研究或规划中。 |
 
-开发主线已整合在线采集、主窗口控制和可修订字幕：One Pass 使用 Qwen3-ASR 1.7B 8bit＋DFlash，Two Pass 使用 SenseVoice／Zipformer 草稿 → Qwen 确认，随后由 Hy-MT2／Index-Translate 本地翻译。模式、语言和加速边界见[模型与使用说明](docs/model-usage.md)。它仍未通过在线语义验收，新机 runtime／草稿准备闭环也未完成；不属于 v0.1.3 的稳定安装能力。在线面板尚无云端翻译入口。当前合同与实际边界见[在线计划](docs/online-asr-plan.md)，不要用早期分支报告判断今天是否已接入。
+**文件任务**将媒体转成带时间轴的原文，可再按任务配置使用本地或云端文本翻译。当前编辑稿、学习资料与来源关系保存在 SQLite，任务目录另存派生音频、识别产物与恢复检查点，凭据保存在系统钥匙串。Gemini 局部重识别另行确认具体音频范围。首批文件工作流支持日语、英语或韩语识别并译为简体中文，日语节目是首要质量基线。详见[数据与隐私](#本地数据与隐私)。
 
-## v0.1.3 统一字幕编辑与收听
-
-本版包含两分钟识别检查点、同任务暂停／继续和只读部分原文；任务可明确选择仅转录或 Hy-MT2／DeepSeek／DeepL／Gemini 翻译，完整识别后自动进入独立翻译阶段。翻译中断只补未完成或过期部分。设置、任务级后端、持久候选、全文检索、循环试听、批量导入、预设、学习来源和 Anki TSV 一并整理。
-
-Hy-MT2 1.8B 是日常本地翻译推荐，采用官方 GGUF Q4_K_M 权重，模型另行下载。开发主线已将 7B 收出新下载目录，保留已安装模型的管理。离线桌面继续使用 C++ / Metal；在线 Qwen 使用 MLX worker，普通用户的 runtime 分发仍待补齐。人工接缝听审和翻译质量验收仍待补充；实现和验收边界见 [验证记录](docs/offline-workflow-validation.md)。
-
-v0.1.2 已接入阶段队列：默认同时识别两个任务，DeepSeek 文本翻译最多四个请求并发，并可在同一任务的稳定原文前缀上提前进行；成功结果持久保存，完整识别后核对并复用。局部本地识别共享设备限额，Hy-MT2 在完整识别后独占设备翻译。修复长电影在 VAD 右上下文末尾时间轻微越界时无法继续的问题，并显示失败块与产物位置。新增累计执行计时，排除中断等待，并按成功分组更新提前翻译进度。发行说明见 [v0.1.2](docs/release-notes/v0.1.2.md)；设计与验证见 [0052](docs/decisions/0052-staged-concurrency-and-early-translation.md) 和 [阶段管线验证](docs/staged-pipeline-validation.md)。
-
-v0.1.3 将完整识别任务统一到可调面板的字幕编辑器：大视频、波形、上下双语编辑和虚拟字幕列表，支持跟随／锁段、草稿恢复及 Ctrl+Z／⌘Z 按焦点撤销。复核共用主时间轴，可拖选范围与起止边界、试听、对照后采用；清理成功的未采用候选退出历史列表。收听全文可置于右侧、下侧或收起，当前双语字幕始终在视频下方，视频高度和全文比例可调并记忆。字幕 SRT／ASS 是保留原视频画质的推荐输出，烧录重新编码可能损失画质。
-
-本版还包含英文新任务的语言默认切分、重叠音频接缝修复、短翻译组请求打包和本机流式播放。原素材加载／解码失败时回退到任务音频，编辑页音频按需加载；不会自动重新识别或合并已有字幕。发行说明见 [v0.1.3](docs/release-notes/v0.1.3.md)，实现边界见 [0054](docs/decisions/0054-request-batching-and-loopback-media.md)、[0058](docs/decisions/0058-compact-editor-and-playback-follow.md)及[统一编辑器验收](docs/unified-editor-acceptance.md)。
+**导出**位于工作台的任务内。可独立导出 SRT／ASS，也可将字幕烧录进视频。当前开发分支另有可开关的 MKV 软字幕封装、画质优先 MP4 和供外部压制的 ProRes 中间文件。新版导出与全屏字幕的发行状态见[路线图](docs/roadmap.md)。
 
 ## 安装与首次配置
 
-macOS 下载 `Atogaki-v0.1.3-macos-arm64.dmg` 及相邻 `.sha256`；Windows 继续使用 alpha.10 的 NSIS 安装器。从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。
+macOS 下载 `Atogaki-v0.1.4-macos-arm64.dmg` 及相邻 `.sha256`；Windows 继续使用 alpha.10 的 NSIS 安装器。从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。各版功能见[发行记录](docs/release-notes)。
 
 macOS 版本没有 Developer ID 签名或公证。核对下载来源与 SHA-256 后，首次打开若被 Gatekeeper 阻止，可在 Finder 中右键 App 选择“打开”。Windows `alpha.10` 安装包同样没有商业代码签名，SmartScreen 可能显示“未知发布者”；不要为运行测试版而全局关闭系统安全功能。
 
@@ -51,7 +35,7 @@ macOS 版本没有 Developer ID 签名或公证。核对下载来源与 SHA-256 
 
 学习词典与字幕翻译相互独立。JMdict、Tomoshi 和 ECDICT 由用户在设置页明确下载到 `dictionaries/`；Merriam-Webster Key 单独保存到系统凭据库。Collins 未取得可测试的 API 账户，Cambridge API 当前不可用，两者均不出现在产品路径中。
 
-开发源码已增加 Qwen 离线转录与强制对齐打轴，需同时准备识别包、ForcedAligner 和对齐运行环境；公开 v0.1.3 不包含此入口。准备与边界见[0084](docs/decisions/0084-offline-qwen-and-forced-alignment.md)。
+v0.1.4 提供 Qwen 离线转录与强制对齐入口，使用时需准备识别包、ForcedAligner 和对应运行环境。准备与边界见[0084](docs/decisions/0084-offline-qwen-and-forced-alignment.md)。
 
 Whisper 模型建议：
 
@@ -84,13 +68,13 @@ Finder 启动的 App 不会执行 `.zshrc`，因此终端中的 `proxy_on` 不�
 
 删除一个已结束的任务会移除 Atogaki 管理的 SQLite 记录与任务派生产物，不会删除最初导入的媒体、共用模型或已经保存的学习条目快照。模型下载中的合法 `.part` 会跨重启保留，并在服务器支持且响应边界正确时断点续传；摘要或 Range 响应不可信时不会把临时文件安装为模型。系统临时目录仍由 macOS 自行管理。
 
-硬字幕必须重新编码视频。内置 FFmpeg 依次尝试：
+硬字幕必须重新编码视频。按码率烧录时，内置 FFmpeg 依次尝试：
 
 1. Apple VideoToolbox H.264；
 2. FFmpeg 原生 LGPL MPEG-4 软件编码；
 3. 两者都失败时保留错误与 ASS 快照，并明确将烧录标记为失败。
 
-分发版不包含 GPL `libx264`。因此软件回退生成的文件通常会比 x264 更大，但 VideoToolbox 故障不会直接让导出失去回退路径。
+当前开发分支的画质优先 MP4 使用 VideoToolbox，ProRes 中间文件使用独立编码器。两种方式需要对应的编码能力。分发版 FFmpeg 使用 LGPL 配置。
 
 ## 本地数据与隐私
 

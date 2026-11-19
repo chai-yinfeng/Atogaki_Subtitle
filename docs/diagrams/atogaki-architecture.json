@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Atogaki 桌面架构",
+    "locale": "zh-CN",
+    "output": "docs/diagrams/atogaki-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:chai-yinfeng/Atogaki_Subtitle.git",
+      "revision": "09e91b2d49c65dba59df58887ed83f34545d6b7c",
+      "link_mode": "local-only"
+    }
+  },
+  "components": [
+    {
+      "id": "desktop-ui", "type": "frontend", "label": "桌面界面", "sublabel": "工作台 · 收听 · 学习",
+      "pos": [40, 266], "size": [150, 67],
+      "sources": [
+        { "path": "ui/src/main.ts", "line": 365, "end_line": 373, "label": "主窗口功能入口" },
+        { "path": "ui/src/task-tools-template.ts", "line": 108, "end_line": 133, "label": "任务内导出入口" }
+      ]
+    },
+    {
+      "id": "tauri", "type": "backend", "label": "Tauri 主进程", "sublabel": "IPC · 系统集成",
+      "pos": [303, 266], "size": [158, 67],
+      "sources": [
+        { "path": "src-tauri/src/main.rs", "line": 2202, "end_line": 2257, "label": "构造并注入桌面服务" },
+        { "path": "src-tauri/src/main.rs", "line": 2341, "end_line": 2368, "label": "注册桌面命令" },
+        { "path": "src-tauri/src/credential_store.rs", "line": 17, "end_line": 45, "label": "本机凭据库适配" }
+      ]
+    },
+    {
+      "id": "offline", "type": "backend", "label": "离线任务", "sublabel": "识别 · 对齐 · 恢复",
+      "pos": [639, 54], "size": [171, 67],
+      "sources": [
+        { "path": "src/application/job_runner.rs", "line": 369, "end_line": 415, "label": "分块 ASR 与正式字幕分段" },
+        { "path": "src/application/local_task_service.rs", "line": 1263, "end_line": 1298, "label": "发布完整原文并按任务配置翻译" },
+        { "path": "src/application/local_task_service.rs", "line": 966, "end_line": 1005, "label": "任务恢复与检查点校验" }
+      ]
+    },
+    {
+      "id": "workspace", "type": "backend", "label": "字幕与学习用例", "sublabel": "校对 · 翻译 · 收藏",
+      "pos": [639, 194], "size": [171, 67],
+      "sources": [
+        { "path": "src/application/local_workspace_service.rs", "line": 289, "end_line": 308, "label": "编辑当前字幕" },
+        { "path": "src/application/local_workspace_service.rs", "line": 862, "end_line": 918, "label": "分组翻译与校验写回" },
+        { "path": "src/application/local_learning_service.rs", "line": 13, "end_line": 26, "label": "本地学习收藏" }
+      ]
+    },
+    {
+      "id": "online", "type": "backend", "label": "在线字幕会话", "sublabel": "系统声音 · 本地推理",
+      "pos": [639, 349], "size": [171, 67],
+      "sources": [
+        { "path": "src-tauri/src/online_session.rs", "line": 453, "end_line": 490, "label": "本地翻译与识别模式选择" },
+        { "path": "src/application/online_session.rs", "line": 327, "end_line": 385, "label": "Worker 就绪后采集并传入音频" },
+        { "path": "src-tauri/src/online_session.rs", "line": 510, "end_line": 539, "label": "发布会话字幕事件" }
+      ]
+    },
+    {
+      "id": "media", "type": "backend", "label": "本机媒体服务", "sublabel": "回环播放 · FFmpeg 导出",
+      "pos": [639, 500], "size": [171, 67],
+      "sources": [
+        { "path": "src-tauri/src/media_server.rs", "line": 45, "end_line": 71, "label": "回环监听与令牌路由" },
+        { "path": "src/application/local_render_service.rs", "line": 228, "end_line": 254, "label": "冻结 ASS 并登记视频任务" },
+        { "path": "src/application/local_render_service.rs", "line": 359, "end_line": 377, "label": "执行视频渲染" }
+      ]
+    },
+    {
+      "id": "sqlite", "type": "database", "label": "本机 SQLite", "sublabel": "任务 · 字幕 · 学习",
+      "pos": [952, 349], "size": [151, 67],
+      "sources": [
+        { "path": "src-tauri/src/main.rs", "line": 2202, "end_line": 2249, "label": "本机数据库与服务共享" },
+        { "path": "src/application/local_workspace_service.rs", "line": 289, "end_line": 308, "label": "保存人工字幕" },
+        { "path": "src/application/local_learning_service.rs", "line": 17, "end_line": 26, "label": "读写学习条目" }
+      ]
+    },
+    {
+      "id": "cloud-providers", "type": "cloud", "label": "可选云端服务", "sublabel": "文本翻译 · 局部识别",
+      "pos": [1160, 194], "size": [152, 67],
+      "sources": [
+        { "path": "src/infrastructure/openai_compatible.rs", "line": 98, "end_line": 124, "label": "可选文本翻译请求" },
+        { "path": "src-tauri/src/main.rs", "line": 1502, "end_line": 1529, "label": "显式授权的 Gemini 局部识别" }
+      ]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "设备本地", "wraps": ["desktop-ui", "tauri", "offline", "workspace", "online", "media", "sqlite"], "pad": 18 }
+  ],
+  "connections": [
+    { "from": "desktop-ui", "to": "tauri", "label": "IPC 与事件", "variant": "emphasis" },
+    { "from": "tauri", "to": "offline", "label": "导入与恢复", "variant": "emphasis" },
+    { "from": "tauri", "to": "workspace", "label": "读写与查询" },
+    { "from": "tauri", "to": "online", "label": "启停与订阅" },
+    { "from": "tauri", "to": "media", "label": "播放与导出" },
+    { "from": "offline", "to": "workspace", "label": "完整原文", "variant": "emphasis" },
+    { "from": "workspace", "to": "sqlite", "label": "读写本机资料" },
+    { "from": "workspace", "to": "cloud-providers", "label": "按配置或授权发送", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "文件任务与正式字幕", "items": [
+      "Whisper 或本地 Qwen3-ASR 识别。Qwen 使用强制对齐。任务目录保存派生音频、运行产物和恢复检查点。",
+      "完整原文进入工作区，翻译按任务配置执行。局部重识别先生成候选，经复核采用后才写入。学习收藏保留例句和来源时间。"
+    ] },
+    { "dot": "violet", "title": "在线会话", "items": [
+      "模型就绪后启动系统声音采集，PCM 进入本地 Python Worker。在线识别和本地翻译的修订事件驱动主窗口与字幕浮窗。",
+      "在线会话与正式任务资料分开。云端实时同传及自动建离线任务仍在研究或规划中。"
+    ] },
+    { "dot": "amber", "title": "播放与交付", "items": [
+      "本机文件经受限回环服务播放。当前分支支持收听视频全屏双语轨。",
+      "独立导出 SRT／ASS，可选 MKV 软字幕封装。烧录直接输出 MP4，或输出可供后期压制的 ProRes 中间文件。"
+    ] },
+    { "dot": "rose", "title": "云端与凭据边界", "items": [
+      "云端翻译按配置发送文本和有限上下文。Gemini 局部重识别对指定音频范围单独授权。在线词典只在用户发起查询时发送选中文本。",
+      "API Key 保存在系统凭据库。图中的云端箭头概括任务用例实际允许的出站请求。"
+    ] }
+  ]
+}

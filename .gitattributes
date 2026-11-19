@@ -1,3 +1,7 @@
 LICENSE text eol=lf
 about.hbs text eol=lf
 src-tauri/third-party/*.html text eol=lf
+
+# Preserve exact Archify output bytes for verification.
+docs/diagrams/atogaki-architecture.html whitespace=-blank-at-eol linguist-generated=true
+docs/diagrams/atogaki-architecture.svg whitespace=-blank-at-eol linguist-generated=true
