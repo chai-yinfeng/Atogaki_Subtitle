@@ -14,6 +14,8 @@ use tokio::{fs, io::AsyncWriteExt, sync::Mutex};
 
 use crate::desktop_settings::DesktopSettingsService;
 
+pub(crate) const SUDACHI_ARCHIVE: &str = "sudachi-core-20261015.zip";
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DictionaryCatalogItem {
@@ -492,6 +494,24 @@ fn dictionary_catalog() -> &'static [DictionaryCatalogItem] {
                 repository: "tomoshi-app/tomoshi-dict-data",
                 asset_prefix: "tomoshi-dict-open.db",
                 asset_suffix: ".zst",
+            },
+        },
+        DictionaryCatalogItem {
+            id: "sudachi-core",
+            name: "Sudachi 日语分词",
+            language_pair: "日语 · 分词与原形",
+            version_label: "2026-10-15",
+            size_label: "约 73 MiB",
+            description: "在收听区本地识别词界、读音和原形；释义仍由 Tomoshi 或 JMdict 提供。",
+            license: "Apache-2.0",
+            attribution: "Works Applications / SudachiDict contributors；含 UniDic、NEologd 数据，见包内 LEGAL",
+            source_url: "https://github.com/WorksApplications/SudachiDict/releases/tag/v20261015",
+            file_name: SUDACHI_ARCHIVE,
+            source: DictionarySource::Fixed {
+                url: "https://github.com/WorksApplications/SudachiDict/releases/download/v20261015/sudachi-dictionary-20261015-core.zip",
+                checksum: "5cf5cb7f1ea943a988e2fb5d285a9a8b3538861faefa7a2604c2cd18c387f503",
+                algorithm: ChecksumAlgorithm::Sha256,
+                total_bytes: Some(76_937_904),
             },
         },
         DictionaryCatalogItem {

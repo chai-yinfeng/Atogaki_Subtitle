@@ -8,6 +8,7 @@ mod desktop_settings;
 mod desktop_update;
 mod dictionary_download;
 mod dictionary_lookup;
+mod japanese_morphology;
 mod media_server;
 mod model_download;
 mod offline_models;
@@ -754,6 +755,30 @@ async fn save_learning_selection(
         })
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn lookup_listening_japanese(
+    state: State<'_, DesktopState>,
+    request: dictionary_lookup::JapaneseLookupRequest,
+) -> Result<dictionary_lookup::JapaneseLookup, String> {
+    state
+        .dictionary_lookup_service
+        .lookup_japanese(&request)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn save_listening_japanese_word(
+    state: State<'_, DesktopState>,
+    request: dictionary_lookup::SaveJapaneseWordRequest,
+) -> Result<LocalLearningItemDetail, String> {
+    state
+        .dictionary_lookup_service
+        .save_japanese_word(request)
+        .await
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]
@@ -2423,6 +2448,8 @@ fn main() {
             save_desktop_settings,
             save_glossary,
             save_learning_selection,
+            lookup_listening_japanese,
+            save_listening_japanese_word,
             save_asr_review_decision,
             commands::editor::save_playback_position,
             commands::subtitle_style::save_subtitle_styles,

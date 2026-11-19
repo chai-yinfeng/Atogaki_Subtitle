@@ -1,7 +1,8 @@
 use anyhow::{Result, anyhow};
 
 use crate::infrastructure::local_db::{
-    LocalDatabase, LocalLearningItemDetail, NewLocalLearningLookupResult, NewLocalLearningSelection,
+    LocalDatabase, LocalLearningItemDetail, NewLocalLearningDictionarySelection,
+    NewLocalLearningLookupResult, NewLocalLearningSelection,
 };
 
 #[derive(Debug, Clone)]
@@ -19,6 +20,20 @@ impl LocalLearningService {
         input: NewLocalLearningSelection,
     ) -> Result<LocalLearningItemDetail> {
         self.database.save_learning_selection(input).await
+    }
+
+    pub async fn save_dictionary_selection(
+        &self,
+        input: NewLocalLearningSelection,
+        dictionary: NewLocalLearningDictionarySelection,
+    ) -> Result<LocalLearningItemDetail> {
+        self.database
+            .save_learning_dictionary_selection(input, dictionary)
+            .await
+    }
+
+    pub async fn dictionary_entry_id(&self, item_id: &str) -> Result<Option<String>> {
+        self.database.learning_dictionary_entry_id(item_id).await
     }
 
     pub async fn list_items(&self) -> Result<Vec<LocalLearningItemDetail>> {

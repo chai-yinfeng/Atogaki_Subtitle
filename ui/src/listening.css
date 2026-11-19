@@ -35,3 +35,13 @@
 .listening-playback:has(audio) { grid-template-rows:auto minmax(48px,1fr) auto auto; }.listening-playback:has(audio) .listening-video-splitter { display:none; }
 @media(max-width:1050px) { #listening-view { padding:20px; }.listening-session { gap:7px; } }
 @media(max-width:700px) { #listening-view { padding:16px; } }
+
+.listening-word-options { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+.listening-word-options button[aria-pressed="true"] { background:var(--accent); color:var(--accent-foreground); }
+.listening-word-context { margin-bottom:6px !important; overflow-wrap:anywhere; }
+.listening-word-context mark { background:var(--accent); color:var(--accent-foreground); border-radius:3px; padding:0 2px; }
+#listening-dictionary-preview label { display:flex; align-items:center; gap:8px; margin:8px 0; }
+#listening-dictionary-preview select { min-width:0; max-width:90%; }
+.listening-word-senses { list-style:none; padding:0; margin:0 0 8px; }
+.listening-word-senses li { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); }
+.listening-word-senses li button { flex:none; }

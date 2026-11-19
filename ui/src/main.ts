@@ -310,6 +310,29 @@ type PendingLearningSelection = {
   selectionEndUtf16: number;
 };
 
+type JapaneseLookupSelection = { text: string; start: number; end: number };
+type JapaneseDictionaryEntry = {
+  id: string;
+  providerId: string;
+  providerName: string;
+  headword: string;
+  readings: string[];
+  senses: LearningLookupSense[];
+  version: string;
+  attribution: string;
+  license: string;
+};
+type JapaneseLookupWord = {
+  start: number;
+  end: number;
+  surface: string;
+  lemma: string;
+  reading: string;
+  unknown: boolean;
+  entries: JapaneseDictionaryEntry[];
+};
+type JapaneseLookupResult = { words: JapaneseLookupWord[]; notices: string[] };
+
 type TranslationRun = {
   id: string;
   provider_id: string;
@@ -448,13 +471,14 @@ app.innerHTML = `
           <div class="listening-splitter" tabindex="0" role="separator" aria-label="调整播放与全文比例" aria-valuemin="25" aria-valuemax="75"></div>
           <div class="listening-reading" aria-label="全文阅读与收藏">
           <div id="listening-subtitle-list" class="listening-subtitle-list" aria-label="节目全文"></div>
-          <div id="listening-selection-menu" class="selection-menu hidden" role="dialog" aria-label="收藏所选原文">
+          <div id="listening-selection-menu" class="selection-menu hidden" role="dialog" aria-label="查词与收藏">
             <div><span>已选择</span><strong id="listening-selection-text"></strong></div>
-            <p id="listening-selection-message">可先收藏，之后在学习区补充标准译义。</p>
+            <p id="listening-selection-message" role="status">可先收藏，之后在学习区补充标准译义。</p>
+            <div id="listening-dictionary-preview" class="hidden"></div>
             <div class="selection-menu-actions">
               <button id="save-learning-selection" type="button">收藏词语／语法</button>
               <button id="save-learning-sentence" type="button" class="secondary">收藏整句</button>
-              <button id="close-learning-selection" type="button" class="secondary">取消</button>
+              <button id="close-learning-selection" type="button" class="secondary">关闭</button>
             </div>
           </div>
           </div>
@@ -663,6 +687,7 @@ const listeningPlaybackRateSelect = document.querySelector<HTMLSelectElement>("#
 const listeningSelectionMenu = document.querySelector<HTMLDivElement>("#listening-selection-menu");
 const listeningSelectionText = document.querySelector<HTMLElement>("#listening-selection-text");
 const listeningSelectionMessage = document.querySelector<HTMLParagraphElement>("#listening-selection-message");
+const listeningDictionaryPreview = document.querySelector<HTMLDivElement>("#listening-dictionary-preview");
 const saveLearningSelectionButton = document.querySelector<HTMLButtonElement>("#save-learning-selection");
 const saveLearningSentenceButton = document.querySelector<HTMLButtonElement>("#save-learning-sentence");
 const learningItemList = document.querySelector<HTMLDivElement>("#learning-item-list");
@@ -2469,7 +2494,7 @@ function renderListeningSubtitles(segments: SubtitleSegment[]): void {
     <article class="listening-subtitle" data-segment-id="${escapeHtml(segment.id)}">
       <button type="button" class="listening-time" data-listen-time="${segment.start_ms}" aria-label="跳转到 ${escapeHtml(formatTime(segment.start_ms))}">${escapeHtml(formatTime(segment.start_ms))}</button>
       <div class="listening-text">
-        <p class="listening-source" data-learning-source title="选择词语、短语或语法表达后收藏">${highlightSaved(segment.source_text,learningItems.filter(d=>d.item.source_language===activeDetail?.job.source_language).map(d=>d.item.source_text), learningItems.flatMap(d=>d.occurrences.filter(o=>o.job_id===activeDetail?.job.job_id && o.segment_id===segment.id && o.segment_source_snapshot===segment.source_text).map(o=>[o.selection_start_utf16,o.selection_end_utf16] as [number,number])), activeDetail?.job.source_language)}</p>
+        <p class="listening-source" data-learning-source title="${activeDetail?.job.source_language === "ja" ? "点击日语原文查词，也可框选" : "选择词语、短语或语法表达后收藏"}">${highlightSaved(segment.source_text,learningItems.filter(d=>d.item.source_language===activeDetail?.job.source_language).map(d=>d.item.source_text), learningItems.flatMap(d=>d.occurrences.filter(o=>o.job_id===activeDetail?.job.job_id && o.segment_id===segment.id && o.segment_source_snapshot===segment.source_text).map(o=>[o.selection_start_utf16,o.selection_end_utf16] as [number,number])), activeDetail?.job.source_language)}</p>
         <p class="listening-translation">${escapeHtml(segment.translated_text ?? "")}</p>
       </div>
       <button type="button" class="collect-learning-sentence secondary" data-collect-sentence="${escapeHtml(segment.id)}">收藏整句</button>
@@ -2518,25 +2543,174 @@ function captureListeningSelection(): void {
     closeLearningSelection(false);
     return;
   }
-  pendingLearningSelection = {
+  showListeningSelection(segmentId, { text: rawText, start, end });
+}
+
+function captureListeningWord(event: MouseEvent): void {
+  if (activeDetail?.job.source_language !== "ja" || currentArea !== "listening" ||
+      event.button !== 0 || event.detail > 1 || window.getSelection()?.isCollapsed === false) return;
+  const source = (event.target as Element).closest<HTMLElement>("[data-learning-source]");
+  const segmentId = source?.closest<HTMLElement>("[data-segment-id]")?.dataset.segmentId;
+  if (!source || !segmentId) return;
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  };
+  const anchor = doc.caretPositionFromPoint?.(event.clientX, event.clientY);
+  const range = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+  const node = anchor?.offsetNode ?? range?.startContainer;
+  if (!node || !source.contains(node)) return;
+  const text = source.textContent ?? "";
+  const caret = selectionOffsetWithin(source, node, anchor?.offset ?? range?.startOffset ?? 0);
+  // Caret APIs report a character boundary. Check the preceding glyph as well so
+  // clicking its right half still selects that glyph, including a surrogate pair.
+  const preceding = Array.from(text.slice(0, caret)).at(-1)?.length ?? 0;
+  const glyph = document.createRange();
+  const walker = document.createTreeWalker(source, NodeFilter.SHOW_TEXT);
+  let base = 0;
+  let offset = caret;
+  for (let current = walker.nextNode(); current; current = walker.nextNode()) {
+    const length = current.textContent?.length ?? 0;
+    const index = caret - preceding - base;
+    if (preceding && index >= 0 && index + preceding <= length) {
+      glyph.setStart(current, index);
+      glyph.setEnd(current, index + preceding);
+      if (Array.from(glyph.getClientRects()).some(rect =>
+        event.clientX >= rect.left && event.clientX <= rect.right &&
+        event.clientY >= rect.top && event.clientY <= rect.bottom)) offset -= preceding;
+      break;
+    }
+    base += length;
+  }
+  if (offset < text.length) showListeningSelection(segmentId, { text, start: offset, end: offset });
+}
+
+function showListeningSelection(segmentId: string, search: JapaneseLookupSelection): void {
+  if (!activeDetail) return;
+  const previous = pendingLearningSelection;
+  const { text, start, end } = search;
+  if (previous && previous.segmentId === segmentId && previous.jobId === activeDetail.job.job_id &&
+      previous.selectionStartUtf16 === start && previous.selectionEndUtf16 === end &&
+      previous.selectedText === text.slice(start, end)) return;
+  const selection: PendingLearningSelection = {
     jobId: activeDetail.job.job_id,
     segmentId,
-    selectedText,
+    selectedText: text.slice(start, end),
     selectionStartUtf16: start,
     selectionEndUtf16: end,
   };
-  if (listeningSelectionText) listeningSelectionText.textContent = selectedText;
+  pendingLearningSelection = selection;
+  listeningDictionaryPreview?.replaceChildren();
+  listeningDictionaryPreview?.classList.add("hidden");
+  if (listeningSelectionText) listeningSelectionText.textContent = selection.selectedText || "日语查词";
   if (listeningSelectionMessage) {
     listeningSelectionMessage.textContent = "可先收藏，之后在学习区补充标准译义。";
     listeningSelectionMessage.classList.remove("warning");
   }
+  if (saveLearningSelectionButton) {
+    saveLearningSelectionButton.hidden = start === end;
+    saveLearningSelectionButton.textContent = activeDetail.job.source_language === "ja" ? "收藏原选区" : "收藏词语／语法";
+  }
   listeningSelectionMenu?.classList.remove("hidden");
-  const followState = subtitleFollowState(listeningSubtitleList);
-  followState.userScrollingUntil = Number.MAX_SAFE_INTEGER;
+  if (listeningSubtitleList) subtitleFollowState(listeningSubtitleList).userScrollingUntil = Number.MAX_SAFE_INTEGER;
+  if (activeDetail.job.source_language === "ja") void lookupListeningJapanese(selection, search);
+}
+
+async function lookupListeningJapanese(selection: PendingLearningSelection, search: JapaneseLookupSelection): Promise<void> {
+  if (listeningSelectionMessage) listeningSelectionMessage.textContent = "正在本机查词，首次使用可能需要准备词库…";
+  try {
+    const result = await invoke<JapaneseLookupResult>("lookup_listening_japanese", { request: search });
+    if (pendingLearningSelection !== selection || currentArea !== "listening") return;
+    if (listeningSelectionMessage) {
+      listeningSelectionMessage.textContent = result.notices.join(" ") ||
+        (result.words.length ? "" : "这个位置没有可分析的词。");
+    }
+    if (result.words.length) renderListeningDictionary(selection, search, result);
+  } catch (error) {
+    if (pendingLearningSelection === selection && listeningSelectionMessage) {
+      listeningSelectionMessage.textContent = String(error);
+      listeningSelectionMessage.classList.add("warning");
+    }
+  }
+}
+
+function renderListeningDictionary(
+  selection: PendingLearningSelection, search: JapaneseLookupSelection, result: JapaneseLookupResult,
+): void {
+  if (!listeningDictionaryPreview) return;
+  const preview = listeningDictionaryPreview;
+  preview.classList.remove("hidden");
+  preview.innerHTML = `<div class="listening-word-options" aria-label="词形候选">${result.words.map((word, index) =>
+    `<button type="button" class="secondary" data-listening-word="${index}" aria-pressed="false">${escapeHtml(word.surface)} · ${escapeHtml(word.lemma)}</button>`,
+  ).join("")}</div><div data-listening-word-detail></div>`;
+  const detail = preview.querySelector<HTMLElement>("[data-listening-word-detail]")!;
+  const wordButtons = [...preview.querySelectorAll<HTMLButtonElement>("[data-listening-word]")];
+  const showWord = (index: number) => {
+    const word = result.words[index];
+    wordButtons.forEach((button, current) => button.setAttribute("aria-pressed", String(current === index)));
+    detail.innerHTML = `<p class="listening-word-context" lang="ja">${escapeHtml(search.text.slice(0, word.start))}<mark>${escapeHtml(word.surface)}</mark>${escapeHtml(search.text.slice(word.end))}</p>
+      <p><strong lang="ja">${escapeHtml(word.lemma)}</strong> ${escapeHtml(word.reading)}${word.unknown ? " · 词形待确认" : ""}</p>
+      ${word.entries.length ? '<label>词条 <select data-listening-entry></select></label><div data-listening-senses></div>' : "<p>当前没有查到词典释义。</p>"}`;
+    const entrySelect = detail.querySelector<HTMLSelectElement>("[data-listening-entry]");
+    const senses = detail.querySelector<HTMLElement>("[data-listening-senses]");
+    if (!entrySelect || !senses) return;
+    word.entries.forEach((entry, index) => entrySelect.add(new Option(
+      `${entry.headword}${entry.readings.length ? `（${entry.readings.slice(0, 2).join("／")}）` : ""} · ${entry.providerName}`,
+      String(index),
+    )));
+    const showEntry = () => {
+      const entry = word.entries[Number(entrySelect.value)];
+      senses.innerHTML = `<ul class="listening-word-senses">${entry.senses.map((sense, index) =>
+        `<li><div>${sense.part_of_speech ? `<small>${escapeHtml(sense.part_of_speech)}</small><br>` : ""}${escapeHtml(sense.definitions.join("；"))}</div>
+          <button type="button" class="secondary" data-save-listening-sense="${index}" aria-label="收藏义项 ${index + 1}">收藏</button></li>`,
+      ).join("")}</ul><small>${escapeHtml(entry.attribution)} · ${escapeHtml(entry.license)} · ${escapeHtml(entry.version)}</small>`;
+      senses.querySelectorAll<HTMLButtonElement>("[data-save-listening-sense]").forEach(button => {
+        button.disabled = learningActionBusy;
+        button.addEventListener("click", () => void saveListeningJapaneseWord(
+          selection, search, word, entry, Number(button.dataset.saveListeningSense),
+        ));
+      });
+    };
+    entrySelect.addEventListener("change", showEntry);
+    showEntry();
+  };
+  wordButtons.forEach((button, index) => button.addEventListener("click", () => showWord(index)));
+  const firstMatch = result.words.findIndex(word => word.entries.length > 0);
+  showWord(Math.max(0, firstMatch));
+}
+
+async function saveListeningJapaneseWord(
+  selection: PendingLearningSelection, search: JapaneseLookupSelection, word: JapaneseLookupWord,
+  entry: JapaneseDictionaryEntry, senseIndex: number,
+): Promise<void> {
+  if (learningActionBusy || pendingLearningSelection !== selection) return;
+  setLearningBusy(true);
+  try {
+    const saved = await invoke<LearningItemDetail>("save_listening_japanese_word", {
+      request: {
+        jobId: selection.jobId, segmentId: selection.segmentId, selection: search,
+        start: word.start, end: word.end, entryId: entry.id, providerId: entry.providerId,
+        version: entry.version, senseIndex,
+      },
+    });
+    await refreshLearningItems();
+    if (pendingLearningSelection === selection && currentArea === "listening") {
+      closeLearningSelection();
+      if (listeningMediaMessage) listeningMediaMessage.textContent = `已收藏「${saved.item.source_text}」，可在学习区回听原句。`;
+    }
+  } catch (error) {
+    if (pendingLearningSelection === selection && listeningSelectionMessage) {
+      listeningSelectionMessage.textContent = String(error);
+      listeningSelectionMessage.classList.add("warning");
+    }
+  } finally {
+    setLearningBusy(false);
+  }
 }
 
 function closeLearningSelection(clearBrowserSelection = true): void {
   pendingLearningSelection = null;
+  listeningDictionaryPreview?.replaceChildren();
+  listeningDictionaryPreview?.classList.add("hidden");
   listeningSelectionMenu?.classList.add("hidden");
   if (clearBrowserSelection) window.getSelection()?.removeAllRanges();
   if (listeningSubtitleList) {
@@ -2548,6 +2722,9 @@ function setLearningBusy(busy: boolean): void {
   learningActionBusy = busy;
   if (saveLearningSelectionButton) saveLearningSelectionButton.disabled = busy;
   if (saveLearningSentenceButton) saveLearningSentenceButton.disabled = busy;
+  listeningDictionaryPreview?.querySelectorAll<HTMLButtonElement>("[data-save-listening-sense]").forEach(button => {
+    button.disabled = busy;
+  });
   listeningSubtitleList?.querySelectorAll<HTMLButtonElement>(".collect-learning-sentence").forEach((button) => {
     button.disabled = busy;
   });
@@ -2625,6 +2802,11 @@ async function refreshLearningItems(): Promise<void> {
   }
 }
 
+function learningOccurrenceSource(occurrence: LearningOccurrence, highlight: boolean): string {
+  const range: [number, number] = [occurrence.selection_start_utf16, occurrence.selection_end_utf16];
+  return highlight ? highlightSaved(occurrence.segment_source_snapshot, [], [range]) : escapeHtml(occurrence.segment_source_snapshot);
+}
+
 function renderLearningItems(): void {
   if (!learningItemList) return;
   const allLanguageItems = learningItems.filter(detail => detail.item.source_language === activeLearningLanguage);
@@ -2662,22 +2844,26 @@ function renderLearningItems(): void {
   }
   learningItemList.innerHTML = languageItems.map((detail) => {
     const occurrence = detail.occurrences[0];
-    const sourceLabel = detail.item.item_type === "sentence" ? "整句" : "词语／语法";
+    const isSelection = detail.item.item_type === "selection";
+    const sourceLabel = isSelection ? "词语／语法" : "整句";
+    const reading = detail.item.source_language === "ja"
+      ? detail.lookup_results.find(result => result.provider_id === detail.item.meaning_provider_id)?.reading
+      : null;
     const sourceMeta = occurrence
       ? `${escapeHtml(occurrence.job_display_name_snapshot)} · ${escapeHtml(formatTime(occurrence.start_ms))}`
       : "来源已不可用";
     const context = occurrence
-      ? `<blockquote><strong>${escapeHtml(occurrence.segment_source_snapshot)}</strong>${occurrence.segment_translation_snapshot ? `<span>${escapeHtml(occurrence.segment_translation_snapshot)}</span>` : ""}</blockquote>`
+      ? `<blockquote><strong>${learningOccurrenceSource(occurrence, detail.item.item_type === "selection")}</strong>${occurrence.segment_translation_snapshot ? `<span>${escapeHtml(occurrence.segment_translation_snapshot)}</span>` : ""}</blockquote>`
       : "";
     return `<article class="learning-card" data-learning-item="${escapeHtml(detail.item.id)}">
       <div class="learning-card-heading">
-        <div><span>${sourceLabel} · ${escapeHtml(languageLabel(detail.item.source_language))}</span><h3>${escapeHtml(detail.item.source_text)}</h3></div>
+        <div><span>${sourceLabel} · ${escapeHtml(languageLabel(detail.item.source_language))}</span><h3>${escapeHtml(detail.item.source_text)}</h3>${reading ? `<span lang="ja">${escapeHtml(reading)}</span>` : ""}</div>
         <span>${detail.item.occurrence_count} 个例句</span>
       </div>
       <label>学习译义${detail.item.meaning_source_label ? `<span class="learning-meaning-source">当前来自 ${escapeHtml(detail.item.meaning_source_label)}</span>` : ""}<input class="learning-meaning" value="${escapeHtml(detail.item.meaning_text ?? "")}" placeholder="可手工填写，或从词典详情选择一条释义" /></label>
       <div class="learning-source-meta">${sourceMeta}</div>
       ${context}
-      <details><summary>全部 ${detail.occurrences.length} 个来源例句</summary>${detail.occurrences.map(o=>`<blockquote><p>${escapeHtml(o.segment_source_snapshot)}</p><p>${escapeHtml(o.segment_translation_snapshot ?? "")}</p><span>${escapeHtml(o.job_display_name_snapshot)} · ${formatTime(o.start_ms)}</span>${o.job_id ? `<button type="button" class="secondary" data-play-occurrence="${escapeHtml(o.id)}">回到原句</button>` : '<span>原任务已删除；保留收藏快照</span>'}</blockquote>`).join("")}</details>
+      <details><summary>全部 ${detail.occurrences.length} 个来源例句</summary>${detail.occurrences.map(o=>`<blockquote><p>${learningOccurrenceSource(o, isSelection)}</p><p>${escapeHtml(o.segment_translation_snapshot ?? "")}</p><span>${escapeHtml(o.job_display_name_snapshot)} · ${formatTime(o.start_ms)}</span>${o.job_id ? `<button type="button" class="secondary" data-play-occurrence="${escapeHtml(o.id)}">回到原句</button>` : '<span>原任务已删除；保留收藏快照</span>'}</blockquote>`).join("")}</details>
       <div class="learning-card-actions">
         <button type="button" data-save-learning-meaning="${escapeHtml(detail.item.id)}">保存译义</button>
         <button type="button" class="secondary" data-open-learning-dictionary="${escapeHtml(detail.item.id)}">查看词典</button>
@@ -2792,7 +2978,7 @@ function renderLearningDictionary(): void {
       ? `<p class="learning-summary-meaning">${escapeHtml(detail.item.meaning_text)}</p><p class="learning-source-meta">${detail.item.meaning_source_label ? `选自 ${escapeHtml(detail.item.meaning_source_label)}` : "手工维护"}</p>`
       : '<p class="learning-provider-empty-copy">还没有简明译义。可在其他词典标签中选择一条释义，也可关闭详情后手工填写。</p>';
     const context = occurrence
-      ? `<blockquote><strong>${escapeHtml(occurrence.segment_source_snapshot)}</strong>${occurrence.segment_translation_snapshot ? `<span>${escapeHtml(occurrence.segment_translation_snapshot)}</span>` : ""}</blockquote>
+      ? `<blockquote><strong>${learningOccurrenceSource(occurrence, detail.item.item_type === "selection")}</strong>${occurrence.segment_translation_snapshot ? `<span>${escapeHtml(occurrence.segment_translation_snapshot)}</span>` : ""}</blockquote>
         <p class="learning-source-meta">${escapeHtml(occurrence.job_display_name_snapshot)} · ${escapeHtml(formatTime(occurrence.start_ms))}</p>`
       : '<p class="learning-provider-empty-copy">原任务已删除；收藏时的来源快照仍保存在本机。</p>';
     learningProviderPanel.innerHTML = `<article class="learning-provider-result">
@@ -4429,6 +4615,10 @@ learningDictionaryDialog?.addEventListener("close", () => {
 });
 listeningSubtitleList?.addEventListener("mouseup", captureListeningSelection);
 listeningSubtitleList?.addEventListener("keyup", captureListeningSelection);
+listeningSubtitleList?.addEventListener("click", captureListeningWord);
+listeningSelectionMenu?.addEventListener("keydown", event => {
+  if (event.key === "Escape") closeLearningSelection();
+});
 saveLearningSelectionButton?.addEventListener("click", () => {
   if (pendingLearningSelection) void persistLearningSelection(pendingLearningSelection, "selection");
 });

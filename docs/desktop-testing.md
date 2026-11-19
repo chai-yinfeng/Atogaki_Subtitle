@@ -323,3 +323,17 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright \
 当前在线与离线代码已整合到 main，稳定发行仍为 v0.1.3。本轮 UI 未覆盖已安装 App。在线 Python runtime／多文件模型仍依赖本机导入，普通用户的准备闭环待确认，不通过本次测试追加实现。
 
 任务排序交互可运行 scripts/verify-task-ordering.cjs：仅合成任务，验证浮动副本、插入占位、保存、取消、抽屉自动滚动与键盘，不操作正式任务顺序。
+
+## 收听日语查词
+
+构建前端并按本页启动静态服务后，运行 `node scripts/verify-listening-japanese.cjs`。WebKit 测试使用合成节目与 IPC，检查点击字形的 UTF-16 偏移、边界不齐的框选、候选范围、词典切换、收藏以及从学习区回到原时间。
+
+另外可以用真实本地词库验证完整查询和收藏事务。先将 Sudachi Core、Tomoshi 和 JMdict 的归档与版本 sidecar 复制到独立可写目录。每次测试的应用 SQLite 都是临时文件，派生索引写入指定的词库目录。
+
+```sh
+ATOGAKI_DICTIONARY_SMOKE_DIR=/absolute/path/to/qa-dictionaries \
+  cargo test --locked --manifest-path src-tauri/Cargo.toml \
+  japanese_word_lookup_collects_original_occurrences_by_sense -- --ignored
+```
+
+实词库验证覆盖「読んで／読み」原形与读音、两词形合并且来源时间独立、不同义项分别收藏、过期字幕拒绝写入，以及假名「はし」返回多个词条。真实节目的排序和使用体验由用户试用确认。

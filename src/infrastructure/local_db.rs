@@ -240,6 +240,14 @@ pub struct LocalLearningItemDetail {
     pub lookup_results: Vec<LocalLearningLookupResult>,
 }
 
+#[derive(Debug)]
+pub struct NewLocalLearningDictionarySelection {
+    pub source_snapshot: String,
+    pub entry_id: String,
+    pub lookup: NewLocalLearningLookupResult,
+    pub sense_index: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewLocalLearningSelection {
     pub job_id: String,
@@ -952,6 +960,23 @@ impl LocalDatabase {
         &self,
         input: NewLocalLearningSelection,
     ) -> Result<LocalLearningItemDetail> {
+        self.save_learning_selection_inner(input, None).await
+    }
+
+    pub async fn save_learning_dictionary_selection(
+        &self,
+        input: NewLocalLearningSelection,
+        dictionary: NewLocalLearningDictionarySelection,
+    ) -> Result<LocalLearningItemDetail> {
+        self.save_learning_selection_inner(input, Some(dictionary))
+            .await
+    }
+
+    async fn save_learning_selection_inner(
+        &self,
+        input: NewLocalLearningSelection,
+        dictionary: Option<NewLocalLearningDictionarySelection>,
+    ) -> Result<LocalLearningItemDetail> {
         if !matches!(input.item_type.as_str(), "selection" | "sentence") {
             return Err(anyhow!(
                 "unsupported learning item type: {}",
@@ -1005,12 +1030,50 @@ impl LocalDatabase {
                 "sentence collections must include the complete subtitle segment"
             ));
         }
-        let source_key = selected_text.to_lowercase();
-        let meaning_text = (input.item_type == "sentence")
-            .then(|| source.translated_text.clone())
-            .flatten()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+        let (headword, source_key, meaning_text, provider_id, provider_name) =
+            if let Some(dictionary) = &dictionary {
+                anyhow::ensure!(
+                    source.source_text == dictionary.source_snapshot
+                        && source.source_language == "ja"
+                        && input.item_type == "selection",
+                    "字幕已变化，请重新查词"
+                );
+                let lookup = &dictionary.lookup;
+                let sense = lookup
+                    .senses
+                    .get(dictionary.sense_index)
+                    .ok_or_else(|| anyhow!("词典义项已变化，请重新查词"))?;
+                let meaning = sense.definitions.join("；");
+                let source_key = format!(
+                    "\0dictionary:{}",
+                    serde_json::to_string(&(
+                        &lookup.provider_id,
+                        &dictionary.entry_id,
+                        dictionary.sense_index,
+                        &sense.definitions,
+                    ))?
+                );
+                (
+                    lookup.headword.as_str(),
+                    source_key,
+                    Some(meaning),
+                    Some(lookup.provider_id.as_str()),
+                    Some(lookup.provider_name.as_str()),
+                )
+            } else {
+                let meaning = (input.item_type == "sentence")
+                    .then(|| source.translated_text.clone())
+                    .flatten()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty());
+                (
+                    selected_text.as_str(),
+                    selected_text.to_lowercase(),
+                    meaning,
+                    None,
+                    None,
+                )
+            };
         let now = chrono::Utc::now().timestamp();
         let item_id = uuid::Uuid::new_v4().to_string();
         sqlx::query(
@@ -1018,8 +1081,12 @@ impl LocalDatabase {
                 id, source_language, target_language, item_type, source_text, source_key,
                 meaning_text, meaning_provider_id, meaning_source_label,
                 created_at_unix, updated_at_unix
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(source_language, target_language, item_type, source_key) DO UPDATE SET
+                meaning_provider_id = CASE WHEN local_learning_items.meaning_text IS NULL
+                    THEN excluded.meaning_provider_id ELSE local_learning_items.meaning_provider_id END,
+                meaning_source_label = CASE WHEN local_learning_items.meaning_text IS NULL
+                    THEN excluded.meaning_source_label ELSE local_learning_items.meaning_source_label END,
                 meaning_text = COALESCE(local_learning_items.meaning_text, excluded.meaning_text),
                 updated_at_unix = excluded.updated_at_unix",
         )
@@ -1027,9 +1094,11 @@ impl LocalDatabase {
         .bind(&source.source_language)
         .bind(&source.target_language)
         .bind(&input.item_type)
-        .bind(&selected_text)
+        .bind(headword)
         .bind(&source_key)
         .bind(meaning_text)
+        .bind(provider_id)
+        .bind(provider_name)
         .bind(now)
         .bind(now)
         .execute(&mut *tx)
@@ -1081,6 +1150,10 @@ impl LocalDatabase {
         .execute(&mut *tx)
         .await
         .context("failed to save learning item source")?;
+        if let Some(mut dictionary) = dictionary {
+            dictionary.lookup.learning_item_id.clone_from(&item_id);
+            Self::write_learning_lookup_result(&mut tx, &dictionary.lookup).await?;
+        }
         tx.commit()
             .await
             .context("failed to commit learning item transaction")?;
@@ -1162,6 +1235,19 @@ impl LocalDatabase {
         &self,
         input: NewLocalLearningLookupResult,
     ) -> Result<LocalLearningItemDetail> {
+        {
+            let mut connection = self.pool.acquire().await?;
+            Self::write_learning_lookup_result(&mut connection, &input).await?;
+        }
+        self.get_learning_item(&input.learning_item_id)
+            .await?
+            .ok_or_else(|| anyhow!("learning item not found: {}", input.learning_item_id))
+    }
+
+    async fn write_learning_lookup_result(
+        connection: &mut sqlx::SqliteConnection,
+        input: &NewLocalLearningLookupResult,
+    ) -> Result<()> {
         let provider_id = input.provider_id.trim();
         let provider_name = input.provider_name.trim();
         let headword = input.headword.trim();
@@ -1238,18 +1324,32 @@ impl LocalDatabase {
         )
         .bind(senses_json)
         .bind(attribution_text)
-        .bind(input.source_url)
-        .bind(input.license_label)
-        .bind(input.data_version)
+        .bind(&input.source_url)
+        .bind(&input.license_label)
+        .bind(&input.data_version)
         .bind(input.fetched_at_unix)
         .bind(input.cache_expires_at_unix)
-        .execute(&self.pool)
+        .execute(connection)
         .await
         .context("failed to save learning dictionary result")?;
+        Ok(())
+    }
 
-        self.get_learning_item(&input.learning_item_id)
-            .await?
-            .ok_or_else(|| anyhow!("learning item not found: {}", input.learning_item_id))
+    pub async fn learning_dictionary_entry_id(&self, item_id: &str) -> Result<Option<String>> {
+        let source_key: Option<String> =
+            sqlx::query_scalar("SELECT source_key FROM local_learning_items WHERE id = ?")
+                .bind(item_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        source_key
+            .as_deref()
+            .and_then(|key| key.strip_prefix("\0dictionary:"))
+            .map(|key| {
+                let (_, entry_id, _, _): (String, String, usize, Vec<String>) =
+                    serde_json::from_str(key)?;
+                Ok(entry_id)
+            })
+            .transpose()
     }
 
     pub async fn get_learning_item(

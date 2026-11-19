@@ -11,11 +11,12 @@ use anyhow::{Context, Result, anyhow, bail};
 use atogaki_subtitle::{
     application::LocalLearningService,
     infrastructure::local_db::{
-        LocalLearningItemDetail, LocalLearningLookupSense, NewLocalLearningLookupResult,
+        LocalLearningItemDetail, LocalLearningLookupSense, NewLocalLearningDictionarySelection,
+        NewLocalLearningLookupResult, NewLocalLearningSelection,
     },
 };
 use flate2::read::GzDecoder;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{
     ConnectOptions, QueryBuilder, Row, Sqlite,
@@ -23,9 +24,53 @@ use sqlx::{
 };
 use tokio::sync::Mutex;
 
-use crate::desktop_settings::DesktopSettingsService;
+use crate::{
+    desktop_settings::DesktopSettingsService,
+    japanese_morphology::{JapaneseMorphology, Word, hiragana},
+};
 
 const INDEX_FILE: &str = "atogaki-dictionary-index.sqlite";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JapaneseLookupRequest {
+    text: String,
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SaveJapaneseWordRequest {
+    job_id: String,
+    segment_id: String,
+    selection: JapaneseLookupRequest,
+    start: usize,
+    end: usize,
+    provider_id: String,
+    entry_id: String,
+    version: String,
+    sense_index: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JapaneseLookup {
+    words: Vec<JapaneseWord>,
+    notices: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JapaneseWord {
+    start: usize,
+    end: usize,
+    surface: String,
+    lemma: String,
+    reading: String,
+    unknown: bool,
+    entries: Vec<JapaneseEntry>,
+}
 
 #[derive(Clone)]
 pub struct DictionaryLookupService {
@@ -33,6 +78,7 @@ pub struct DictionaryLookupService {
     learning: LocalLearningService,
     settings: DesktopSettingsService,
     index_lock: Arc<Mutex<()>>,
+    morphology: Arc<JapaneseMorphology>,
 }
 
 impl DictionaryLookupService {
@@ -46,7 +92,147 @@ impl DictionaryLookupService {
             learning,
             settings,
             index_lock: Arc::new(Mutex::new(())),
+            morphology: Arc::new(JapaneseMorphology::default()),
         }
+    }
+
+    pub(crate) async fn lookup_japanese(
+        &self,
+        request: &JapaneseLookupRequest,
+    ) -> Result<JapaneseLookup> {
+        let text = &request.text;
+        let length = text.encode_utf16().count();
+        anyhow::ensure!(
+            length <= 4096 && request.start <= request.end && request.end <= length,
+            "查词位置无效或字幕过长"
+        );
+        let morphology = self.morphology.clone();
+        let directory = self.directory.clone();
+        let input = text.clone();
+        let tokens =
+            tokio::task::spawn_blocking(move || morphology.words(&directory, &input)).await??;
+        let utf16: Vec<u16> = text.encode_utf16().collect();
+        let mut relevant = tokens
+            .iter()
+            .filter_map(|word| {
+                let end = display_word_end(word, &tokens, &utf16);
+                let hit = if request.start == request.end {
+                    word.start <= request.start && request.start < end
+                } else {
+                    word.start < request.end && request.start < end
+                };
+                hit.then_some((word, end))
+            })
+            .collect::<Vec<_>>();
+        relevant.sort_by_key(|(word, end)| {
+            (
+                matches!(word.pos.as_str(), "助詞" | "助動詞"),
+                word.unknown,
+                word.start,
+                std::cmp::Reverse(*end),
+            )
+        });
+        let mut notices = Vec::new();
+        if relevant.len() > 8 {
+            notices.push("选区较长，显示前 8 个词。可缩小选区继续查找。".to_owned());
+            relevant.truncate(8);
+        }
+        let mut words = Vec::new();
+        for (word, end) in relevant {
+            let (tomoshi, jmdict) = tokio::join!(
+                self.japanese_entries_for_word("tomoshi", word),
+                self.japanese_entries_for_word("jmdict", word),
+            );
+            let mut entries = Vec::new();
+            for outcome in [tomoshi, jmdict] {
+                match outcome {
+                    Ok(results) => entries.extend(results),
+                    Err(error) => {
+                        let message = error.to_string();
+                        if !notices.contains(&message) {
+                            notices.push(message);
+                        }
+                    }
+                }
+            }
+            words.push(JapaneseWord {
+                start: word.start,
+                end,
+                surface: String::from_utf16(&utf16[word.start..end])?,
+                lemma: word.lemma.clone(),
+                reading: word.reading.clone(),
+                unknown: word.unknown,
+                entries,
+            });
+        }
+        Ok(JapaneseLookup { words, notices })
+    }
+
+    async fn japanese_entries_for_word(
+        &self,
+        provider: &str,
+        word: &Word,
+    ) -> Result<Vec<JapaneseEntry>> {
+        let query = &word.lemma;
+        let mut entries = self.japanese_entries(provider, query).await?;
+        if entries.is_empty() && !word.reading.is_empty() && query != &word.reading {
+            entries = self.japanese_entries(provider, &word.reading).await?;
+        }
+        for entry in &mut entries {
+            entry
+                .readings
+                .sort_by_key(|reading| hiragana(reading) != word.reading);
+        }
+        entries.sort_by_key(|entry| {
+            entry
+                .readings
+                .first()
+                .is_none_or(|reading| hiragana(reading) != word.reading)
+        });
+        Ok(entries)
+    }
+
+    async fn japanese_entries(&self, provider: &str, query: &str) -> Result<Vec<JapaneseEntry>> {
+        match provider {
+            "tomoshi" => self.tomoshi_entries(query, 12).await,
+            "jmdict" => self.jmdict_entries(query, 12).await,
+            _ => bail!("不支持的日语词典来源"),
+        }
+    }
+
+    pub(crate) async fn save_japanese_word(
+        &self,
+        request: SaveJapaneseWordRequest,
+    ) -> Result<LocalLearningItemDetail> {
+        let lookup = self.lookup_japanese(&request.selection).await?;
+        let entry = lookup
+            .words
+            .into_iter()
+            .filter(|word| word.start == request.start && word.end == request.end)
+            .flat_map(|word| word.entries)
+            .find(|entry| {
+                entry.provider_id == request.provider_id
+                    && entry.id == request.entry_id
+                    && entry.version == request.version
+            })
+            .ok_or_else(|| anyhow!("词典候选已变化，请重新查词"))?;
+        self.learning
+            .save_dictionary_selection(
+                NewLocalLearningSelection {
+                    job_id: request.job_id,
+                    segment_id: request.segment_id,
+                    item_type: "selection".into(),
+                    selection_start_utf16: request.start.try_into()?,
+                    selection_end_utf16: request.end.try_into()?,
+                },
+                NewLocalLearningDictionarySelection {
+                    source_snapshot: request.selection.text,
+                    entry_id: entry.id.clone(),
+                    lookup: entry.into_result(""),
+                    sense_index: request.sense_index,
+                },
+            )
+            .await
     }
 
     pub async fn lookup(
@@ -65,6 +251,21 @@ impl DictionaryLookupService {
         let query = detail.item.source_text.trim();
         if query.is_empty() {
             bail!("学习条目没有可查询的文本");
+        }
+        if matches!(provider_id, "jmdict" | "tomoshi")
+            && let Some(entry_id) = self.learning.dictionary_entry_id(item_id).await?
+        {
+            ensure_language(&detail, "ja", provider_id)?;
+            let entry = self
+                .japanese_entries(provider_id, query)
+                .await?
+                .into_iter()
+                .find(|entry| entry.id == entry_id)
+                .ok_or_else(|| anyhow!("此来源未找到收藏词条的对应释义"))?;
+            return self
+                .learning
+                .upsert_lookup_result(entry.into_result(item_id))
+                .await;
         }
         let result = match provider_id {
             "jmdict" => {
@@ -93,23 +294,25 @@ impl DictionaryLookupService {
         item_id: &str,
         query: &str,
     ) -> Result<NewLocalLearningLookupResult> {
+        self.jmdict_entries(query, 1)
+            .await?
+            .into_iter()
+            .next()
+            .map(|entry| entry.into_result(item_id))
+            .ok_or_else(|| anyhow!("JMdict 中没有找到“{query}”的精确词形"))
+    }
+
+    async fn jmdict_entries(&self, query: &str, limit: i64) -> Result<Vec<JapaneseEntry>> {
         let source = self.directory.join("jmdict-eng.json.tgz");
         require_file(&source, "JMdict")?;
         let version = package_version(&source);
         self.ensure_index("jmdict", &version, &source).await?;
-        let entry = self
-            .query_index("jmdict", query)
+        Ok(self
+            .find_index_entries("jmdict", query, limit)
             .await?
-            .ok_or_else(|| anyhow!("JMdict 中没有找到“{query}”的精确词形"))?;
-        Ok(entry.into_lookup(
-            item_id,
-            "jmdict",
-            "JMdict",
-            "JMdict / Electronic Dictionary Research and Development Group",
-            Some("https://www.edrdg.org/jmdict/j_jmdict.html"),
-            Some("CC BY-SA 4.0"),
-            Some(version),
-        ))
+            .into_iter()
+            .map(|entry| JapaneseEntry::from_jmdict(entry, version.clone()))
+            .collect())
     }
 
     async fn lookup_ecdict(
@@ -169,47 +372,51 @@ impl DictionaryLookupService {
         Ok(())
     }
 
-    async fn query_index(&self, provider: &str, query: &str) -> Result<Option<IndexedEntry>> {
-        self.query_index_candidates(provider, &[query.to_string()])
-            .await
-    }
-
     async fn query_index_candidates(
         &self,
         provider: &str,
         queries: &[String],
     ) -> Result<Option<IndexedEntry>> {
-        let pool = open_index(&self.directory.join(INDEX_FILE)).await?;
-        create_index_schema(&pool).await?;
-        let mut row = None;
         for query in queries {
-            row = sqlx::query(
-                "SELECT e.entry_id, e.headword, e.reading, e.senses_json
-                 FROM dictionary_forms f
-                 JOIN dictionary_entries e
-                   ON e.provider_id = f.provider_id AND e.entry_id = f.entry_id
-                 WHERE f.provider_id = ? AND f.form = ? COLLATE NOCASE
-                 ORDER BY f.rank ASC LIMIT 1",
-            )
-            .bind(provider)
-            .bind(query)
-            .fetch_optional(&pool)
-            .await?;
-            if row.is_some() {
-                break;
+            if let Some(entry) = self.find_index_entries(provider, query, 1).await?.pop() {
+                return Ok(Some(entry));
             }
         }
+        Ok(None)
+    }
+
+    async fn find_index_entries(
+        &self,
+        provider: &str,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<IndexedEntry>> {
+        let pool = open_index(&self.directory.join(INDEX_FILE)).await?;
+        let rows = sqlx::query(
+            "SELECT e.entry_id, e.headword, e.reading, e.senses_json
+             FROM dictionary_forms f
+             JOIN dictionary_entries e
+               ON e.provider_id = f.provider_id AND e.entry_id = f.entry_id
+             WHERE f.provider_id = ? AND f.form = ? COLLATE NOCASE
+             ORDER BY f.rank ASC, e.entry_id LIMIT ?",
+        )
+        .bind(provider)
+        .bind(query)
+        .bind(limit)
+        .fetch_all(&pool)
+        .await?;
         pool.close().await;
-        row.map(|row| {
-            Ok(IndexedEntry {
-                id: row.try_get("entry_id")?,
-                headword: row.try_get("headword")?,
-                reading: row.try_get("reading")?,
-                senses: serde_json::from_str(&row.try_get::<String, _>("senses_json")?)?,
-                forms: Vec::new(),
+        rows.into_iter()
+            .map(|row| {
+                Ok(IndexedEntry {
+                    id: row.try_get("entry_id")?,
+                    headword: row.try_get("headword")?,
+                    reading: row.try_get("reading")?,
+                    senses: serde_json::from_str(&row.try_get::<String, _>("senses_json")?)?,
+                    forms: Vec::new(),
+                })
             })
-        })
-        .transpose()
+            .collect()
     }
 
     async fn lookup_tomoshi(
@@ -217,10 +424,22 @@ impl DictionaryLookupService {
         item_id: &str,
         query: &str,
     ) -> Result<NewLocalLearningLookupResult> {
+        self.tomoshi_entries(query, 8)
+            .await?
+            .into_iter()
+            .next()
+            .map(|entry| entry.into_result(item_id))
+            .ok_or_else(|| anyhow!("Tomoshi 中没有找到“{query}”的可显示中文释义"))
+    }
+
+    async fn tomoshi_entries(&self, query: &str, limit: i64) -> Result<Vec<JapaneseEntry>> {
         let compressed = self.directory.join("tomoshi-dict-open.db.zst");
         require_file(&compressed, "Tomoshi")?;
         let version = package_version(&compressed);
-        let database = self.ensure_tomoshi_database(&compressed, &version).await?;
+        let database = {
+            let _guard = self.index_lock.lock().await;
+            self.ensure_tomoshi_database(&compressed, &version).await?
+        };
         let options = SqliteConnectOptions::new()
             .filename(&database)
             .read_only(true)
@@ -235,44 +454,44 @@ impl DictionaryLookupService {
             "SELECT e.id, e.data, z.data AS zh_data
              FROM forms f JOIN entries e ON e.id = f.entry_id
              LEFT JOIN zh_defs z ON z.entry_id = e.id AND z.locale = 'zh-CN'
-             WHERE f.text = ? ORDER BY f.is_common DESC, e.is_common DESC LIMIT 8",
+             WHERE f.text = ?
+             GROUP BY e.id
+             ORDER BY MAX(f.is_common) DESC, e.is_common DESC, e.id LIMIT ?",
         )
         .bind(query)
+        .bind(limit)
         .fetch_all(&pool)
         .await?;
         pool.close().await;
-        let row = rows
-            .first()
-            .ok_or_else(|| anyhow!("Tomoshi 中没有找到“{query}”的精确词形"))?;
-        let data: TomoshiEntry = serde_json::from_str(row.try_get("data")?)?;
-        let zh_data = row
-            .try_get::<Option<String>, _>("zh_data")?
-            .and_then(|value| serde_json::from_str::<Value>(&value).ok());
-        let senses = tomoshi_senses(&data, zh_data.as_ref());
-        if senses.is_empty() {
-            bail!("Tomoshi 返回的词条没有可显示的中文释义");
+        let mut entries = Vec::new();
+        for row in rows {
+            let data: TomoshiEntry = serde_json::from_str(row.try_get("data")?)?;
+            let zh_data = row
+                .try_get::<Option<String>, _>("zh_data")?
+                .and_then(|value| serde_json::from_str::<Value>(&value).ok());
+            let senses = tomoshi_senses(&data, zh_data.as_ref());
+            if senses.is_empty() {
+                continue;
+            }
+            entries.push(JapaneseEntry {
+                id: row.try_get("id")?,
+                provider_id: "tomoshi",
+                provider_name: "Tomoshi",
+                headword: data
+                    .kanji
+                    .first()
+                    .or_else(|| data.kana.first())
+                    .map(|item| item.text.clone())
+                    .unwrap_or_else(|| query.to_owned()),
+                readings: data.kana.into_iter().map(|item| item.text).collect(),
+                senses,
+                version: version.clone(),
+                attribution: "Tomoshi (Y1Z)；JMdict / EDRDG 及开放数据贡献者",
+                source_url: "https://github.com/tomoshi-app/tomoshi-dict-data",
+                license: "查询所用 entries/forms/zh_defs：CC BY-SA 4.0",
+            });
         }
-        Ok(NewLocalLearningLookupResult {
-            learning_item_id: item_id.to_string(),
-            provider_id: "tomoshi".to_string(),
-            provider_name: "Tomoshi".to_string(),
-            headword: data
-                .kanji
-                .first()
-                .map(|item| item.text.clone())
-                .or_else(|| data.kana.first().map(|item| item.text.clone()))
-                .unwrap_or_else(|| query.to_string()),
-            reading: data.kana.first().map(|item| item.text.clone()),
-            pronunciation: None,
-            audio_url: None,
-            senses,
-            attribution_text: "Tomoshi (Y1Z)；JMdict / EDRDG 及开放数据贡献者".to_string(),
-            source_url: Some("https://github.com/tomoshi-app/tomoshi-dict-data".to_string()),
-            license_label: Some("查询所用 entries/forms/zh_defs：CC BY-SA 4.0".to_string()),
-            data_version: Some(version),
-            fetched_at_unix: now_unix(),
-            cache_expires_at_unix: None,
-        })
+        Ok(entries)
     }
 
     async fn ensure_tomoshi_database(&self, compressed: &Path, version: &str) -> Result<PathBuf> {
@@ -482,6 +701,71 @@ fn require_file(path: &Path, name: &str) -> Result<()> {
         bail!("{name} 词典包尚未安装；请先到设置 → 学习词典下载");
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JapaneseEntry {
+    id: String,
+    provider_id: &'static str,
+    provider_name: &'static str,
+    headword: String,
+    readings: Vec<String>,
+    senses: Vec<LocalLearningLookupSense>,
+    version: String,
+    attribution: &'static str,
+    source_url: &'static str,
+    license: &'static str,
+}
+
+impl JapaneseEntry {
+    fn from_jmdict(entry: IndexedEntry, version: String) -> Self {
+        Self {
+            id: entry.id,
+            provider_id: "jmdict",
+            provider_name: "JMdict",
+            headword: entry.headword,
+            readings: entry.reading.into_iter().collect(),
+            senses: entry.senses,
+            version,
+            attribution: "JMdict / Electronic Dictionary Research and Development Group",
+            source_url: "https://www.edrdg.org/jmdict/j_jmdict.html",
+            license: "CC BY-SA 4.0",
+        }
+    }
+
+    fn into_result(self, item_id: &str) -> NewLocalLearningLookupResult {
+        NewLocalLearningLookupResult {
+            learning_item_id: item_id.into(),
+            provider_id: self.provider_id.into(),
+            provider_name: self.provider_name.into(),
+            headword: self.headword,
+            reading: self.readings.into_iter().next(),
+            pronunciation: None,
+            audio_url: None,
+            senses: self.senses,
+            attribution_text: self.attribution.into(),
+            source_url: Some(self.source_url.into()),
+            license_label: Some(self.license.into()),
+            data_version: Some(self.version),
+            fetched_at_unix: now_unix(),
+            cache_expires_at_unix: None,
+        }
+    }
+}
+
+fn display_word_end(word: &Word, tokens: &[Word], text: &[u16]) -> usize {
+    // Include the connective suffix in selection and highlighting, while looking up the verb.
+    let end = word.end;
+    if word.pos == "動詞"
+        && matches!(text.get(end), Some(0x3066 | 0x3067))
+        && tokens
+            .iter()
+            .any(|next| next.start == end && next.end == end + 1 && next.pos == "助詞")
+    {
+        return end + 1;
+    }
+    end
 }
 
 fn package_version(path: &Path) -> String {
@@ -1080,6 +1364,172 @@ mod tests {
         INDEX_FILE, TomoshiEntry, create_index_schema, english_lemma_candidates, mw_audio_url,
         open_index, package_version, parse_ecdict, parse_jmdict, replace_index, tomoshi_senses,
     };
+
+    #[tokio::test]
+    #[ignore = "requires a writable QA copy of the installed Sudachi, Tomoshi and JMdict packages"]
+    async fn japanese_word_lookup_collects_original_occurrences_by_sense() {
+        use std::sync::Arc;
+
+        use atogaki_subtitle::{
+            application::{
+                JobSnapshot, LocalLearningService,
+                job_manifest::JobManifest,
+                job_status::JobStatus,
+                translation_provider::{
+                    MutableTranslationProvider, UnconfiguredTranslationProvider,
+                },
+            },
+            domain::TranscriptSegment,
+            infrastructure::{job_store::Job, local_db::LocalDatabase},
+        };
+
+        use crate::desktop_settings::DesktopSettingsService;
+
+        use super::{DictionaryLookupService, JapaneseLookupRequest, SaveJapaneseWordRequest};
+
+        let dictionaries = PathBuf::from(std::env::var_os("ATOGAKI_DICTIONARY_SMOKE_DIR").unwrap());
+        let root = std::env::temp_dir().join(format!("atogaki-japanese-{}", uuid::Uuid::new_v4()));
+        let database = LocalDatabase::open(root.join("work.sqlite")).await.unwrap();
+        let learning = LocalLearningService::new(database.clone());
+        let settings = DesktopSettingsService::new(
+            database.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            None,
+            None,
+            None,
+            None,
+        );
+        let service = DictionaryLookupService::new(dictionaries, learning.clone(), settings);
+        let job = Job::create_in(&root).unwrap();
+        let mut manifest = JobManifest::new(&job, None, None, Default::default());
+        manifest.mark(JobStatus::Done);
+        let first = TranscriptSegment::new(1_000, 2_500, "📖昨日は本を読んでいたけど".into());
+        let second = TranscriptSegment::new(3_000, 4_500, "その本はもう読みました".into());
+        database
+            .sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![first.clone(), second.clone()],
+            })
+            .await
+            .unwrap();
+
+        let mut saved_id: Option<String> = None;
+        let mut second_sense = None;
+        for (segment, start, end, expected) in [(&first, 6, 11, "読んで"), (&second, 6, 6, "読み")]
+        {
+            let selection = JapaneseLookupRequest {
+                text: segment.source_text.clone(),
+                start,
+                end,
+            };
+            let preview = service.lookup_japanese(&selection).await.unwrap();
+            assert!(preview.notices.is_empty(), "{:?}", preview.notices);
+            let word = preview
+                .words
+                .iter()
+                .find(|word| word.lemma == "読む")
+                .unwrap();
+            assert_eq!(word.surface, expected);
+            assert_eq!(word.reading, "よむ");
+            let entry = word
+                .entries
+                .iter()
+                .find(|entry| entry.provider_id == "tomoshi")
+                .unwrap();
+            assert_eq!(entry.id, "1456360");
+            assert!(
+                word.entries
+                    .iter()
+                    .any(|entry| entry.provider_id == "jmdict" && entry.id == "1456360")
+            );
+            let save = |sense_index, source: String| SaveJapaneseWordRequest {
+                job_id: manifest.job_id.clone(),
+                segment_id: segment.id.clone(),
+                selection: JapaneseLookupRequest {
+                    text: source,
+                    start,
+                    end,
+                },
+                start: word.start,
+                end: word.end,
+                provider_id: entry.provider_id.into(),
+                entry_id: entry.id.clone(),
+                version: entry.version.clone(),
+                sense_index,
+            };
+            let item = service
+                .save_japanese_word(save(0, selection.text.clone()))
+                .await
+                .unwrap();
+            assert_eq!(item.item.source_text, "読む");
+            assert_eq!(item.item.meaning_source_label.as_deref(), Some("Tomoshi"));
+            assert_eq!(item.lookup_results[0].headword, "読む");
+            let occurrence = item
+                .occurrences
+                .iter()
+                .find(|occurrence| occurrence.segment_id.as_deref() == Some(segment.id.as_str()))
+                .unwrap();
+            assert_eq!(occurrence.selection_start_utf16, word.start as i64);
+            assert_eq!(occurrence.start_ms as u64, segment.start_ms);
+            if let Some(id) = &saved_id {
+                assert_eq!(&item.item.id, id);
+                assert_eq!(item.occurrences.len(), 2);
+                assert_eq!(
+                    learning.dictionary_entry_id(id).await.unwrap().as_deref(),
+                    Some("1456360")
+                );
+                let comparison = service.lookup(id, "jmdict").await.unwrap();
+                assert!(
+                    comparison
+                        .lookup_results
+                        .iter()
+                        .any(|r| r.provider_id == "jmdict" && r.headword == "読む")
+                );
+                assert!(
+                    service
+                        .save_japanese_word(save(0, format!("{}。", selection.text)))
+                        .await
+                        .is_err()
+                );
+                if entry.senses.len() > 1 {
+                    let other = service
+                        .save_japanese_word(save(1, selection.text.clone()))
+                        .await
+                        .unwrap();
+                    assert_ne!(other.item.id, *id);
+                    second_sense = Some(other.item.id);
+                }
+            }
+            saved_id = Some(item.item.id);
+        }
+        let suffix = service
+            .lookup_japanese(&JapaneseLookupRequest {
+                text: first.source_text.clone(),
+                start: 8,
+                end: 8,
+            })
+            .await
+            .unwrap();
+        assert_eq!(suffix.words[0].lemma, "読む");
+        assert!(second_sense.is_some());
+        let homophones = service
+            .lookup_japanese(&JapaneseLookupRequest {
+                text: "はしを渡ってきた".into(),
+                start: 0,
+                end: 0,
+            })
+            .await
+            .unwrap();
+        let entries = &homophones.words[0].entries;
+        assert!(["橋", "箸", "端"].iter().all(|headword| {
+            entries
+                .iter()
+                .any(|entry| entry.provider_id == "tomoshi" && &entry.headword == headword)
+        }));
+        database.close().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn builds_mw_audio_paths() {
