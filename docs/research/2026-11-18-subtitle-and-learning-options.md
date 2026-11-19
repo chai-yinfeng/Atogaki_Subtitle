@@ -21,7 +21,7 @@ Gummy 旧版价目约 ¥0.54／小时／单项，转写与翻译都开约 ¥1.08
 
 ### 凭据与首次连通测试
 
-桌面现有 Gemini 文本翻译与局部音频转录共用 macOS 钥匙串项，由应用设置保存。仓库只保存 provider 实现与非秘密设置约定。2026-11-18 本机核对存在配置标记和对应钥匙串项，未读取或输出 Key，未做联网鉴权。现有文本和局部转录入口不会打开 Gemini Live。端到端测试要另开 Live WebSocket，用合成日语验证该 Key 对应项目的模型权限、地域、配额和转写回包。Google 当前会拒绝未限制的标准 Key，若旧凭据握手失败应一并核对类型与限制。百炼测试需正常开通的北京区 API Key、对应业务空间 ID（Workspace ID）和同地域端点；当前 App 无 DashScope 配置入口，可用官方示例或隔离测试脚本。两个云端方案都应先用短合成音频。 [共享凭据](../decisions/0046-gemini-text-translation-and-shared-credential.md) · [Gemini Live 指南](https://aistudio.google.com/docs/live-api/live-translate) · [Google Key 类型与限制](https://aistudio.google.com/docs/api-key) · [百炼 WebSocket 与业务空间](https://help.aliyun.com/zh/model-studio/qwen3-5-livetranslate-flash-realtime)
+桌面现有 Gemini 文本翻译与局部音频转录共用 macOS 钥匙串项，由应用设置保存。仓库只保存 provider 实现与非秘密设置约定。2026-11-18 本机核对存在配置标记和对应钥匙串项，未读取或输出 Key，未做联网鉴权。现有文本和局部转录入口不会打开 Gemini Live。端到端测试要另开 Live WebSocket，用合成日语验证该 Key 对应项目的模型权限、地域、配额和转写回包。Google 当前会拒绝未限制的标准 Key，若旧凭据握手失败应一并核对类型与限制。百炼测试需正常开通的北京区 API Key、对应业务空间 ID（Workspace ID）和同地域端点；当前 App 无 DashScope 配置入口，可用官方示例或隔离测试脚本。临时本机密码框和 Gemini 使用同一个 Atogaki 钥匙串服务，百炼保存为独立项 `asr.bailian-livetranslate`。建 Key 的默认业务空间可以直接使用，连接前从控制台查看实际地域及业务空间 ID。两个云端方案都应先用短合成音频。 [共享凭据](../decisions/0046-gemini-text-translation-and-shared-credential.md) · [Gemini Live 指南](https://aistudio.google.com/docs/live-api/live-translate) · [Google Key 类型与限制](https://aistudio.google.com/docs/api-key) · [百炼 WebSocket 与业务空间](https://help.aliyun.com/zh/model-studio/qwen3-5-livetranslate-flash-realtime)
 
 
 ## 日语学习
@@ -44,6 +44,17 @@ Gummy 旧版价目约 ¥0.54／小时／单项，转写与翻译都开约 ¥1.08
 - 用同一组短字幕比较 [Sudachi.rs](https://github.com/WorksApplications/sudachi.rs) 和 [MeCab／UniDic](https://clrd.ninjal.ac.jp/unidic/en/about_unidic_en.html) 的原形、读音与范围。Sudachi 的多粒度分词适合同时检查复合词和组成，UniDic 的标准短单位可作对照。优先确定词条身份如何关联字典及每条来源，保留人工选义。
 - 先选少量高频语法卡，验证「选句 → 高亮触发片段 → 查看接续、释义、前置概念和例句」。可用《新标日》作为用户熟悉的导航，以原创短释义和可引用教材作为内容来源。需要知道修饰关系时，再评估 [GiNZA](https://github.com/megagonlabs/ginza) 的句法分析能否减少误匹配。它提供依存关系和文节信息，教学语法点仍需要自己的条目与匹配规则。
 - 主线先用已有收藏、回听和文本 Anki 导出串起来。首轮选择本地解析器与语法卡的内容边界后，再决定要不要引入 AI 歧义解释和更完整的句法模型。
+
+
+### 选区容错、词义歧义与全级覆盖
+
+**选区。** 用户确认点词、分词、还原原形、句型理解四项均有价值。点词输入应是字幕偏移，先分析完整句子，再用偏移定位一组可点击候选。框选只标记感兴趣的范围，解析器继续读取整句及必要的相邻字幕行；界面回显实际命中范围。在「昨日は本を読んでいたけど」中，选成「を読んでい」也可建议「読む」或完整「読んでいた」的语法范围；选区跨多个有意义的单位时同时列出，不静默丢弃否定、助词或条件。Sudachi 的多粒度切分和未登录词标记有助于容错，Yomitan 的从点击位置扫描、词尾逆活用和词典匹配有助于解决后缀过长。半词起点、口语、省略、错字和跨字幕断句仍需依赖整句、候选和可更正的高亮。 [Sudachi](https://github.com/WorksApplications/Sudachi) · [Yomitan 词典扫描](https://github.com/yomidevs/yomitan-api/blob/master/docs/api_paths/tokenize.md)
+
+**词典歧义。** 本机 JMdict 日英归档 `3.6.2+20261116213322` 有 219,127 条，其中 23,432 条含多个义项。以同一完整假名读音指向不同 entry ID 计算，236,951 种读音有 13,935 种指向多个词条（5.9%）；只保留 JMdict 标为 common 的读音记录，20,397 种中有 1,772 种（8.7%）。这是词典类型统计，和字幕里实际碰到同音词的比例不同。Tomoshi `v2026-10-13` 有 217,538 条、对应简体中文释义记录 217,538 行，两套数据含重叠。当前 Tomoshi 桌面入口用精确词形查询并取首条，资料源结构本身支持词形、读音与义项。后续可用原文写法、原形、读音、词性及邻近搭配来排序候选，区分不同词条和同一词条的多个义项。词本保存已选词条／义项与实际用例。 [JMdict 数据结构](https://www.edrdg.org/jmdict/jmdict_dtd_h.html) · [Tomoshi 发布库](https://github.com/tomoshi-app/tomoshi-dict-data)
+
+**N5 至 N1。** JLPT 现行考试没有发布官方逐条语法清单。OpenJLPT 有 526 条（N5 到 N1 为 81／98／101／123／123），按 CC BY-SA 4.0 发布，包含接续说明、例句和稳定 ID，是候选底库。Bunpro 公开目录实数为 979 个独立链接（132／185／220／221／221），可作为一千条量级的参照。两者划分粒度不同，目录规模只用于估算。如果每条人工核对接续、中文解释及例句用 5–10 分钟，约 500 条需 42–83 小时、约 1,000 条需 83–167 小时，粗估未含解析器开发、命中规则、专项复核和失败案例。优先核对候选数据来源及许可后再试导入。 [JLPT 官方说明](https://jlpt.jp/sp/e/faq/index.html) · [OpenJLPT 数据](https://github.com/evanclan/OpenJLPT) · [Bunpro 公开目录](https://bunpro.jp/grammar_points)
+
+可按 N5 至 N1 建立可查条目，再用两阶段完成句型识别。第一阶段使用本地形态词性、接续和规则优先匹配，并展现实际命中范围；第二阶段按需解释歧义、补全未命中句子的分析，并标注来源与推断。可先把 150–250 个高频句型作为强化本地规则的预算，按电台与口语中的实际出现次数排名，跨越 JLPT 等级。这个预算和语法覆盖率分别测量。用人工标注的节目与日常会话抽样，分别报告主要句型召回、准确命中比例、整句有帮助的比例和 AI 触发比例；必要时用 NINJAL CEJC 辅助排名。验收完整交互时，未命中仍可显示词形、可查的条目及按需解释。解析器、目录来源及首批规则数量待验证。 [NINJAL 日常会话语料](https://www.ninjal.ac.jp/english/research/cr-project/project-4/spoken-language/)
 
 
 ## 离线字幕校对
