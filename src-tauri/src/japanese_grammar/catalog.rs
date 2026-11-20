@@ -158,9 +158,17 @@ mod tests {
                 .iter()
                 .filter(|entry| entry.language() == "zh-Hans")
                 .count(),
-            99
+            145
         );
         for entry in entries {
+            if entry.level == "N5" {
+                assert_eq!(
+                    entry.language(),
+                    "zh-Hans",
+                    "N5 card {} must have Chinese",
+                    entry.id
+                );
+            }
             assert!(entry.related.iter().all(|id| ids.contains(id.as_str())));
         }
         let mut rule_ids = HashSet::new();

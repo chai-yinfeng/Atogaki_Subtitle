@@ -1754,5 +1754,826 @@
       "te-kudasai",
       "te-wa-ikenai"
     ]
+  },
+  {
+    "id": "yori",
+    "pattern": "～より（比较基准）",
+    "level": "N5",
+    "meaning": "把所接成分作为基准，说明另一事物在某个方面怎样。",
+    "formation": "用于比较的名词＋より",
+    "notes": "「AはBより高い」表示 A 比 B 高。表示出发点的「九時より」属于另一用法。",
+    "examples": [
+      {
+        "ja": "この道は大通りより静かです。",
+        "translation": "这条路比主街安静。"
+      }
+    ],
+    "related": [
+      "no-hou-ga-yori"
+    ]
+  },
+  {
+    "id": "no-hou-ga-yori",
+    "pattern": "～の方が～より",
+    "level": "N5",
+    "meaning": "把两项放在一起比较，强调哪一项更符合所说的性质。",
+    "formation": "比较结果更突出的一方＋の方が；另一方＋より",
+    "notes": "「バスより電車の方が早い」也可以调换两个比较成分的位置。看「より」确定基准。",
+    "examples": [
+      {
+        "ja": "この店の方が隣の店より安いです。",
+        "translation": "这家店比隔壁那家便宜。"
+      }
+    ],
+    "related": [
+      "yori",
+      "to-to-dochira-ga"
+    ]
+  },
+  {
+    "id": "to-to-dochira-ga",
+    "pattern": "～と～とどちらが",
+    "level": "N5",
+    "meaning": "在两个明确的选项之间提问。",
+    "formation": "A と B と、どちらが＋谓语",
+    "notes": "第二个「と」常省略。回答时可用「Aの方が」或「どちらも」。",
+    "examples": [
+      {
+        "ja": "朝と夜と、どちらが勉強しやすいですか。",
+        "translation": "早上和晚上，哪个时段更容易学习？"
+      }
+    ],
+    "related": [
+      "no-hou-ga-yori",
+      "no-naka-de-ga-ichiban"
+    ]
+  },
+  {
+    "id": "no-naka-de-ga-ichiban",
+    "pattern": "～の中で～が一番",
+    "level": "N5",
+    "meaning": "在一个给定范围内指出程度最高的一项。",
+    "formation": "范围＋の中で＋比较对象＋が一番＋谓语",
+    "notes": "范围用「の中で」限定。提问时可把对象换成「どれ」「誰」「何」等。",
+    "examples": [
+      {
+        "ja": "この三冊の中で、この本が一番読みやすい。",
+        "translation": "这三本里，这本书最容易读。"
+      }
+    ],
+    "related": [
+      "to-to-dochira-ga"
+    ]
+  },
+  {
+    "id": "desu",
+    "pattern": "～です",
+    "level": "N5",
+    "meaning": "使判断或描述带有礼貌语气。",
+    "formation": "名词／な形容词词干／い形容词＋です",
+    "notes": "い形容词可以直接接「です」，过去形先变成「寒かった」再接「です」。名词的礼貌过去形式是「でした」。",
+    "examples": [
+      {
+        "ja": "この説明は分かりやすいです。",
+        "translation": "这个说明很好懂。"
+      }
+    ],
+    "related": [
+      "da",
+      "deshita",
+      "ku-nai-katta-ku-nakatta"
+    ]
+  },
+  {
+    "id": "da",
+    "pattern": "～だ",
+    "level": "N5",
+    "meaning": "用普通体作出判断，或陈述某种属性。",
+    "formation": "名词或な形容词词干＋だ",
+    "notes": "名词「休みだ」和な形容词「静かだ」都可接「だ」。い形容词直接说「寒い」，句末无需加「だ」。",
+    "examples": [
+      {
+        "ja": "明日は図書館の休館日だ。",
+        "translation": "明天图书馆闭馆。"
+      }
+    ],
+    "related": [
+      "desu",
+      "plain-form"
+    ]
+  },
+  {
+    "id": "de-wa-arimasen-ja-nai",
+    "pattern": "～ではありません／～じゃない",
+    "level": "N5",
+    "meaning": "否定某种身份、类别或属性。",
+    "formation": "名词或な形容词词干＋ではありません／じゃない",
+    "notes": "「ではありません」是礼貌形式，「じゃない」是常见口语形式。い形容词用「～くない」否定。",
+    "examples": [
+      {
+        "ja": "これは私の傘ではありません。",
+        "translation": "这不是我的伞。"
+      }
+    ],
+    "related": [
+      "desu",
+      "da",
+      "ku-nai-katta-ku-nakatta"
+    ]
+  },
+  {
+    "id": "deshita",
+    "pattern": "～でした",
+    "level": "N5",
+    "meaning": "礼貌地说明过去的身份、情况或性质。",
+    "formation": "名词或な形容词词干＋でした",
+    "notes": "「学生でした」对应「学生です」。「寒かったです」的过去体现在い形容词本身。",
+    "examples": [
+      {
+        "ja": "昨日の会場はとても静かでした。",
+        "translation": "昨天的会场很安静。"
+      }
+    ],
+    "related": [
+      "desu",
+      "mashita"
+    ]
+  },
+  {
+    "id": "masu",
+    "pattern": "～ます",
+    "level": "N5",
+    "meaning": "用礼貌体陈述习惯、一般行为或未来动作。",
+    "formation": "动词连用形＋ます",
+    "notes": "「毎朝読みます」描述习惯，「明日読みます」说明将来，两句都可用同一非过去形式。",
+    "examples": [
+      {
+        "ja": "毎晩、本を少し読みます。",
+        "translation": "我每天晚上都会读一会儿书。"
+      }
+    ],
+    "related": [
+      "masen",
+      "mashita"
+    ]
+  },
+  {
+    "id": "masen",
+    "pattern": "～ません",
+    "level": "N5",
+    "meaning": "用礼貌体否定习惯或未来动作。",
+    "formation": "动词连用形＋ません",
+    "notes": "「今日は出かけません」表示今天不出门。过去否定要用「ませんでした」。",
+    "examples": [
+      {
+        "ja": "この店では現金を使いません。",
+        "translation": "这家店不用现金。"
+      }
+    ],
+    "related": [
+      "masu",
+      "masen-deshita"
+    ]
+  },
+  {
+    "id": "mashita",
+    "pattern": "～ました",
+    "level": "N5",
+    "meaning": "用礼貌体报告过去发生或已经完成的动作。",
+    "formation": "动词连用形＋ました",
+    "notes": "普通体通常对应动词「た形」。「読みました」对应「読んだ」。",
+    "examples": [
+      {
+        "ja": "先ほどメールを送りました。",
+        "translation": "我刚才发了邮件。"
+      }
+    ],
+    "related": [
+      "masu",
+      "ta"
+    ]
+  },
+  {
+    "id": "masen-deshita",
+    "pattern": "～ませんでした",
+    "level": "N5",
+    "meaning": "用礼貌体说明过去没有发生某个动作。",
+    "formation": "动词连用形＋ませんでした",
+    "notes": "与普通体「～なかった」对应。「見ません」是不看，「見ませんでした」是当时没看。",
+    "examples": [
+      {
+        "ja": "昨日はその番組を見ませんでした。",
+        "translation": "昨天我没看那个节目。"
+      }
+    ],
+    "related": [
+      "masen",
+      "polarity"
+    ]
+  },
+  {
+    "id": "nai",
+    "pattern": "～ない",
+    "level": "N5",
+    "meaning": "构成动词的普通体非过去否定。",
+    "formation": "动词未然形＋ない",
+    "notes": "五段动词一般把词尾改成あ段，如「読む→読まない」。「買う→買わない」，「する→しない」「来る→来ない」。",
+    "examples": [
+      {
+        "ja": "明日はお弁当を買わない。",
+        "translation": "明天我不买便当。"
+      }
+    ],
+    "related": [
+      "polarity",
+      "naide-kudasai"
+    ]
+  },
+  {
+    "id": "ta",
+    "pattern": "～た",
+    "level": "N5",
+    "meaning": "表示过去发生、已经完成，也可在接续中建立先后关系。",
+    "formation": "动词た形，五段动词的末尾可变成「た／だ」",
+    "notes": "「読む→読んだ」「書く→書いた」「行く→行った」。「たら」「たことがある」都用到た形。",
+    "examples": [
+      {
+        "ja": "窓を閉めた。",
+        "translation": "我把窗关了。"
+      }
+    ],
+    "related": [
+      "polarity",
+      "tara",
+      "ta-koto-ga-aru"
+    ]
+  },
+  {
+    "id": "mashou",
+    "pattern": "～ましょう",
+    "level": "N5",
+    "meaning": "有礼貌地提议一起做某事，或表明自己愿意采取行动。",
+    "formation": "动词连用形＋ましょう",
+    "notes": "「始めましょう」常用来推进共同活动。「では私が説明しましょう」可以是说话人主动承担。",
+    "examples": [
+      {
+        "ja": "時間になったので、始めましょう。",
+        "translation": "时间到了，我们开始吧。"
+      }
+    ],
+    "related": [
+      "mashou-ka",
+      "masen-ka"
+    ]
+  },
+  {
+    "id": "mashou-ka",
+    "pattern": "～ましょうか",
+    "level": "N5",
+    "meaning": "提议一起做某事，或主动问对方是否需要帮忙。",
+    "formation": "动词连用形＋ましょうか",
+    "notes": "「私が持ちましょうか」是主动提出帮拿。「次の問題に進みましょうか」则询问是否一起进入下一题。",
+    "examples": [
+      {
+        "ja": "荷物を持ちましょうか。",
+        "translation": "我帮你拿行李吧？"
+      }
+    ],
+    "related": [
+      "mashou",
+      "masen-ka"
+    ]
+  },
+  {
+    "id": "masen-ka",
+    "pattern": "～ませんか",
+    "level": "N5",
+    "meaning": "可礼貌地邀请对方做某事。",
+    "formation": "动词连用形＋ませんか",
+    "notes": "邀请读法通常以对方的意愿为重点。同一形式也可能是普通否定疑问，语境能辨别。",
+    "examples": [
+      {
+        "ja": "週末、一緒に映画を見ませんか。",
+        "translation": "周末要不要一起看电影？"
+      }
+    ],
+    "related": [
+      "mashou",
+      "mashou-ka"
+    ]
+  },
+  {
+    "id": "ga-hoshii",
+    "pattern": "～がほしい",
+    "level": "N5",
+    "meaning": "表示想要某样东西。",
+    "formation": "想获得的事物＋がほしい",
+    "notes": "「新しい机がほしい」说想拥有桌子；「手伝ってほしい」说希望别人帮忙。",
+    "examples": [
+      {
+        "ja": "机の上に置ける小さい時計がほしい。",
+        "translation": "我想要一只能放在桌上的小钟。"
+      }
+    ],
+    "related": [
+      "tai",
+      "te-hoshii"
+    ]
+  },
+  {
+    "id": "o-kudasai",
+    "pattern": "～をください",
+    "level": "N5",
+    "meaning": "礼貌地请求对方给自己某样东西，常用于点单或购物。",
+    "formation": "名词＋をください",
+    "notes": "点单可说「お茶をください」。请求对方完成动作时，可以用「～てください」。",
+    "examples": [
+      {
+        "ja": "温かいお茶を一杯ください。",
+        "translation": "请给我一杯热茶。"
+      }
+    ],
+    "related": [
+      "te-kudasai"
+    ]
+  },
+  {
+    "id": "te",
+    "pattern": "～て（连接动作）",
+    "level": "N5",
+    "meaning": "把多个动作接在一起，常描写一连串动作。",
+    "formation": "动词て形＋后续谓语",
+    "notes": "前半的时态通常由句末谓语统一承担。明确强调前项做完后再做后项时可用「てから」。",
+    "examples": [
+      {
+        "ja": "電気を消して、部屋を出た。",
+        "translation": "我关了灯，离开了房间。"
+      }
+    ],
+    "related": [
+      "te-form",
+      "te-kara",
+      "te-reason"
+    ]
+  },
+  {
+    "id": "tari-tari-suru",
+    "pattern": "～たり～たりする",
+    "level": "N5",
+    "meaning": "举出几个有代表性的活动，暗示还有其他活动。",
+    "formation": "动词た形＋り，可列举多项，最后接する",
+    "notes": "「読んだり書いたりする」不会要求两项严格按顺序发生。礼貌、过去等变化加在最后的「する」上。",
+    "examples": [
+      {
+        "ja": "休みの日は本を読んだり、散歩したりする。",
+        "translation": "休息日我会看看书、散散步。"
+      }
+    ],
+    "related": [
+      "te",
+      "ya"
+    ]
+  },
+  {
+    "id": "mae-ni",
+    "pattern": "～前に",
+    "level": "N5",
+    "meaning": "说明后面的事发生在参照事件之前。",
+    "formation": "动词辞书形／名词＋の，再接前に",
+    "notes": "「出かける前に確認した」整体发生在过去，参照动词「出かける」仍用辞书形。",
+    "examples": [
+      {
+        "ja": "寝る前に明日の予定を確認する。",
+        "translation": "睡前我会确认明天的安排。"
+      }
+    ],
+    "related": [
+      "ato-de",
+      "te-kara"
+    ]
+  },
+  {
+    "id": "ato-de",
+    "pattern": "～後で",
+    "level": "N5",
+    "meaning": "说明一件事完成之后，稍后再发生另一件事。",
+    "formation": "动词た形／名词＋の，再接後で",
+    "notes": "「会議が終わった後で」的参照动作用た形。「後で」也可单独表示稍后。",
+    "examples": [
+      {
+        "ja": "授業が終わった後で、図書館へ行った。",
+        "translation": "下课后我去了图书馆。"
+      }
+    ],
+    "related": [
+      "mae-ni",
+      "te-kara"
+    ]
+  },
+  {
+    "id": "ni-iku",
+    "pattern": "～に行く",
+    "level": "N5",
+    "meaning": "说明移动是为了做什么。",
+    "formation": "动词连用形或活动名词＋に＋行く／来る等",
+    "notes": "「本を買いに行く」中的「に」标出目的。「本屋に行く」的「に」标出目的地。",
+    "examples": [
+      {
+        "ja": "駅まで友達を迎えに行く。",
+        "translation": "我去车站接朋友。"
+      }
+    ],
+    "related": [
+      "ni-destination"
+    ]
+  },
+  {
+    "id": "ga-suki-ga-kirai",
+    "pattern": "～が好き／～が嫌い",
+    "level": "N5",
+    "meaning": "表达喜欢或讨厌某物或某个活动。",
+    "formation": "名词或「动词辞书形＋の」＋が＋好き／嫌い",
+    "notes": "喜欢的对象通常用「が」标出。已经成为对比话题时也可用「は」。",
+    "examples": [
+      {
+        "ja": "静かな場所で本を読むのが好きです。",
+        "translation": "我喜欢在安静的地方看书。"
+      }
+    ],
+    "related": [
+      "ga-jouzu-ga-heta",
+      "no-koto-nominalizer"
+    ]
+  },
+  {
+    "id": "ga-jouzu-ga-heta",
+    "pattern": "～が上手／～が下手",
+    "level": "N5",
+    "meaning": "评价做某项活动的熟练程度。",
+    "formation": "活动或技能名词，或名词化动作＋が＋上手／下手",
+    "notes": "「上手」可以赞扬别人擅长某事。自述时，常用较客观的能力描述，或说某项是自己的强项。",
+    "examples": [
+      {
+        "ja": "姉は絵を描くのが上手です。",
+        "translation": "我姐姐很擅长画画。"
+      }
+    ],
+    "related": [
+      "ga-suki-ga-kirai",
+      "koto-ga-dekiru"
+    ]
+  },
+  {
+    "id": "ga-aru-ga-iru",
+    "pattern": "～がある／～がいる",
+    "level": "N5",
+    "meaning": "表示存在。「ある」通常用于物品、植物和事件，「いる」通常用于人和动物。",
+    "formation": "事物或生物＋が＋ある／いる；地点常用「に」",
+    "notes": "说「公園に木がある」用「ある」。有动态生命的对象如「猫がいる」一般用「いる」。",
+    "examples": [
+      {
+        "ja": "棚の上に古い箱があります。",
+        "translation": "架子上有个旧盒子。"
+      }
+    ],
+    "related": [
+      "ni-location",
+      "ga-subject"
+    ]
+  },
+  {
+    "id": "ga-but",
+    "pattern": "～が（转折或铺垫）",
+    "level": "N5",
+    "meaning": "连接两个分句，能表示转折，也能柔和地引出请求或说明。",
+    "formation": "分句＋が＋后续分句",
+    "notes": "「行きたいですが、時間がない」有转折。「すみませんが」常只是礼貌地开口。",
+    "examples": [
+      {
+        "ja": "すみませんが、もう一度お願いします。",
+        "translation": "不好意思，麻烦再说一次。"
+      }
+    ],
+    "related": [
+      "kedo-keredomo",
+      "ga-subject"
+    ]
+  },
+  {
+    "id": "deshou",
+    "pattern": "～でしょう",
+    "level": "N5",
+    "meaning": "以礼貌语气推测，语调上扬时也可请求确认。",
+    "formation": "动词或い形容词普通形／名词或な形容词词干＋でしょう",
+    "notes": "天气预报「雨が降るでしょう」表示预计下雨。「知っているでしょう？」可表示向对方确认。",
+    "examples": [
+      {
+        "ja": "午後から雨が降るでしょう。",
+        "translation": "预计午后会下雨。"
+      }
+    ],
+    "related": [
+      "darou"
+    ]
+  },
+  {
+    "id": "ku-naru-ni-naru",
+    "pattern": "～くなる／～になる",
+    "level": "N5",
+    "meaning": "描述某种性质、身份或状态出现变化。",
+    "formation": "い形容词去い＋くなる；名词或な形容词词干＋になる",
+    "notes": "「静かになる」描述变化，「静かにする」强调有人使它安静或自己保持安静。",
+    "examples": [
+      {
+        "ja": "日が暮れて、外が暗くなった。",
+        "translation": "天黑后，外面变暗了。"
+      }
+    ],
+    "related": [
+      "ku-suru-ni-suru",
+      "you-ni-naru"
+    ]
+  },
+  {
+    "id": "ni-suru",
+    "pattern": "～にする（选择）",
+    "level": "N5",
+    "meaning": "从几个选项中做出决定。",
+    "formation": "选定的名词＋にする",
+    "notes": "点餐「コーヒーにします」表示决定要咖啡。「静かにする」属于使某种状态成立的用法。",
+    "examples": [
+      {
+        "ja": "飲み物は紅茶にします。",
+        "translation": "饮料我选红茶。"
+      }
+    ],
+    "related": [
+      "ku-suru-ni-suru",
+      "koto-ni-suru"
+    ]
+  },
+  {
+    "id": "mou-ta",
+    "pattern": "もう～た",
+    "level": "N5",
+    "meaning": "表示事情到参照时间已经发生或完成。",
+    "formation": "もう＋动词た形或「ました」",
+    "notes": "「もう送った？」是在问已经发了吗。否定回答常说「まだ送っていない」。",
+    "examples": [
+      {
+        "ja": "必要な書類はもう送りました。",
+        "translation": "所需文件我已经发了。"
+      }
+    ],
+    "related": [
+      "mada-te-inai",
+      "ta"
+    ]
+  },
+  {
+    "id": "amari-nai",
+    "pattern": "あまり～ない",
+    "level": "N5",
+    "meaning": "表示程度不高或次数不多。",
+    "formation": "あまり＋谓语否定形式",
+    "notes": "「最近あまり行かない」是最近去得不多。「あまりに」加肯定谓语则可表示过于……。",
+    "examples": [
+      {
+        "ja": "最近はあまりテレビを見ない。",
+        "translation": "最近我不太看电视。"
+      }
+    ],
+    "related": [
+      "zenzen-nai"
+    ]
+  },
+  {
+    "id": "zenzen-nai",
+    "pattern": "全然～ない",
+    "level": "N5",
+    "meaning": "加强否定，表示完全或一点也不。",
+    "formation": "全然＋谓语否定形式",
+    "notes": "基本形式可说「全然分からない」。现代口语也会有肯定搭配，例如「全然大丈夫」。",
+    "examples": [
+      {
+        "ja": "音が小さくて、全然聞こえない。",
+        "translation": "声音太小，我一点也听不见。"
+      }
+    ],
+    "related": [
+      "amari-nai"
+    ]
+  },
+  {
+    "id": "dake",
+    "pattern": "～だけ",
+    "level": "N5",
+    "meaning": "把数量、对象或动作限制在某个范围。",
+    "formation": "名词或动词普通形等＋だけ",
+    "notes": "「見るだけ」表示只看。「しか」通常搭配否定形式，如「一つしかない」。",
+    "examples": [
+      {
+        "ja": "今日は見学するだけです。",
+        "translation": "今天我只是来参观。"
+      }
+    ],
+    "related": [
+      "shika-nai"
+    ]
+  },
+  {
+    "id": "kurai-gurai",
+    "pattern": "～くらい／～ぐらい（约数）",
+    "level": "N5",
+    "meaning": "表示大约多少或大概到某种程度。",
+    "formation": "数量、时长或程度＋くらい／ぐらい",
+    "notes": "时长「二時間ぐらい」约两小时；钟点「三時ごろ」大约三点。",
+    "examples": [
+      {
+        "ja": "駅から十分ぐらい歩きます。",
+        "translation": "从车站走大约十分钟。"
+      }
+    ],
+    "related": [
+      "goro"
+    ]
+  },
+  {
+    "id": "goro",
+    "pattern": "～ごろ",
+    "level": "N5",
+    "meaning": "表示在某个时间点附近。",
+    "formation": "钟点、日期等时间点＋ごろ",
+    "notes": "「三時ごろ」约三点；「三時間ぐらい」约三小时。两者分别描述时间点和时长。",
+    "examples": [
+      {
+        "ja": "夕方六時ごろに着きます。",
+        "translation": "大约傍晚六点到。"
+      }
+    ],
+    "related": [
+      "kurai-gurai",
+      "ni-time"
+    ]
+  },
+  {
+    "id": "nani-mo-nai-dare-mo-nai",
+    "pattern": "何も～ない／誰も～ない",
+    "level": "N5",
+    "meaning": "用疑问词和「も」配合否定，表示什么都没有或谁都没有。",
+    "formation": "何も或誰も＋否定谓语",
+    "notes": "「誰も来なかった」是没人来。「誰か来た」则表示有人来了。",
+    "examples": [
+      {
+        "ja": "部屋には誰もいなかった。",
+        "translation": "房间里一个人都没有。"
+      }
+    ],
+    "related": [
+      "nani-ka-dare-ka-doko-ka",
+      "mo"
+    ]
+  },
+  {
+    "id": "nani-ka-dare-ka-doko-ka",
+    "pattern": "何か／誰か／どこか",
+    "level": "N5",
+    "meaning": "在对象不明确时分别表示某样东西、某人或某处。",
+    "formation": "疑问词＋か",
+    "notes": "「どこかで」表示在某个地方。「どこで」才是在问在哪里。",
+    "examples": [
+      {
+        "ja": "帰りにどこかで昼ご飯を食べよう。",
+        "translation": "回去路上找个地方吃午饭吧。"
+      }
+    ],
+    "related": [
+      "nani-mo-nai-dare-mo-nai",
+      "ka-question"
+    ]
+  },
+  {
+    "id": "kore-sore-are-dore",
+    "pattern": "これ／それ／あれ／どれ",
+    "level": "N5",
+    "meaning": "分别指说话人近处、听话人近处、双方远处或询问哪一个。",
+    "formation": "これ／それ／あれ／どれ可独立作指示代词",
+    "notes": "对话中也能指前面提到的内容。修饰后续名词时用「この／その／あの／どの」。",
+    "examples": [
+      {
+        "ja": "この三つのうち、どれが使いやすいですか。",
+        "translation": "这三个里，哪一个更好用？"
+      }
+    ],
+    "related": [
+      "kono-sono-ano-dono"
+    ]
+  },
+  {
+    "id": "kono-sono-ano-dono",
+    "pattern": "この／その／あの／どの",
+    "level": "N5",
+    "meaning": "在名词前指出具体对象，或问是哪一个。",
+    "formation": "この／その／あの／どの＋名词",
+    "notes": "「その本」后面必须给出名词。对象明确时可用代词「それ」。",
+    "examples": [
+      {
+        "ja": "どのバスが駅まで行きますか。",
+        "translation": "哪辆公交车到车站？"
+      }
+    ],
+    "related": [
+      "kore-sore-are-dore"
+    ]
+  },
+  {
+    "id": "koko-soko-asoko-doko",
+    "pattern": "ここ／そこ／あそこ／どこ",
+    "level": "N5",
+    "meaning": "分别指这里、你那边或前面提到的地方、远处那里，以及哪里。",
+    "formation": "ここ／そこ／あそこ／どこ可指地点",
+    "notes": "表示动作地点可接「で」，表示到达或存在地点时常接「に」。",
+    "examples": [
+      {
+        "ja": "ここで少し休みましょう。",
+        "translation": "我们在这儿休息一下吧。"
+      }
+    ],
+    "related": [
+      "de-place",
+      "ni-location"
+    ]
+  },
+  {
+    "id": "ku-nai-katta-ku-nakatta",
+    "pattern": "～くない／～かった／～くなかった",
+    "level": "N5",
+    "meaning": "构成い形容词的非过去否定、过去肯定和过去否定。",
+    "formation": "い形容词去い＋くない／かった／くなかった",
+    "notes": "以「寒い」为例，依次为「寒くない、寒かった、寒くなかった」。「いい」变化时用「よくない、よかった、よくなかった」。",
+    "examples": [
+      {
+        "ja": "昨日は思ったほど寒くなかった。",
+        "translation": "昨天没我想的那么冷。"
+      }
+    ],
+    "related": [
+      "polarity",
+      "na-na-adjective"
+    ]
+  },
+  {
+    "id": "na-na-adjective",
+    "pattern": "～な（な形容词修饰名词）",
+    "level": "N5",
+    "meaning": "把な形容词接到它修饰的名词前。",
+    "formation": "な形容词词干＋な＋名词",
+    "notes": "「静かな町」需要「な」，句末则说「町は静かだ／静かです」。「きれい」虽然以「い」结尾，也按な形容词接续。",
+    "examples": [
+      {
+        "ja": "静かな部屋を探しています。",
+        "translation": "我在找一间安静的房间。"
+      }
+    ],
+    "related": [
+      "da",
+      "kute-de"
+    ]
+  },
+  {
+    "id": "kute-de",
+    "pattern": "～くて／～で",
+    "level": "N5",
+    "meaning": "连接两个性质、状态或身份，也可按语境理解为原因。",
+    "formation": "い形容词去い＋くて；な形容词或名词＋で",
+    "notes": "「安くて便利」把两个性质并列。「静かで眠れた」中的前项可说明原因。",
+    "examples": [
+      {
+        "ja": "この部屋は広くて明るい。",
+        "translation": "这间房宽敞又明亮。"
+      }
+    ],
+    "related": [
+      "te-reason",
+      "te"
+    ]
+  },
+  {
+    "id": "to-iu-named",
+    "pattern": "～という（名称）",
+    "level": "N5",
+    "meaning": "说明后面的事物叫什么、被称作什么。",
+    "formation": "名称＋という＋名词",
+    "notes": "「青空という店」介绍店名。「明日行くと言う」里的「と言う」则是引述某人说的话。",
+    "examples": [
+      {
+        "ja": "駅前に「青空」という喫茶店がある。",
+        "translation": "车站前有一家叫「青空」的咖啡馆。"
+      }
+    ],
+    "related": [
+      "to-iu-say",
+      "no"
+    ]
   }
 ]
