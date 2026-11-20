@@ -23,6 +23,8 @@ pub(crate) struct Entry {
     pub lesson: String,
     #[serde(skip)]
     localized: bool,
+    #[serde(skip)]
+    translated_from_openjlpt: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -30,6 +32,30 @@ pub(crate) struct Example {
     pub ja: String,
     #[serde(alias = "en")]
     pub translation: String,
+}
+
+#[derive(Deserialize)]
+struct OpenJlptTranslation {
+    id: String,
+    formation: String,
+    meaning: String,
+    #[serde(default)]
+    notes: String,
+    examples: Vec<String>,
+}
+
+impl OpenJlptTranslation {
+    fn apply(self, entry: &mut Entry) {
+        assert_eq!(self.examples.len(), entry.examples.len(), "{}", self.id);
+        entry.formation = self.formation;
+        entry.meaning = self.meaning;
+        entry.notes = self.notes;
+        for (example, translation) in entry.examples.iter_mut().zip(self.examples) {
+            example.translation = translation;
+        }
+        entry.localized = true;
+        entry.translated_from_openjlpt = true;
+    }
 }
 
 #[derive(Serialize)]
@@ -43,6 +69,7 @@ pub(crate) struct Summary<'a> {
     pub romaji: &'a str,
     pub language: &'static str,
     pub automatic: bool,
+    pub translated_from_openjlpt: bool,
 }
 
 #[derive(Serialize)]
@@ -63,6 +90,7 @@ impl Entry {
             romaji: &self.romaji,
             language: self.language(),
             automatic: super::rules::rule_ids().any(|id| id == self.id),
+            translated_from_openjlpt: self.translated_from_openjlpt,
         }
     }
 
@@ -92,22 +120,38 @@ pub(crate) fn entries() -> &'static [Entry] {
         })
         .collect();
 
+        let mut translations: HashMap<String, OpenJlptTranslation> =
+            serde_json::from_str::<Vec<OpenJlptTranslation>>(include_str!(
+                "../../../assets/japanese-grammar/zh-Hans-openjlpt.json"
+            ))
+            .expect("bundled OpenJLPT translations must parse")
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect();
+
         let mut entries: Vec<_> = OPENJLPT
             .iter()
             .flat_map(|data| {
                 serde_json::from_str::<Vec<Entry>>(data).expect("bundled OpenJLPT must parse")
             })
-            .map(|entry| match overlay.remove(&entry.id) {
+            .map(|mut entry| match overlay.remove(&entry.id) {
                 Some(mut zh) => {
                     zh.romaji = entry.romaji;
                     zh.reading = entry.reading;
                     zh
                 }
-                None => entry,
+                None => {
+                    if let Some(translation) = translations.remove(&entry.id) {
+                        translation.apply(&mut entry);
+                    }
+                    entry
+                }
             })
             .collect();
         let mut concepts = overlay.into_values().collect::<Vec<_>>();
-        concepts.sort_by(|a, b| a.id.cmp(&b.id));
+        concepts.sort_by(|a, b| {
+            (a.id != "grammar-basics", &a.id).cmp(&(b.id != "grammar-basics", &b.id))
+        });
         entries.extend(concepts);
         entries
     })
@@ -150,27 +194,30 @@ mod tests {
                 ("N3", 101),
                 ("N4", 98),
                 ("N5", 81),
-                ("基础概念", 3),
+                ("基础概念", 21),
             ])
         );
+        assert!(entries.iter().all(|entry| entry.language() == "zh-Hans"));
         assert_eq!(
             entries
                 .iter()
-                .filter(|entry| entry.language() == "zh-Hans")
+                .filter(|entry| entry.translated_from_openjlpt)
                 .count(),
-            145
+            384
         );
         for entry in entries {
-            if entry.level == "N5" {
-                assert_eq!(
-                    entry.language(),
-                    "zh-Hans",
-                    "N5 card {} must have Chinese",
-                    entry.id
-                );
-            }
             assert!(entry.related.iter().all(|id| ids.contains(id.as_str())));
         }
+        assert_eq!(super::get("gatera").unwrap().level, "N1");
+        assert_eq!(super::get("grammar-basics").unwrap().level, "基础概念");
+        assert_eq!(
+            entries
+                .iter()
+                .find(|entry| entry.level == "基础概念")
+                .unwrap()
+                .id,
+            "grammar-basics"
+        );
         let mut rule_ids = HashSet::new();
         for id in super::super::rules::rule_ids() {
             assert!(rule_ids.insert(id), "duplicate rule ID {id}");

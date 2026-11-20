@@ -24,6 +24,7 @@ type GrammarSummary = {
   meaning: string;
   language: "zh-Hans" | "en";
   automatic: boolean;
+  translatedFromOpenjlpt?: boolean;
 };
 type GrammarDetail = {
   entry: { formation: string; notes: string; lesson?: string; examples: { ja: string; translation: string }[] };
@@ -46,14 +47,15 @@ export const japaneseGrammarDialog = `
   </div>
   <div class="japanese-grammar-body" data-grammar-body></div>
   <footer class="learning-source-meta">
-    JLPT 等级为社区参考。英文条目由 OpenJLPT contributors 编写。
+    JLPT 等级为社区参考。目录与译文源自 OpenJLPT contributors 编写的资料。
     <button type="button" class="secondary" data-grammar-link="source">数据来源</button>
     <button type="button" class="secondary" data-grammar-link="license">CC BY-SA 4.0</button>
   </footer>
 </dialog>`;
 
 function grammarDetailMarkup({ entry, summary, related }: GrammarDetail): string {
-  const source = summary.language === "en" ? "OpenJLPT 英文条目" : "Atogaki 中文讲解";
+  const source = summary.translatedFromOpenjlpt ? "OpenJLPT 中文译文"
+    : summary.language === "en" ? "OpenJLPT 英文条目" : "Atogaki 中文讲解";
   return `<article class="japanese-grammar-entry">
     <h3 lang="ja">${escaped(summary.pattern)}</h3>
     <small>${escaped(summary.level)} · ${source}${summary.automatic ? " · 支持本地匹配" : ""}</small>

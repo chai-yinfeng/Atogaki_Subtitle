@@ -14,7 +14,8 @@
     ],
     "related": [
       "te-form",
-      "polarity"
+      "polarity",
+      "aspect-basics"
     ],
     "lesson": "《新标日》初级上册第 15 课"
   },
@@ -141,7 +142,8 @@
     "related": [
       "ba",
       "nara",
-      "polarity"
+      "polarity",
+      "conditional-form"
     ]
   },
   {
@@ -443,7 +445,8 @@
     "related": [
       "te-iru",
       "te-oku",
-      "te-kudasai"
+      "te-kudasai",
+      "grammar-basics"
     ],
     "lesson": "《新标日》初级上册第 14 课"
   },
@@ -463,7 +466,8 @@
     "related": [
       "plain-form",
       "te-iru",
-      "tara"
+      "tara",
+      "grammar-basics"
     ],
     "lesson": "《新标日》初级上册第 19 课（否定形）"
   },
@@ -482,7 +486,8 @@
     ],
     "related": [
       "polarity",
-      "sou-da-hearsay"
+      "sou-da-hearsay",
+      "grammar-basics"
     ]
   },
   {
@@ -536,7 +541,8 @@
     ],
     "related": [
       "te-kureru",
-      "te-kudasaru-te-itadaku"
+      "te-kudasaru-te-itadaku",
+      "giving-perspective"
     ]
   },
   {
@@ -1914,7 +1920,9 @@
     ],
     "related": [
       "masen",
-      "mashita"
+      "mashita",
+      "continuative-form",
+      "honorific-basics"
     ]
   },
   {
@@ -2537,7 +2545,9 @@
     ],
     "related": [
       "da",
-      "kute-de"
+      "kute-de",
+      "adjective-basics",
+      "modifier-basics"
     ]
   },
   {
@@ -2574,6 +2584,375 @@
     "related": [
       "to-iu-say",
       "no"
+    ]
+  },
+  {
+    "id": "grammar-basics",
+    "pattern": "日语语法基础导航",
+    "level": "基础概念",
+    "meaning": "遇到接续说明不懂时，可以沿相关条目回看它所用的词类、词形和句法概念。",
+    "formation": "从谓语和词类入手，接着学活用，最后看分句关系与语气。",
+    "notes": "「动词て形＋いる」同时用到动词活用、て形以及补助动词。名词判断、礼貌体和尊敬谦让也可以沿各自的条目查阅。",
+    "examples": [
+      {
+        "ja": "昨日は窓を開けていた。",
+        "translation": "昨天我一直开着窗户。"
+      }
+    ],
+    "related": [
+      "predicate-basics",
+      "verb-classes",
+      "particle-basics",
+      "te-form",
+      "plain-form",
+      "polarity",
+      "clause-structure",
+      "voice-basics",
+      "honorific-basics"
+    ]
+  },
+  {
+    "id": "predicate-basics",
+    "pattern": "谓语（述語）",
+    "level": "基础概念",
+    "meaning": "谓语告诉我们发生什么、有何性质，或某人是什么身份。",
+    "formation": "日语的谓语通常在分句末尾，可以由动词、形容词或「名词＋だ／です」构成。",
+    "notes": "「走る」是动作，「静かだ」描述性质，「学生だ」作名词判断。时间、地点、主语等常由助词标出，也可根据语境省略。",
+    "examples": [
+      {
+        "ja": "兄は学生で、妹は働いている。",
+        "translation": "哥哥是学生，妹妹在工作。"
+      }
+    ],
+    "related": [
+      "particle-basics",
+      "plain-form",
+      "clause-structure",
+      "na-na-adjective",
+      "da",
+      "desu"
+    ]
+  },
+  {
+    "id": "particle-basics",
+    "pattern": "助词（助詞）",
+    "level": "基础概念",
+    "meaning": "用来区分话题、主语、宾语、时间、地点、连接或语气。",
+    "formation": "名词或分句后接助词，以标明其在句中的关系；句末助词也可标出说话语气。",
+    "notes": "「で」有多个用法。「駅で待つ」标动作地点，「読んでいる」里的「で」是动词て形的一部分，判断时要看它前后接的成分。",
+    "examples": [
+      {
+        "ja": "駅で友達を待つ。",
+        "translation": "我在车站等朋友。"
+      }
+    ],
+    "related": [
+      "wa",
+      "ga-subject",
+      "o",
+      "ni-location",
+      "de-place",
+      "te-form",
+      "clause-structure"
+    ]
+  },
+  {
+    "id": "verb-classes",
+    "pattern": "动词的三类活用",
+    "level": "基础概念",
+    "meaning": "判对类别，才能从辞书形推出ない形、ます形、て形等。",
+    "formation": "五段动词、一段动词以及不规则的「する／来る」按不同方式改词尾。",
+    "notes": "「読む→読み／読ま／読んで」是五段；「食べる→食べ／食べない／食べて」是一段；「する→し」「来る→き／こ」要单独掌握。以る结尾的「帰る」仍是五段。",
+    "examples": [
+      {
+        "ja": "早く帰って、夕飯を食べる。",
+        "translation": "早点回来，然后吃晚饭。"
+      }
+    ],
+    "related": [
+      "dictionary-form",
+      "continuative-form",
+      "irrealis-form",
+      "te-form"
+    ]
+  },
+  {
+    "id": "dictionary-form",
+    "pattern": "辞书形（辞書形）",
+    "level": "基础概念",
+    "meaning": "它也表示普通体的非过去肯定，可作句末谓语或接在一些句型前。",
+    "formation": "辞书形是动词查字典的形式，例如「読む」「食べる」「する」「来る」。",
+    "notes": "「読む前に」要求辞书形。句型标「普通形」时，往往还允许否定或过去形，要看该条目的接续说明。",
+    "examples": [
+      {
+        "ja": "寝る前に本を読む。",
+        "translation": "我睡前读书。"
+      }
+    ],
+    "related": [
+      "verb-classes",
+      "plain-form",
+      "mae-ni",
+      "koto-ga-dekiru"
+    ]
+  },
+  {
+    "id": "continuative-form",
+    "pattern": "连用形（連用形）",
+    "level": "基础概念",
+    "meaning": "用于接「ます」「たい」「ながら」和部分后接动词，也有て形、た形相关的音便变体。",
+    "formation": "五段动词常用い段接「ます」；一段动词去る；「する→し」「来る→き」。",
+    "notes": "教学里的「ます形去ます」可找出「読み」「食べ」等。接て形时五段动词还可能变成「読んで」「書いて」「待って」。",
+    "examples": [
+      {
+        "ja": "次の駅で降ります。",
+        "translation": "我在下一站下车。"
+      }
+    ],
+    "related": [
+      "verb-classes",
+      "te-form",
+      "masu",
+      "tai",
+      "nagara"
+    ]
+  },
+  {
+    "id": "irrealis-form",
+    "pattern": "未然形（未然形）",
+    "level": "基础概念",
+    "meaning": "常出现在否定、被动和使役等构造之前。",
+    "formation": "五段动词接ない常用あ段，一段动词去る；不规则动词随接续变化。",
+    "notes": "「読まない」「読まれる」「読ませる」共享「読ま」。「買う」接ない变「買わない」；「する」在「しない」和「される」中形式不同。",
+    "examples": [
+      {
+        "ja": "雨の日は遠くまで歩かない。",
+        "translation": "下雨天我不走太远。"
+      }
+    ],
+    "related": [
+      "verb-classes",
+      "polarity",
+      "nai",
+      "voice-basics"
+    ]
+  },
+  {
+    "id": "conditional-form",
+    "pattern": "假定形与条件接续",
+    "level": "基础概念",
+    "meaning": "各形式对条件成立方式、时间顺序以及后项是推论还是意志有不同侧重。",
+    "formation": "用「ば」「たら」「なら」「と」等把条件接到后面的内容。",
+    "notes": "「着いたら」常表示到达以后，「安ければ」提出价格条件，「行くなら」承接去的前提。「押すと開く」可说按下后自然发生的结果。",
+    "examples": [
+      {
+        "ja": "時間があれば寄ってください。",
+        "translation": "有时间的话，请顺道来一趟。"
+      }
+    ],
+    "related": [
+      "ba",
+      "tara",
+      "nara",
+      "to"
+    ]
+  },
+  {
+    "id": "volitional-form",
+    "pattern": "意向形（意向形）",
+    "level": "基础概念",
+    "meaning": "用来提出一起做某事、表达自己打算做什么，或进入「～うと思う」等句型。",
+    "formation": "五段动词词尾改お段＋う，一段去る＋よう；「する→しよう」「来る→来よう」。",
+    "notes": "「行こう」是普通体，可是提议也可是自言自语的决定。礼貌提议常用「行きましょう」。",
+    "examples": [
+      {
+        "ja": "今日は早めに帰ろう。",
+        "translation": "今天早点回去吧。"
+      }
+    ],
+    "related": [
+      "ou-you",
+      "you-to-omou",
+      "mashou"
+    ]
+  },
+  {
+    "id": "imperative-form",
+    "pattern": "命令形（命令形）",
+    "level": "基础概念",
+    "meaning": "用于直接命令，常见于紧急提醒、指示、引语等，语气通常较强。",
+    "formation": "五段改え段，例如「書け」；一段如「食べろ」；「する→しろ／せよ」「来る→来い」。",
+    "notes": "请人做事可用て形＋ください。辞书形＋な表示禁止，例如「入るな」，与肯定命令分开。",
+    "examples": [
+      {
+        "ja": "危ない、下がれ！",
+        "translation": "危险，退后！"
+      }
+    ],
+    "related": [
+      "e-ro",
+      "na-prohibition",
+      "te-kudasai"
+    ]
+  },
+  {
+    "id": "adjective-basics",
+    "pattern": "い形容词和な形容词",
+    "level": "基础概念",
+    "meaning": "两类词在否定、过去和连接时用不同形式。",
+    "formation": "い形容词直接修饰名词，な形容词用「な」接名词。",
+    "notes": "「安い店→安くない」用い形容词活用；「静かな店→静かじゃない」用な形容词接续。「きれい」按な形容词处理。",
+    "examples": [
+      {
+        "ja": "静かな店で温かいお茶を飲む。",
+        "translation": "在安静的店里喝热茶。"
+      }
+    ],
+    "related": [
+      "na-na-adjective",
+      "ku-nai-katta-ku-nakatta",
+      "kute-de",
+      "predicate-basics"
+    ]
+  },
+  {
+    "id": "aspect-basics",
+    "pattern": "时态与体（テンス・アスペクト）",
+    "level": "基础概念",
+    "meaning": "例如「開いた」报道动作已经发生，「開いている」描写门仍是开着的。",
+    "formation": "用非过去／过去等形式定位事件，用「ている」「てある」等说明进行、结果持续或习惯。",
+    "notes": "「読んでいる」一般是正在读，有时间频率时也能表示习惯。「読んでいた」把参照时间放在过去。",
+    "examples": [
+      {
+        "ja": "そのころは毎日、日本語の本を読んでいた。",
+        "translation": "那时候我每天都读日语书。"
+      }
+    ],
+    "related": [
+      "te-iru",
+      "te-aru",
+      "polarity",
+      "mada-te-inai"
+    ]
+  },
+  {
+    "id": "transitivity",
+    "pattern": "自动词与他动词",
+    "level": "基础概念",
+    "meaning": "区分「门开了」和「有人开了门」之类的事件视角。",
+    "formation": "自动词可描述事物自身的变化；他动词通常带用「を」标记的对象。",
+    "notes": "「ドアが開く」描述门的变化，「ドアを開ける」描述开门的动作。看对象和谓语搭配，助词也要结合句义判断。",
+    "examples": [
+      {
+        "ja": "風で窓が開いたので、私が窓を閉めた。",
+        "translation": "风把窗吹开了，所以我把窗关上了。"
+      }
+    ],
+    "related": [
+      "predicate-basics",
+      "o",
+      "te-aru",
+      "ga-subject"
+    ]
+  },
+  {
+    "id": "voice-basics",
+    "pattern": "可能、被动与使役",
+    "level": "基础概念",
+    "meaning": "可能讲能不能做，被动从承受方叙述，使役讲让或使别人做。",
+    "formation": "可能可用「読める／食べられる」，被动可用「読まれる／食べられる」，使役可用「読ませる／食べさせる」。",
+    "notes": "一段动词的「られる」在可能、被动和尊敬中可能同形。需要看参与者和前后文。「子供に読ませる」中的孩子是实际读的人。",
+    "examples": [
+      {
+        "ja": "この本は小学生にも読める。",
+        "translation": "这本书小学生也能读。"
+      }
+    ],
+    "related": [
+      "eru-rareru-potential",
+      "reru-rareru-passive",
+      "seru-saseru",
+      "serareru-saserareru"
+    ]
+  },
+  {
+    "id": "giving-perspective",
+    "pattern": "授受视角",
+    "level": "基础概念",
+    "meaning": "也可接在动词て形后，表示替人做事或得到帮助。",
+    "formation": "あげる从给予一方出发，くれる把给予看作朝向说话人一方，もらう以接受者为主语。",
+    "notes": "「友達が貸してくれた」以朋友为主语，「友達に貸してもらった」以受益的一方为主语。两句可以描述同一件事。",
+    "examples": [
+      {
+        "ja": "友達に傘を貸してもらった。",
+        "translation": "朋友把伞借给了我。"
+      }
+    ],
+    "related": [
+      "ageru-kureru-morau",
+      "te-ageru",
+      "te-kureru",
+      "te-morau"
+    ]
+  },
+  {
+    "id": "modifier-basics",
+    "pattern": "连体修饰与连用修饰",
+    "level": "基础概念",
+    "meaning": "用「静かな部屋」「昨日買った本」限定名词，用「静かに話す」说明方式。",
+    "formation": "修饰名词的成分放在名词前，修饰动作或状态的成分通常放在谓语前。",
+    "notes": "名词可用「の」修饰另一名词。动词或分句修饰名词时通常直接接上，例如「私が読んだ本」。",
+    "examples": [
+      {
+        "ja": "昨日買った本をゆっくり読む。",
+        "translation": "慢慢读昨天买的书。"
+      }
+    ],
+    "related": [
+      "no",
+      "na-na-adjective",
+      "no-koto-nominalizer",
+      "predicate-basics"
+    ]
+  },
+  {
+    "id": "clause-structure",
+    "pattern": "文节与分句",
+    "level": "基础概念",
+    "meaning": "理解较长句子时，可先分出各个谓语及其修饰成分，再判断前后分句的关系。",
+    "formation": "文节常由实词和附随成分构成，分句通常围绕一个谓语建立。",
+    "notes": "在「雨が降ったので、家にいた」里，「雨が降った」说明原因，「家にいた」是主要陈述。分句边界也可出现在没标点的口语里。",
+    "examples": [
+      {
+        "ja": "雨が降ったので、家にいた。",
+        "translation": "因为下雨，我就待在家里了。"
+      }
+    ],
+    "related": [
+      "predicate-basics",
+      "particle-basics",
+      "node",
+      "modifier-basics"
+    ]
+  },
+  {
+    "id": "honorific-basics",
+    "pattern": "普通体、礼貌体与敬语",
+    "level": "基础概念",
+    "meaning": "礼貌体面向听话人，尊敬表达抬高所说的动作执行者，谦让表达从说话人一方着眼。",
+    "formation": "普通体用「だ」「する」等，礼貌体常用「です」「ます」，尊敬和谦让还可改变词汇或结构。",
+    "notes": "「先生が言う→先生がおっしゃる」是尊敬。「私が言う→私が申す／申し上げる」从说话人一方表达敬意。",
+    "examples": [
+      {
+        "ja": "先生がおっしゃったことを、後でお伝えします。",
+        "translation": "老师说的话，我稍后转告您。"
+      }
+    ],
+    "related": [
+      "plain-form",
+      "masu",
+      "sonkeigo",
+      "kenjougo"
     ]
   }
 ]
