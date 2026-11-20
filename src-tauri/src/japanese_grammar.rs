@@ -449,18 +449,82 @@ mod tests {
                 "さえ明日までに書けば",
             ),
         ];
+        let new_cases = [
+            ("声が小さくなっていった。", "te-iku", "なっていった"),
+            ("風が強くなってきました。", "te-kuru", "なってきました"),
+            ("あの箱は重すぎた。", "sugiru", "重すぎた"),
+            ("設定が複雑すぎます。", "sugiru", "複雑すぎます"),
+            (
+                "明日は帰らないつもりです。",
+                "tsumori",
+                "帰らないつもりです",
+            ),
+            (
+                "明日は出かけないつもりです。",
+                "tsumori",
+                "出かけないつもりです",
+            ),
+            ("来月また訪ねる予定だった。", "yotei", "訪ねる予定だった"),
+            ("開催は夕方の予定です。", "yotei", "夕方の予定です"),
+            ("あの紙は丈夫なはずだった。", "hazu-da", "丈夫なはずだった"),
+            ("店が開いたはずがない。", "hazu-ga-nai", "開いたはずがない"),
+            ("引っ越したばかりの家だ。", "ta-bakari", "引っ越したばかり"),
+            (
+                "目を閉じたとたんに音がした。",
+                "ta-totan-ta-totan-ni",
+                "閉じたとたんに",
+            ),
+            ("この箱は開けにくかった。", "yasui-nikui", "開けにくかった"),
+            ("この道は歩きやすい。", "yasui-nikui", "歩きやすい"),
+            ("初対面では話しづらいです。", "zurai", "話しづらいです"),
+            (
+                "途中で雨が降り始めた。",
+                "hajimeru-owaru-tsuzukeru",
+                "降り始めた",
+            ),
+            (
+                "お皿を洗い終わりました。",
+                "hajimeru-owaru-tsuzukeru",
+                "洗い終わりました",
+            ),
+            ("何も言わないで帰った。", "naide", "言わないで"),
+            (
+                "先に帰らないでください。",
+                "naide-kudasai",
+                "帰らないでください",
+            ),
+            ("連絡せずに帰った。", "zu-ni", "せずに"),
+        ];
         let mut tested = std::collections::HashSet::new();
-        for (text, id, written) in cases {
+        let mut failures = Vec::new();
+        for (text, id, written) in cases.into_iter().chain(new_cases) {
             let tokens = morphology.grammar_tokens(&root, text).unwrap();
             let chars = text.encode_utf16().collect::<Vec<_>>();
             let hits = rules::find(&tokens, (0, chars.len()));
-            assert!(
-                hits.iter().any(|hit| hit.id == id
-                    && String::from_utf16(&chars[hit.start..hit.end]).unwrap() == written),
-                "{text}: {id} {written}, {hits:?}, {tokens:?}"
-            );
+            if !hits.iter().any(|hit| {
+                hit.id == id && String::from_utf16(&chars[hit.start..hit.end]).unwrap() == written
+            }) {
+                failures.push(format!("{text}: {id} {written}, {hits:?}, {tokens:?}"));
+            }
             tested.insert(id);
         }
+        for id in new_cases
+            .into_iter()
+            .map(|(_, id, _)| id)
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            for example in &catalog::get(id).unwrap().examples {
+                let tokens = morphology.grammar_tokens(&root, &example.ja).unwrap();
+                let hits = rules::find(&tokens, (0, example.ja.encode_utf16().count()));
+                if !hits.iter().any(|hit| hit.id == id) {
+                    failures.push(format!(
+                        "目录例句 {}: {id}, {hits:?}, {tokens:?}",
+                        example.ja
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
         assert_eq!(tested.len(), rules::rule_ids().count());
         for (text, excluded) in [
             ("雨が降るそうだ。", "sou-da-appearance"),
@@ -494,6 +558,22 @@ mod tests {
             ("この本を読む人さえいない。", "sae-ba"),
             ("本さえある人が来ればいい。", "sae-ba"),
             ("せっかく来たものの値段を調べた。", "mono-no"),
+            ("駅で降りて市場に行った。", "te-iku"),
+            ("先に電話して、友達が来た。", "te-kuru"),
+            ("バスは学校の前を過ぎた。", "sugiru"),
+            ("そのつもりです。", "tsumori"),
+            ("来週の予定表を作った。", "yotei"),
+            ("きっと届くはずがない。", "hazu-da"),
+            ("きっと届くはずです。", "hazu-ga-nai"),
+            ("水ばかり飲んでいる。", "ta-bakari"),
+            ("屋根はトタンでできている。", "ta-totan-ta-totan-ni"),
+            ("安い箱を開けた。", "yasui-nikui"),
+            ("彼が失敗するとは想像し難い。", "yasui-nikui"),
+            ("この料理は辛い。", "zurai"),
+            ("料理を作って、片づけを始めた。", "hajimeru-owaru-tsuzukeru"),
+            ("先に帰らないでください。", "naide"),
+            ("明日は来ないでしょう。", "naide-kudasai"),
+            ("静かになってから席に着いた。", "zu-ni"),
         ] {
             let tokens = morphology.grammar_tokens(&root, text).unwrap();
             let hits = rules::find(&tokens, (0, text.encode_utf16().count()));

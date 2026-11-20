@@ -76,11 +76,26 @@ const PREDICATE_GAP: Step = Step::Gap {
 
 const VERB_STEM: Sequence = &["v:stem"];
 const VERB_TE: Sequence = &["v:stem", "connector"];
+const VERB_NAI: Sequence = &["v:negative", "l:ない&aux"];
+const VERB_TA: Sequence = &["v:stem", "l:た&plain"];
 const PREDICATE_TE: Sequence = &["v:stem|a:stem", "connector"];
 const VERB_YOU_NI: Sequence = &["v:plain|neg:plain", "s:よう&na", "s:に"];
 const VERB_KOTO_NI: Sequence = &["v:plain|neg:plain", "s:こと&noun", "s:に&particle"];
+const PREDICATE_NOUN_PREFIX: Step = Step::Alternatives(&[
+    &["plain"],
+    &["na", "s:な&l:だ&aux"],
+    &["nominal", "s:の&particle"],
+]);
 
 impl Rule {
+    const fn variants(id: &'static str, variants: &'static [Sequence], extend_aux: bool) -> Self {
+        Self {
+            id,
+            pattern: Pattern::Variants(variants),
+            extend_aux,
+        }
+    }
+
     const fn suffix(id: &'static str, prefix: Sequence, tail: Sequence, extend_aux: bool) -> Self {
         Self {
             id,
@@ -326,7 +341,7 @@ const RULES: &[Rule] = &[
     ),
     Rule::suffix(
         "ta-koto-ga-aru",
-        &["v:stem", "l:た&plain"],
+        VERB_TA,
         &["s:こと&noun", "s:が&particle", "l:ある&bound-verb"],
         true,
     ),
@@ -461,6 +476,84 @@ const RULES: &[Rule] = &[
         &[],
         false,
     ),
+    Rule::suffix("te-iku", VERB_TE, &["l:いく|行く&bound-verb"], true),
+    Rule::suffix("te-kuru", VERB_TE, &["l:くる|来る&bound-verb"], true),
+    Rule::suffix(
+        "sugiru",
+        &["v:stem|a:root|adjectival-noun"],
+        &["l:すぎる|過ぎる&bound-verb"],
+        true,
+    ),
+    Rule::suffix(
+        "yasui-nikui",
+        VERB_STEM,
+        &["l:やすい|易い|にくい&adjectival-suffix"],
+        true,
+    ),
+    Rule::suffix("zurai", VERB_STEM, &["l:づらい&adjectival-suffix"], true),
+    Rule::suffix(
+        "hajimeru-owaru-tsuzukeru",
+        VERB_STEM,
+        &["l:始める|はじめる|終わる|おわる|続ける|つづける&verb"],
+        true,
+    ),
+    Rule::suffix("tsumori", &["v:plain|neg:plain"], &["s:つもり&noun"], true),
+    Rule::variants(
+        "yotei",
+        &[
+            &["v:plain", "s:予定&noun", "l:だ|です&aux"],
+            &["nominal", "s:の&particle", "s:予定&noun", "l:だ|です&aux"],
+        ],
+        true,
+    ),
+    Rule::context(
+        "hazu-da",
+        &[],
+        &[
+            PREDICATE_NOUN_PREFIX,
+            Step::Token("s:はず|筈&noun"),
+            Step::Token("l:だ|です&aux"),
+        ],
+        &[],
+        true,
+    ),
+    Rule::context(
+        "hazu-ga-nai",
+        &[],
+        &[
+            PREDICATE_NOUN_PREFIX,
+            Step::Token("s:はず|筈&noun"),
+            Step::Token("s:が&particle"),
+            Step::Token("l:ない&adjective|aux"),
+        ],
+        &[],
+        true,
+    ),
+    Rule::suffix("ta-bakari", VERB_TA, &["s:ばかり&particle"], true),
+    Rule::context(
+        "ta-totan-ta-totan-ni",
+        &[],
+        &[
+            Step::Alternatives(&[VERB_TA]),
+            Step::Token("s:とたん|途端&noun"),
+            Step::Optional(&["s:に&particle"]),
+        ],
+        &[],
+        false,
+    ),
+    Rule::suffix("naide", VERB_NAI, &["s:で&particle"], false),
+    Rule::suffix(
+        "naide-kudasai",
+        VERB_NAI,
+        &["s:で&particle", "s:ください"],
+        false,
+    ),
+    Rule::suffix(
+        "zu-ni",
+        &["v:negative"],
+        &["s:ず&aux", "s:に&particle"],
+        false,
+    ),
 ];
 
 pub(super) fn rule_ids() -> impl Iterator<Item = &'static str> {
@@ -531,6 +624,7 @@ pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match>
         ("te-mo-ii", "te-mo-de-mo"),
         ("te-mo-kamawanai", "te-mo-de-mo"),
         ("you-ni-suru", "te-iru"),
+        ("naide-kudasai", "naide"),
     ];
     let covered_connectors: Vec<_> = hits
         .iter()
@@ -556,12 +650,21 @@ fn predicate_start(tokens: &[GrammarToken], start: usize) -> usize {
     while cursor > 0 && tokens[cursor - 1].pos == "助動詞" {
         cursor -= 1;
     }
-    if let Some(previous) = cursor.checked_sub(1).and_then(|index| tokens.get(index)) {
+    if let Some(mut predicate) = cursor.checked_sub(1) {
+        let previous = &tokens[predicate];
         if !previous.unknown
             && (matches!(previous.pos.as_str(), "動詞" | "形容詞")
                 || (copula && matches!(previous.pos.as_str(), "形状詞" | "名詞" | "代名詞")))
         {
-            return previous.start;
+            // Sudachi A may split a compound verb before a non-independent verb.
+            while predicate > 0
+                && satisfies(&tokens[predicate], "bound-verb")
+                && satisfies(&tokens[predicate - 1], "v:stem")
+                && tokens[predicate - 1].end == tokens[predicate].start
+            {
+                predicate -= 1;
+            }
+            return tokens[predicate].start;
         }
     }
     tokens[cursor].start
@@ -593,6 +696,11 @@ fn matches_condition(token: &GrammarToken, conditions: &str) -> bool {
         match condition {
             "verb" => token.pos == "動詞",
             "adjective" => token.pos == "形容詞",
+            "adjectival-noun" => {
+                token.pos == "形状詞"
+                    || (token.pos == "名詞" && token.pos_detail.ends_with("形状詞可能"))
+            }
+            "adjectival-suffix" => token.pos == "接尾辞" && token.subpos == "形容詞的",
             "bound-verb" => token.pos == "動詞" && token.subpos == "非自立可能",
             "bound-adjective" => token.pos == "形容詞" && token.subpos == "非自立可能",
             "noun" => matches!(token.pos.as_str(), "名詞" | "代名詞"),
@@ -626,6 +734,7 @@ fn matches_condition(token: &GrammarToken, conditions: &str) -> bool {
             "neg:plain" => token.lemma == "ない" && plain,
             "v:stem" => token.pos == "動詞" && stem,
             "a:stem" => token.pos == "形容詞" && stem,
+            "a:root" => token.pos == "形容詞" && token.form.starts_with("語幹"),
             "a:sa" => token.pos == "形容詞" && token.form == "語幹-サ",
             "aux:stem" => token.pos == "助動詞" && stem,
             "v:negative" => token.pos == "動詞" && token.form.starts_with("未然形"),
@@ -675,6 +784,7 @@ mod tests {
                     lemma: String::new(),
                     pos: String::new(),
                     subpos: String::new(),
+                    pos_detail: String::new(),
                     form: String::new(),
                     unknown: false,
                 })

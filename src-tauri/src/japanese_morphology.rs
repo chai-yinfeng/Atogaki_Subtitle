@@ -32,6 +32,7 @@ pub(crate) struct GrammarToken {
     pub lemma: String,
     pub pos: String,
     pub subpos: String,
+    pub pos_detail: String,
     pub form: String,
     pub unknown: bool,
 }
@@ -117,6 +118,7 @@ impl JapaneseMorphology {
                     lemma: token.dictionary_form().into(),
                     pos: features[0].clone(),
                     subpos: features[1].clone(),
+                    pos_detail: features[2].clone(),
                     form: features[5].clone(),
                     unknown: token.is_oov(),
                 })
