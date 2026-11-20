@@ -414,6 +414,40 @@ mod tests {
                 "mono-no",
                 "来たものの",
             ),
+            ("パンしか買わない。", "shika-nai", "しか買わない"),
+            ("パンしか買いません。", "shika-nai", "しか買いません"),
+            ("財布に五百円しかない。", "shika-nai", "しかない"),
+            (
+                "このことは、あなたにしか話していません。",
+                "shika-nai",
+                "しか話していません",
+            ),
+            (
+                "荷物しか家では見つからなかった。",
+                "shika-nai",
+                "しか家では見つからなかった",
+            ),
+            (
+                "今日は歩くしかなかった。",
+                "shika-nai-no-choice",
+                "歩くしかなかった",
+            ),
+            (
+                "今は待つしかありません。",
+                "shika-nai-no-choice",
+                "待つしかありません",
+            ),
+            ("時間さえあれば行ける。", "sae-ba", "さえあれば"),
+            (
+                "薬を飲んで寝てさえいれば、すぐに治りますよ。",
+                "sae-ba",
+                "さえいれば",
+            ),
+            (
+                "報告書さえ明日までに書けばいい。",
+                "sae-ba",
+                "さえ明日までに書けば",
+            ),
         ];
         let mut tested = std::collections::HashSet::new();
         for (text, id, written) in cases {
@@ -448,6 +482,18 @@ mod tests {
             ("洋服を着てはいける。", "te-wa-ikenai"),
             ("東京へ行くことがある。", "ta-koto-ga-aru"),
             ("行かなければならない。", "ba"),
+            ("歩くしかない。", "shika-nai"),
+            ("本しかない。", "shika-nai-no-choice"),
+            ("「パンしか」とは言っていない。", "shika-nai"),
+            ("パンしか買う人が来ない。", "shika-nai"),
+            ("パンしか買って、紅茶は飲まない。", "shika-nai"),
+            ("パンしか買ったが何も食べない。", "shika-nai"),
+            ("パンしか買った。", "shika-nai"),
+            ("時間さえあれば行ける。", "ba"),
+            ("時間さえないが、お金があれば行ける。", "sae-ba"),
+            ("この本を読む人さえいない。", "sae-ba"),
+            ("本さえある人が来ればいい。", "sae-ba"),
+            ("せっかく来たものの値段を調べた。", "mono-no"),
         ] {
             let tokens = morphology.grammar_tokens(&root, text).unwrap();
             let hits = rules::find(&tokens, (0, text.encode_utf16().count()));
@@ -486,6 +532,8 @@ mod tests {
             TranscriptSegment::new(2090, 3500, "いなかった。".into()),
             TranscriptSegment::new(3650, 5100, "雨が降りそうだ。".into()),
             TranscriptSegment::new(5200, 6300, "また外で待ってる。".into()),
+            TranscriptSegment::new(6450, 7300, "📖その話は君にしか".into()),
+            TranscriptSegment::new(7400, 8700, "伝えていません。".into()),
         ];
         let job_id = manifest.job_id.clone();
         database
@@ -584,6 +632,48 @@ mod tests {
         .unwrap();
         assert_eq!(same_card.item.id, collected.item.id);
         assert_eq!(same_card.occurrences.len(), 2);
+
+        let select_restriction = || Request {
+            end_cue: Some(SelectionEnd {
+                segment_id: cues[6].id.clone(),
+                source_text: cues[6].source_text.clone(),
+            }),
+            ..select(5, 8, 4)
+        };
+        let restricted = preview(&dictionary, &learning, &select_restriction())
+            .await
+            .unwrap();
+        let hit_restriction = restricted
+            .matches
+            .iter()
+            .find(|hit| hit.id == "shika-nai")
+            .unwrap();
+        assert_eq!((hit_restriction.start, hit_restriction.end), (8, 17));
+        let item = save(
+            &dictionary,
+            &learning,
+            send(select_restriction(), restricted.text, hit_restriction),
+        )
+        .await
+        .unwrap();
+        assert_eq!(item.item.grammar_id.as_deref(), Some("shika-nai"));
+        assert_eq!(item.occurrences[0].start_ms, 6450);
+        assert_eq!(item.occurrences[0].end_ms, 8700);
+        database
+            .update_segment(
+                &job_id,
+                &cues[6].id,
+                cues[6].source_text.clone(),
+                None,
+                8200,
+                8700,
+            )
+            .await
+            .unwrap();
+        let separated = preview(&dictionary, &learning, &select_restriction())
+            .await
+            .unwrap();
+        assert!(separated.matches.iter().all(|hit| hit.id != "shika-nai"));
 
         database
             .update_segment(

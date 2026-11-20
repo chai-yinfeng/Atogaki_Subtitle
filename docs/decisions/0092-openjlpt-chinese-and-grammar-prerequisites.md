@@ -8,4 +8,4 @@
 
 本轮补齐 384 条译文并增加 18 张基础概念。最终目录包含 526 条中文语法卡和 21 张基础概念卡。自动匹配覆盖仍由 37 条已有规则定义。
 
-匹配器继续使用 Atogaki 的 Sudachi 适配、OpenJLPT ID、字幕高亮范围和收藏接口。Tsutsuji 的规范形与派生体组织可作为归并变形的参考，`nnj-grammar` 的核心范围、前后文条件、有限槽位和歧义组可作为对照。后续先用独立标注样本比较收益，再决定要不要在现有 matcher 中加入这些能力。参考实现和授权边界见[匹配调研](../research/2026-11-18-subtitle-and-learning-options.md#日语句型匹配的参考实现2026-11-20)。
+匹配器继续使用 Atogaki 的 Sudachi 适配、OpenJLPT ID、字幕高亮范围和收藏接口。Tsutsuji 的规范形与派生体组织可作为归并变形的参考，`nnj-grammar` 的核心范围、前后文条件、有限槽位和歧义组可作为对照。后续实现见 [0093](0093-contextual-japanese-grammar-matching.md)，参考实现和授权边界见[匹配调研](../research/2026-11-18-subtitle-and-learning-options.md#日语句型匹配的参考实现2026-11-20)。

@@ -223,6 +223,6 @@ mod tests {
             assert!(rule_ids.insert(id), "duplicate rule ID {id}");
             assert_eq!(super::get(id).unwrap().language(), "zh-Hans");
         }
-        assert_eq!(rule_ids.len(), 37);
+        assert_eq!(rule_ids.len(), 40);
     }
 }

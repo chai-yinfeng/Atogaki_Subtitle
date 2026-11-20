@@ -27,6 +27,31 @@ enum Pattern {
         tail: Sequence,
         ending: Ending,
     },
+    Context {
+        left: &'static [Step],
+        core: &'static [Step],
+        right: &'static [Step],
+    },
+}
+
+enum Step {
+    Token(&'static str),
+    Optional(Sequence),
+    Alternatives(&'static [Sequence]),
+    Gap { through: &'static str, max: usize },
+}
+
+impl Step {
+    fn max_width(&self) -> usize {
+        match self {
+            Self::Token(_) => 1,
+            Self::Optional(sequence) => sequence.len(),
+            Self::Alternatives(choices) => {
+                choices.iter().map(|choice| choice.len()).max().unwrap_or(0)
+            }
+            Self::Gap { max, .. } => *max,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -36,8 +61,18 @@ enum Ending {
     Negative,
 }
 
-const NEGATIVE_AUXILIARIES: &[Sequence] =
-    &[&["l:ない&aux"], &["s:ませ&l:ます&aux", "s:ん&l:ぬ&aux"]];
+const MASEN: Sequence = &["s:ませ&l:ます&aux", "s:ん&l:ぬ&aux"];
+const NEGATIVE_AUXILIARIES: &[Sequence] = &[&["l:ない&aux"], MASEN];
+const NEGATIVE_PREDICATE_ENDINGS: &[Sequence] = &[&["l:ない&adjective|aux"], MASEN];
+
+const ARGUMENT_GAP: Step = Step::Gap {
+    through: "argument&!s:しか|さえ",
+    max: 12,
+};
+const PREDICATE_GAP: Step = Step::Gap {
+    through: "nonfinal-predicate",
+    max: 6,
+};
 
 const VERB_STEM: Sequence = &["v:stem"];
 const VERB_TE: Sequence = &["v:stem", "connector"];
@@ -82,6 +117,20 @@ impl Rule {
         }
     }
 
+    const fn context(
+        id: &'static str,
+        left: &'static [Step],
+        core: &'static [Step],
+        right: &'static [Step],
+        extend_aux: bool,
+    ) -> Self {
+        Self {
+            id,
+            pattern: Pattern::Context { left, core, right },
+            extend_aux,
+        }
+    }
+
     fn end(&self, tokens: &[GrammarToken], start: usize) -> Option<usize> {
         match self.pattern {
             Pattern::Variants(variants) => variants
@@ -111,8 +160,69 @@ impl Rule {
                     }
                 }
             }
+            Pattern::Context { left, core, right } => match_steps(tokens, start, core, &|end| {
+                let left_width = left.iter().map(Step::max_width).sum::<usize>();
+                let left_matches = (start.saturating_sub(left_width)..=start).any(|from| {
+                    match_steps(&tokens[..start], from, left, &|left_end| {
+                        (left_end == start).then_some(left_end)
+                    })
+                    .is_some()
+                });
+                if !left_matches {
+                    return None;
+                }
+                match_steps(tokens, end, right, &|_| Some(end))
+            }),
         }
     }
+}
+
+// Core, context and bounded gaps follow the design of nnj-grammar. Match the
+// shortest viable gap first so a later predicate can't replace a nearer match.
+fn match_steps(
+    tokens: &[GrammarToken],
+    position: usize,
+    steps: &[Step],
+    accept: &impl Fn(usize) -> Option<usize>,
+) -> Option<usize> {
+    let Some((step, rest)) = steps.split_first() else {
+        return accept(position);
+    };
+    let continue_at = |end| match_steps(tokens, end, rest, accept);
+    match step {
+        Step::Token(spec) => {
+            sequence_end(tokens, position, std::iter::once(*spec)).and_then(continue_at)
+        }
+        Step::Optional(sequence) => sequence_end(tokens, position, sequence.iter().copied())
+            .and_then(continue_at)
+            .or_else(|| continue_at(position)),
+        Step::Alternatives(choices) => choices.iter().find_map(|choice| {
+            sequence_end(tokens, position, choice.iter().copied()).and_then(continue_at)
+        }),
+        Step::Gap { through, max } => {
+            let mut end = position;
+            let limit = tokens.len().min(position + max);
+            loop {
+                if let Some(result) = continue_at(end) {
+                    return Some(result);
+                }
+                if end == limit || !can_skip(&tokens[end], through) {
+                    return None;
+                }
+                end += 1;
+            }
+        }
+    }
+}
+
+fn can_skip(token: &GrammarToken, spec: &str) -> bool {
+    // Sudachi includes punctuation, brackets and quotes in 補助記号.
+    // The surface check also protects newlines and punctuation marked unknown.
+    token.pos != "補助記号"
+        && !token
+            .surface
+            .contains(['\n', '\r', '「', '」', '『', '』', '"', '“', '”'])
+        && satisfies(token, spec)
 }
 
 fn sequence_end<'a>(
@@ -292,11 +402,65 @@ const RULES: &[Rule] = &[
         pattern: Pattern::Variants(&[&["plain", "s:から&particle"]]),
         extend_aux: false,
     },
-    Rule {
-        id: "mono-no",
-        pattern: Pattern::Variants(&[&["plain", "s:もの&noun", "s:の&particle", "s:、|，"]]),
-        extend_aux: false,
-    },
+    Rule::context(
+        "mono-no",
+        &[],
+        &[
+            Step::Token("plain"),
+            Step::Token("s:もの&noun"),
+            Step::Token("s:の&particle"),
+        ],
+        &[Step::Token("s:、|，")],
+        false,
+    ),
+    Rule::context(
+        "shika-nai",
+        &[Step::Token("nominal"), Step::Optional(&["case-particle"])],
+        &[
+            Step::Token("s:しか&particle"),
+            ARGUMENT_GAP,
+            PREDICATE_GAP,
+            Step::Optional(&[
+                "connector",
+                "l:いる|おく|しまう|みる|ある&nonfinal-predicate",
+            ]),
+            Step::Alternatives(NEGATIVE_PREDICATE_ENDINGS),
+        ],
+        &[],
+        true,
+    ),
+    Rule::context(
+        "shika-nai-no-choice",
+        &[],
+        &[
+            Step::Token("v:plain"),
+            Step::Token("s:しか&particle"),
+            Step::Alternatives(&[
+                &["l:ない&adjective|aux"],
+                &["l:ある&v:stem", "s:ませ&l:ます&aux", "s:ん&l:ぬ&aux"],
+            ]),
+        ],
+        &[],
+        true,
+    ),
+    Rule::context(
+        "sae-ba",
+        &[Step::Alternatives(&[
+            &["nominal", "case-particle"],
+            &["nominal|v:stem"],
+            VERB_TE,
+        ])],
+        &[
+            Step::Token("s:さえ&particle"),
+            ARGUMENT_GAP,
+            PREDICATE_GAP,
+            Step::Optional(&["connector"]),
+            Step::Token("hyp&verb|adjective|aux"),
+            Step::Token("s:ば&particle"),
+        ],
+        &[],
+        false,
+    ),
 ];
 
 pub(super) fn rule_ids() -> impl Iterator<Item = &'static str> {
@@ -321,13 +485,11 @@ pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match>
                     end += 1;
                 }
             }
-            // A comma can disambiguate a connective such as ものの, but is not part of it.
-            let last = if tokens[end - 1].pos == "補助記号" {
-                end - 2
-            } else {
-                end - 1
+            let start_offset = match rule.pattern {
+                Pattern::Context { left, .. } if !left.is_empty() => tokens[start].start,
+                _ => predicate_start(tokens, start),
             };
-            let span = (predicate_start(tokens, start), tokens[last].end);
+            let span = (start_offset, tokens[end - 1].end);
             if span.0 >= focus.1 || span.1 <= focus.0 {
                 continue;
             }
@@ -364,6 +526,7 @@ pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match>
     // conventional expression, while preserving genuine nested constructions.
     const NESTED_CONNECTORS: &[(&str, &str)] = &[
         ("nakereba-naranai-nakute-wa-ikenai", "ba"),
+        ("sae-ba", "ba"),
         ("nakute-mo-ii", "te-mo-de-mo"),
         ("te-mo-ii", "te-mo-de-mo"),
         ("te-mo-kamawanai", "te-mo-de-mo"),
@@ -406,43 +569,121 @@ fn predicate_start(tokens: &[GrammarToken], start: usize) -> usize {
 
 fn satisfies(token: &GrammarToken, spec: &str) -> bool {
     !token.unknown
-        && spec.split('&').all(|conditions| {
-            // For written alternatives, the prefix applies to every choice. An
-            // unprefixed group such as v:stem|a:stem is evaluated by predicate.
-            if let Some(written) = conditions.strip_prefix("s:") {
-                return written.split('|').any(|value| value == token.surface);
+        && spec.split('&').all(|clause| {
+            if let Some(excluded) = clause.strip_prefix('!') {
+                !matches_condition(token, excluded)
+            } else {
+                matches_condition(token, clause)
             }
-            if let Some(lemmas) = conditions.strip_prefix("l:") {
-                return lemmas.split('|').any(|value| value == token.lemma);
-            }
-            conditions.split('|').any(|condition| {
-                let plain = token.form.starts_with("終止形") || token.form.starts_with("連体形");
-                let stem = token.form.starts_with("連用形");
-                match condition {
-                    "verb" => token.pos == "動詞",
-                    "adjective" => token.pos == "形容詞",
-                    "bound-verb" => token.pos == "動詞" && token.subpos == "非自立可能",
-                    "bound-adjective" => token.pos == "形容詞" && token.subpos == "非自立可能",
-                    "noun" => matches!(token.pos.as_str(), "名詞" | "代名詞"),
-                    "na" => token.pos == "形状詞",
-                    "aux" => token.pos == "助動詞",
-                    "particle" => token.pos == "助詞",
-                    "connector" => {
-                        token.pos == "助詞"
-                            && token.subpos == "接続助詞"
-                            && matches!(token.surface.as_str(), "て" | "で")
-                    }
-                    "plain" => plain && matches!(token.pos.as_str(), "動詞" | "形容詞" | "助動詞"),
-                    "hyp" => token.form.starts_with("仮定形"),
-                    "v:plain" => token.pos == "動詞" && plain,
-                    "neg:plain" => token.lemma == "ない" && plain,
-                    "v:stem" => token.pos == "動詞" && stem,
-                    "a:stem" => token.pos == "形容詞" && stem,
-                    "a:sa" => token.pos == "形容詞" && token.form == "語幹-サ",
-                    "aux:stem" => token.pos == "助動詞" && stem,
-                    "v:negative" => token.pos == "動詞" && token.form.starts_with("未然形"),
-                    _ => false,
-                }
-            })
         })
+}
+
+fn matches_condition(token: &GrammarToken, conditions: &str) -> bool {
+    // For written alternatives, the prefix applies to every choice. An
+    // unprefixed group such as v:stem|a:stem is evaluated by predicate.
+    if let Some(written) = conditions.strip_prefix("s:") {
+        return written.split('|').any(|value| value == token.surface);
+    }
+    if let Some(lemmas) = conditions.strip_prefix("l:") {
+        return lemmas.split('|').any(|value| value == token.lemma);
+    }
+    conditions.split('|').any(|condition| {
+        let plain = token.form.starts_with("終止形") || token.form.starts_with("連体形");
+        let stem = token.form.starts_with("連用形");
+        match condition {
+            "verb" => token.pos == "動詞",
+            "adjective" => token.pos == "形容詞",
+            "bound-verb" => token.pos == "動詞" && token.subpos == "非自立可能",
+            "bound-adjective" => token.pos == "形容詞" && token.subpos == "非自立可能",
+            "noun" => matches!(token.pos.as_str(), "名詞" | "代名詞"),
+            "nominal" => {
+                matches!(token.pos.as_str(), "名詞" | "代名詞")
+                    || (token.pos == "接尾辞" && token.subpos == "名詞的")
+            }
+            "case-particle" => token.pos == "助詞" && token.subpos == "格助詞",
+            "argument" => {
+                matches!(
+                    token.pos.as_str(),
+                    "名詞" | "代名詞" | "接尾辞" | "副詞" | "連体詞"
+                ) || (token.pos == "助詞"
+                    && matches!(token.subpos.as_str(), "格助詞" | "係助詞" | "副助詞"))
+            }
+            "nonfinal-predicate" => {
+                matches!(token.pos.as_str(), "動詞" | "形容詞" | "助動詞")
+                    && (stem || token.form.starts_with("未然形"))
+            }
+            "na" => token.pos == "形状詞",
+            "aux" => token.pos == "助動詞",
+            "particle" => token.pos == "助詞",
+            "connector" => {
+                token.pos == "助詞"
+                    && token.subpos == "接続助詞"
+                    && matches!(token.surface.as_str(), "て" | "で")
+            }
+            "plain" => plain && matches!(token.pos.as_str(), "動詞" | "形容詞" | "助動詞"),
+            "hyp" => token.form.starts_with("仮定形"),
+            "v:plain" => token.pos == "動詞" && plain,
+            "neg:plain" => token.lemma == "ない" && plain,
+            "v:stem" => token.pos == "動詞" && stem,
+            "a:stem" => token.pos == "形容詞" && stem,
+            "a:sa" => token.pos == "形容詞" && token.form == "語幹-サ",
+            "aux:stem" => token.pos == "助動詞" && stem,
+            "v:negative" => token.pos == "動詞" && token.form.starts_with("未然形"),
+            _ => false,
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contextual_matches_respect_scope_and_exclude_evidence_from_the_span() {
+        const RULE: Rule = Rule::context(
+            "test",
+            &[Step::Token("s:left"), Step::Optional(&["s:optional"])],
+            &[
+                Step::Token("s:anchor"),
+                Step::Gap {
+                    through: "s:filler|end|bridge|」",
+                    max: 3,
+                },
+                Step::Token("s:end"),
+            ],
+            &[Step::Token("s:right")],
+            false,
+        );
+        for (text, expected) in [
+            ("left anchor end right", Some(3)),
+            ("left optional anchor filler end right", Some(5)),
+            ("left anchor end bridge end right", Some(5)),
+            ("left anchor end right end right", Some(3)),
+            ("left anchor filler filler filler end right", Some(6)),
+            ("left anchor filler filler filler filler end right", None),
+            ("left anchor filler 」 end right", None),
+            ("other anchor end right", None),
+            ("left anchor end other", None),
+        ] {
+            let tokens: Vec<_> = text
+                .split_whitespace()
+                .enumerate()
+                .map(|(index, surface)| GrammarToken {
+                    start: index,
+                    end: index + 1,
+                    surface: surface.into(),
+                    lemma: String::new(),
+                    pos: String::new(),
+                    subpos: String::new(),
+                    form: String::new(),
+                    unknown: false,
+                })
+                .collect();
+            let anchor = tokens
+                .iter()
+                .position(|token| token.surface == "anchor")
+                .unwrap();
+            assert_eq!(RULE.end(&tokens, anchor), expected, "{text}");
+        }
+    }
 }
