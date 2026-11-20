@@ -89,12 +89,39 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
     assert.deepEqual(await page.evaluate(() => window.__grammarRequests.at(-1)), {
       jobId: "editor-test", segmentId: "cue-1", sourceText: "まだ食べて", start: 1, end: 4,
     });
+    await page.locator("#close-learning-selection").click();
+    const endSource = page.locator('[data-segment-id="cue-2"] [data-learning-source]');
+    await endSource.scrollIntoViewIfNeeded();
+    const pointAt = (element, offset) => {
+      const range = document.createRange();
+      range.setStart(element.firstChild, offset);
+      range.setEnd(element.firstChild, offset + 1);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.left + rect.width * 0.15, y: rect.top + rect.height / 2 };
+    };
+    const firstPoint = await source.evaluate(pointAt, 2);
+    const lastPoint = await endSource.evaluate(pointAt, 4);
+    // Drag backwards to exercise the browser's normalization of range endpoints.
+    await page.mouse.move(lastPoint.x, lastPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(firstPoint.x, firstPoint.y, { steps: 15 });
+    await page.mouse.up();
+    assert.equal(await page.locator("#listening-selection-text").textContent(), "食べていなかっ");
+    assert.equal(await page.locator("#save-learning-selection").isVisible(), false);
+    await page.locator("#analyze-listening-grammar").click();
+    await preview.getByText(/过去否定/).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.__grammarRequests.at(-1)), {
+      jobId: "editor-test", segmentId: "cue-1", sourceText: "まだ食べて", start: 2, end: 4,
+      endCue: { segmentId: "cue-2", sourceText: "いなかった。" },
+    });
     await preview.getByRole("button", { name: "て形", exact: true }).click();
     await catalog.getByRole("heading", { name: "て形" }).waitFor();
     await catalog.getByRole("button", { name: "关闭" }).click();
     await preview.getByRole("button", { name: "收藏语法例句" }).click();
     await preview.waitFor({ state: "hidden" });
-    assert.equal(await page.evaluate(() => window.__collectedGrammar.id), "te-iru");
+    const collected = await page.evaluate(() => window.__collectedGrammar);
+    assert.equal(collected.id, "te-iru");
+    assert.equal(collected.selection.endCue.segmentId, "cue-2");
 
     await page.locator("#show-learning").click();
     const card = page.locator('[data-learning-item="grammar-1"]');

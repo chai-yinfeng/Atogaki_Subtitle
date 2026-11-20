@@ -122,7 +122,7 @@ import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./
 import {readOnlinePreferences, saveOnlinePreferences} from "./online-preferences";
 import { applyTheme, readTheme, candidateLabel } from "./themes";
 applyTheme(readTheme());
-import { japaneseGrammarDialog, mountJapaneseGrammar, type SaveGrammarMatch } from "./japanese-grammar-view";
+import { japaneseGrammarDialog, mountJapaneseGrammar, type SaveGrammarMatch, type GrammarSelection } from "./japanese-grammar-view";
 import { matchesQuery, highlightSaved } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
 let playbackLoop: {startMs:number;endMs:number;repeat:boolean;manual?:boolean} | null = null;
@@ -310,10 +310,15 @@ type PendingLearningSelection = {
   selectedText: string;
   sourceText: string;
   grammarMode?: boolean;
+  crossCue?: CrossCueSelection;
   selectionStartUtf16: number;
   selectionEndUtf16: number;
 };
 
+type CrossCueSelection = {
+  endCue: NonNullable<GrammarSelection["endCue"]>;
+  selectedText: string;
+};
 type JapaneseLookupSelection = { text: string; start: number; end: number };
 type JapaneseDictionaryEntry = {
   id: string;
@@ -2536,20 +2541,42 @@ function captureListeningSelection(): void {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return;
   const range = selection.getRangeAt(0);
-  const source = (range.startContainer instanceof Element
-    ? range.startContainer
-    : range.startContainer.parentElement)?.closest<HTMLElement>("[data-learning-source]");
-  if (!source || !source.contains(range.startContainer) || !source.contains(range.endContainer)) {
+  const sourceFor = (node: Node) => (node instanceof Element ? node : node.parentElement)
+    ?.closest<HTMLElement>("[data-learning-source]");
+  const source = sourceFor(range.startContainer);
+  const endSource = sourceFor(range.endContainer);
+  const segmentId = source?.closest<HTMLElement>("[data-segment-id]")?.dataset.segmentId;
+  const endId = endSource?.closest<HTMLElement>("[data-segment-id]")?.dataset.segmentId;
+  if (!source || !endSource || !segmentId || !endId ||
+      !listeningSubtitleList.contains(source) || !listeningSubtitleList.contains(endSource)) {
     closeLearningSelection(false);
     return;
   }
-  const segmentElement = source.closest<HTMLElement>("[data-segment-id]");
-  const segmentId = segmentElement?.dataset.segmentId;
-  if (!segmentId) return;
   let start = selectionOffsetWithin(source, range.startContainer, range.startOffset);
-  let end = selectionOffsetWithin(source, range.endContainer, range.endOffset);
-  if (end < start) [start, end] = [end, start];
+  let end = selectionOffsetWithin(endSource, range.endContainer, range.endOffset);
   const rawText = source.textContent ?? "";
+  if (source !== endSource) {
+    if (activeDetail.job.source_language !== "ja") {
+      closeLearningSelection(false);
+      return;
+    }
+    const cues = activeDetail.segments;
+    const first = cues.findIndex(cue => cue.id === segmentId);
+    const last = cues.findIndex(cue => cue.id === endId);
+    const lastText = endSource.textContent ?? "";
+    const selectedText = first >= 0 && last > first
+      ? [rawText.slice(start), ...cues.slice(first + 1, last).map(cue => cue.source_text), lastText.slice(0, end)].join("")
+      : "";
+    if (!selectedText.trim()) {
+      closeLearningSelection(false);
+      return;
+    }
+    showListeningSelection(segmentId, { text: rawText, start, end }, false, {
+      endCue: { segmentId: endId, sourceText: lastText },
+      selectedText,
+    });
+    return;
+  }
   const rawSelection = rawText.slice(start, end);
   const leadingWhitespace = rawSelection.length - rawSelection.trimStart().length;
   const trailingWhitespace = rawSelection.length - rawSelection.trimEnd().length;
@@ -2601,19 +2628,24 @@ function captureListeningWord(event: MouseEvent): void {
   if (offset < text.length) showListeningSelection(segmentId, { text, start: offset, end: offset });
 }
 
-function showListeningSelection(segmentId: string, search: JapaneseLookupSelection, grammarMode = false): void {
+function showListeningSelection(
+  segmentId: string, search: JapaneseLookupSelection, grammarMode = false, crossCue?: CrossCueSelection,
+): void {
   if (!activeDetail) return;
   const previous = pendingLearningSelection;
   const { text, start, end } = search;
+  const selectedText = crossCue?.selectedText ?? text.slice(start, end);
   if (!grammarMode && previous && !previous.grammarMode && previous.segmentId === segmentId && previous.jobId === activeDetail.job.job_id &&
       previous.selectionStartUtf16 === start && previous.selectionEndUtf16 === end &&
-      previous.selectedText === text.slice(start, end)) return;
+      previous.crossCue?.endCue.segmentId === crossCue?.endCue.segmentId &&
+      previous.selectedText === selectedText) return;
   const selection: PendingLearningSelection = {
     jobId: activeDetail.job.job_id,
     segmentId,
-    selectedText: text.slice(start, end),
+    selectedText,
     sourceText: text,
     grammarMode,
+    crossCue,
     selectionStartUtf16: start,
     selectionEndUtf16: end,
   };
@@ -2623,19 +2655,25 @@ function showListeningSelection(segmentId: string, search: JapaneseLookupSelecti
   listeningDictionaryPreview?.classList.add("hidden");
   if (listeningSelectionText) listeningSelectionText.textContent = selection.selectedText || "日语查词";
   if (listeningSelectionMessage) {
-    listeningSelectionMessage.textContent = grammarMode ? "" : "可先收藏，之后在学习区补充标准译义。";
+    listeningSelectionMessage.textContent = grammarMode ? ""
+      : crossCue ? "已跨行选择日语原文，可分析句型。"
+      : "可先收藏，之后在学习区补充标准译义。";
     listeningSelectionMessage.classList.remove("warning");
   }
   if (saveLearningSelectionButton) {
-    saveLearningSelectionButton.hidden = start === end;
+    saveLearningSelectionButton.hidden = Boolean(crossCue) || start === end;
     saveLearningSelectionButton.textContent = activeDetail.job.source_language === "ja" ? "收藏原选区" : "收藏词语／语法";
   }
+  if (saveLearningSentenceButton) saveLearningSentenceButton.hidden = Boolean(crossCue);
   if (analyzeListeningGrammarButton) analyzeListeningGrammarButton.hidden = activeDetail.job.source_language !== "ja" || grammarMode;
   listeningSelectionMenu?.classList.remove("hidden");
   if (listeningSubtitleList) subtitleFollowState(listeningSubtitleList).userScrollingUntil = Number.MAX_SAFE_INTEGER;
   if (grammarMode) {
-    void japaneseGrammar.analyze({ jobId: selection.jobId, segmentId, sourceText: text, start, end });
-  } else if (activeDetail.job.source_language === "ja") {
+    void japaneseGrammar.analyze({
+      jobId: selection.jobId, segmentId, sourceText: text, start, end,
+      ...(crossCue && { endCue: crossCue.endCue }),
+    });
+  } else if (!crossCue && activeDetail.job.source_language === "ja") {
     void lookupListeningJapanese(selection, search);
   }
 }
@@ -4678,11 +4716,11 @@ listeningSubtitleList?.addEventListener("click", event => {
 analyzeListeningGrammarButton?.addEventListener("click", () => {
   const selection = pendingLearningSelection;
   if (!selection) return;
-  const { segmentId, sourceText: text, selectionStartUtf16, selectionEndUtf16 } = selection;
-  const hasRange = selectionStartUtf16 < selectionEndUtf16;
+  const { segmentId, sourceText: text, selectionStartUtf16, selectionEndUtf16, crossCue } = selection;
+  const hasRange = crossCue || selectionStartUtf16 < selectionEndUtf16;
   showListeningSelection(segmentId, {
     text, start: hasRange ? selectionStartUtf16 : 0, end: hasRange ? selectionEndUtf16 : text.length,
-  }, true);
+  }, true, crossCue);
 });
 document.querySelector("#open-japanese-grammar")?.addEventListener("click", () => japaneseGrammar.open());
 listeningSelectionMenu?.addEventListener("keydown", event => {

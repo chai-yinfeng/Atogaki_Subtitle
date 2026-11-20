@@ -36,10 +36,11 @@ impl LocalLearningService {
     pub async fn grammar_context(
         &self,
         job_id: &str,
-        segment_id: &str,
+        start_segment_id: &str,
+        end_segment_id: &str,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         self.database
-            .learning_grammar_context(job_id, segment_id)
+            .learning_grammar_context(job_id, start_segment_id, end_segment_id)
             .await
     }
 

@@ -1252,24 +1252,29 @@ impl LocalDatabase {
     pub async fn learning_grammar_context(
         &self,
         job_id: &str,
-        segment_id: &str,
+        start_segment_id: &str,
+        end_segment_id: &str,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         let mut tx = self.pool.begin().await?;
-        let index: Option<i64> = sqlx::query_scalar(
-            "SELECT s.segment_index FROM local_subtitle_segments s
-             JOIN local_jobs j ON j.job_id = s.job_id
-             WHERE s.job_id = ? AND s.id = ? AND j.source_language = 'ja'",
+        let (first, last): (i64, i64) = sqlx::query_as(
+            "SELECT first.segment_index, last.segment_index
+             FROM local_jobs j
+             JOIN local_subtitle_segments first ON first.job_id = j.job_id
+             JOIN local_subtitle_segments last ON last.job_id = j.job_id
+             WHERE j.job_id = ? AND first.id = ? AND last.id = ? AND j.source_language = 'ja'",
         )
         .bind(job_id)
-        .bind(segment_id)
+        .bind(start_segment_id)
+        .bind(end_segment_id)
         .fetch_optional(&mut *tx)
-        .await?;
-        let index = index.ok_or_else(|| anyhow!("没有找到可分析的日语字幕"))?;
+        .await?
+        .ok_or_else(|| anyhow!("没有找到可分析的日语字幕"))?;
+        anyhow::ensure!(first <= last, "字幕选区顺序无效");
         Self::learning_cue_range(
             &mut tx,
             job_id,
-            index.saturating_sub(1),
-            index.saturating_add(1),
+            first.saturating_sub(1),
+            last.saturating_add(1),
         )
         .await
     }

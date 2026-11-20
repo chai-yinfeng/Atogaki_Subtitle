@@ -21,6 +21,14 @@ pub(crate) struct Request {
     source_text: String,
     start: usize,
     end: usize,
+    end_cue: Option<SelectionEnd>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectionEnd {
+    segment_id: String,
+    source_text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,53 +50,88 @@ pub(crate) struct Preview {
     matches: Vec<rules::Match>,
 }
 
+impl Request {
+    fn end_segment_id(&self) -> &str {
+        self.end_cue
+            .as_ref()
+            .map_or(&self.segment_id, |end| &end.segment_id)
+    }
+}
+
+const MAX_CUE_GAP_MS: i64 = 750;
+
+fn near(left: &LocalSubtitleSegmentRecord, right: &LocalSubtitleSegmentRecord) -> bool {
+    right.start_ms.saturating_sub(left.end_ms) <= MAX_CUE_GAP_MS
+}
+
 struct Sentence {
     text: String,
     start_in_cues: usize,
     focus: (usize, usize),
+    breaks: Vec<usize>,
     cues: Vec<LocalSubtitleSegmentRecord>,
 }
 
 impl Sentence {
     fn from_cues(mut cues: Vec<LocalSubtitleSegmentRecord>, request: &Request) -> Result<Self> {
-        let anchor = cues
+        let selection_first = cues
             .iter()
             .position(|cue| cue.id == request.segment_id)
             .ok_or_else(|| anyhow!("分析所需的字幕已变化"))?;
-        let cue = &cues[anchor];
+        let selection_last = cues
+            .iter()
+            .position(|cue| cue.id == request.end_segment_id())
+            .filter(|&index| index >= selection_first)
+            .ok_or_else(|| anyhow!("分析所需的字幕已变化"))?;
+        let first_cue = &cues[selection_first];
+        let last_cue = &cues[selection_last];
+        let last_snapshot = request
+            .end_cue
+            .as_ref()
+            .map_or(&request.source_text, |end| &end.source_text);
         ensure!(
-            cue.source_text == request.source_text,
+            first_cue.source_text == request.source_text && last_cue.source_text == *last_snapshot,
             "字幕已变化，请重新选句"
         );
-        let text = cue.source_text.encode_utf16().collect::<Vec<_>>();
+        let valid_offset = |text: &str, offset: usize| {
+            let chars = text.encode_utf16().collect::<Vec<_>>();
+            offset <= chars.len()
+                && !chars
+                    .get(offset)
+                    .is_some_and(|ch| (0xdc00..=0xdfff).contains(ch))
+        };
         ensure!(
-            request.start < request.end && request.end <= text.len(),
+            valid_offset(&first_cue.source_text, request.start)
+                && valid_offset(&last_cue.source_text, request.end),
             "请选择有效的字幕范围"
         );
-        // Check that JavaScript UTF-16 offsets do not split a surrogate pair.
-        String::from_utf16(&text[request.start..request.end])?;
 
-        // Adjacent subtitles often split one sentence. Cap the window at one
-        // neighboring cue per side, and stay inside nearby sentence punctuation.
-        const MAX_GAP_MS: i64 = 750;
-        let before =
-            anchor > 0 && cue.start_ms.saturating_sub(cues[anchor - 1].end_ms) <= MAX_GAP_MS;
-        let after = cues
-            .get(anchor + 1)
-            .is_some_and(|next| next.start_ms.saturating_sub(cue.end_ms) <= MAX_GAP_MS);
-        let first = anchor - usize::from(before);
-        let last = anchor + usize::from(after);
-        let anchor_start = if before {
-            cues[first].source_text.encode_utf16().count()
-        } else {
-            0
-        };
-        let joined = cues[first..=last]
-            .iter()
-            .flat_map(|cue| cue.source_text.encode_utf16())
-            .collect::<Vec<_>>();
-        let start = anchor_start + request.start;
-        let end = anchor_start + request.end;
+        // Extend the outer boundaries for context. Explicitly selected cues on
+        // either side of a pause are analyzed independently.
+        let first = selection_first
+            - usize::from(selection_first > 0 && near(&cues[selection_first - 1], first_cue));
+        let last = selection_last
+            + usize::from(
+                cues.get(selection_last + 1)
+                    .is_some_and(|next| near(last_cue, next)),
+            );
+        let mut joined = Vec::new();
+        let mut breaks = Vec::new();
+        let mut start = 0;
+        let mut end = 0;
+        for index in first..=last {
+            if index > first && !near(&cues[index - 1], &cues[index]) {
+                breaks.push(joined.len());
+            }
+            if index == selection_first {
+                start = joined.len() + request.start;
+            }
+            if index == selection_last {
+                end = joined.len() + request.end;
+            }
+            joined.extend(cues[index].source_text.encode_utf16());
+        }
+        ensure!(start < end, "请选择有效的字幕范围");
         let hard_break = |ch: u16| matches!(ch, 0x3002 | 0xff01 | 0xff1f | 0x21 | 0x3f | 10 | 13);
         let left = joined[..start]
             .iter()
@@ -103,10 +146,14 @@ impl Sentence {
                 .map_or(joined.len(), |position| end + position + 1)
         };
         ensure!(right - left <= 4096, "字幕范围过长，请缩小选区");
+        breaks.retain(|offset| left < *offset && *offset < right);
+        breaks.iter_mut().for_each(|offset| *offset -= left);
+        breaks.dedup();
         Ok(Self {
             text: String::from_utf16(&joined[left..right])?,
             start_in_cues: left,
             focus: (start - left, end - left),
+            breaks,
             cues: cues.drain(first..=last).collect(),
         })
     }
@@ -144,11 +191,43 @@ async fn analyze(
     request: &Request,
 ) -> Result<(Sentence, Vec<rules::Match>)> {
     let cues = learning
-        .grammar_context(&request.job_id, &request.segment_id)
+        .grammar_context(
+            &request.job_id,
+            &request.segment_id,
+            request.end_segment_id(),
+        )
         .await?;
     let sentence = Sentence::from_cues(cues, request)?;
-    let tokens = dictionary.grammar_tokens(sentence.text.clone()).await?;
-    let matches = rules::find(&tokens, sentence.focus);
+    let mut matches = Vec::new();
+    if sentence.breaks.is_empty() {
+        let tokens = dictionary.grammar_tokens(sentence.text.clone()).await?;
+        matches = rules::find(&tokens, sentence.focus);
+    } else {
+        let text = sentence.text.encode_utf16().collect::<Vec<_>>();
+        let mut start = 0;
+        for end in sentence
+            .breaks
+            .iter()
+            .copied()
+            .chain(std::iter::once(text.len()))
+        {
+            if start < sentence.focus.1 && end > sentence.focus.0 {
+                let focus = (
+                    sentence.focus.0.saturating_sub(start),
+                    sentence.focus.1.min(end) - start,
+                );
+                let tokens = dictionary
+                    .grammar_tokens(String::from_utf16(&text[start..end])?)
+                    .await?;
+                matches.extend(rules::find(&tokens, focus).into_iter().map(|mut hit| {
+                    hit.start += start;
+                    hit.end += start;
+                    hit
+                }));
+            }
+            start = end;
+        }
+    }
     Ok((sentence, matches))
 }
 
@@ -367,6 +446,7 @@ mod tests {
             source_text: cues[index].source_text.clone(),
             start,
             end,
+            end_cue: None,
         };
         let send = |selection, text: String, hit: &rules::Match| SaveRequest {
             selection,
@@ -376,17 +456,25 @@ mod tests {
             end: hit.end,
         };
 
-        let previewed = preview(&dictionary, &learning, &select(1, 4, 6))
+        let select_cross_cue = || Request {
+            end_cue: Some(SelectionEnd {
+                segment_id: cues[2].id.clone(),
+                source_text: cues[2].source_text.clone(),
+            }),
+            ..select(1, 4, 4)
+        };
+        let previewed = preview(&dictionary, &learning, &select_cross_cue())
             .await
             .unwrap();
         assert_eq!(previewed.text, "📖まだ食べていなかった。");
+        assert_eq!((previewed.focus_start, previewed.focus_end), (4, 11));
         let hit = &previewed.matches[0];
         assert_eq!(hit.id, "te-iru");
         assert_eq!(hit.form_note, Some("过去否定"));
         let collected = save(
             &dictionary,
             &learning,
-            send(select(1, 4, 6), previewed.text.clone(), hit),
+            send(select_cross_cue(), previewed.text.clone(), hit),
         )
         .await
         .unwrap();
@@ -457,11 +545,26 @@ mod tests {
             save(
                 &dictionary,
                 &learning,
-                send(select(1, 4, 6), previewed.text.clone(), hit)
+                send(select_cross_cue(), previewed.text.clone(), hit)
             )
             .await
             .is_err()
         );
+        database
+            .update_segment(
+                &job_id,
+                &cues[2].id,
+                cues[2].source_text.clone(),
+                None,
+                3000,
+                3500,
+            )
+            .await
+            .unwrap();
+        let separated = preview(&dictionary, &learning, &select_cross_cue())
+            .await
+            .unwrap();
+        assert!(separated.matches.iter().all(|hit| hit.id != "te-iru"));
         database.close().await;
         std::fs::remove_dir_all(root).unwrap();
     }

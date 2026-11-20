@@ -7,6 +7,7 @@ export type GrammarSelection = {
   sourceText: string;
   start: number;
   end: number;
+  endCue?: { segmentId: string; sourceText: string };
 };
 type GrammarMatch = { id: string; start: number; end: number; formNote?: string };
 type GrammarPreview = { text: string; focusStart: number; focusEnd: number; matches: GrammarMatch[] };
