@@ -135,6 +135,12 @@ mod tests {
                     && !entry.meaning.is_empty()
             );
             assert!(!entry.examples.is_empty());
+            assert!(entry.examples.iter().all(|example| {
+                !example.ja.trim().is_empty() && !example.translation.trim().is_empty()
+            }));
+            if entry.language() == "zh-Hans" {
+                assert!(!entry.notes.trim().is_empty(), "{}", entry.id);
+            }
         }
         assert_eq!(
             levels,
@@ -152,13 +158,16 @@ mod tests {
                 .iter()
                 .filter(|entry| entry.language() == "zh-Hans")
                 .count(),
-            27
+            99
         );
         for entry in entries {
             assert!(entry.related.iter().all(|id| ids.contains(id.as_str())));
         }
+        let mut rule_ids = HashSet::new();
         for id in super::super::rules::rule_ids() {
+            assert!(rule_ids.insert(id), "duplicate rule ID {id}");
             assert_eq!(super::get(id).unwrap().language(), "zh-Hans");
         }
+        assert_eq!(rule_ids.len(), 37);
     }
 }

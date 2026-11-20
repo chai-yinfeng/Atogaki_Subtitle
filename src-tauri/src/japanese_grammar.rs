@@ -309,6 +309,50 @@ mod tests {
         let root = PathBuf::from(std::env::var_os("ATOGAKI_DICTIONARY_SMOKE_DIR").unwrap());
         let morphology = JapaneseMorphology::default();
         let cases = [
+            ("荷物を持ってあげた。", "te-ageru", "持ってあげた"),
+            ("友達が手伝ってくれた。", "te-kureru", "手伝ってくれた"),
+            ("先輩に荷物を運んでもらった。", "te-morau", "運んでもらった"),
+            (
+                "予定を送っていただいた。",
+                "te-kudasaru-te-itadaku",
+                "送っていただいた",
+            ),
+            ("予定が書いてある。", "te-aru", "書いてある"),
+            ("ここで待ってほしい。", "te-hoshii", "待ってほしい"),
+            ("ご飯を食べてから出かける。", "te-kara", "食べてから"),
+            ("写真を撮ってもいいですか。", "te-mo-ii", "撮ってもいいです"),
+            ("風が強くてもいい。", "te-mo-ii", "強くてもいい"),
+            (
+                "写真を撮っても構わない。",
+                "te-mo-kamawanai",
+                "撮っても構わない",
+            ),
+            (
+                "写真を撮ってはいけない。",
+                "te-wa-ikenai",
+                "撮ってはいけない",
+            ),
+            (
+                "毎日走れるようになった。",
+                "you-ni-naru",
+                "走れるようになった",
+            ),
+            (
+                "誰でも参加することができる。",
+                "koto-ga-dekiru",
+                "することができる",
+            ),
+            ("留学したことがある。", "ta-koto-ga-aru", "したことがある"),
+            (
+                "展示品に触ってはいけません。",
+                "te-wa-ikenai",
+                "触ってはいけません",
+            ),
+            (
+                "返事は遅くなっても構いません。",
+                "te-mo-kamawanai",
+                "なっても構いません",
+            ),
             ("まだ食べていなかった。", "te-iru", "食べていなかった"),
             ("電車を待ってる。", "te-iru", "待ってる"),
             ("そう言ってた。", "te-iru", "言ってた"),
@@ -392,6 +436,17 @@ mod tests {
             ("本を読ん。でいた。", "te-iru"),
             ("本をよんｄでた。", "te-iru"),
             ("窓を開けて海を見る。", "te-miru"),
+            ("駅で荷物をもらった。", "te-morau"),
+            ("駅で降りて、お菓子をあげた。", "te-ageru"),
+            ("荷物がある。", "te-aru"),
+            ("会場で会ってから帰る。", "kara-reason"),
+            ("朝は駅から歩く。", "te-kara"),
+            ("写真を撮ってもいいですか。", "te-mo-de-mo"),
+            ("写真を撮っても構わない。", "te-mo-de-mo"),
+            ("雨が降っても行く。", "te-mo-ii"),
+            ("批判されても構わず続ける。", "te-mo-kamawanai"),
+            ("洋服を着てはいける。", "te-wa-ikenai"),
+            ("東京へ行くことがある。", "ta-koto-ga-aru"),
             ("行かなければならない。", "ba"),
         ] {
             let tokens = morphology.grammar_tokens(&root, text).unwrap();

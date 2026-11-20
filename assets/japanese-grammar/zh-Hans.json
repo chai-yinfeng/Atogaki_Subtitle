@@ -484,5 +484,1275 @@
       "polarity",
       "sou-da-hearsay"
     ]
+  },
+  {
+    "id": "te-ageru",
+    "pattern": "～てあげる",
+    "level": "N4",
+    "meaning": "主语为别人做某事，动作对接受者有益。",
+    "formation": "动词て形＋あげる",
+    "notes": "焦点在做事的人。对当事人尤其是长辈说「～てあげます」有时显得居高临下，可改说「～ましょうか」。",
+    "examples": [
+      {
+        "ja": "妹に自転車を直してあげた。",
+        "translation": "我帮妹妹修了自行车。"
+      }
+    ],
+    "related": [
+      "te-kureru",
+      "te-morau"
+    ]
+  },
+  {
+    "id": "te-kureru",
+    "pattern": "～てくれる",
+    "level": "N4",
+    "meaning": "别人为说话人或说话人一方做某事。",
+    "formation": "动词て形＋くれる",
+    "notes": "做事的人是主语，常用「が」标出。描述同一件事时，也可以从受益者视角说「～てもらう」。",
+    "examples": [
+      {
+        "ja": "友達が駅まで迎えに来てくれた。",
+        "translation": "朋友来车站接我了。"
+      }
+    ],
+    "related": [
+      "te-ageru",
+      "te-morau"
+    ]
+  },
+  {
+    "id": "te-morau",
+    "pattern": "～てもらう",
+    "level": "N4",
+    "meaning": "请别人做某事，或得到别人提供的帮助。",
+    "formation": "动词て形＋もらう",
+    "notes": "受益者是主语，做事的人通常用「に」标出。「友達に教えてもらった」的教导者是朋友。",
+    "examples": [
+      {
+        "ja": "先輩に申し込み方を教えてもらった。",
+        "translation": "我请前辈教了我怎么报名。"
+      }
+    ],
+    "related": [
+      "te-kureru",
+      "te-kudasaru-te-itadaku"
+    ]
+  },
+  {
+    "id": "te-kudasaru-te-itadaku",
+    "pattern": "～てくださる／～ていただく",
+    "level": "N4",
+    "meaning": "礼貌地描述对方为己方做了某事。",
+    "formation": "动词て形＋くださる／いただく",
+    "notes": "「先生が説明してくださった」尊敬做事人。「先生に説明していただいた」从己方受益的角度表达谦逊。",
+    "examples": [
+      {
+        "ja": "先生に原稿を読んでいただきました。",
+        "translation": "承蒙老师读了我的稿子。"
+      }
+    ],
+    "related": [
+      "te-kureru",
+      "te-morau"
+    ]
+  },
+  {
+    "id": "te-aru",
+    "pattern": "～てある",
+    "level": "N4",
+    "meaning": "某人有意做了某事，动作留下的结果还在。",
+    "formation": "及物动词て形＋ある",
+    "notes": "常把结果状态中的对象用「が」标出。「窓が開けてある」暗示有人打开并保持着，「窓が開いている」直接描述状态。",
+    "examples": [
+      {
+        "ja": "机に資料が並べてある。",
+        "translation": "桌上已经摆好了资料。"
+      }
+    ],
+    "related": [
+      "te-iru",
+      "te-oku"
+    ]
+  },
+  {
+    "id": "te-hoshii",
+    "pattern": "～てほしい",
+    "level": "N4",
+    "meaning": "希望别人做某事或希望出现某种变化。",
+    "formation": "动词て形＋ほしい；否定常用动词ない形＋でほしい",
+    "notes": "动作执行者可用「に」引出。「待ってほしい」表达我的愿望，直接请求时可根据关系使用「待ってください」。",
+    "examples": [
+      {
+        "ja": "もう少しゆっくり話してほしい。",
+        "translation": "希望你再说慢一点。"
+      }
+    ],
+    "related": [
+      "te-kudasai"
+    ]
+  },
+  {
+    "id": "te-kara",
+    "pattern": "～てから",
+    "level": "N5",
+    "meaning": "先发生前项，再做后项。",
+    "formation": "动词て形＋から",
+    "notes": "「帰ってから連絡する」把回家作为联系的时间起点。「忙しいから」则是说明原因。",
+    "examples": [
+      {
+        "ja": "鍵を閉めてから出かけてね。",
+        "translation": "锁好门以后再出门。"
+      }
+    ],
+    "related": [
+      "kara-reason",
+      "tara"
+    ]
+  },
+  {
+    "id": "te-mo-ii",
+    "pattern": "～てもいい",
+    "level": "N5",
+    "meaning": "表示许可或接受某种选择。",
+    "formation": "动词或い形容词的て形＋もいい",
+    "notes": "句尾加「ですか」常用于询问可不可以。允许不做可以说「～なくてもいい」。",
+    "examples": [
+      {
+        "ja": "この椅子を使ってもいいですか。",
+        "translation": "我可以用这把椅子吗？"
+      }
+    ],
+    "related": [
+      "nakute-mo-ii",
+      "te-wa-ikenai",
+      "te-mo-de-mo"
+    ]
+  },
+  {
+    "id": "te-mo-kamawanai",
+    "pattern": "～ても構わない",
+    "level": "N4",
+    "meaning": "表示某种情况可以接受，没关系。",
+    "formation": "动词或い形容词て形＋も構わない；名词或な形容词＋でも構わない",
+    "notes": "「てもいい」适合直接给许可，「ても構わない」更突出说话人不介意。",
+    "examples": [
+      {
+        "ja": "返事は来週になっても構いません。",
+        "translation": "下周再回复也没关系。"
+      }
+    ],
+    "related": [
+      "te-mo-ii",
+      "te-mo-de-mo"
+    ]
+  },
+  {
+    "id": "te-wa-ikenai",
+    "pattern": "～てはいけない",
+    "level": "N5",
+    "meaning": "表示禁止或规则上不允许。",
+    "formation": "动词て形＋はいけない",
+    "notes": "常用来提醒规则。「帰ってはいけない」是不许回去，「帰らなくてもいい」是可以不回去。",
+    "examples": [
+      {
+        "ja": "展示品に触ってはいけません。",
+        "translation": "不能触摸展品。"
+      }
+    ],
+    "related": [
+      "te-mo-ii",
+      "nakute-mo-ii"
+    ]
+  },
+  {
+    "id": "you-ni-naru",
+    "pattern": "～ようになる",
+    "level": "N4",
+    "meaning": "描述能力、习惯或状态发生变化。",
+    "formation": "动词辞书形／ない形＋ようになる",
+    "notes": "「読めるようになった」表示从不会读变成会读。「毎日読むようにする」是有意努力每天读。",
+    "examples": [
+      {
+        "ja": "最近、一人で料理を作れるようになった。",
+        "translation": "最近我已经能一个人做饭了。"
+      }
+    ],
+    "related": [
+      "you-ni-suru",
+      "koto-ni-naru"
+    ]
+  },
+  {
+    "id": "koto-ga-dekiru",
+    "pattern": "～ことができる",
+    "level": "N4",
+    "meaning": "表示有能力做某事，或条件允许做某事。",
+    "formation": "动词辞书形＋ことができる",
+    "notes": "「予約することができる」也可说「予約できる」。说明制度或场所提供的选择时常用完整形式。",
+    "examples": [
+      {
+        "ja": "図書館では無料で本を借りることができます。",
+        "translation": "在图书馆可以免费借书。"
+      }
+    ],
+    "related": [
+      "you-ni-naru"
+    ]
+  },
+  {
+    "id": "ta-koto-ga-aru",
+    "pattern": "～たことがある",
+    "level": "N5",
+    "meaning": "表示曾经做过某事的经历。",
+    "formation": "动词た形＋ことがある",
+    "notes": "「行ったことがない」表示从未去过。「行くことがある」表示有时会去，接续不同。",
+    "examples": [
+      {
+        "ja": "冬の北海道を旅行したことがある。",
+        "translation": "我曾在冬天去北海道旅行。"
+      }
+    ],
+    "related": [
+      "koto-ga-aru",
+      "polarity"
+    ]
+  },
+  {
+    "id": "te-iku",
+    "pattern": "～ていく",
+    "level": "N4",
+    "meaning": "动作离开说话人的参照点，或变化从现在向后发展。",
+    "formation": "动词て形＋いく",
+    "notes": "「持っていく」表示带去，「これから減っていく」观察的是今后的变化。",
+    "examples": [
+      {
+        "ja": "これからも少しずつ勉強を続けていく。",
+        "translation": "今后我还会一点一点继续学习。"
+      }
+    ],
+    "related": [
+      "te-kuru"
+    ]
+  },
+  {
+    "id": "te-kuru",
+    "pattern": "～てくる",
+    "level": "N4",
+    "meaning": "动作朝参照点而来，或某种变化从过去发展到现在。",
+    "formation": "动词て形＋くる",
+    "notes": "「買ってくる」也可表示去买了再回来。「寒くなってきた」强调变化已逐渐显现。",
+    "examples": [
+      {
+        "ja": "雨の音がだんだん大きくなってきた。",
+        "translation": "雨声渐渐大了起来。"
+      }
+    ],
+    "related": [
+      "te-iku"
+    ]
+  },
+  {
+    "id": "mada-te-inai",
+    "pattern": "まだ～ていない",
+    "level": "N5",
+    "meaning": "到当前参照时间为止，预期的动作尚未发生或完成。",
+    "formation": "まだ＋动词て形＋いない／いません",
+    "notes": "「まだ読んでいない」是还没读。「まだ読んでいる」则是仍在读。",
+    "examples": [
+      {
+        "ja": "招待状はまだ送っていない。",
+        "translation": "邀请函还没寄出去。"
+      }
+    ],
+    "related": [
+      "te-iru",
+      "polarity"
+    ]
+  },
+  {
+    "id": "toki",
+    "pattern": "～とき",
+    "level": "N4",
+    "meaning": "指出后项发生时的时间或情境。",
+    "formation": "动词普通形／い形容词／な形容词＋な／名词＋の，后接とき",
+    "notes": "「出かけるとき」通常着眼于出门时或之前，「出かけたとき」常以出门已发生为参照。",
+    "examples": [
+      {
+        "ja": "日本に行くとき、空港で両替した。",
+        "translation": "去日本那次，我在机场换了钱。"
+      }
+    ],
+    "related": [
+      "tara",
+      "te-kara"
+    ]
+  },
+  {
+    "id": "node",
+    "pattern": "～ので",
+    "level": "N4",
+    "meaning": "说明后项的原因或背景。",
+    "formation": "普通形＋ので；名词或な形容词用「な＋ので」",
+    "notes": "请求、解释迟到等场合可用「ので」交代缘由。「から」也能表示因果，语气取决于上下文。",
+    "examples": [
+      {
+        "ja": "電車が遅れたので、少し遅刻しました。",
+        "translation": "因为电车晚点，我迟到了一会儿。"
+      }
+    ],
+    "related": [
+      "kara-reason"
+    ]
+  },
+  {
+    "id": "noni-although",
+    "pattern": "～のに（转折）",
+    "level": "N4",
+    "meaning": "明明前项成立，后项却与期待相反。",
+    "formation": "普通形＋のに；名词或な形容词用「な＋のに」",
+    "notes": "句尾停在「のに」时，后项往往靠上下文补足，并可带有遗憾或不满。",
+    "examples": [
+      {
+        "ja": "早く出たのに、バスに間に合わなかった。",
+        "translation": "明明很早就出了门，还是没赶上公交车。"
+      }
+    ],
+    "related": [
+      "noni-purpose",
+      "ni-mo-kakawarazu"
+    ]
+  },
+  {
+    "id": "noni-purpose",
+    "pattern": "～のに（用途）",
+    "level": "N4",
+    "meaning": "表示某个东西、时间或条件用于做某事。",
+    "formation": "动词辞书形＋のに，常接使う、役立つ、必要だ等",
+    "notes": "「調べるのに便利だ」是查找时方便；「調べたのに分からなかった」则是转折。",
+    "examples": [
+      {
+        "ja": "このアプリは発音を練習するのに便利だ。",
+        "translation": "这个应用很适合拿来练发音。"
+      }
+    ],
+    "related": [
+      "noni-although"
+    ]
+  },
+  {
+    "id": "tsumori",
+    "pattern": "～つもり",
+    "level": "N4",
+    "meaning": "表达做或不做某事的意图。",
+    "formation": "动词辞书形／ない形＋つもりだ",
+    "notes": "「行かないつもり」是打算不去。「行ったつもり」用过去形，通常表示当作去过了。",
+    "examples": [
+      {
+        "ja": "来年は試験を受けるつもりだ。",
+        "translation": "我打算明年参加考试。"
+      }
+    ],
+    "related": [
+      "yotei",
+      "koto-ni-suru"
+    ]
+  },
+  {
+    "id": "yotei",
+    "pattern": "～予定",
+    "level": "N4",
+    "meaning": "表示已经列入计划或日程的事项。",
+    "formation": "动词辞书形／名词＋の，再接予定だ",
+    "notes": "「つもり」偏向个人意图。「予定」可以谈他人或组织已经做出的安排。",
+    "examples": [
+      {
+        "ja": "次の会議は金曜日に開く予定です。",
+        "translation": "下次会议计划周五召开。"
+      }
+    ],
+    "related": [
+      "tsumori",
+      "koto-ni-naru"
+    ]
+  },
+  {
+    "id": "hazu-da",
+    "pattern": "～はずだ",
+    "level": "N4",
+    "meaning": "根据已有信息推断按理应该如此。",
+    "formation": "普通形＋はずだ；な形容词用「な」，名词用「の」接续",
+    "notes": "「届くはずだ」说按日程应该会到；实际没到时仍可说「届くはずだった」。",
+    "examples": [
+      {
+        "ja": "もう駅を出たなら、十分で着くはずだ。",
+        "translation": "如果已经出站了，按理十分钟就能到。"
+      }
+    ],
+    "related": [
+      "hazu-ga-nai",
+      "ni-chigai-nai"
+    ]
+  },
+  {
+    "id": "hazu-ga-nai",
+    "pattern": "～はずがない",
+    "level": "N4",
+    "meaning": "基于已知事实判断某事不可能。",
+    "formation": "普通形＋はずがない；な形容词用「な」，名词用「の」",
+    "notes": "「来ないはず」推断不会来，「来るはずがない」更强烈地否定他来的可能性。",
+    "examples": [
+      {
+        "ja": "今日は休館日だから、開いているはずがない。",
+        "translation": "今天闭馆，所以不可能开门。"
+      }
+    ],
+    "related": [
+      "hazu-da",
+      "wake-ga-nai"
+    ]
+  },
+  {
+    "id": "darou",
+    "pattern": "～だろう",
+    "level": "N4",
+    "meaning": "表示推测，语调上扬时也可向对方确认。",
+    "formation": "动词或い形容词普通形／名词或な形容词词干＋だろう",
+    "notes": "说「明日は寒いだろう」是在预测；「見ただろう？」在问对方是不是看过。礼貌形式常用「でしょう」。",
+    "examples": [
+      {
+        "ja": "この調子なら、夕方までには終わるだろう。",
+        "translation": "按这个进度，傍晚前大概能做完。"
+      }
+    ],
+    "related": [
+      "rashii",
+      "hazu-da"
+    ]
+  },
+  {
+    "id": "rashii",
+    "pattern": "～らしい（推测／传闻）",
+    "level": "N4",
+    "meaning": "依据传闻或迹象，推断某件事似乎是真的。",
+    "formation": "普通形＋らしい；名词或な形容词通常省掉「だ」",
+    "notes": "「駅前に店ができるらしい」可来自听说；「子供らしい」也可能是说很符合孩子的特点。",
+    "examples": [
+      {
+        "ja": "駅前に新しい店ができるらしい。",
+        "translation": "听说车站前面要开一家新店。"
+      }
+    ],
+    "related": [
+      "rashii-typical-of",
+      "sou-da-hearsay"
+    ]
+  },
+  {
+    "id": "rashii-typical-of",
+    "pattern": "～らしい（典型特征）",
+    "level": "N3",
+    "meaning": "表示具有某一类人或事物应有的特点。",
+    "formation": "名词＋らしい，后续活用类似い形容词",
+    "notes": "「春らしい天気」说天气像春天；「明日から暖かくなるらしい」表示听说或推测。",
+    "examples": [
+      {
+        "ja": "今日は春らしい暖かい一日だった。",
+        "translation": "今天温暖宜人，很有春天的感觉。"
+      }
+    ],
+    "related": [
+      "rashii",
+      "mitai"
+    ]
+  },
+  {
+    "id": "mitai",
+    "pattern": "～みたい",
+    "level": "N4",
+    "meaning": "口语中表示像某事物，也可表示根据迹象看似如此。",
+    "formation": "普通形＋みたい；名词或な形容词可直接接みたい",
+    "notes": "修饰名词用「みたいな」，修饰动作可用「みたいに」。「雨が降ったみたい」常表示看迹象推测下过雨。",
+    "examples": [
+      {
+        "ja": "窓がぬれている。夜に雨が降ったみたい。",
+        "translation": "窗户湿了，好像夜里下过雨。"
+      }
+    ],
+    "related": [
+      "you-na-you-ni-like",
+      "rashii"
+    ]
+  },
+  {
+    "id": "te-tamaranai",
+    "pattern": "～てたまらない",
+    "level": "N3",
+    "meaning": "表示情感、感觉或愿望强烈到难以抑制。",
+    "formation": "动词或い形容词て形＋たまらない；な形容词用「で」",
+    "notes": "既可说负面感受「寒くてたまらない」，也可说强烈喜悦「うれしくてたまらない」。",
+    "examples": [
+      {
+        "ja": "久しぶりに友達に会えるのが楽しみでたまらない。",
+        "translation": "好久没见朋友了，我期待得不得了。"
+      }
+    ],
+    "related": [
+      "te-shou-ga-nai-te-shikata-ga-nai"
+    ]
+  },
+  {
+    "id": "ba-ii",
+    "pattern": "～ばいい",
+    "level": "N3",
+    "meaning": "表示满足某条件就行，常用来建议做法。",
+    "formation": "动词或い形容词假定形＋ばいい",
+    "notes": "「どうすればいい？」是在问怎么办。「窓を開ければいい」给出一种解决办法。",
+    "examples": [
+      {
+        "ja": "迷ったら、駅員に聞けばいいよ。",
+        "translation": "弄不清楚的话，问站务员就好。"
+      }
+    ],
+    "related": [
+      "ba",
+      "ba-yokatta"
+    ]
+  },
+  {
+    "id": "ba-yokatta",
+    "pattern": "～ばよかった",
+    "level": "N4",
+    "meaning": "回顾过去时表示早知道就该怎样做。",
+    "formation": "动词假定形＋よかった；否定可用「なければよかった」",
+    "notes": "常用于事后后悔。「予約すればよかった」通常暗示当时没订。",
+    "examples": [
+      {
+        "ja": "もっと早く出ればよかった。",
+        "translation": "早知道就早点出门了。"
+      }
+    ],
+    "related": [
+      "ba",
+      "ba-ii"
+    ]
+  },
+  {
+    "id": "ba-hodo",
+    "pattern": "～ば～ほど",
+    "level": "N3",
+    "meaning": "表示一个程度越高，另一个程度也相应变化。",
+    "formation": "前项用假定形，后面重复同一谓语的普通形，再接ほど",
+    "notes": "「練習すればするほど」重复动词；な形容词可用「静かなら静かなほど」。",
+    "examples": [
+      {
+        "ja": "この曲は聞けば聞くほど好きになる。",
+        "translation": "这首歌越听越喜欢。"
+      }
+    ],
+    "related": [
+      "ba"
+    ]
+  },
+  {
+    "id": "wake-da",
+    "pattern": "～わけだ",
+    "level": "N3",
+    "meaning": "从已知事实得出自然的结论，常译为「难怪」或「也就是说」。",
+    "formation": "普通形＋わけだ；な形容词用「な」，名词可用「という」",
+    "notes": "「毎日練習しているのか。上手なわけだ」是得知原因后明白了结果。",
+    "examples": [
+      {
+        "ja": "今日は祝日か。それで店が混んでいるわけだ。",
+        "translation": "原来今天是假日，难怪店里这么挤。"
+      }
+    ],
+    "related": [
+      "wake-de-wa-nai",
+      "wake-ga-nai"
+    ]
+  },
+  {
+    "id": "wake-ga-nai",
+    "pattern": "～わけがない",
+    "level": "N3",
+    "meaning": "强调某种说法或事情绝无可能。",
+    "formation": "普通形＋わけがない；な形容词用「な」，名词用「の」等接续",
+    "notes": "「忘れるわけがない」很肯定地说不可能忘；「忘れたわけではない」是在澄清并非忘了。",
+    "examples": [
+      {
+        "ja": "こんな大切な約束を忘れるわけがない。",
+        "translation": "这么重要的约定，我不可能忘。"
+      }
+    ],
+    "related": [
+      "wake-de-wa-nai",
+      "hazu-ga-nai"
+    ]
+  },
+  {
+    "id": "wake-ni-wa-ikanai",
+    "pattern": "～わけにはいかない",
+    "level": "N3",
+    "meaning": "考虑责任、情理或现实限制，不能那样做。",
+    "formation": "动词辞书形或ない形＋わけにはいかない",
+    "notes": "动词带否定时要读两层意思。「行かないわけにはいかない」表示不能不去。",
+    "examples": [
+      {
+        "ja": "みんなが待っているから、帰るわけにはいかない。",
+        "translation": "大家还等着，所以我不能走。"
+      }
+    ],
+    "related": [
+      "zaru-o-enai"
+    ]
+  },
+  {
+    "id": "ni-shite-wa",
+    "pattern": "～にしては",
+    "level": "N3",
+    "meaning": "以某个身份或条件为标准，指出结果与通常预期不同。",
+    "formation": "名词或动词普通形＋にしては",
+    "notes": "「初めてにしては」以第一次的表现为参照，经常用来表示比预料更好。",
+    "examples": [
+      {
+        "ja": "初めて作ったにしては、よくできている。",
+        "translation": "作为第一次做，已经做得很好了。"
+      }
+    ],
+    "related": [
+      "mono-no"
+    ]
+  },
+  {
+    "id": "to-shite-mo",
+    "pattern": "～としても",
+    "level": "N3",
+    "meaning": "即便把某个假设当真，后面的判断或打算仍成立。",
+    "formation": "普通形＋としても；名词或な形容词可用「だ＋としても」",
+    "notes": "「行くとしても」先假定会去，再说明即使如此也有其他条件。",
+    "examples": [
+      {
+        "ja": "行くとしても、夕方からになる。",
+        "translation": "就算去，也得等到傍晚以后。"
+      }
+    ],
+    "related": [
+      "te-mo-de-mo",
+      "tatoe-te-mo"
+    ]
+  },
+  {
+    "id": "to-itte-mo",
+    "pattern": "～といっても",
+    "level": "N2",
+    "meaning": "接着补充限制，纠正听者可能从前一句得出的印象。",
+    "formation": "前述说法＋といっても",
+    "notes": "常用于「说是……，其实也就……」。例如提到工作经验后说明经历很短。",
+    "examples": [
+      {
+        "ja": "料理ができるといっても、簡単なものだけだ。",
+        "translation": "说是会做饭，其实只会做些简单的。"
+      }
+    ],
+    "related": [
+      "to-shite-mo"
+    ]
+  },
+  {
+    "id": "kara-to-itte",
+    "pattern": "～からといって",
+    "level": "N3",
+    "meaning": "指出仅凭前项理由不能推出后面的结论。",
+    "formation": "表示理由的分句＋からといって",
+    "notes": "后面常见「～わけではない」「～とは限らない」等否定推断。",
+    "examples": [
+      {
+        "ja": "安いからといって、質が悪いわけではない。",
+        "translation": "东西便宜，也不见得质量差。"
+      }
+    ],
+    "related": [
+      "kara-reason",
+      "wake-de-wa-nai"
+    ]
+  },
+  {
+    "id": "tatoe-te-mo",
+    "pattern": "たとえ～ても",
+    "level": "N2",
+    "meaning": "即使假设一种情况发生，决定或结论也不会改变。",
+    "formation": "たとえ＋动词或い形容词て形＋も；名词或な形容词＋でも",
+    "notes": "「たとえ」用来强调让步，常引出说话人认为不利、极端或不一定会发生的情况。",
+    "examples": [
+      {
+        "ja": "たとえ失敗しても、もう一度やってみる。",
+        "translation": "即使失败，我也会再试一次。"
+      }
+    ],
+    "related": [
+      "te-mo-de-mo",
+      "to-shite-mo"
+    ]
+  },
+  {
+    "id": "ni-kakawarazu",
+    "pattern": "～にかかわらず",
+    "level": "N2",
+    "meaning": "不受某个条件的影响，两个或多个情况都适用。",
+    "formation": "名词／相对的两种动词形式＋にかかわらず",
+    "notes": "「有無にかかわらず」是无论有无；「にもかかわらず」则是尽管事实如此，结果仍出乎预期。",
+    "examples": [
+      {
+        "ja": "経験の有無にかかわらず、応募できます。",
+        "translation": "有无经验都可以申请。"
+      }
+    ],
+    "related": [
+      "ni-mo-kakawarazu"
+    ]
+  },
+  {
+    "id": "ni-saishite",
+    "pattern": "～に際して",
+    "level": "N2",
+    "meaning": "在某件较正式或重要的事情发生时。",
+    "formation": "名词或动词辞书形＋に際して",
+    "notes": "常见于入学、签约、启动项目等一次性场合。「に際しての」可修饰名词。",
+    "examples": [
+      {
+        "ja": "入会に際して、身分証をご提示ください。",
+        "translation": "办理入会手续时，请出示身份证明。"
+      }
+    ],
+    "related": [
+      "ni-atatte"
+    ]
+  },
+  {
+    "id": "ni-atatte",
+    "pattern": "～にあたって",
+    "level": "N2",
+    "meaning": "在着手某件重要事情之前或之际。",
+    "formation": "名词或动词辞书形＋にあたって",
+    "notes": "常引出为迎接新阶段而做的准备或表态，例如开业、搬迁、就任。",
+    "examples": [
+      {
+        "ja": "開店にあたって、地域の方々に挨拶した。",
+        "translation": "开业之际，我向附近居民打了招呼。"
+      }
+    ],
+    "related": [
+      "ni-saishite"
+    ]
+  },
+  {
+    "id": "gatera",
+    "pattern": "～がてら",
+    "level": "N1",
+    "meaning": "在做主动作时顺路再做另一件事。",
+    "formation": "动词连用形或动作性名词＋がてら",
+    "notes": "常用于一次出门兼顾两件事。「散歩がてら寄る」就是散步时顺道去一趟。",
+    "examples": [
+      {
+        "ja": "散歩がてら、郵便局に寄った。",
+        "translation": "我散步时顺便去了趟邮局。"
+      }
+    ],
+    "related": [
+      "nagara",
+      "katawara"
+    ]
+  },
+  {
+    "id": "katawara",
+    "pattern": "～かたわら",
+    "level": "N1",
+    "meaning": "从事一个长期主要活动的同时，也持续从事另一项活动。",
+    "formation": "动词辞书形或名词＋の，再接かたわら",
+    "notes": "常用于职业和长期活动。「ながら」也可用来描述正在同时进行的短动作。",
+    "examples": [
+      {
+        "ja": "会社で働くかたわら、週末は絵を教えている。",
+        "translation": "我平时在公司上班，周末还教画画。"
+      }
+    ],
+    "related": [
+      "gatera",
+      "nagara"
+    ]
+  },
+  {
+    "id": "soba-kara",
+    "pattern": "～そばから",
+    "level": "N1",
+    "meaning": "前项刚发生，后项就接着发生，而且常反复出现。",
+    "formation": "动词辞书形或た形＋そばから",
+    "notes": "后项常使前项工夫白费。「聞いたそばから忘れる」说刚听完就忘。",
+    "examples": [
+      {
+        "ja": "片づけたそばから、子どもがおもちゃを出す。",
+        "translation": "我刚收好，孩子就又把玩具拿出来。"
+      }
+    ],
+    "related": [
+      "te-kara"
+    ]
+  },
+  {
+    "id": "ba-koso",
+    "pattern": "～ばこそ",
+    "level": "N1",
+    "meaning": "强调正因为有前项才会有后项。",
+    "formation": "动词、い形容词假定形＋こそ；名词或な形容词可用「であればこそ」",
+    "notes": "常用来说明某种看似不好理解的行为背后，恰恰有这个重要理由。",
+    "examples": [
+      {
+        "ja": "大事に思えばこそ、はっきり意見を言う。",
+        "translation": "正因为重视，我才直说自己的意见。"
+      }
+    ],
+    "related": [
+      "ba",
+      "kara-reason"
+    ]
+  },
+  {
+    "id": "te-yamanai",
+    "pattern": "～てやまない",
+    "level": "N1",
+    "meaning": "表示一直保持某种强烈愿望或感情。",
+    "formation": "表示感情、期盼等的动词て形＋やまない",
+    "notes": "常见搭配有「願ってやまない」「愛してやまない」，语体略正式。",
+    "examples": [
+      {
+        "ja": "皆さんの成功を願ってやみません。",
+        "translation": "我由衷祝愿各位成功。"
+      }
+    ],
+    "related": [
+      "te-tamaranai"
+    ]
+  },
+  {
+    "id": "wa",
+    "pattern": "～は（话题）",
+    "level": "N5",
+    "meaning": "先点出正在谈论的对象，后面说明关于它的信息。",
+    "formation": "名词或其他成分＋は",
+    "notes": "助词「は」读作「わ」。放在不同成分后也能表示对比，例如「朝は」暗示其他时段可能不同。",
+    "examples": [
+      {
+        "ja": "朝はコーヒーを飲みます。",
+        "translation": "早上我喝咖啡。"
+      }
+    ],
+    "related": [
+      "ga-subject",
+      "mo"
+    ]
+  },
+  {
+    "id": "ga-subject",
+    "pattern": "～が（主语）",
+    "level": "N5",
+    "meaning": "标出动作、状态或判断的主语。",
+    "formation": "名词＋が",
+    "notes": "疑问词作主语时常用「が」。「誰が来た？」是在问来者是谁。",
+    "examples": [
+      {
+        "ja": "誰が最初に気づいたの？",
+        "translation": "是谁最先发现的？"
+      }
+    ],
+    "related": [
+      "wa",
+      "ga-aru-ga-iru"
+    ]
+  },
+  {
+    "id": "o",
+    "pattern": "～を",
+    "level": "N5",
+    "meaning": "标出动作作用的对象，也可标出经过的路线或离开的地点。",
+    "formation": "名词＋を",
+    "notes": "助词「を」通常读作「お」。「本を読む」标出对象，「道を歩く」标出经过的路线。",
+    "examples": [
+      {
+        "ja": "毎朝、この道を歩きます。",
+        "translation": "我每天早上走这条路。"
+      }
+    ],
+    "related": [
+      "de-place"
+    ]
+  },
+  {
+    "id": "ni-time",
+    "pattern": "～に（时间）",
+    "level": "N5",
+    "meaning": "标出动作发生的时间点。",
+    "formation": "具体时间点＋に",
+    "notes": "「三時に」「月曜日に」常用「に」。「今日」「明日」「毎日」单用时通常直接放在句中。",
+    "examples": [
+      {
+        "ja": "午後三時に電話します。",
+        "translation": "我下午三点打电话。"
+      }
+    ],
+    "related": [
+      "ni-frequency",
+      "made"
+    ]
+  },
+  {
+    "id": "ni-destination",
+    "pattern": "～に（目的地）",
+    "level": "N5",
+    "meaning": "标出移动的目的地。",
+    "formation": "地点＋に＋行く／来る／帰る等",
+    "notes": "「駅に行く」指以车站为目的地。用「駅へ行く」也可表达同一路程，语感更着重朝向。",
+    "examples": [
+      {
+        "ja": "仕事のあとで図書館に行きます。",
+        "translation": "下班后我去图书馆。"
+      }
+    ],
+    "related": [
+      "e",
+      "ni-location"
+    ]
+  },
+  {
+    "id": "ni-location",
+    "pattern": "～に（存在地点）",
+    "level": "N5",
+    "meaning": "标出人或事物所在的位置。",
+    "formation": "地点＋に＋人或物＋が＋いる／ある",
+    "notes": "「部屋に人がいる」谈人的所在。「部屋で話す」则谈动作在哪里发生。",
+    "examples": [
+      {
+        "ja": "台所に猫がいます。",
+        "translation": "厨房里有一只猫。"
+      }
+    ],
+    "related": [
+      "de-place",
+      "ga-aru-ga-iru"
+    ]
+  },
+  {
+    "id": "ni-indirect-object",
+    "pattern": "～に（动作对象）",
+    "level": "N5",
+    "meaning": "标出给予、说明、联系等动作的接受者或指向对象。",
+    "formation": "接受者或对象＋に＋动词",
+    "notes": "授受句的方向要看动词。「友達に渡す」是交给朋友，「友達にもらう」是从朋友那里得到。",
+    "examples": [
+      {
+        "ja": "受付の人に名前を伝えた。",
+        "translation": "我把名字告诉了前台人员。"
+      }
+    ],
+    "related": [
+      "te-morau",
+      "ni-destination"
+    ]
+  },
+  {
+    "id": "ni-frequency",
+    "pattern": "～に（频率）",
+    "level": "N5",
+    "meaning": "在给定的时间或单位范围内，说明出现几次或有几个。",
+    "formation": "时间或单位范围＋に＋次数或数量",
+    "notes": "「週に二回」是每周两次。这里的「に」标出计算范围。",
+    "examples": [
+      {
+        "ja": "週に二回、仕事のあとで泳ぎます。",
+        "translation": "我每周下班后游两次泳。"
+      }
+    ],
+    "related": [
+      "ni-time"
+    ]
+  },
+  {
+    "id": "e",
+    "pattern": "～へ（方向）",
+    "level": "N5",
+    "meaning": "标出移动方向，助词「へ」读作「え」。",
+    "formation": "地点＋へ＋移动动词",
+    "notes": "「北へ向かう」着重向北行进。描述以某地点为目的地时，「へ」和「に」常可互换。",
+    "examples": [
+      {
+        "ja": "この道をまっすぐ駅へ向かう。",
+        "translation": "沿这条路直走，往车站去。"
+      }
+    ],
+    "related": [
+      "ni-destination"
+    ]
+  },
+  {
+    "id": "de-place",
+    "pattern": "～で（动作地点）",
+    "level": "N5",
+    "meaning": "标出动作或活动在哪里发生。",
+    "formation": "地点＋で＋动作",
+    "notes": "「駅で待つ」说在哪里等，「駅に着く」标出到达的地点。",
+    "examples": [
+      {
+        "ja": "駅前の店で昼ご飯を食べた。",
+        "translation": "我在车站前的店里吃了午饭。"
+      }
+    ],
+    "related": [
+      "ni-location",
+      "de-means"
+    ]
+  },
+  {
+    "id": "de-means",
+    "pattern": "～で（手段）",
+    "level": "N5",
+    "meaning": "标出做事采用的手段、媒介或材料。",
+    "formation": "工具、交通方式、材料或语言＋で",
+    "notes": "「電車で行く」说交通方式。「駅で会う」是同一个助词的地点用法。",
+    "examples": [
+      {
+        "ja": "家から会場までバスで行きました。",
+        "translation": "我从家坐公交车去了会场。"
+      }
+    ],
+    "related": [
+      "de-place"
+    ]
+  },
+  {
+    "id": "to-and",
+    "pattern": "～と（完整列举）",
+    "level": "N5",
+    "meaning": "连接并列的名词，常把所谈对象明确列出来。",
+    "formation": "名词＋と＋名词",
+    "notes": "用「や」时通常只是举例，暗示还可能有其他项目。",
+    "examples": [
+      {
+        "ja": "机の上に本とペンがある。",
+        "translation": "桌上有书和笔。"
+      }
+    ],
+    "related": [
+      "ya",
+      "to-with"
+    ]
+  },
+  {
+    "id": "to-with",
+    "pattern": "～と（一起）",
+    "level": "N5",
+    "meaning": "标出一起做某事的人或交流对象。",
+    "formation": "人或团体＋と＋动作",
+    "notes": "「友達と話す」是和朋友交谈；「友達に話す」可以着重把话说给朋友听。",
+    "examples": [
+      {
+        "ja": "妹と新しい店を見に行った。",
+        "translation": "我和妹妹去看了那家新店。"
+      }
+    ],
+    "related": [
+      "to-and",
+      "ni-indirect-object"
+    ]
+  },
+  {
+    "id": "ya",
+    "pattern": "～や（举例）",
+    "level": "N5",
+    "meaning": "从同一类事物中列举几个例子。",
+    "formation": "名词＋や＋名词，可加「など」",
+    "notes": "「りんごやみかん」是苹果、橘子等东西。只想明确列出两项时，可以用「と」。",
+    "examples": [
+      {
+        "ja": "市場でりんごやみかんを買った。",
+        "translation": "我在市场买了苹果、橘子之类的东西。"
+      }
+    ],
+    "related": [
+      "to-and"
+    ]
+  },
+  {
+    "id": "ka-or",
+    "pattern": "～か（或者）",
+    "level": "N5",
+    "meaning": "在并列的几项中表示选择或不确定是哪一项。",
+    "formation": "名词＋か＋名词",
+    "notes": "「月曜か火曜」是周一或周二。句末「か」也可标记疑问。",
+    "examples": [
+      {
+        "ja": "月曜か火曜に連絡します。",
+        "translation": "我周一或周二联系你。"
+      }
+    ],
+    "related": [
+      "ka-question"
+    ]
+  },
+  {
+    "id": "mo",
+    "pattern": "～も（也）",
+    "level": "N5",
+    "meaning": "表示某事物也在所说范围内。",
+    "formation": "名词或其他成分＋も",
+    "notes": "作主语或宾语时常替代「が」「を」，如「私も行く」；时间、地点等用法可保留前面的助词，如「東京にも行く」。",
+    "examples": [
+      {
+        "ja": "私もその映画を見ました。",
+        "translation": "我也看了那部电影。"
+      }
+    ],
+    "related": [
+      "wa"
+    ]
+  },
+  {
+    "id": "no",
+    "pattern": "～の（名词修饰）",
+    "level": "N5",
+    "meaning": "说明后一个名词的归属、类别、属性或相关关系。",
+    "formation": "名词＋の＋名词",
+    "notes": "不一定表示拥有关系。「日本の映画」可指日本电影，「木の机」可以表示木制桌子。",
+    "examples": [
+      {
+        "ja": "これは友達のカメラです。",
+        "translation": "这是朋友的相机。"
+      }
+    ],
+    "related": [
+      "to-iu-named"
+    ]
+  },
+  {
+    "id": "kara-from",
+    "pattern": "～から（起点）",
+    "level": "N5",
+    "meaning": "标出移动、持续时间或事物来处的起点。",
+    "formation": "地点、时间或来源＋から",
+    "notes": "「九時から」是从九点开始；谓语普通形后的「から」也可提出原因。",
+    "examples": [
+      {
+        "ja": "駅から店まで歩いて行った。",
+        "translation": "我从车站走到了店里。"
+      }
+    ],
+    "related": [
+      "made",
+      "kara-reason"
+    ]
+  },
+  {
+    "id": "made",
+    "pattern": "～まで（终点）",
+    "level": "N5",
+    "meaning": "标出持续或移动到什么地方、什么时间为止。",
+    "formation": "地点、时间或界限＋まで",
+    "notes": "「五時まで働く」表示工作持续到五点。「五時までに終える」表示最晚五点前完成。",
+    "examples": [
+      {
+        "ja": "今日は午後六時まで働きます。",
+        "translation": "我今天工作到下午六点。"
+      }
+    ],
+    "related": [
+      "kara-from",
+      "ni-time"
+    ]
+  },
+  {
+    "id": "ka-question",
+    "pattern": "～か（疑问）",
+    "level": "N5",
+    "meaning": "标明疑问，常见于礼貌体问句。",
+    "formation": "句末＋か",
+    "notes": "「いつですか」直接提问。「いつ来るか分からない」中的「か」也能把疑问嵌入句子。",
+    "examples": [
+      {
+        "ja": "駅までは何分かかりますか。",
+        "translation": "到车站要几分钟？"
+      }
+    ],
+    "related": [
+      "ka-or"
+    ]
+  },
+  {
+    "id": "ne",
+    "pattern": "～ね",
+    "level": "N5",
+    "meaning": "邀请对方确认或表达双方可以分享的感受。",
+    "formation": "句末＋ね",
+    "notes": "「寒いですね」可以是在和对方分享感受。语调上扬时，确认的意味更明显。",
+    "examples": [
+      {
+        "ja": "外はずいぶん静かですね。",
+        "translation": "外面真安静啊。"
+      }
+    ],
+    "related": [
+      "yo"
+    ]
+  },
+  {
+    "id": "yo",
+    "pattern": "～よ",
+    "level": "N5",
+    "meaning": "向对方提示、强调或告知自己掌握的信息。",
+    "formation": "句末＋よ",
+    "notes": "常用在提醒和告知中。「閉まっているよ」可是在告诉对方店已经关了。",
+    "examples": [
+      {
+        "ja": "その切符は明日も使えるよ。",
+        "translation": "那张票明天也能用哦。"
+      }
+    ],
+    "related": [
+      "ne"
+    ]
+  },
+  {
+    "id": "tai",
+    "pattern": "～たい",
+    "level": "N5",
+    "meaning": "表示想做某事。",
+    "formation": "动词连用形＋たい",
+    "notes": "说话人可直接说「食べたい」。代述他人的愿望时往往加「と言っている」等依据，或使用适合语境的形式。",
+    "examples": [
+      {
+        "ja": "今度は別の町にも行ってみたい。",
+        "translation": "下次我也想试着去另一座城市。"
+      }
+    ],
+    "related": [
+      "ga-hoshii",
+      "te-hoshii"
+    ]
+  },
+  {
+    "id": "naide-kudasai",
+    "pattern": "～ないでください",
+    "level": "N5",
+    "meaning": "有礼貌地请求对方别做某事。",
+    "formation": "动词ない形＋でください",
+    "notes": "「触らないでください」是请求别碰。「触ってはいけません」更强调有规定禁止碰。",
+    "examples": [
+      {
+        "ja": "乗り換えの切符をなくさないでください。",
+        "translation": "请别弄丢换乘车票。"
+      }
+    ],
+    "related": [
+      "te-kudasai",
+      "te-wa-ikenai"
+    ]
   }
 ]

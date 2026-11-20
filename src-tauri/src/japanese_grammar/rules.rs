@@ -14,179 +14,287 @@ pub(super) struct Match {
 
 struct Rule {
     id: &'static str,
-    variants: &'static [&'static [&'static str]],
+    pattern: Pattern,
     extend_aux: bool,
 }
 
+type Sequence = &'static [&'static str];
+
+enum Pattern {
+    Variants(&'static [Sequence]),
+    Suffix {
+        prefix: Sequence,
+        tail: Sequence,
+        ending: Ending,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum Ending {
+    Regular,
+    ContractedTe(&'static str),
+    Negative,
+}
+
+const NEGATIVE_AUXILIARIES: &[Sequence] =
+    &[&["l:ない&aux"], &["s:ませ&l:ます&aux", "s:ん&l:ぬ&aux"]];
+
+const VERB_STEM: Sequence = &["v:stem"];
+const VERB_TE: Sequence = &["v:stem", "connector"];
+const PREDICATE_TE: Sequence = &["v:stem|a:stem", "connector"];
+const VERB_YOU_NI: Sequence = &["v:plain|neg:plain", "s:よう&na", "s:に"];
+const VERB_KOTO_NI: Sequence = &["v:plain|neg:plain", "s:こと&noun", "s:に&particle"];
+
+impl Rule {
+    const fn suffix(id: &'static str, prefix: Sequence, tail: Sequence, extend_aux: bool) -> Self {
+        Self {
+            id,
+            pattern: Pattern::Suffix {
+                prefix,
+                tail,
+                ending: Ending::Regular,
+            },
+            extend_aux,
+        }
+    }
+
+    const fn te_aux(id: &'static str, tail: Sequence, contraction: &'static str) -> Self {
+        Self {
+            id,
+            pattern: Pattern::Suffix {
+                prefix: VERB_TE,
+                tail,
+                ending: Ending::ContractedTe(contraction),
+            },
+            extend_aux: true,
+        }
+    }
+
+    const fn negative_suffix(id: &'static str, prefix: Sequence, tail: Sequence) -> Self {
+        Self {
+            id,
+            pattern: Pattern::Suffix {
+                prefix,
+                tail,
+                ending: Ending::Negative,
+            },
+            extend_aux: true,
+        }
+    }
+
+    fn end(&self, tokens: &[GrammarToken], start: usize) -> Option<usize> {
+        match self.pattern {
+            Pattern::Variants(variants) => variants
+                .iter()
+                .filter_map(|variant| sequence_end(tokens, start, variant.iter().copied()))
+                .max(),
+            Pattern::Suffix {
+                prefix,
+                tail,
+                ending,
+            } => {
+                let regular = sequence_end(tokens, start, prefix.iter().chain(tail).copied());
+                match ending {
+                    Ending::Regular => regular,
+                    Ending::ContractedTe(form) => regular.or_else(|| {
+                        sequence_end(
+                            tokens,
+                            start,
+                            VERB_STEM.iter().copied().chain(std::iter::once(form)),
+                        )
+                    }),
+                    Ending::Negative => {
+                        let end = regular?;
+                        NEGATIVE_AUXILIARIES
+                            .iter()
+                            .find_map(|suffix| sequence_end(tokens, end, suffix.iter().copied()))
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn sequence_end<'a>(
+    tokens: &[GrammarToken],
+    start: usize,
+    pattern: impl Iterator<Item = &'a str>,
+) -> Option<usize> {
+    let mut end = start;
+    for spec in pattern {
+        if !tokens.get(end).is_some_and(|token| satisfies(token, spec)) {
+            return None;
+        }
+        end += 1;
+    }
+    Some(end)
+}
+
 const RULES: &[Rule] = &[
-    Rule {
-        id: "te-iru",
-        variants: &[
-            &["v:stem", "connector", "l:いる&verb"],
-            &["v:stem", "l:てる|でる&aux"],
-        ],
-        extend_aux: true,
-    },
-    Rule {
-        id: "te-shimau-chau",
-        variants: &[
-            &["v:stem", "connector", "l:しまう&verb"],
-            &["v:stem", "l:ちゃう|じゃう&aux"],
-        ],
-        extend_aux: true,
-    },
-    Rule {
-        id: "te-oku",
-        variants: &[
-            &["v:stem", "connector", "l:おく&verb"],
-            &["v:stem", "l:とく|どく&aux"],
-        ],
-        extend_aux: true,
-    },
-    Rule {
-        id: "te-miru",
-        variants: &[&[
-            "v:stem",
-            "connector",
-            "s:み|みて|みる|みよ|みよう&l:みる&verb",
-        ]],
-        extend_aux: true,
-    },
-    Rule {
-        id: "te-kudasai",
-        variants: &[&["v:stem", "connector", "s:ください"]],
-        extend_aux: false,
-    },
+    Rule::te_aux("te-iru", &["l:いる&verb"], "l:てる|でる&aux"),
+    Rule::te_aux("te-shimau-chau", &["l:しまう&verb"], "l:ちゃう|じゃう&aux"),
+    Rule::te_aux("te-oku", &["l:おく&verb"], "l:とく|どく&aux"),
+    Rule::suffix(
+        "te-miru",
+        VERB_TE,
+        &["s:み|みて|みる|みよ|みよう&l:みる&verb"],
+        true,
+    ),
+    Rule::suffix("te-kudasai", VERB_TE, &["s:ください"], false),
+    Rule::suffix("te-ageru", VERB_TE, &["l:あげる&bound-verb"], true),
+    Rule::suffix("te-kureru", VERB_TE, &["l:くれる&bound-verb"], true),
+    Rule::suffix("te-morau", VERB_TE, &["l:もらう&bound-verb"], true),
+    Rule::suffix(
+        "te-kudasaru-te-itadaku",
+        VERB_TE,
+        &["l:くださる|下さる|いただく&bound-verb"],
+        true,
+    ),
+    Rule::suffix("te-aru", VERB_TE, &["l:ある&bound-verb"], true),
+    Rule::suffix(
+        "te-hoshii",
+        VERB_TE,
+        &["l:ほしい|欲しい&bound-adjective"],
+        true,
+    ),
+    Rule::suffix("te-kara", VERB_TE, &["s:から&particle"], false),
+    Rule::suffix(
+        "te-mo-ii",
+        PREDICATE_TE,
+        &["s:も&particle", "l:いい|よい&adjective"],
+        true,
+    ),
+    Rule::negative_suffix(
+        "te-mo-kamawanai",
+        PREDICATE_TE,
+        &["s:も&particle", "l:構う|かまう&verb"],
+    ),
+    Rule::negative_suffix(
+        "te-wa-ikenai",
+        PREDICATE_TE,
+        &["s:は&particle", "s:いけ&verb"],
+    ),
     Rule {
         id: "sou-da-appearance",
-        variants: &[&["v:stem|a:stem|a:sa", "s:そう&na"], &["na", "s:そう&na"]],
+        pattern: Pattern::Variants(&[&["v:stem|a:stem|a:sa", "s:そう&na"], &["na", "s:そう&na"]]),
         extend_aux: true,
     },
     Rule {
         id: "sou-da-hearsay",
-        variants: &[&["plain", "s:そう&noun", "s:だ|です|でして&aux"]],
+        pattern: Pattern::Variants(&[&["plain", "s:そう&noun", "s:だ|です|でして&aux"]]),
         extend_aux: true,
     },
     Rule {
         id: "tara",
-        variants: &[&["v:stem|a:stem|aux:stem", "s:たら|だら&hyp"]],
+        pattern: Pattern::Variants(&[&["v:stem|a:stem|aux:stem", "s:たら|だら&hyp"]]),
         extend_aux: false,
     },
     Rule {
         id: "ba",
-        variants: &[&["hyp", "s:ば&particle"]],
+        pattern: Pattern::Variants(&[&["hyp", "s:ば&particle"]]),
         extend_aux: false,
     },
     Rule {
         id: "nara",
-        variants: &[&["noun|na|plain", "s:なら|ならば&l:だ&hyp"]],
+        pattern: Pattern::Variants(&[&["noun|na|plain", "s:なら|ならば&l:だ&hyp"]]),
         extend_aux: false,
     },
     Rule {
         id: "nagara",
-        variants: &[&["v:stem", "s:ながら&particle"]],
+        pattern: Pattern::Variants(&[&["v:stem", "s:ながら&particle"]]),
         extend_aux: false,
     },
-    Rule {
-        id: "you-ni-suru",
-        variants: &[&["v:plain|neg:plain", "s:よう&na", "s:に", "l:する&verb"]],
-        extend_aux: true,
-    },
-    Rule {
-        id: "koto-ni-suru",
-        variants: &[&[
-            "v:plain|neg:plain",
-            "s:こと&noun",
-            "s:に&particle",
-            "l:する&verb",
-        ]],
-        extend_aux: true,
-    },
-    Rule {
-        id: "koto-ni-naru",
-        variants: &[&[
-            "v:plain|neg:plain",
-            "s:こと&noun",
-            "s:に&particle",
-            "l:なる&verb",
-        ]],
-        extend_aux: true,
-    },
+    Rule::suffix("you-ni-suru", VERB_YOU_NI, &["l:する&verb"], true),
+    Rule::suffix("you-ni-naru", VERB_YOU_NI, &["l:なる&verb"], true),
+    Rule::suffix("koto-ni-suru", VERB_KOTO_NI, &["l:する&verb"], true),
+    Rule::suffix("koto-ni-naru", VERB_KOTO_NI, &["l:なる&verb"], true),
+    Rule::suffix(
+        "koto-ga-dekiru",
+        &["v:plain"],
+        &["s:こと&noun", "s:が&particle", "l:できる|出来る&bound-verb"],
+        true,
+    ),
+    Rule::suffix(
+        "ta-koto-ga-aru",
+        &["v:stem", "l:た&plain"],
+        &["s:こと&noun", "s:が&particle", "l:ある&bound-verb"],
+        true,
+    ),
     Rule {
         id: "te-mo-de-mo",
-        variants: &[
+        pattern: Pattern::Variants(&[
             &["v:stem|a:stem", "connector", "s:も&particle"],
             &["na|noun", "s:で&aux", "s:も&particle"],
-        ],
+        ]),
         extend_aux: false,
     },
     Rule {
         id: "wake-de-wa-nai",
-        variants: &[
+        pattern: Pattern::Variants(&[
             &["plain", "s:わけ|訳&noun", "s:で", "s:は", "l:ない"],
             &["plain", "s:わけ|訳&noun", "s:じゃ", "l:ない"],
-        ],
+        ]),
         extend_aux: true,
     },
     Rule {
         id: "nakereba-naranai-nakute-wa-ikenai",
-        variants: &[
+        pattern: Pattern::Variants(&[
             &["v:negative", "s:なけれ", "s:ば", "s:なら", "l:ない"],
             &["v:negative", "s:なく", "s:て", "s:は", "s:いけ", "l:ない"],
             &["v:negative", "s:なくちゃ|なきゃ"],
-        ],
+        ]),
         extend_aux: true,
     },
     Rule {
         id: "nakute-mo-ii",
-        variants: &[&["v:negative", "s:なく", "s:て", "s:も", "l:いい|よい"]],
+        pattern: Pattern::Variants(&[&["v:negative", "s:なく", "s:て", "s:も", "l:いい|よい"]]),
         extend_aux: true,
     },
     Rule {
         id: "made-mo-nai",
-        variants: &[&["v:plain", "s:まで&particle", "s:も&particle", "l:ない"]],
+        pattern: Pattern::Variants(&[&["v:plain", "s:まで&particle", "s:も&particle", "l:ない"]]),
         extend_aux: true,
     },
     Rule {
         id: "ni-mo-kakawarazu",
-        variants: &[&[
+        pattern: Pattern::Variants(&[&[
             "plain|noun|na",
             "s:に&particle",
             "s:も&particle",
             "l:かかわる|関わる|拘わる&verb",
             "s:ず&aux",
-        ]],
+        ]]),
         extend_aux: false,
     },
     Rule {
         id: "zaru-o-enai",
-        variants: &[&[
+        pattern: Pattern::Variants(&[&[
             "v:negative",
             "s:ざる&aux",
             "s:を&particle",
             "l:得る|える&verb",
             "l:ない&aux",
-        ]],
+        ]]),
         extend_aux: true,
     },
     Rule {
         id: "ni-chigai-nai",
-        variants: &[&[
+        pattern: Pattern::Variants(&[&[
             "plain|noun|na",
             "s:に&particle",
             "s:違い|ちがい&noun",
             "l:ない",
-        ]],
+        ]]),
         extend_aux: true,
     },
     Rule {
         id: "kara-reason",
-        variants: &[&["plain", "s:から&particle"]],
+        pattern: Pattern::Variants(&[&["plain", "s:から&particle"]]),
         extend_aux: false,
     },
     Rule {
         id: "mono-no",
-        variants: &[&["plain", "s:もの&noun", "s:の&particle", "s:、|，"]],
+        pattern: Pattern::Variants(&[&["plain", "s:もの&noun", "s:の&particle", "s:、|，"]]),
         extend_aux: false,
     },
 ];
@@ -199,20 +307,9 @@ pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match>
     let mut hits = Vec::new();
     for start in 0..tokens.len() {
         for rule in RULES {
-            let matched = rule
-                .variants
-                .iter()
-                .filter_map(|variant| {
-                    let end = start + variant.len();
-                    let window = tokens.get(start..end)?;
-                    window
-                        .iter()
-                        .zip(variant.iter())
-                        .all(|(token, spec)| satisfies(token, spec))
-                        .then_some(end)
-                })
-                .max();
-            let Some(mut end) = matched else { continue };
+            let Some(mut end) = rule.end(tokens, start) else {
+                continue;
+            };
             if rule.extend_aux {
                 while tokens.get(end).is_some_and(|token| {
                     token.pos == "助動詞"
@@ -265,26 +362,21 @@ pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match>
     }
     // Prefer the larger expression when an internal connector belongs to a
     // conventional expression, while preserving genuine nested constructions.
+    const NESTED_CONNECTORS: &[(&str, &str)] = &[
+        ("nakereba-naranai-nakute-wa-ikenai", "ba"),
+        ("nakute-mo-ii", "te-mo-de-mo"),
+        ("te-mo-ii", "te-mo-de-mo"),
+        ("te-mo-kamawanai", "te-mo-de-mo"),
+        ("you-ni-suru", "te-iru"),
+    ];
     let covered_connectors: Vec<_> = hits
         .iter()
-        .filter(|hit| {
-            matches!(
-                hit.id,
-                "nakereba-naranai-nakute-wa-ikenai" | "nakute-mo-ii" | "you-ni-suru"
-            )
-        })
+        .filter(|hit| NESTED_CONNECTORS.iter().any(|(outer, _)| *outer == hit.id))
         .map(|hit| (hit.id, hit.start, hit.end))
         .collect();
     hits.retain(|hit| {
         !covered_connectors.iter().any(|&(outer, start, end)| {
-            start <= hit.start
-                && end >= hit.end
-                && matches!(
-                    (outer, hit.id),
-                    ("nakereba-naranai-nakute-wa-ikenai", "ba")
-                        | ("nakute-mo-ii", "te-mo-de-mo")
-                        | ("you-ni-suru", "te-iru")
-                )
+            start <= hit.start && end >= hit.end && NESTED_CONNECTORS.contains(&(outer, hit.id))
         })
     });
     hits.sort_by_key(|hit| (hit.start, std::cmp::Reverse(hit.end), hit.id));
@@ -328,12 +420,17 @@ fn satisfies(token: &GrammarToken, spec: &str) -> bool {
                 let stem = token.form.starts_with("連用形");
                 match condition {
                     "verb" => token.pos == "動詞",
+                    "adjective" => token.pos == "形容詞",
+                    "bound-verb" => token.pos == "動詞" && token.subpos == "非自立可能",
+                    "bound-adjective" => token.pos == "形容詞" && token.subpos == "非自立可能",
                     "noun" => matches!(token.pos.as_str(), "名詞" | "代名詞"),
                     "na" => token.pos == "形状詞",
                     "aux" => token.pos == "助動詞",
                     "particle" => token.pos == "助詞",
                     "connector" => {
-                        token.pos == "助詞" && matches!(token.surface.as_str(), "て" | "で")
+                        token.pos == "助詞"
+                            && token.subpos == "接続助詞"
+                            && matches!(token.surface.as_str(), "て" | "で")
                     }
                     "plain" => plain && matches!(token.pos.as_str(), "動詞" | "形容詞" | "助動詞"),
                     "hyp" => token.form.starts_with("仮定形"),

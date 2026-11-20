@@ -342,7 +342,7 @@ ATOGAKI_DICTIONARY_SMOKE_DIR=/absolute/path/to/qa-dictionaries \
 
 构建前端并启动静态服务后，运行 `node scripts/verify-listening-grammar.cjs`。使用合成字幕与 IPC，覆盖未匹配时查目录、等级过滤、单行框选、反向跨行拖选、跨行高亮、关联条目、收藏和回听。
 
-解析和收藏事务可用已校验的本机 Sudachi Core 包回归，词库目录应可写以便生成派生文件。用例是手写的正反例，未用作真实节目覆盖率统计。
+解析和收藏事务可用已校验的本机 Sudachi Core 包回归，词库目录应可写以便生成派生文件。用例是手写的正反例，覆盖当前全部自动匹配条目，以及助词同形、缩略、礼貌否定与句型包含。真实节目覆盖率单独评估。
 
 ```sh
 ATOGAKI_DICTIONARY_SMOKE_DIR=/absolute/path/to/qa-dictionaries \
