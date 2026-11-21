@@ -16,30 +16,31 @@ export function mountDictionaryDownloadView(root: HTMLElement, options: Options)
   const cards = new Map<string, Card>(), events = new AbortController(); let disposed = false;
   const create = (id: string): Card => {
     const node = document.createElement("article"); node.className = "model-card"; node.dataset.dictionaryCard = id;
-    node.innerHTML = '<div><strong data-name></strong><span data-summary></span></div><span data-description></span><span data-license></span><span data-source></span><progress max="1" class="hidden"></progress><div class="model-card-action"><span data-status tabindex="-1"></span><button type="button" class="secondary">下载</button></div>';
+    node.innerHTML = '<div><strong data-name></strong><span data-summary></span></div><div class="model-card-action"><span data-status tabindex="-1"></span><button type="button" class="secondary">下载并安装</button></div><progress max="1" class="hidden"></progress><span data-description></span><span data-license></span><span data-source></span>';
     const button = node.querySelector<HTMLButtonElement>("button")!; button.dataset.downloadDictionary = id;
     return { node, button, name: node.querySelector("[data-name]")!, summary: node.querySelector("[data-summary]")!, description: node.querySelector("[data-description]")!, license: node.querySelector("[data-license]")!, source: node.querySelector("[data-source]")!, progress: node.querySelector("progress")!, status: node.querySelector("[data-status]")! };
   };
   const render = () => {
     if (disposed) return;
     const state = options.state(), byId = new Map(state.downloads.map(item => [item.dictionaryId, item]));
-    const busy = state.busy || state.downloads.some(item => ["queued", "resolving", "downloading"].includes(item.status));
+    const active = state.downloads.find(item => ["queued", "resolving", "downloading"].includes(item.status));
+    const busy = state.busy || Boolean(active);
     const before = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
     const seen = new Set<string>(), order: HTMLElement[] = [];
     for (const item of state.catalog) {
       if (seen.has(item.id)) continue; seen.add(item.id);
       let card = cards.get(item.id); if (!card) { card = create(item.id); cards.set(item.id, card); }
       const download = byId.get(item.id);
-      const status = download?.status === "done" ? `已安装${download.version ? ` · ${download.version}` : ""}` : download?.status === "failed" ? `失败：${download.error ?? "未知错误"}` : download?.status === "downloading" ? `${options.formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${options.formatBytes(download.totalBytes)}` : ""}${download.source ? ` · ${download.source}` : ""}` : download?.status === "resolving" ? "正在获取最新版与校验信息…" : download?.status === "queued" ? "等待下载" : "尚未安装";
+      const status = download?.status === "done" ? `已安装${download.version ? ` · ${download.version}` : ""}` : download?.status === "failed" ? `失败：${download.error ?? "未知错误"}` : download?.status === "downloading" ? `${options.formatBytes(download.downloadedBytes)}${download.totalBytes ? ` / ${options.formatBytes(download.totalBytes)}` : ""}${download.source ? ` · ${download.source}` : ""}` : download?.status === "resolving" ? "正在获取版本与校验信息…" : download?.status === "queued" ? "等待下载" : active ? "等待当前词典下载结束" : "尚未安装";
       text(card.name, item.name); text(card.summary, `${item.languagePair} · ${item.sizeLabel} · ${item.versionLabel}`);
       text(card.description, item.description); text(card.license, `${item.license} · 署名：${item.attribution}`); text(card.source, `来源：${item.sourceUrl}`); text(card.status, status);
       const statusLabel = `${item.name}：${status}`, progressLabel = `${item.name} 下载进度`;
       if (card.status.getAttribute("aria-label") !== statusLabel) card.status.setAttribute("aria-label", statusLabel);
       if (card.progress.getAttribute("aria-label") !== progressLabel) card.progress.setAttribute("aria-label", progressLabel);
       flag(card.status, "warning", download?.status === "failed");
-      const progress = download?.totalBytes ? Math.max(0, Math.min(1, download.downloadedBytes / download.totalBytes)) : null;
+      const progress = download?.status === "downloading" && download.totalBytes ? Math.max(0, Math.min(1, download.downloadedBytes / download.totalBytes)) : null;
       flag(card.progress, "hidden", progress === null); if (progress !== null && card.progress.value !== progress) card.progress.value = progress;
-      text(card.button, download?.status === "done" ? "检查更新" : download?.status === "failed" ? "重试" : "下载");
+      text(card.button, active?.dictionaryId === item.id ? "安装中…" : download?.status === "done" ? "检查更新" : download?.status === "failed" ? "重试" : "下载并安装");
       if (card.button.disabled !== busy) card.button.disabled = busy;
       order.push(card.node);
     }

@@ -32,7 +32,7 @@ ${translationProviderTemplate()}
           <div class="settings-section-heading"><div><strong>词典</strong><span>离线词典按需下载；目录可在「存储」查看。</span></div></div>
           <div>
             <strong class="settings-subheading">离线词典包</strong>
-            <p class="settings-message">JMdict 与 Tomoshi 用于日语；ECDICT 基础数据用于英语。ECDICT 属于社区汇总数据，下载会复用上方代理设置并校验固定版本摘要。</p>
+            <p class="settings-message">日语查词和句型分析先下载 Sudachi。Tomoshi 提供日中释义，JMdict 提供日英释义，ECDICT 基础数据用于英语。词典下载沿用应用的代理设置。</p>
           </div>
           <div id="dictionary-catalog" class="model-catalog"></div>
           <p id="dictionary-download-message" class="settings-message" role="status"></p>

@@ -4,20 +4,34 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{stripTypeScrip
  const browser=await webkit.launch({headless:true});
  try{
   const page=await browser.newPage({viewport:{width:960,height:640}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
-  await page.setContent('<style>.hidden{display:none!important}</style><input id="other" aria-label="Other input"><div id="dictionaries"></div>');
+  await page.setContent('<style>.hidden{display:none!important}</style><input id="other" aria-label="Other input"><div id="dictionary-catalog" class="model-catalog" style="width:min(100%,560px)"></div>');
+  await page.addStyleTag({path:'ui/src/feature-styles.css'});
+  await page.addStyleTag({path:'ui/src/settings.css'});
   await page.evaluate(async source=>{
    const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));const {mountDictionaryDownloadView}=await import(url);URL.revokeObjectURL(url);
-   const state=window.__view={catalog:['a','b'].map(id=>({id,name:'Dictionary <'+id+'>',languagePair:'ja/zh',sizeLabel:'1 KiB',versionLabel:'fixture',description:'description <text>',license:'License <text>',attribution:'Author <text>',sourceUrl:'https://example.invalid/<source>'})),downloads:[],busy:false,visit:1,dead:false,calls:[],errors:[],release:null,reject:null};
+   const state=window.__view={catalog:['a','b'].map(id=>({id,name:'Dictionary <'+id+'>',languagePair:'ja/zh',sizeLabel:'1 KiB',versionLabel:'fixture',description:'description <text>',license:'License <text>',attribution:'Author <text>',sourceUrl:'https://example.invalid/<source>/'+ 'a'.repeat(160)})),downloads:[],busy:false,visit:1,dead:false,calls:[],errors:[],release:null,reject:null};
    const guard=()=>{if(state.dead)throw Error('disposed view context');};
-   state.view=mountDictionaryDownloadView(document.querySelector('#dictionaries'),{visit:()=>{guard();return state.visit;},state:()=>{guard();return state;},formatBytes:n=>n+' bytes',error:text=>state.errors.push(text),start:async id=>{state.calls.push(id);state.busy=true;state.view.render();try{await new Promise((resolve,reject)=>{state.release=resolve;state.reject=reject;});}finally{state.busy=false;state.view.render();}}});
+   state.view=mountDictionaryDownloadView(document.querySelector('#dictionary-catalog'),{visit:()=>{guard();return state.visit;},state:()=>{guard();return state;},formatBytes:n=>n+' bytes',error:text=>state.errors.push(text),start:async id=>{state.calls.push(id);state.busy=true;state.view.render();try{await new Promise((resolve,reject)=>{state.release=resolve;state.reject=reject;});}finally{state.busy=false;state.view.render();}}});
    state.nodes={card:document.querySelector('[data-dictionary-card="a"]'),button:document.querySelector('[data-download-dictionary="a"]'),progress:document.querySelector('[data-dictionary-card="a"] progress')};
   },stripTypeScriptTypes(fs.readFileSync('ui/src/dictionary-download-view.ts','utf8')));
   const button=id=>page.locator(`[data-download-dictionary="${id}"]`),status=id=>page.locator(`[data-dictionary-card="${id}"] [data-status]`);
   assert.equal(await status('a').innerText(),'尚未安装');assert.match(await page.locator('[data-dictionary-card="a"]').innerText(),/License <text> · 署名：Author <text>/);assert.equal(await page.locator('source,text,script').count(),0);assert.equal(await page.locator('[data-dictionary-card="a"] progress').getAttribute('aria-label'),'Dictionary <a> 下载进度');
-  await button('a').focus();assert.equal(await page.evaluate(()=>{const observer=new MutationObserver(()=>{});observer.observe(document.querySelector('#dictionaries'),{subtree:true,attributes:true,childList:true,characterData:true});window.__view.view.render();const count=observer.takeRecords().length;observer.disconnect();return count;}),0);assert.equal(await button('a').evaluate(e=>document.activeElement===e),true);
+  assert.equal(await button('a').innerText(),'下载并安装');
+  for (const width of [960,360]) {
+   await page.setViewportSize({width,height:640});
+   assert.equal(await page.locator('[data-dictionary-card="a"]').evaluate(card=>{
+    const button=card.querySelector('button'),source=card.querySelector('[data-source]');
+    return card.scrollWidth<=card.clientWidth && source.scrollWidth<=source.clientWidth &&
+      button.getBoundingClientRect().bottom<source.getBoundingClientRect().top;
+   }),true);
+  }
+  await page.setViewportSize({width:960,height:640});
+  await button('a').focus();assert.equal(await page.evaluate(()=>{const observer=new MutationObserver(()=>{});observer.observe(document.querySelector('#dictionary-catalog'),{subtree:true,attributes:true,childList:true,characterData:true});window.__view.view.render();const count=observer.takeRecords().length;observer.disconnect();return count;}),0);assert.equal(await button('a').evaluate(e=>document.activeElement===e),true);
   await button('a').press('Enter');assert.equal(await status('a').evaluate(e=>document.activeElement===e),true);assert.equal(await button('b').isDisabled(),true);await page.locator('#other').fill('preserve newer focus');await page.evaluate(()=>{window.__view.downloads=[{dictionaryId:'a',status:'downloading',downloadedBytes:1,totalBytes:4,source:'fixture'}];window.__view.release();});await page.waitForFunction(()=>!window.__view.busy);assert.equal(await page.locator('#other').evaluate(e=>document.activeElement===e),true);
   await status('a').focus();await page.evaluate(()=>{window.__view.downloads[0].downloadedBytes=3;window.__view.view.render();});assert.equal(await status('a').evaluate(e=>document.activeElement===e),true);assert.equal(await page.locator('[data-dictionary-card="a"] progress').getAttribute('value'),'0.75');assert.equal(await page.evaluate(()=>document.querySelector('[data-download-dictionary="a"]')===window.__view.nodes.button&&document.querySelector('[data-dictionary-card="a"] progress')===window.__view.nodes.progress),true);
+  assert.equal(await status('b').innerText(),'等待当前词典下载结束');
   await page.evaluate(()=>{window.__view.downloads[0].status='done';window.__view.downloads[0].version='v1';window.__view.view.render();});assert.equal(await button('a').innerText(),'检查更新');assert.equal(await button('a').isEnabled(),true);assert.equal(await status('a').evaluate(e=>document.activeElement===e),true);
+  assert.equal(await page.locator('[data-dictionary-card="a"] progress').isVisible(),false);
   await button('a').focus();await button('a').press('Enter');await page.evaluate(()=>window.__view.reject(Error('fixture update failed')));await page.waitForFunction(()=>window.__view.errors.length===1);assert.equal(await button('a').evaluate(e=>document.activeElement===e),true);
   await page.evaluate(()=>{window.__view.downloads[0]={dictionaryId:'a',status:'failed',error:'bad <digest>',downloadedBytes:0,totalBytes:null};window.__view.view.render();});assert.equal(await button('a').innerText(),'重试');assert.match(await status('a').innerText(),/bad <digest>/);assert.equal(await status('a').getAttribute('class'),'warning');assert.equal(await page.locator('digest').count(),0);
   await page.evaluate(()=>{window.__view.catalog.reverse();window.__view.catalog.push(window.__view.catalog[0]);window.__view.view.render();});assert.equal(await page.locator('[data-dictionary-card]').count(),2);assert.equal(await button('a').evaluate(e=>document.activeElement===e),true);await page.evaluate(()=>{window.__view.catalog=window.__view.catalog.filter(item=>item.id==='a');window.__view.view.render();});assert.equal(await page.locator('[data-dictionary-card]').count(),1);assert.equal(await page.evaluate(()=>document.querySelector('[data-dictionary-card="a"]')===window.__view.nodes.card),true);
