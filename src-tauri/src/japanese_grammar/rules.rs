@@ -22,6 +22,11 @@ type Sequence = &'static [&'static str];
 
 enum Pattern {
     Variants(&'static [Sequence]),
+    Compiled {
+        variants: &'static [Sequence],
+        clause_final: &'static [Sequence],
+        excluded_following: &'static str,
+    },
     Suffix {
         prefix: Sequence,
         tail: Sequence,
@@ -96,6 +101,24 @@ impl Rule {
         }
     }
 
+    const fn compiled(
+        id: &'static str,
+        variants: &'static [Sequence],
+        clause_final: &'static [Sequence],
+        excluded_following: &'static str,
+        extend_aux: bool,
+    ) -> Self {
+        Self {
+            id,
+            pattern: Pattern::Compiled {
+                variants,
+                clause_final,
+                excluded_following,
+            },
+            extend_aux,
+        }
+    }
+
     const fn suffix(id: &'static str, prefix: Sequence, tail: Sequence, extend_aux: bool) -> Self {
         Self {
             id,
@@ -152,6 +175,31 @@ impl Rule {
                 .iter()
                 .filter_map(|variant| sequence_end(tokens, start, variant.iter().copied()))
                 .max(),
+            Pattern::Compiled {
+                variants,
+                clause_final,
+                excluded_following,
+            } => {
+                let regular = variants.iter().filter_map(|variant| {
+                    let end = sequence_end(tokens, start, variant.iter().copied())?;
+                    tokens
+                        .get(end)
+                        .is_none_or(|token| {
+                            excluded_following.is_empty() || !satisfies(token, excluded_following)
+                        })
+                        .then_some(end)
+                });
+                let terminal = clause_final.iter().filter_map(|variant| {
+                    let end = sequence_end(tokens, start, variant.iter().copied())?;
+                    tokens
+                        .get(end)
+                        .is_none_or(|token| {
+                            token.pos == "補助記号" || satisfies(token, "end-particle")
+                        })
+                        .then_some(end)
+                });
+                regular.chain(terminal).max()
+            }
             Pattern::Suffix {
                 prefix,
                 tail,
@@ -556,14 +604,21 @@ const RULES: &[Rule] = &[
     ),
 ];
 
+const GENERATED_RULES: &[Rule] = include!("generated_rules.rs");
+
 pub(super) fn rule_ids() -> impl Iterator<Item = &'static str> {
-    RULES.iter().map(|rule| rule.id)
+    RULES.iter().chain(GENERATED_RULES).map(|rule| rule.id)
+}
+
+#[cfg(test)]
+pub(super) fn generated_rule_ids() -> impl Iterator<Item = &'static str> {
+    GENERATED_RULES.iter().map(|rule| rule.id)
 }
 
 pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match> {
     let mut hits = Vec::new();
     for start in 0..tokens.len() {
-        for rule in RULES {
+        for rule in RULES.iter().chain(GENERATED_RULES) {
             let Some(mut end) = rule.end(tokens, start) else {
                 continue;
             };
@@ -625,6 +680,7 @@ pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match>
         ("te-mo-kamawanai", "te-mo-de-mo"),
         ("you-ni-suru", "te-iru"),
         ("naide-kudasai", "naide"),
+        ("you-to-omou", "to-omou"),
     ];
     let covered_connectors: Vec<_> = hits
         .iter()
@@ -709,6 +765,10 @@ fn matches_condition(token: &GrammarToken, conditions: &str) -> bool {
                     || (token.pos == "接尾辞" && token.subpos == "名詞的")
             }
             "case-particle" => token.pos == "助詞" && token.subpos == "格助詞",
+            "clause-particle" => token.pos == "助詞" && token.subpos == "接続助詞",
+            "end-particle" => token.pos == "助詞" && token.subpos == "終助詞",
+            "adverbial-particle" => token.pos == "助詞" && token.subpos == "副助詞",
+            "nominalizer" => token.pos == "助詞" && token.subpos == "準体助詞",
             "argument" => {
                 matches!(
                     token.pos.as_str(),
@@ -731,9 +791,30 @@ fn matches_condition(token: &GrammarToken, conditions: &str) -> bool {
             "plain" => plain && matches!(token.pos.as_str(), "動詞" | "形容詞" | "助動詞"),
             "hyp" => token.form.starts_with("仮定形"),
             "v:plain" => token.pos == "動詞" && plain,
+            "v:predicate" => {
+                plain
+                    && (token.pos == "動詞"
+                        || (token.pos == "助動詞"
+                            && matches!(
+                                token.lemma.as_str(),
+                                "た" | "ない"
+                                    | "ぬ"
+                                    | "たい"
+                                    | "てる"
+                                    | "でる"
+                                    | "ちゃう"
+                                    | "じゃう"
+                                    | "とく"
+                                    | "どく"
+                            )))
+            }
+            "volitional-verb" => {
+                matches!(token.pos.as_str(), "動詞" | "助動詞") && token.form == "意志推量形"
+            }
             "neg:plain" => token.lemma == "ない" && plain,
             "v:stem" => token.pos == "動詞" && stem,
             "a:stem" => token.pos == "形容詞" && stem,
+            "a:plain" => token.pos == "形容詞" && plain,
             "a:root" => token.pos == "形容詞" && token.form.starts_with("語幹"),
             "a:sa" => token.pos == "形容詞" && token.form == "語幹-サ",
             "aux:stem" => token.pos == "助動詞" && stem,

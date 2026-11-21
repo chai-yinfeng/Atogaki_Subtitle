@@ -525,7 +525,56 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+        for id in rules::generated_rule_ids() {
+            assert!(tested.insert(id), "generated rule should have a unique ID");
+            for example in &catalog::get(id).unwrap().examples {
+                let tokens = morphology.grammar_tokens(&root, &example.ja).unwrap();
+                let hits = rules::find(&tokens, (0, example.ja.encode_utf16().count()));
+                if !hits.iter().any(|hit| hit.id == id) {
+                    failures.push(format!(
+                        "生成规则目录例句 {}: {id}, {hits:?}, {tokens:?}",
+                        example.ja
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
         assert_eq!(tested.len(), rules::rule_ids().count());
+        for (text, id, written) in [
+            (
+                "この機械を使ってるんです。",
+                "n-desu-no-desu",
+                "使ってるんです",
+            ),
+            ("それは資料なんですが。", "n-desu-no-desu", "資料なんです"),
+            ("会場は静かなのです。", "n-desu-no-desu", "静かなのです"),
+            ("雨が降ったので休んだ。", "node", "降ったので"),
+            ("明日なら行けるかもね。", "kamo-shirenai", "行けるかも"),
+            (
+                "明日は休めるかもしれません。",
+                "kamo-shirenai",
+                "休めるかもしれません",
+            ),
+            (
+                "新しい店に寄ろうと思っています。",
+                "you-to-omou",
+                "寄ろうと思っています",
+            ),
+            (
+                "もう時間がないけれども急がない。",
+                "kedo-keredomo",
+                "ないけれども",
+            ),
+        ] {
+            let tokens = morphology.grammar_tokens(&root, text).unwrap();
+            let chars = text.encode_utf16().collect::<Vec<_>>();
+            let hits = rules::find(&tokens, (0, chars.len()));
+            assert!(
+                hits.iter().any(|hit| hit.id == id
+                    && String::from_utf16(&chars[hit.start..hit.end]).unwrap() == written),
+                "{text}: {id} {written}, {hits:?}, {tokens:?}"
+            );
+        }
         for (text, excluded) in [
             ("雨が降るそうだ。", "sou-da-appearance"),
             ("雨が降りそうだ。", "sou-da-hearsay"),
@@ -574,6 +623,13 @@ mod tests {
             ("先に帰らないでください。", "naide"),
             ("明日は来ないでしょう。", "naide-kudasai"),
             ("静かになってから席に着いた。", "zu-ni"),
+            ("それは係のです。", "n-desu-no-desu"),
+            ("帰るのではなく待つ。", "node"),
+            ("誰かも知っている。", "kamo-shirenai"),
+            ("彼らしい話し方だ。", "rashii"),
+            ("この映画を見たい。", "mitai"),
+            ("電車が来た。", "ga-but"),
+            ("新しい店に寄ろうと思っています。", "to-omou"),
         ] {
             let tokens = morphology.grammar_tokens(&root, text).unwrap();
             let hits = rules::find(&tokens, (0, text.encode_utf16().count()));
