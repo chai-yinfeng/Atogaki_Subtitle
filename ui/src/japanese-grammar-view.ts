@@ -9,11 +9,16 @@ export type GrammarSelection = {
   end: number;
   endCue?: { segmentId: string; sourceText: string };
 };
-type GrammarMatch = { id: string; start: number; end: number; formNote?: string };
+type GrammarMatch = { id: string; start: number; end: number; formNote?: string; usageNote?: string };
 type GrammarPreview = { text: string; focusStart: number; focusEnd: number; matches: GrammarMatch[] };
 export type SaveGrammarMatch = Pick<GrammarMatch, "id" | "start" | "end"> & {
   selection: GrammarSelection;
   text: string;
+};
+export type GrammarFeedback = {
+  selection: GrammarSelection;
+  text: string;
+  reportedMatch?: Pick<GrammarMatch, "id" | "start" | "end">;
 };
 type GrammarSummary = {
   id: string;
@@ -31,6 +36,8 @@ type GrammarDetail = {
   summary: GrammarSummary;
   related: GrammarSummary[];
 };
+type GrammarExample = { text: string; start: number; end: number };
+type OpenGrammarEntry = { id: string; example?: GrammarExample };
 
 export const japaneseGrammarDialog = `
 <dialog id="japanese-grammar-dialog" class="learning-dictionary-dialog japanese-grammar-dialog" aria-labelledby="japanese-grammar-title">
@@ -53,13 +60,13 @@ export const japaneseGrammarDialog = `
   </footer>
 </dialog>`;
 
-function grammarDetailMarkup({ entry, summary, related }: GrammarDetail): string {
+function grammarDetailMarkup({ entry, summary, related }: GrammarDetail, showMeaning = true): string {
   const source = summary.translatedFromOpenjlpt ? "OpenJLPT 中文译文"
     : summary.language === "en" ? "OpenJLPT 英文条目" : "Atogaki 中文讲解";
   return `<article class="japanese-grammar-entry">
     <h3 lang="ja">${escaped(summary.pattern)}</h3>
     <small>${escaped(summary.level)} · ${source}${summary.automatic ? " · 支持本地匹配" : ""}</small>
-    <p lang="${summary.language}">${escaped(summary.meaning)}</p>
+    ${showMeaning ? `<p lang="${summary.language}">${escaped(summary.meaning)}</p>` : ""}
     <dl lang="${summary.language}"><dt>接续</dt><dd>${escaped(entry.formation)}</dd>
     ${entry.notes ? `<dt>用法</dt><dd>${escaped(entry.notes)}</dd>` : ""}</dl>
     ${entry.lesson ? `<p><button type="button" class="secondary" data-grammar-link="course">${escaped(entry.lesson)} · 课程大纲</button></p>` : ""}
@@ -76,6 +83,7 @@ function grammarDetailMarkup({ entry, summary, related }: GrammarDetail): string
 export function mountJapaneseGrammar(
   dialog: HTMLDialogElement, preview: HTMLElement,
   save: (request: SaveGrammarMatch) => Promise<void>,
+  saveFeedback: (request: GrammarFeedback) => Promise<void>,
 ) {
   const body = dialog.querySelector<HTMLElement>("[data-grammar-body]")!;
   const controls = dialog.querySelector<HTMLElement>("[data-grammar-search]")!;
@@ -83,7 +91,7 @@ export function mountJapaneseGrammar(
   const level = dialog.querySelector<HTMLSelectElement>("[data-grammar-level]")!;
   const close = dialog.querySelector<HTMLButtonElement>("[data-close-grammar]")!;
   const details = new Map<string, Promise<GrammarDetail>>();
-  const history: string[] = [];
+  const history: OpenGrammarEntry[] = [];
   let catalog: Promise<GrammarSummary[]> | undefined;
   let catalogRequest = 0;
   let previewRequest = 0;
@@ -131,14 +139,18 @@ export function mountJapaneseGrammar(
     }
   }
 
-  async function showEntry(id: string): Promise<void> {
+  async function showEntry({ id, example }: OpenGrammarEntry): Promise<void> {
     const request = ++catalogRequest;
     controls.hidden = true;
     body.textContent = "正在读取句型条目…";
     try {
       const detail = await loadEntry(id);
       if (request !== catalogRequest || !dialog.open) return;
-      body.innerHTML = `<button type="button" class="secondary" data-grammar-back>${history.length > 1 ? "返回上个条目" : "返回目录"}</button>${grammarDetailMarkup(detail)}`;
+      const occurrence = example
+        ? `<p><strong>本句用法</strong> ${escaped(detail.summary.meaning)}</p>
+           <p lang="ja" class="listening-word-context">${rangeMarkup(example.text, example.start, example.end)}</p>`
+        : "";
+      body.innerHTML = `<button type="button" class="secondary" data-grammar-back>${history.length > 1 ? "返回上个条目" : "返回目录"}</button>${occurrence}${grammarDetailMarkup(detail, !example)}`;
       body.querySelector<HTMLButtonElement>("[data-grammar-back]")?.focus();
       body.scrollTop = 0;
     } catch (error) {
@@ -153,15 +165,16 @@ export function mountJapaneseGrammar(
     }
   }
 
-  function open(id?: string): void {
+  function open(id?: string, example?: GrammarExample): void {
     if (!dialog.open) {
       returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       history.length = 0;
       dialog.showModal();
     }
     if (id) {
-      history.push(id);
-      void showEntry(id);
+      const entry = { id, example };
+      history.push(entry);
+      void showEntry(entry);
     } else {
       history.length = 0;
       void showCatalog();
@@ -219,11 +232,31 @@ export function mountJapaneseGrammar(
       const options = await Promise.all(result.matches.map(match => loadEntry(match.id)));
       if (request !== previewRequest) return;
       preview.innerHTML = `<div class="listening-word-options" aria-label="已匹配句型"></div>
-        <div data-grammar-match-detail></div><button class="secondary" type="button" data-browse-grammar>浏览语法目录</button>`;
+        <div data-grammar-match-detail></div>
+        <div class="listening-word-options">
+          <button class="secondary" type="button" data-browse-grammar>浏览语法目录</button>
+          <button class="secondary" type="button" data-grammar-missed>标记漏报</button>
+        </div>
+        <p role="status" data-grammar-feedback-status></p>`;
       const optionsHost = preview.querySelector<HTMLElement>(".listening-word-options")!;
       const matchHost = preview.querySelector<HTMLElement>("[data-grammar-match-detail]")!;
       const browse = preview.querySelector<HTMLButtonElement>("[data-browse-grammar]")!;
       browse.addEventListener("click", () => open());
+      function bindFeedback(button: HTMLButtonElement, reportedMatch?: GrammarFeedback["reportedMatch"]) {
+        const status = preview.querySelector<HTMLElement>("[data-grammar-feedback-status]")!;
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          status.textContent = "正在保存反馈…";
+          try {
+            await saveFeedback({ selection, text: result.text, reportedMatch });
+            if (request === previewRequest) status.textContent = "已标记，可在学习区回到原句。";
+          } catch (error) {
+            if (request === previewRequest) status.textContent = String(error);
+            button.disabled = false;
+          }
+        });
+      }
+      bindFeedback(preview.querySelector<HTMLButtonElement>("[data-grammar-missed]")!);
       if (!result.matches.length) {
         matchHost.innerHTML = `<p lang="ja" class="listening-word-context">${rangeMarkup(result.text, result.focusStart, result.focusEnd)}</p>
           <p>选区暂未识别到有把握的句型。可以调整选区，或在目录查找。</p>`;
@@ -241,12 +274,19 @@ export function mountJapaneseGrammar(
       });
       function choose(index: number): void {
         const match = result.matches[index];
+        const detail = options[index];
         buttons.forEach((button, current) => button.setAttribute("aria-pressed", String(index === current)));
         matchHost.innerHTML = `<p lang="ja" class="listening-word-context">${rangeMarkup(result.text, match.start, match.end)}</p>
+          <p><strong>本句用法</strong> ${escaped(match.usageNote ?? detail.summary.meaning)}</p>
           ${match.formNote ? `<p>本句形式 · ${escaped(match.formNote)}</p>` : ""}
-          <button type="button" data-save-grammar>收藏语法例句</button>
+          <div class="listening-word-options">
+            <button type="button" data-save-grammar>收藏语法例句</button>
+            <button class="secondary" type="button" data-grammar-wrong>标记误报</button>
+          </div>
           <p role="status" data-grammar-save-status></p>
-          ${grammarDetailMarkup(options[index])}`;
+          ${grammarDetailMarkup(detail, Boolean(match.usageNote))}`;
+        bindFeedback(matchHost.querySelector<HTMLButtonElement>("[data-grammar-wrong]")!,
+          { id: match.id, start: match.start, end: match.end });
         const saveButton = matchHost.querySelector<HTMLButtonElement>("[data-save-grammar]")!;
         const key = ++detailRequest;
         saveButton.disabled = busy;

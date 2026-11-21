@@ -21,6 +21,7 @@ pub(crate) struct Word {
     pub lemma: String,
     pub reading: String,
     pub pos: String,
+    pub form_note: Option<&'static str>,
     pub unknown: bool,
 }
 
@@ -85,6 +86,12 @@ impl JapaneseMorphology {
                     lemma: token.dictionary_form().into(),
                     reading: hiragana(&reading),
                     pos: pos.into(),
+                    form_note: form_note(
+                        pos,
+                        &token.part_of_speech()[5],
+                        &text[start_byte..end_byte],
+                        token.dictionary_form(),
+                    ),
                     unknown: token.is_oov(),
                 };
                 if !words.contains(&word) {
@@ -124,6 +131,27 @@ impl JapaneseMorphology {
                 })
             })
             .collect())
+    }
+}
+
+fn form_note(pos: &str, form: &str, surface: &str, lemma: &str) -> Option<&'static str> {
+    if surface == lemma || !matches!(pos, "動詞" | "形容詞" | "助動詞" | "接尾辞") {
+        return None;
+    }
+    match form.split('-').next()? {
+        "連用形" if form.ends_with("促音便") => {
+            Some("连用形的促音变化，用小「っ」接后面的成分。")
+        }
+        "連用形" if form.ends_with("撥音便") => {
+            Some("连用形的拨音变化，用「ん」接后面的成分。")
+        }
+        "連用形" => Some("这里用连用形，接后面的助动词、接续词或谓语。"),
+        "未然形" => Some("这里用未然形，可接后面的否定、被动或使役等形式。"),
+        "連体形" => Some("这里用连体形，接后面的名词或名词性成分。"),
+        "仮定形" => Some("这里用假定形，可接「ば」等表示条件。"),
+        "意志推量形" => Some("这里用意向或推量的形式。"),
+        "命令形" => Some("这里用命令形。"),
+        _ => None,
     }
 }
 

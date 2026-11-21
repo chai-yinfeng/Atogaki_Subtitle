@@ -5,8 +5,8 @@ use anyhow::{Result, anyhow, ensure};
 use atogaki_subtitle::{
     application::LocalLearningService,
     infrastructure::local_db::{
-        LocalLearningItemDetail, LocalSubtitleSegmentRecord, NewLocalLearningGrammarSelection,
-        NewLocalLearningSelection,
+        LocalLearningItemDetail, LocalSubtitleSegmentRecord, NewLocalLearningGrammarFeedback,
+        NewLocalLearningGrammarSelection, NewLocalLearningSelection,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,21 @@ struct SelectionEnd {
 pub(crate) struct SaveRequest {
     selection: Request,
     text: String,
+    id: String,
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FeedbackRequest {
+    selection: Request,
+    text: String,
+    reported_match: Option<ReportedMatch>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReportedMatch {
     id: String,
     start: usize,
     end: usize,
@@ -158,9 +173,13 @@ impl Sentence {
         })
     }
 
-    fn example(self, found: &rules::Match) -> Result<(Vec<LocalSubtitleSegmentRecord>, i64, i64)> {
-        let start = self.start_in_cues + found.start;
-        let end = self.start_in_cues + found.end;
+    fn example(
+        self,
+        start: usize,
+        end: usize,
+    ) -> Result<(Vec<LocalSubtitleSegmentRecord>, i64, i64)> {
+        let start = self.start_in_cues + start;
+        let end = self.start_in_cues + end;
         let mut offset = 0;
         let mut first_offset = None;
         let cues = self
@@ -185,11 +204,7 @@ impl Sentence {
     }
 }
 
-async fn analyze(
-    dictionary: &DictionaryLookupService,
-    learning: &LocalLearningService,
-    request: &Request,
-) -> Result<(Sentence, Vec<rules::Match>)> {
+async fn selection_context(learning: &LocalLearningService, request: &Request) -> Result<Sentence> {
     let cues = learning
         .grammar_context(
             &request.job_id,
@@ -197,7 +212,15 @@ async fn analyze(
             request.end_segment_id(),
         )
         .await?;
-    let sentence = Sentence::from_cues(cues, request)?;
+    Sentence::from_cues(cues, request)
+}
+
+async fn analyze(
+    dictionary: &DictionaryLookupService,
+    learning: &LocalLearningService,
+    request: &Request,
+) -> Result<(Sentence, Vec<rules::Match>)> {
+    let sentence = selection_context(learning, request).await?;
     let mut matches = Vec::new();
     if sentence.breaks.is_empty() {
         let tokens = dictionary.grammar_tokens(sentence.text.clone()).await?;
@@ -257,7 +280,7 @@ pub(crate) async fn save(
         .find(|hit| hit.id == request.id && hit.start == request.start && hit.end == request.end)
         .ok_or_else(|| anyhow!("句型结果已变化，请重新分析"))?;
     let entry = catalog::get(found.id).ok_or_else(|| anyhow!("找不到对应语法条目"))?;
-    let (cues, start, end) = sentence.example(found)?;
+    let (cues, start, end) = sentence.example(found.start, found.end)?;
     let segment_id = cues
         .first()
         .ok_or_else(|| anyhow!("找不到句型原文"))?
@@ -278,6 +301,46 @@ pub(crate) async fn save(
                 meaning: entry.meaning.clone(),
                 cues,
             },
+        )
+        .await
+}
+
+pub(crate) async fn save_feedback(
+    dictionary: &DictionaryLookupService,
+    learning: &LocalLearningService,
+    request: FeedbackRequest,
+) -> Result<LocalLearningItemDetail> {
+    let (sentence, start, end, grammar_id) = if let Some(reported) = request.reported_match {
+        let (sentence, hits) = analyze(dictionary, learning, &request.selection).await?;
+        let hit = hits
+            .iter()
+            .find(|hit| {
+                hit.id == reported.id && hit.start == reported.start && hit.end == reported.end
+            })
+            .ok_or_else(|| anyhow!("句型结果已变化，请重新分析"))?;
+        (sentence, hit.start, hit.end, Some(hit.id.to_owned()))
+    } else {
+        let sentence = selection_context(learning, &request.selection).await?;
+        let (start, end) = sentence.focus;
+        (sentence, start, end, None)
+    };
+    ensure!(sentence.text == request.text, "字幕已变化，请重新分析句型");
+    let (cues, start, end) = sentence.example(start, end)?;
+    let segment_id = cues
+        .first()
+        .ok_or_else(|| anyhow!("找不到反馈原文"))?
+        .id
+        .clone();
+    learning
+        .save_grammar_feedback(
+            NewLocalLearningSelection {
+                job_id: request.selection.job_id,
+                segment_id,
+                item_type: "selection".into(),
+                selection_start_utf16: start,
+                selection_end_utf16: end,
+            },
+            NewLocalLearningGrammarFeedback { grammar_id, cues },
         )
         .await
 }
@@ -547,6 +610,16 @@ mod tests {
                 "使ってるんです",
             ),
             ("それは資料なんですが。", "n-desu-no-desu", "資料なんです"),
+            (
+                "近くで見ると読みやすかったんだ。",
+                "n-desu-no-desu",
+                "読みやすかったんだ",
+            ),
+            (
+                "色が変わっていくような気がする。",
+                "you-da",
+                "変わっていくような",
+            ),
             ("会場は静かなのです。", "n-desu-no-desu", "静かなのです"),
             ("雨が降ったので休んだ。", "node", "降ったので"),
             ("明日なら行けるかもね。", "kamo-shirenai", "行けるかも"),
@@ -710,6 +783,7 @@ mod tests {
         let hit = &previewed.matches[0];
         assert_eq!(hit.id, "te-iru");
         assert_eq!(hit.form_note, Some("过去否定"));
+        assert!(hit.usage_note.unwrap().contains("て形"));
         let collected = save(
             &dictionary,
             &learning,
@@ -725,6 +799,48 @@ mod tests {
             previewed.text
         );
         assert_eq!(collected.occurrences[0].selection_start_utf16, 4);
+
+        let missed = || FeedbackRequest {
+            selection: select_cross_cue(),
+            text: previewed.text.clone(),
+            reported_match: None,
+        };
+        let flagged = save_feedback(&dictionary, &learning, missed())
+            .await
+            .unwrap();
+        let again = save_feedback(&dictionary, &learning, missed())
+            .await
+            .unwrap();
+        assert_eq!(flagged.item.id, again.item.id);
+        assert_eq!(again.occurrences.len(), 1);
+        assert_eq!(flagged.item.grammar_feedback.as_deref(), Some("missed"));
+        assert_eq!(flagged.item.grammar_id, None);
+        assert_eq!(flagged.occurrences[0].selection_start_utf16, 4);
+        assert_eq!(flagged.occurrences[0].selection_end_utf16, 11);
+        assert_eq!(flagged.occurrences[0].start_ms, 900);
+        assert_eq!(flagged.occurrences[0].end_ms, 3500);
+
+        let wrong = || FeedbackRequest {
+            selection: select_cross_cue(),
+            text: previewed.text.clone(),
+            reported_match: Some(ReportedMatch {
+                id: hit.id.into(),
+                start: hit.start,
+                end: hit.end,
+            }),
+        };
+        let reported = save_feedback(&dictionary, &learning, wrong())
+            .await
+            .unwrap();
+        assert_eq!(reported.item.grammar_feedback.as_deref(), Some("wrong"));
+        assert_eq!(reported.item.grammar_id.as_deref(), Some("te-iru"));
+        assert_ne!(reported.item.id, collected.item.id);
+        let export = atogaki_subtitle::application::local_learning_service::anki_tsv(
+            &[collected.clone(), reported, flagged],
+            "ja",
+        );
+        assert_eq!(export.matches("\"～ている\"").count(), 1);
+        assert!(!export.contains("\"食べていなかっ\""));
 
         let other_anchor = preview(&dictionary, &learning, &select(2, 0, 4))
             .await
@@ -830,6 +946,16 @@ mod tests {
             )
             .await
             .is_err()
+        );
+        assert!(
+            save_feedback(&dictionary, &learning, missed())
+                .await
+                .is_err()
+        );
+        assert!(
+            save_feedback(&dictionary, &learning, wrong())
+                .await
+                .is_err()
         );
         database
             .update_segment(

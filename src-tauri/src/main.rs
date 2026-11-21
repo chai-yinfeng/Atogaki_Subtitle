@@ -835,6 +835,20 @@ async fn save_listening_japanese_grammar(
 }
 
 #[tauri::command]
+async fn save_listening_japanese_grammar_feedback(
+    state: State<'_, DesktopState>,
+    request: japanese_grammar::FeedbackRequest,
+) -> Result<LocalLearningItemDetail, String> {
+    japanese_grammar::save_feedback(
+        &state.dictionary_lookup_service,
+        &state.learning_service,
+        request,
+    )
+    .await
+    .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
 async fn update_learning_item_meaning(
     state: State<'_, DesktopState>,
     request: UpdateLearningMeaningRequest,
@@ -2507,6 +2521,7 @@ fn main() {
             japanese_grammar_entry,
             analyze_listening_japanese_grammar,
             save_listening_japanese_grammar,
+            save_listening_japanese_grammar_feedback,
             save_asr_review_decision,
             commands::editor::save_playback_position,
             commands::subtitle_style::save_subtitle_styles,

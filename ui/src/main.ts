@@ -122,7 +122,7 @@ import { executionSeconds, earlyTranslationLabel, type ProcessingTime } from "./
 import {readOnlinePreferences, saveOnlinePreferences} from "./online-preferences";
 import { applyTheme, readTheme, candidateLabel } from "./themes";
 applyTheme(readTheme());
-import { japaneseGrammarDialog, mountJapaneseGrammar, type SaveGrammarMatch, type GrammarSelection } from "./japanese-grammar-view";
+import { japaneseGrammarDialog, mountJapaneseGrammar, type SaveGrammarMatch, type GrammarSelection, type GrammarFeedback } from "./japanese-grammar-view";
 import { matchesQuery, highlightSaved } from "./offline-tools";
 let selectedMediaFiles: string[] = [];
 let playbackLoop: {startMs:number;endMs:number;repeat:boolean;manual?:boolean} | null = null;
@@ -287,6 +287,7 @@ type LearningItemDetail = {
     item_type: "selection" | "sentence";
     source_text: string;
     grammar_id?: string | null;
+    grammar_feedback?: "missed" | "wrong" | null;
     meaning_text: string | null;
     meaning_provider_id: string | null;
     meaning_source_label: string | null;
@@ -338,6 +339,7 @@ type JapaneseLookupWord = {
   lemma: string;
   reading: string;
   unknown: boolean;
+  formNote?: string;
   entries: JapaneseDictionaryEntry[];
 };
 type JapaneseLookupResult = { words: JapaneseLookupWord[]; notices: string[] };
@@ -708,6 +710,7 @@ const japaneseGrammar = mountJapaneseGrammar(
   document.querySelector<HTMLDialogElement>("#japanese-grammar-dialog")!,
   document.querySelector<HTMLElement>("#listening-grammar-preview")!,
   saveListeningGrammar,
+  saveListeningGrammarFeedback,
 );
 const saveLearningSelectionButton = document.querySelector<HTMLButtonElement>("#save-learning-selection");
 const saveLearningSentenceButton = document.querySelector<HTMLButtonElement>("#save-learning-sentence");
@@ -2511,11 +2514,14 @@ async function openListeningJob(
 function renderListeningSubtitles(segments: SubtitleSegment[]): void {
   if (!listeningSubtitleList) return;
   closeLearningSelection();
+  const savedItems = learningItems.filter(detail => !detail.item.grammar_feedback);
+  const savedWords = savedItems.filter(detail => detail.item.source_language === activeDetail?.job.source_language)
+    .map(detail => detail.item.source_text);
   listeningSubtitleList.innerHTML = segments.map((segment) => `
     <article class="listening-subtitle" data-segment-id="${escapeHtml(segment.id)}">
       <button type="button" class="listening-time" data-listen-time="${segment.start_ms}" aria-label="跳转到 ${escapeHtml(formatTime(segment.start_ms))}">${escapeHtml(formatTime(segment.start_ms))}</button>
       <div class="listening-text">
-        <p class="listening-source" data-learning-source title="${activeDetail?.job.source_language === "ja" ? "点击日语原文查词，也可框选" : "选择词语、短语或语法表达后收藏"}">${highlightSaved(segment.source_text,learningItems.filter(d=>d.item.source_language===activeDetail?.job.source_language).map(d=>d.item.source_text), learningItems.flatMap(d=>d.occurrences.filter(o=>o.job_id===activeDetail?.job.job_id && o.segment_id===segment.id && o.segment_source_snapshot===segment.source_text).map(o=>[o.selection_start_utf16,o.selection_end_utf16] as [number,number])), activeDetail?.job.source_language)}</p>
+        <p class="listening-source" data-learning-source title="${activeDetail?.job.source_language === "ja" ? "点击日语原文查词，也可框选" : "选择词语、短语或语法表达后收藏"}">${highlightSaved(segment.source_text,savedWords,savedItems.flatMap(d=>d.occurrences.filter(o=>o.job_id===activeDetail?.job.job_id && o.segment_id===segment.id && o.segment_source_snapshot===segment.source_text).map(o=>[o.selection_start_utf16,o.selection_end_utf16] as [number,number])), activeDetail?.job.source_language)}</p>
         <p class="listening-translation">${escapeHtml(segment.translated_text ?? "")}</p>
         ${activeDetail?.job.source_language === "ja" ? `<button type="button" class="listening-cue-grammar secondary" data-cue-grammar="${escapeHtml(segment.id)}">分析句型</button>` : ""}
       </div>
@@ -2712,6 +2718,7 @@ function renderListeningDictionary(
     wordButtons.forEach((button, current) => button.setAttribute("aria-pressed", String(current === index)));
     detail.innerHTML = `<p class="listening-word-context" lang="ja">${escapeHtml(search.text.slice(0, word.start))}<mark>${escapeHtml(word.surface)}</mark>${escapeHtml(search.text.slice(word.end))}</p>
       <p><strong lang="ja">${escapeHtml(word.lemma)}</strong> ${escapeHtml(word.reading)}${word.unknown ? " · 词形待确认" : ""}</p>
+      ${word.formNote && !word.unknown ? `<p><strong>本句词形</strong> ${escapeHtml(word.formNote)}</p>` : ""}
       ${word.entries.length ? '<label>词条 <select data-listening-entry></select></label><div data-listening-senses></div>' : "<p>当前没有查到词典释义。</p>"}`;
     const entrySelect = detail.querySelector<HTMLSelectElement>("[data-listening-entry]");
     const senses = detail.querySelector<HTMLElement>("[data-listening-senses]");
@@ -2784,6 +2791,11 @@ async function saveListeningGrammar(request: SaveGrammarMatch): Promise<void> {
   } finally {
     setLearningBusy(false);
   }
+}
+
+async function saveListeningGrammarFeedback(request: GrammarFeedback): Promise<void> {
+  await invoke("save_listening_japanese_grammar_feedback", { request });
+  await refreshLearningItems();
 }
 
 function closeLearningSelection(clearBrowserSelection = true): void {
@@ -2889,11 +2901,15 @@ function learningOccurrenceSource(occurrence: LearningOccurrence, highlight: boo
   return highlight ? highlightSaved(occurrence.segment_source_snapshot, [], [range]) : escapeHtml(occurrence.segment_source_snapshot);
 }
 
+function grammarFeedbackLabel(kind: LearningItemDetail["item"]["grammar_feedback"]): string {
+  return kind === "wrong" ? "句型反馈 · 疑似误报" : kind === "missed" ? "句型反馈 · 疑似漏报" : "";
+}
+
 function renderLearningItems(): void {
   if (!learningItemList) return;
   const allLanguageItems = learningItems.filter(detail => detail.item.source_language === activeLearningLanguage);
   const languageItems = allLanguageItems.filter(detail =>
-    matchesQuery(learningQuery,[detail.item.source_text,detail.item.meaning_text,...detail.occurrences.map(o=>o.segment_source_snapshot)])
+    matchesQuery(learningQuery,[detail.item.source_text,detail.item.meaning_text,grammarFeedbackLabel(detail.item.grammar_feedback),...detail.occurrences.map(o=>o.segment_source_snapshot)])
     && (!learningTaskFilter || detail.occurrences.some(o=>o.job_id===learningTaskFilter)));
   const taskFilter = document.querySelector<HTMLSelectElement>("#learning-task-filter");
   if (taskFilter) {
@@ -2928,7 +2944,8 @@ function renderLearningItems(): void {
     const occurrence = detail.occurrences[0];
     const isSelection = detail.item.item_type === "selection";
     const grammarId = detail.item.grammar_id;
-    const sourceLabel = grammarId ? "句型" : isSelection ? "词语／语法" : "整句";
+    const feedback = grammarFeedbackLabel(detail.item.grammar_feedback);
+    const sourceLabel = feedback || (grammarId ? "句型" : isSelection ? "词语／语法" : "整句");
     const reading = detail.item.source_language === "ja"
       ? detail.lookup_results.find(result => result.provider_id === detail.item.meaning_provider_id)?.reading
       : null;
@@ -2943,15 +2960,15 @@ function renderLearningItems(): void {
         <div><span>${sourceLabel} · ${escapeHtml(languageLabel(detail.item.source_language))}</span><h3>${escapeHtml(detail.item.source_text)}</h3>${reading ? `<span lang="ja">${escapeHtml(reading)}</span>` : ""}</div>
         <span>${detail.item.occurrence_count} 个例句</span>
       </div>
-      <label>学习译义${detail.item.meaning_source_label ? `<span class="learning-meaning-source">当前来自 ${escapeHtml(detail.item.meaning_source_label)}</span>` : ""}<input class="learning-meaning" value="${escapeHtml(detail.item.meaning_text ?? "")}" placeholder="可手工填写，或从词典详情选择一条释义" /></label>
+      ${feedback ? "" : `<label>学习译义${detail.item.meaning_source_label ? `<span class="learning-meaning-source">当前来自 ${escapeHtml(detail.item.meaning_source_label)}</span>` : ""}<input class="learning-meaning" value="${escapeHtml(detail.item.meaning_text ?? "")}" placeholder="可手工填写，或从词典详情选择一条释义" /></label>`}
       <div class="learning-source-meta">${sourceMeta}</div>
       ${context}
       <details><summary>全部 ${detail.occurrences.length} 个来源例句</summary>${detail.occurrences.map(o=>`<blockquote><p>${learningOccurrenceSource(o, isSelection)}</p><p>${escapeHtml(o.segment_translation_snapshot ?? "")}</p><span>${escapeHtml(o.job_display_name_snapshot)} · ${formatTime(o.start_ms)}</span>${o.job_id ? `<button type="button" class="secondary" data-play-occurrence="${escapeHtml(o.id)}">回到原句</button>` : '<span>原任务已删除；保留收藏快照</span>'}</blockquote>`).join("")}</details>
       <div class="learning-card-actions">
-        <button type="button" data-save-learning-meaning="${escapeHtml(detail.item.id)}">保存译义</button>
+        ${feedback ? "" : `<button type="button" data-save-learning-meaning="${escapeHtml(detail.item.id)}">保存译义</button>`}
         ${grammarId
-          ? `<button type="button" class="secondary" data-open-learning-grammar="${escapeHtml(grammarId)}">查看句型</button>`
-          : `<button type="button" class="secondary" data-open-learning-dictionary="${escapeHtml(detail.item.id)}">查看词典</button>`}
+          ? `<button type="button" class="secondary" data-open-learning-grammar="${escapeHtml(grammarId)}">${feedback ? "查看被标记的句型" : "查看句型"}</button>`
+          : feedback ? "" : `<button type="button" class="secondary" data-open-learning-dictionary="${escapeHtml(detail.item.id)}">查看词典</button>`}
         ${occurrence?.job_id ? `<button type="button" class="secondary" data-play-learning-source="${escapeHtml(detail.item.id)}">播放例句</button>` : ""}
         <button type="button" class="danger" data-delete-learning-item="${escapeHtml(detail.item.id)}">删除</button>
       </div>
@@ -2968,7 +2985,16 @@ function renderLearningItems(): void {
     button.addEventListener("click", () => void playLearningSource(button.dataset.playLearningSource ?? ""));
   });
   learningItemList.querySelectorAll<HTMLButtonElement>("[data-open-learning-grammar]").forEach(button => {
-    button.addEventListener("click", () => japaneseGrammar.open(button.dataset.openLearningGrammar));
+    button.addEventListener("click", () => {
+      const cardId = button.closest<HTMLElement>("[data-learning-item]")?.dataset.learningItem;
+      const detail = learningItems.find(item => item.item.id === cardId);
+      const example = detail?.item.grammar_feedback ? undefined : detail?.occurrences[0];
+      japaneseGrammar.open(button.dataset.openLearningGrammar, example && {
+        text: example.segment_source_snapshot,
+        start: example.selection_start_utf16,
+        end: example.selection_end_utf16,
+      });
+    });
   });
   learningItemList.querySelectorAll<HTMLButtonElement>("[data-open-learning-dictionary]").forEach((button) => {
     button.addEventListener("click", () => openLearningDictionary(button.dataset.openLearningDictionary ?? ""));

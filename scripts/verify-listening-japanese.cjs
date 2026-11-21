@@ -23,7 +23,7 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
         if (command === "lookup_listening_japanese") {
           window.__japaneseRequests.push(args.request);
           return { words: [
-            { start: 5, end: 8, surface: "読んで", lemma: "読む", reading: "よむ", unknown: false,
+            { start: 5, end: 8, surface: "読んで", lemma: "読む", reading: "よむ", unknown: false, formNote: "这里是动词的て形，用于接后面的表达。",
               entries: [entry("tomoshi", "Tomoshi", "阅读"), entry("jmdict", "JMdict", "to read")] },
             ...(args.request.start === args.request.end ? [] : [
               { start: 4, end: 5, surface: "を", lemma: "を", reading: "を", unknown: false, entries: [] },
@@ -66,6 +66,7 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
     await page.mouse.click(point.x, point.y);
     const preview = page.locator("#listening-dictionary-preview");
     await preview.getByText("阅读").waitFor();
+    await preview.getByText(/本句词形.*动词的て形/).waitFor();
     assert.deepEqual(await page.evaluate(() => window.__japaneseRequests[0]), {
       text: "昨日は本を読んでいたけど", start: 5, end: 5,
     });
@@ -91,6 +92,7 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
     await preview.getByRole("button", { name: "読んで · 読む", exact: true }).waitFor();
     await preview.getByRole("button", { name: "を", exact: true }).click();
     await preview.getByText("当前没有查到词典释义。").waitFor();
+    assert.equal(await preview.getByText("本句词形", { exact: true }).count(), 0);
     await preview.getByRole("button", { name: "読んで · 読む", exact: true }).click();
     assert.equal(await page.locator("#save-learning-selection").textContent(), "收藏原选区");
     await preview.getByRole("button", { name: "收藏义项 1" }).click();

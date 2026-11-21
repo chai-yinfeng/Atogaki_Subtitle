@@ -10,6 +10,8 @@ pub(super) struct Match {
     pub end: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form_note: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_note: Option<&'static str>,
 }
 
 struct Rule {
@@ -667,6 +669,7 @@ pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match>
                 start: span.0,
                 end: span.1,
                 form_note,
+                usage_note: usage_note(rule.id, &tokens[start..end]),
             });
         }
     }
@@ -699,31 +702,76 @@ pub(super) fn find(tokens: &[GrammarToken], focus: (usize, usize)) -> Vec<Match>
 
 fn predicate_start(tokens: &[GrammarToken], start: usize) -> usize {
     if tokens[start].pos != "助動詞" {
-        return tokens[start].start;
+        return tokens[compound_predicate_start(tokens, start)].start;
     }
     let mut cursor = start;
     let copula = tokens[start].lemma == "だ";
     while cursor > 0 && tokens[cursor - 1].pos == "助動詞" {
         cursor -= 1;
     }
-    if let Some(mut predicate) = cursor.checked_sub(1) {
+    if let Some(predicate) = cursor.checked_sub(1) {
         let previous = &tokens[predicate];
         if !previous.unknown
-            && (matches!(previous.pos.as_str(), "動詞" | "形容詞")
+            && (satisfies(previous, "verb|adjective|adjectival-suffix")
                 || (copula && matches!(previous.pos.as_str(), "形状詞" | "名詞" | "代名詞")))
         {
-            // Sudachi A may split a compound verb before a non-independent verb.
-            while predicate > 0
-                && satisfies(&tokens[predicate], "bound-verb")
-                && satisfies(&tokens[predicate - 1], "v:stem")
-                && tokens[predicate - 1].end == tokens[predicate].start
-            {
-                predicate -= 1;
-            }
-            return tokens[predicate].start;
+            return tokens[compound_predicate_start(tokens, predicate)].start;
         }
     }
     tokens[cursor].start
+}
+
+fn compound_predicate_start(tokens: &[GrammarToken], mut start: usize) -> usize {
+    while let Some(previous) = start.checked_sub(1) {
+        let token = &tokens[start];
+        let before = &tokens[previous];
+        if before.end != token.start {
+            break;
+        }
+        if satisfies(token, "bound-verb|adjectival-suffix") && satisfies(before, "v:stem") {
+            start = previous;
+            continue;
+        }
+        let Some(stem) = previous.checked_sub(1) else {
+            break;
+        };
+        if satisfies(
+            token,
+            "l:いる|いく|行く|くる|来る|しまう|仕舞う|おく|置く|みる|ある&bound-verb",
+        ) && satisfies(before, "connector")
+            && tokens[stem].end == before.start
+            && satisfies(&tokens[stem], "v:stem")
+        {
+            start = stem;
+            continue;
+        }
+        break;
+    }
+    start
+}
+
+fn usage_note(id: &str, tokens: &[GrammarToken]) -> Option<&'static str> {
+    match id {
+        "n-desu-no-desu" if tokens.last().is_some_and(|token| token.surface == "だ") => {
+            Some("这里用普通体「んだ／のだ」，把前面的情况作为背景来说明。")
+        }
+        "n-desu-no-desu" => Some("这里用礼貌体「んです／のです」，把前面的情况作为背景来说明。"),
+        "node" => Some("「ので」前面这段是原因，后面接由此产生的结果或行动。"),
+        "kedo-keredomo" | "ga-but" => {
+            Some("这个接续放在前一分句末尾，可引出转折，也可先交代背景或把话留给对方。")
+        }
+        "kamo-shirenai" if tokens.last().is_some_and(|token| token.surface == "も") => {
+            Some("口语把「かもしれない」缩成「かも」，对前面的事情作不确定的推测。")
+        }
+        "kamo-shirenai" => Some("「かもしれない」把前面的事情说成一种可能。"),
+        "to-omou" | "you-to-omou" => {
+            Some("「と」标出前面的想法，后面的「思う」说明这是说话者的判断或打算。")
+        }
+        "te-iru" => {
+            Some("前面的动词用て形，后接「いる」或它的变体，描述动作进行、结果持续或习惯。")
+        }
+        _ => None,
+    }
 }
 
 fn satisfies(token: &GrammarToken, spec: &str) -> bool {

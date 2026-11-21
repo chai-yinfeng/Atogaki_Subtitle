@@ -69,6 +69,8 @@ struct JapaneseWord {
     lemma: String,
     reading: String,
     unknown: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    form_note: Option<&'static str>,
     entries: Vec<JapaneseEntry>,
 }
 
@@ -168,6 +170,11 @@ impl DictionaryLookupService {
                 lemma: word.lemma.clone(),
                 reading: word.reading.clone(),
                 unknown: word.unknown,
+                form_note: if end > word.end {
+                    Some("这里是动词的て形，用于接后面的表达。")
+                } else {
+                    word.form_note
+                },
                 entries,
             });
         }

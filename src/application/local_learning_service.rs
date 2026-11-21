@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow};
 
 use crate::infrastructure::local_db::{
     LocalDatabase, LocalLearningItemDetail, LocalSubtitleSegmentRecord,
-    NewLocalLearningDictionarySelection, NewLocalLearningGrammarSelection,
-    NewLocalLearningLookupResult, NewLocalLearningSelection,
+    NewLocalLearningDictionarySelection, NewLocalLearningGrammarFeedback,
+    NewLocalLearningGrammarSelection, NewLocalLearningLookupResult, NewLocalLearningSelection,
 };
 
 #[derive(Debug, Clone)]
@@ -56,6 +56,16 @@ impl LocalLearningService {
 
     pub async fn dictionary_entry_id(&self, item_id: &str) -> Result<Option<String>> {
         self.database.learning_dictionary_entry_id(item_id).await
+    }
+
+    pub async fn save_grammar_feedback(
+        &self,
+        input: NewLocalLearningSelection,
+        feedback: NewLocalLearningGrammarFeedback,
+    ) -> Result<LocalLearningItemDetail> {
+        self.database
+            .save_learning_grammar_feedback(input, feedback)
+            .await
     }
 
     pub async fn list_items(&self) -> Result<Vec<LocalLearningItemDetail>> {
@@ -133,7 +143,10 @@ pub fn anki_tsv(items: &[LocalLearningItemDetail], language: &str) -> String {
     let mut result = String::from(
         "#separator:tab\n#html:false\n#columns:Expression\tMeaning\tExamples\tTranslations\tSources\tTimecodes\tLanguage\tKind\n",
     );
-    for detail in items.iter().filter(|d| d.item.source_language == language) {
+    for detail in items
+        .iter()
+        .filter(|d| d.item.source_language == language && d.item.grammar_feedback.is_none())
+    {
         let join = |values: Vec<String>| values.join("\n");
         let examples = join(
             detail
@@ -197,6 +210,7 @@ mod tests {
             target_language: "zh-Hans".into(),
             item_type: "phrase".into(),
             grammar_id: None,
+            grammar_feedback: None,
             source_text: "say \"hello\"\t世界".into(),
             meaning_text: Some("问候\n第二行".into()),
             meaning_provider_id: None,

@@ -18,9 +18,10 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
       const concept = { id: "te-form", pattern: "て形", level: "基础概念", meaning: "连接动作。", language: "zh-Hans", automatic: false };
       const advanced = { id: "ga-hayai-ka", pattern: "〜が早いか", level: "N1", romaji: "ga hayai ka", meaning: "刚……就……", language: "zh-Hans", translatedFromOpenjlpt: true, automatic: false };
       const entries = { [pattern.id]: pattern, [concept.id]: concept, [advanced.id]: advanced };
-      const match = { id: pattern.id, start: 2, end: 10, formNote: "过去否定" };
+      const match = { id: pattern.id, start: 2, end: 10, formNote: "过去否定", usageNote: "本句用て形接「いる」。" };
       let items = [];
       window.__grammarRequests = [];
+      window.__grammarFeedback = [];
       window.__TAURI_INTERNALS__.invoke = async (command, args = {}) => {
         if (command === "list_japanese_grammar") return Object.values(entries);
         if (command === "japanese_grammar_entry") return {
@@ -38,10 +39,25 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
           window.__collectedGrammar = args.request;
           const item = { id: "grammar-1", grammar_id: pattern.id, item_type: "selection", source_language: "ja",
             source_text: pattern.pattern, meaning_text: pattern.meaning, occurrence_count: 1 };
-          items = [{ item, lookup_results: [], occurrences: [{ id: "source", job_id: args.request.selection.jobId,
+          items.push({ item, lookup_results: [], occurrences: [{ id: "source", job_id: args.request.selection.jobId,
             segment_id: "cue-1", job_display_name_snapshot: "测试节目", segment_source_snapshot: text,
-            selection_start_utf16: match.start, selection_end_utf16: match.end, start_ms: 3000, end_ms: 9000 }] }];
-          return items[0];
+            selection_start_utf16: match.start, selection_end_utf16: match.end, start_ms: 3000, end_ms: 9000 }] });
+          return items.at(-1);
+        }
+        if (command === "save_listening_japanese_grammar_feedback") {
+          const request = args.request;
+          window.__grammarFeedback.push(request);
+          const { reportedMatch, selection } = request;
+          const kind = reportedMatch ? "wrong" : "missed";
+          const { start, end } = reportedMatch ?? selection;
+          items.push({
+            item: { id: kind, grammar_id: reportedMatch?.id, grammar_feedback: kind, item_type: "selection",
+              source_language: "ja", source_text: request.text.slice(start, end), occurrence_count: 1 },
+            lookup_results: [], occurrences: [{ id: kind, job_id: selection.jobId, segment_id: selection.segmentId,
+              job_display_name_snapshot: "测试节目", segment_source_snapshot: request.text,
+              selection_start_utf16: start, selection_end_utf16: end, start_ms: reportedMatch ? 3000 : 0, end_ms: 9000 }],
+          });
+          return items.at(-1);
         }
         if (command === "list_learning_items") return items;
         if (command === "get_playback_position") return 0;
@@ -66,6 +82,9 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
     const catalog = page.locator("#japanese-grammar-dialog");
     await page.locator('[data-cue-grammar="cue-0"]').click();
     await preview.getByText(/暂未识别到/).waitFor();
+    await preview.getByRole("button", { name: "标记漏报" }).click();
+    await preview.getByText("已标记，可在学习区回到原句。").waitFor();
+    assert.equal(await page.evaluate(() => window.__grammarFeedback[0].reportedMatch), undefined);
     await preview.getByRole("button", { name: "浏览语法目录" }).click();
     await catalog.locator("[data-grammar-level]").selectOption("N1");
     await catalog.getByText("〜が早いか").waitFor();
@@ -91,6 +110,7 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
     });
     await page.locator("#analyze-listening-grammar").click();
     await preview.getByText(/过去否定/).waitFor();
+    await preview.getByText("本句用て形接「いる」。", { exact: false }).waitFor();
     assert.equal(await preview.locator("mark").textContent(), "食べていなかった");
     assert.deepEqual(await page.evaluate(() => window.__grammarRequests.at(-1)), {
       jobId: "editor-test", segmentId: "cue-1", sourceText: "まだ食べて", start: 1, end: 4,
@@ -123,6 +143,9 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
     await preview.getByRole("button", { name: "て形", exact: true }).click();
     await catalog.getByRole("heading", { name: "て形" }).waitFor();
     await catalog.getByRole("button", { name: "关闭" }).click();
+    await preview.getByRole("button", { name: "标记误报" }).click();
+    await preview.getByText("已标记，可在学习区回到原句。").waitFor();
+    assert.deepEqual(await page.evaluate(() => window.__grammarFeedback[1].reportedMatch), { id: "te-iru", start: 2, end: 10 });
     await preview.getByRole("button", { name: "收藏语法例句" }).click();
     await preview.waitFor({ state: "hidden" });
     const collected = await page.evaluate(() => window.__collectedGrammar);
@@ -130,13 +153,20 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
     assert.equal(collected.selection.endCue.segmentId, "cue-2");
 
     await page.locator("#show-learning").click();
+    await page.locator('[data-learning-item="missed"]').getByText(/疑似漏报/).waitFor();
+    const feedback = page.locator('[data-learning-item="wrong"]');
+    await feedback.getByText(/疑似误报/).waitFor();
+    assert.equal(await feedback.locator("blockquote mark").first().textContent(), "食べていなかった");
+    assert.equal(await feedback.getByRole("button", { name: "保存译义" }).count(), 0);
     const card = page.locator('[data-learning-item="grammar-1"]');
     await card.getByRole("heading", { name: "～ている" }).waitFor();
     assert.equal(await card.locator("blockquote mark").first().textContent(), "食べていなかった");
     await card.getByRole("button", { name: "查看句型" }).click();
     await catalog.getByRole("heading", { name: "～ている" }).waitFor();
+    await catalog.getByText(/本句用法.*表示动作或状态持续/).waitFor();
+    assert.equal(await catalog.locator("mark").textContent(), "食べていなかった");
     await catalog.getByRole("button", { name: "关闭" }).click();
-    await card.getByRole("button", { name: "播放例句" }).click();
+    await feedback.getByRole("button", { name: "播放例句" }).click();
     await page.waitForFunction(() => document.querySelector("#listening-media-host audio")?.currentTime >= 3);
     assert.deepEqual(errors, []);
     console.log("Japanese grammar: selection, non-match, level filter, cross-cue highlight, related entry, save and replay passed");
