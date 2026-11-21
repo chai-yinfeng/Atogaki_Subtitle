@@ -16,7 +16,7 @@ export function mountDesktopUpdate(dialog: HTMLDialogElement, prepare: () => Pro
     try {
       const result = await invoke<UpdateInfo>("check_desktop_update");
       version = result.availableVersion;
-      status.textContent = !result.enabled ? `当前 v${result.currentVersion} 未启用应用内更新。`
+      status.textContent = !result.enabled ? `当前 v${result.currentVersion} 未启用应用内更新。此功能需要包含发行公钥的 Apple Silicon 版本。`
         : version ? `当前 v${result.currentVersion}，可更新到 v${version}。`
         : `当前 v${result.currentVersion} 已是最新正式版。`;
       install.hidden = !version;

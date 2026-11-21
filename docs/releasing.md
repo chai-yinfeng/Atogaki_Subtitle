@@ -19,7 +19,7 @@ macOS Apple Silicon 是日常开发与完整体验的质量基线。Windows 11 x
 
 DMG 不提交到 Git 历史，也不使用 Git LFS。源码提交并打 tag 后，把 DMG 作为 GitHub Release asset 上传。这样仓库保持轻量，Release 页面仍能为测试者提供固定版本下载。
 
-日常开发不再为每个提交生成 Test App 或测试 DMG。桌面范围内的稳定改动完成提交与回归后，按需运行 `./scripts/install-current-macos-app.sh`，以包含 FFmpeg、FFprobe、whisper.cpp 和 `llama-server` 的完整配置覆盖 `/Applications/Atogaki.app`。模型和 pipeline 实验先在 CLI／evaluation harness 验证，不触发桌面打包。公开候选仍必须按下述流程生成、校验和实测 DMG；本机覆盖安装不能替代发行门禁。
+日常开发不再为每个提交生成 Test App 或测试 DMG。桌面范围内的稳定改动完成提交与回归后，按需运行 `./scripts/install-current-macos-app.sh`，以包含 FFmpeg、FFprobe、whisper.cpp 和 `llama-server` 的完整配置覆盖 `/Applications/Atogaki.app`。该脚本默认使用开发构建设置，未注入发行公钥时，「设置 → 更新」会显示应用内更新未启用。模型和 pipeline 实验先在 CLI／evaluation harness 验证，不触发桌面打包。公开候选仍必须按下述流程生成、校验和实测 DMG；本机覆盖安装不能替代发行门禁。
 
 开发主线 complete 配置现为五个 sidecar，另含 `atogaki-audio-tap`；v0.1.3 的四 sidecar 发行材料保留历史。手工运行下述打包命令前，须按[binaries 说明](../src-tauri/binaries/README.md)准备已固定的 llama-server，并在仓库根目录执行 `./scripts/prepare-online-capture.sh src-tauri/binaries/atogaki-audio-tap-aarch64-apple-darwin`。安装脚本已包含 helper 准备，基础 sidecar builder 则没有。完整新机 Python／MLX runtime 仍未随包交付，不能把五个可执行文件齐全等同于在线开箱可用。
 

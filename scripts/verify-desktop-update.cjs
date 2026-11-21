@@ -30,7 +30,7 @@ const assert=require('node:assert/strict');
   await page.locator('[data-settings-tab="updates"]').click();
   const check=page.locator('#check-app-update'),install=page.locator('#install-app-update');
   await check.click();
-  await page.getByText('当前 v0.1.3 未启用应用内更新。',{exact:true}).waitFor();
+  await page.getByText('当前 v0.1.3 未启用应用内更新。此功能需要包含发行公钥的 Apple Silicon 版本。',{exact:true}).waitFor();
   assert.equal(await install.isVisible(),false);
   await page.evaluate(()=>window.__updateQA.enabled=true);
   await check.click();
