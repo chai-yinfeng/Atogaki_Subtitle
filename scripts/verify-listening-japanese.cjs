@@ -25,6 +25,9 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
           return { words: [
             { start: 5, end: 8, surface: "読んで", lemma: "読む", reading: "よむ", unknown: false,
               entries: [entry("tomoshi", "Tomoshi", "阅读"), entry("jmdict", "JMdict", "to read")] },
+            ...(args.request.start === args.request.end ? [] : [
+              { start: 4, end: 5, surface: "を", lemma: "を", reading: "を", unknown: false, entries: [] },
+            ]),
           ], notices: [] };
         }
         if (command === "save_listening_japanese_word") {
@@ -85,6 +88,10 @@ const { installEditorFixture } = require("./editor-ui-fixture.cjs");
     assert.deepEqual(await page.evaluate(() => window.__japaneseRequests.at(-1)), {
       text: "昨日は本を読んでいたけど", start: 4, end: 9,
     });
+    await preview.getByRole("button", { name: "読んで · 読む", exact: true }).waitFor();
+    await preview.getByRole("button", { name: "を", exact: true }).click();
+    await preview.getByText("当前没有查到词典释义。").waitFor();
+    await preview.getByRole("button", { name: "読んで · 読む", exact: true }).click();
     assert.equal(await page.locator("#save-learning-selection").textContent(), "收藏原选区");
     await preview.getByRole("button", { name: "收藏义项 1" }).click();
     await preview.waitFor({ state: "hidden" });

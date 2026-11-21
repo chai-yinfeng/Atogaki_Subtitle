@@ -328,7 +328,7 @@ ATOGAKI_PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright \
 
 在「设置 → 词典」中，Sudachi 的「下载并安装」与状态位于卡片上方。长来源地址和错误信息应在卡片内换行，已有词典显示安装状态，下载期间说明其他未安装词典为何暂不可操作。用 `node scripts/verify-dictionary-view.cjs` 回归布局及状态。
 
-构建前端并按本页启动静态服务后，运行 `node scripts/verify-listening-japanese.cjs`。WebKit 测试使用合成节目与 IPC，检查点击字形的 UTF-16 偏移、边界不齐的框选、候选范围、词典切换、收藏以及从学习区回到原时间。
+构建前端并按本页启动静态服务后，运行 `node scripts/verify-listening-japanese.cjs`。WebKit 测试使用合成节目与 IPC，检查点击字形的 UTF-16 偏移、边界不齐的框选、候选范围、原文与词典形相同只显示一次、词典切换、收藏以及从学习区回到原时间。
 
 另外可以用真实本地词库验证完整查询和收藏事务。先将 Sudachi Core、Tomoshi 和 JMdict 的归档与版本 sidecar 复制到独立可写目录。每次测试的应用 SQLite 都是临时文件，派生索引写入指定的词库目录。
 

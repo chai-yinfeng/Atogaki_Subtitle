@@ -2703,7 +2703,7 @@ function renderListeningDictionary(
   const preview = listeningDictionaryPreview;
   preview.classList.remove("hidden");
   preview.innerHTML = `<div class="listening-word-options" aria-label="词形候选">${result.words.map((word, index) =>
-    `<button type="button" class="secondary" data-listening-word="${index}" aria-pressed="false">${escapeHtml(word.surface)} · ${escapeHtml(word.lemma)}</button>`,
+    `<button type="button" class="secondary" data-listening-word="${index}" aria-pressed="false">${escapeHtml(word.surface)}${word.lemma === word.surface ? "" : ` · ${escapeHtml(word.lemma)}`}</button>`,
   ).join("")}</div><div data-listening-word-detail></div>`;
   const detail = preview.querySelector<HTMLElement>("[data-listening-word-detail]")!;
   const wordButtons = [...preview.querySelectorAll<HTMLButtonElement>("[data-listening-word]")];
