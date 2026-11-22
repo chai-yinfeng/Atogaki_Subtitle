@@ -344,9 +344,9 @@ p { margin-top: 0; }
 .media-capabilities code { grid-column: 1 / -1; overflow-wrap: anywhere; color: inherit; font-size: 11px; }
 .media-capabilities small { grid-column: 1 / -1; }
 .video-render-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
-.video-render-form label { display: grid; grid-column: 1 / -1; gap: 6px; color: var(--muted-foreground); font-size: 12px; font-weight: 700; }
-.video-render-form label:nth-of-type(2) { grid-column: 1; }
-.video-render-form input, .video-render-form select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: var(--ink); background: var(--surface); }
+.video-render-form label { display: grid; grid-column: 1 / -1; min-width: 0; gap: 6px; color: var(--muted-foreground); font-size: 12px; font-weight: 700; }
+.video-render-form label:last-of-type { grid-column: 1; }
+.video-render-form select { height: auto; min-height: 40px; }
 .video-render-form > button { grid-column: 2; align-self: end; }
 .video-render-form > p { grid-column: 1 / -1; margin: 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; }
 .video-render-estimate { grid-column: 1 / -1; display: grid; gap: 5px; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; color: var(--foreground); background: var(--card); font-size: 12px; line-height: 1.5; }

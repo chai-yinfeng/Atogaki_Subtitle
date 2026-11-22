@@ -16,6 +16,8 @@ _最后更新：2026-11-18_
 
 `node scripts/verify-editor-render.cjs` 检查独立导出区的 MKV 封装与单独的烧录入口、MP4／MKV／MOV 保存路径、覆盖确认、进度、取消、关闭与过期字幕保护。带内置 FFmpeg 的实测使用 `ATOGAKI_FFMPEG=/absolute/path/to/ffmpeg cargo test --offline --lib lgpl_sidecar_renders_a_persisted_sqlite_workspace -- --ignored`，需要本机可访问 VideoToolbox 硬件。使用 ffprobe 比较 MKV 的源视频与 AAC 音频包哈希，并核对 H.264、ProRes 422 HQ 及 PCM 输出。
 
+烧录窗口的回归也检查两个下拉框的文字高度、展开指示和对齐，以及路径与「选择位置」按钮同排。签名候选在 macOS 原生窗口复核中文文字完整显示。
+
 ## 当前主窗口回归（2026-11-16）
 
 主窗口采用 [0083](decisions/0083-neutral-shell-and-embedded-online.md) 的 Neutral shell。最近任务默认隐藏，合成浏览器测试需要操作任务时先调用 `editor-ui-fixture.cjs` 的 `openTaskList(page)`；只等待任务数据初始化时使用 attached 状态，不能要求列表默认可见。在线控制位于主程序页面，独立字幕窗仍保留。
@@ -339,6 +341,8 @@ ATOGAKI_DICTIONARY_SMOKE_DIR=/absolute/path/to/qa-dictionaries \
 ```
 
 实词库验证覆盖「読んで／読み」原形与读音、两词形合并且来源时间独立、不同义项分别收藏、过期字幕拒绝写入，以及假名「はし」返回多个词条。真实节目的排序和使用体验由用户试用确认。
+
+`queries_merriam_webster_with_saved_key` 会读取钥匙串并使用一次英语词典 API 调用，仅在专门验证 Merriam-Webster 时按测试名运行。运行包含忽略用例的桌面回归时，用 `--skip queries_merriam_webster_with_saved_key` 排除该联机测试。
 
 ## 收听日语句型
 

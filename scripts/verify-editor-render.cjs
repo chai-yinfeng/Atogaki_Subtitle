@@ -36,6 +36,22 @@ const {webkit}=require(process.env.ATOGAKI_PLAYWRIGHT_MODULE||'playwright');cons
  await page.waitForFunction(()=>!document.querySelector('#submit-video-render').disabled);
  assert.equal(await page.locator('#video-render-title').textContent(),'烧录导出');
  assert.equal(await page.locator('#video-render-quality').inputValue(),'quality');
+ const selects = await dialog.locator('select').evaluateAll(controls => controls.map(control => {
+   const css = getComputedStyle(control);
+   const { width, height } = control.getBoundingClientRect();
+   const inset = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom)
+     + parseFloat(css.borderTopWidth) + parseFloat(css.borderBottomWidth);
+   return { width, textHeight: height - inset, lineHeight: parseFloat(css.lineHeight), arrow: css.backgroundImage };
+ }));
+ assert.equal(selects.length, 2);
+ for (const select of selects) {
+   assert.ok(select.textHeight >= select.lineHeight, `The selected text needs ${select.lineHeight}px and has ${select.textHeight}px`);
+   assert.notEqual(select.arrow, 'none', 'The dropdown indicator must stay visible');
+ }
+ assert.equal(selects[0].width, selects[1].width);
+ const outputPath = await page.locator('#video-output-path').boundingBox();
+ const chooseOutput = await page.locator('#choose-video-output').boundingBox();
+ assert.equal(outputPath.y + outputPath.height, chooseOutput.y + chooseOutput.height);
  assert.equal(await page.locator('#video-render-quality option[value="soft_matroska"]').count(),0);
  assert.match(await page.locator('#video-render-estimate').innerText(),/按画质分配码率/);
  await page.locator('#video-render-quality').selectOption('prores');
