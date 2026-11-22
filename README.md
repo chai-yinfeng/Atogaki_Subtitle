@@ -2,7 +2,7 @@
 
 Atogaki 是一个面向中文使用者的、本地优先的外语音视频理解与学习工作台。它通过识别、翻译、字幕校对、词典与可回看的媒体时间轴，把用户本机已有的节目整理成可以理解、复习和导出的双语资料。项目最初用于整理ヨルシカ「後書き」电台；字幕编辑、样式和烧录是建立可信资料的基础能力，但 Atogaki 目前不以替代完整视频字幕制作软件为目标。
 
-macOS Apple Silicon 是日常开发和完整体验基线，已发布的 macOS 基线为 [`v0.1.4`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.4)，采用 ad-hoc 签名且尚未公证，最低声明 macOS 12.0。Windows 开发、自动 CI 与后续打包已从 2026-11-13 暂停；既有 Windows 11 x86_64 未签名历史基线为 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
+macOS Apple Silicon 是日常开发和完整体验基线。正式版采用 ad-hoc 签名，尚未公证，最低要求 macOS 12.0。Windows 开发、自动 CI 与后续打包已从 2026-11-13 暂停；既有 Windows 11 x86_64 未签名历史基线为 [`v0.1.0-alpha.10`](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/tag/v0.1.0-alpha.10)，悬浮字幕仍不稳定，不建议使用。Atogaki 是独立的个人开发项目，与ヨルシカ及其官方运营方没有隶属、授权或赞助关系。
 
 ## 功能划分与架构
 
@@ -13,17 +13,17 @@ macOS Apple Silicon 是日常开发和完整体验基线，已发布的 macOS �
 | 功能区 | 职责与边界 |
 | --- | --- |
 | **工作台** | 导入本机音视频，安排识别、对齐和翻译任务。支持从已提交检查点恢复。完整原文进入统一字幕编辑器，可校对、调整时间、局部重识别和重译。候选经确认后才更新当前字幕。 |
-| **收听** | 播放已有任务，跟随双语字幕、定位原句并收藏。当前开发分支的视频全屏支持双语和仅译文字幕轨。 |
-| **学习** | 管理词句收藏、词典释义和可回听的例句，支持导出 Anki TSV。当前开发分支也支持从日语字幕查词、看活用、分析句型，以及浏览 N5 至 N1 的中文语法目录和基础概念。 |
+| **收听** | 播放已有任务，跟随双语字幕、定位原句并收藏。视频全屏支持双语和仅译文字幕轨。 |
+| **学习** | 管理词句收藏、词典释义和可回听的例句，支持导出 Anki TSV。可从日语字幕查词、看活用、分析句型，也可浏览 N5 至 N1 的中文语法目录和基础概念。 |
 | **在线字幕** | 独立会话采集系统声音，用本地模型识别和翻译，并在主窗口或浮窗显示可修订字幕。v0.1.4 有 One Pass／Two Pass 入口，实时语义和延迟仍待验收。Gemini／百炼实时翻译、保存录音并转离线任务都还在研究或规划中。 |
 
 **文件任务**将媒体转成带时间轴的原文，可再按任务配置使用本地或云端文本翻译。当前编辑稿、学习资料与来源关系保存在 SQLite，任务目录另存派生音频、识别产物与恢复检查点，凭据保存在系统钥匙串。Gemini 局部重识别另行确认具体音频范围。首批文件工作流支持日语、英语或韩语识别并译为简体中文，日语节目是首要质量基线。详见[数据与隐私](#本地数据与隐私)。
 
-**导出**位于工作台的任务内。可独立导出 SRT／ASS，也可将字幕烧录进视频。当前开发分支另有可开关的 MKV 软字幕封装、画质优先 MP4 和供外部压制的 ProRes 中间文件。新版导出与全屏字幕的发行状态见[路线图](docs/roadmap.md)。
+**导出**位于工作台的任务内。独立导出支持 SRT／ASS，以及带可切换字幕轨的 MKV。烧录导出把字幕写入视频画面，可直接输出 MP4，也可输出 ProRes 中间文件供后期压制。发行进度见[路线图](docs/roadmap.md)。
 
 ## 安装与首次配置
 
-macOS 下载 `Atogaki-v0.1.4-macos-arm64.dmg` 及相邻 `.sha256`；Windows 继续使用 alpha.10 的 NSIS 安装器。从 [GitHub Releases](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases) 下载对应平台、带版本名的安装包和相邻 SHA-256；开发者也可以按下文从源码构建。安装产物不提交到 Git 历史。各版功能见[发行记录](docs/release-notes)。
+macOS 首次安装请下载带版本号的 arm64 DMG 和同名 `.sha256` 文件。已安装 v0.1.4 或更新的正式版，可到「设置 → 更新」检查并安装。Windows 继续使用 alpha.10 的 NSIS 安装器。开发者也可以按下文从源码构建。[下载最新 macOS 正式版](https://github.com/chai-yinfeng/Atogaki_Subtitle/releases/latest) · [发行记录](docs/release-notes)
 
 macOS 版本没有 Developer ID 签名或公证。核对下载来源与 SHA-256 后，首次打开若被 Gatekeeper 阻止，可在 Finder 中右键 App 选择“打开”。Windows `alpha.10` 安装包同样没有商业代码签名，SmartScreen 可能显示“未知发布者”；不要为运行测试版而全局关闭系统安全功能。
 
@@ -82,7 +82,7 @@ Finder 启动的 App 不会执行 `.zshrc`，因此终端中的 `proxy_on` 不�
 2. FFmpeg 原生 LGPL MPEG-4 软件编码；
 3. 两者都失败时保留错误与 ASS 快照，并明确将烧录标记为失败。
 
-当前开发分支的画质优先 MP4 使用 VideoToolbox，ProRes 中间文件使用独立编码器。两种方式需要对应的编码能力。分发版 FFmpeg 使用 LGPL 配置。
+画质优先 MP4 使用 VideoToolbox，ProRes 中间文件使用独立编码器。两种方式需要对应的编码能力。分发版 FFmpeg 使用 LGPL 配置。
 
 ## 本地数据与隐私
 
