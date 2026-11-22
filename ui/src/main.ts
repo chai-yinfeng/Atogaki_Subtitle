@@ -3161,8 +3161,8 @@ function learningProviderStatus(provider: LearningProviderOption): string {
 function dictionaryProviderEmptyMessage(provider: LearningProviderOption | undefined): string {
   if (!provider) return "词典来源不可用。";
   const status = learningProviderStatus(provider);
-  if (status === "未下载") return `${provider.name} 的离线包尚未安装。请先到设置 → 学习词典下载；包会保存在正式应用数据目录。`;
-  if (status === "未配置") return `${provider.name} API Key 尚未配置。请先到设置 → 学习词典保存并检查该来源的 Key。`;
+  if (status === "未下载") return `${provider.name} 的离线包尚未安装。请在「设置 → 词典」下载并安装。`;
+  if (status === "未配置") return `${provider.name} API Key 尚未配置。请在「设置 → 词典」保存并检查该来源的 Key。`;
   return provider.kind === "offline"
     ? "已安装本地数据。第一次查询可能需要解压或建立轻量索引，之后会直接复用。"
     : "查询只会把当前词语发送给这个词典 API；结果按来源独立保存。";

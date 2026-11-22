@@ -157,7 +157,7 @@ fn form_note(pos: &str, form: &str, surface: &str, lemma: &str) -> Option<&'stat
 
 fn unpack_dictionary(directory: &Path) -> Result<std::path::PathBuf> {
     let archive = File::open(directory.join(SUDACHI_ARCHIVE))
-        .context("请先在设置 → 学习词典下载 Sudachi 日语分词")?;
+        .context("请在「设置 → 词典」下载并安装「Sudachi 日语分词」。")?;
     let path = directory.join("sudachi-core-20261015.dic");
     const EXPECTED_BYTES: u64 = 202_236_003;
     if fs::metadata(&path).is_ok_and(|metadata| metadata.len() == EXPECTED_BYTES) {

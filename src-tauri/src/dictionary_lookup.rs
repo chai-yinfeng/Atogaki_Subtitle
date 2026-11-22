@@ -714,7 +714,7 @@ fn ensure_language(detail: &LocalLearningItemDetail, expected: &str, provider: &
 
 fn require_file(path: &Path, name: &str) -> Result<()> {
     if !path.is_file() {
-        bail!("{name} 词典包尚未安装；请先到设置 → 学习词典下载");
+        bail!("{name} 词典包尚未安装。请在「设置 → 词典」下载并安装。");
     }
     Ok(())
 }
