@@ -252,6 +252,7 @@ pub struct NewLocalLearningDictionarySelection {
 
 #[derive(Debug)]
 pub struct NewLocalLearningGrammarSelection {
+    pub source_language: &'static str,
     pub grammar_id: String,
     pub title: String,
     pub meaning: String,
@@ -1063,14 +1064,16 @@ impl LocalDatabase {
             )
         })?;
 
-        let grammar_cues = match &origin {
-            LearningSelectionOrigin::Grammar(grammar) => Some(&grammar.cues),
-            LearningSelectionOrigin::GrammarFeedback(feedback) => Some(&feedback.cues),
-            _ => None,
+        let (grammar_language, grammar_cues) = match &origin {
+            LearningSelectionOrigin::Grammar(grammar) => {
+                (grammar.source_language, Some(&grammar.cues))
+            }
+            LearningSelectionOrigin::GrammarFeedback(feedback) => ("ja", Some(&feedback.cues)),
+            _ => (source.source_language.as_str(), None),
         };
         let (source_snapshot, translation_snapshot, end_ms) = if let Some(cues) = grammar_cues {
             anyhow::ensure!(
-                source.source_language == "ja"
+                source.source_language == grammar_language
                     && input.item_type == "selection"
                     && cues.first().is_some_and(|cue| cue.id == input.segment_id),
                 "语法例句来源无效"
@@ -1135,9 +1138,14 @@ impl LocalDatabase {
             grammar_feedback,
         ) = match &origin {
             LearningSelectionOrigin::Dictionary(dictionary) => {
+                let language = match dictionary.lookup.provider_id.as_str() {
+                    "tomoshi" | "jmdict" => "ja",
+                    "ecdict" => "en",
+                    _ => return Err(anyhow!("不支持的收藏词典来源")),
+                };
                 anyhow::ensure!(
                     source.source_text == dictionary.source_snapshot
-                        && source.source_language == "ja"
+                        && source.source_language == language
                         && input.item_type == "selection",
                     "字幕已变化，请重新查词"
                 );
@@ -1201,9 +1209,48 @@ impl LocalDatabase {
                     .flatten()
                     .map(|value| value.trim().to_string())
                     .filter(|value| !value.is_empty());
+                let source_key = if input.item_type == "selection" {
+                    let legacy_key = selected_text.to_lowercase();
+                    let existing: bool = sqlx::query_scalar(
+                        "SELECT EXISTS(
+                            SELECT 1 FROM local_learning_items i
+                            JOIN local_learning_occurrences o ON o.learning_item_id = i.id
+                            WHERE i.source_language = ? AND i.target_language = ?
+                              AND i.item_type = 'selection' AND i.source_key = ?
+                              AND o.job_id = ? AND o.segment_id = ?
+                              AND o.selection_start_utf16 = ? AND o.selection_end_utf16 = ?
+                              AND o.segment_source_snapshot = ?)",
+                    )
+                    .bind(&source.source_language)
+                    .bind(&source.target_language)
+                    .bind(&legacy_key)
+                    .bind(&source.job_id)
+                    .bind(&source.segment_id)
+                    .bind(input.selection_start_utf16)
+                    .bind(input.selection_end_utf16)
+                    .bind(&source_snapshot)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    if existing {
+                        legacy_key
+                    } else {
+                        format!(
+                            "\0selection:{}",
+                            serde_json::to_string(&(
+                                &source.job_id,
+                                &source.segment_id,
+                                start,
+                                end,
+                                &source_snapshot
+                            ))?
+                        )
+                    }
+                } else {
+                    selected_text.to_lowercase()
+                };
                 (
                     selected_text.as_str(),
-                    selected_text.to_lowercase(),
+                    source_key,
                     meaning,
                     None,
                     None,
@@ -1308,6 +1355,7 @@ impl LocalDatabase {
         job_id: &str,
         start_segment_id: &str,
         end_segment_id: &str,
+        language: &str,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         let mut tx = self.pool.begin().await?;
         let (first, last): (i64, i64) = sqlx::query_as(
@@ -1315,14 +1363,15 @@ impl LocalDatabase {
              FROM local_jobs j
              JOIN local_subtitle_segments first ON first.job_id = j.job_id
              JOIN local_subtitle_segments last ON last.job_id = j.job_id
-             WHERE j.job_id = ? AND first.id = ? AND last.id = ? AND j.source_language = 'ja'",
+             WHERE j.job_id = ? AND first.id = ? AND last.id = ? AND j.source_language = ?",
         )
         .bind(job_id)
         .bind(start_segment_id)
         .bind(end_segment_id)
+        .bind(language)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or_else(|| anyhow!("没有找到可分析的日语字幕"))?;
+        .ok_or_else(|| anyhow!("没有找到所选语言的字幕"))?;
         anyhow::ensure!(first <= last, "字幕选区顺序无效");
         Self::learning_cue_range(
             &mut tx,

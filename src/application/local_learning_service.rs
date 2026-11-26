@@ -38,9 +38,10 @@ impl LocalLearningService {
         job_id: &str,
         start_segment_id: &str,
         end_segment_id: &str,
+        language: &str,
     ) -> Result<Vec<LocalSubtitleSegmentRecord>> {
         self.database
-            .learning_grammar_context(job_id, start_segment_id, end_segment_id)
+            .learning_grammar_context(job_id, start_segment_id, end_segment_id, language)
             .await
     }
 
@@ -133,15 +134,16 @@ impl LocalLearningService {
     }
 }
 
+fn tsv_cell(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
 /// One note per learning item. All source snapshots stay available, including
-/// occurrences whose original task has been deleted. No dictionary content is
-/// silently substituted for the user's selected meaning.
+/// occurrences whose original task has been deleted. The chosen meaning is
+/// exported as saved.
 pub fn anki_tsv(items: &[LocalLearningItemDetail], language: &str) -> String {
-    fn cell(value: &str) -> String {
-        format!("\"{}\"", value.replace('"', "\"\""))
-    }
     let mut result = String::from(
-        "#separator:tab\n#html:false\n#columns:Expression\tMeaning\tExamples\tTranslations\tSources\tTimecodes\tLanguage\tKind\n",
+        "#separator:tab\n#html:false\n#guid column:9\n#columns:Expression\tMeaning\tExamples\tTranslations\tSources\tTimecodes\tLanguage\tKind\tGUID\n",
     );
     for detail in items
         .iter()
@@ -176,6 +178,7 @@ pub fn anki_tsv(items: &[LocalLearningItemDetail], language: &str) -> String {
                 .map(|o| format!("{}–{} ms", o.start_ms, o.end_ms))
                 .collect(),
         );
+        let guid = format!("atogaki-basic-{}", detail.item.id);
         let fields = [
             detail.item.source_text.as_str(),
             detail.item.meaning_text.as_deref().unwrap_or(""),
@@ -185,17 +188,92 @@ pub fn anki_tsv(items: &[LocalLearningItemDetail], language: &str) -> String {
             &times,
             &detail.item.source_language,
             &detail.item.item_type,
+            &guid,
         ];
         result.push_str(
             &fields
                 .iter()
-                .map(|f| cell(f))
+                .map(|f| tsv_cell(f))
                 .collect::<Vec<_>>()
                 .join("\t"),
         );
         result.push('\n');
     }
     result
+}
+
+/// Export one saved context per card. The GUID keeps distinct senses separate
+/// even when their cloze text is identical.
+pub fn anki_cloze_tsv(items: &[LocalLearningItemDetail], language: &str) -> Option<String> {
+    fn html(value: &str) -> String {
+        value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('{', "&#123;")
+            .replace('}', "&#125;")
+            .replace(':', "&#58;")
+            .replace("\r\n", "<br>")
+            .replace(['\r', '\n'], "<br>")
+    }
+    let mut result = String::from(
+        "#separator:tab\n#html:true\n#notetype:Cloze\n#guid column:3\n#columns:Text\tBack Extra\tGUID\n",
+    );
+    let header_len = result.len();
+    for detail in items.iter().filter(|detail| {
+        detail.item.source_language == language
+            && detail.item.item_type == "selection"
+            && detail.item.grammar_feedback.is_none()
+    }) {
+        let Some((occurrence, text)) = detail.occurrences.iter().find_map(|occurrence| {
+            let chars: Vec<u16> = occurrence.segment_source_snapshot.encode_utf16().collect();
+            let start = usize::try_from(occurrence.selection_start_utf16).ok()?;
+            let end = usize::try_from(occurrence.selection_end_utf16).ok()?;
+            let before = String::from_utf16(chars.get(..start)?).ok()?;
+            let answer = String::from_utf16(chars.get(start..end)?).ok()?;
+            let after = String::from_utf16(chars.get(end..)?).ok()?;
+            if answer.trim().is_empty()
+                || !before
+                    .chars()
+                    .chain(after.chars())
+                    .any(char::is_alphanumeric)
+            {
+                return None;
+            }
+            Some((
+                occurrence,
+                format!(
+                    "{}{{{{c1::{}}}}}{}",
+                    html(&before),
+                    html(&answer),
+                    html(&after)
+                ),
+            ))
+        }) else {
+            continue;
+        };
+        let source = format!(
+            "{} · {}–{} ms",
+            occurrence.job_display_name_snapshot, occurrence.start_ms, occurrence.end_ms
+        );
+        let extra = [
+            detail.item.meaning_text.as_deref().unwrap_or(""),
+            occurrence
+                .segment_translation_snapshot
+                .as_deref()
+                .unwrap_or(""),
+            &source,
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .map(html)
+        .collect::<Vec<_>>()
+        .join("<br>");
+        let guid = format!("atogaki-{}", detail.item.id);
+        result.push_str(&[tsv_cell(&text), tsv_cell(&extra), tsv_cell(&guid)].join("\t"));
+        result.push('\n');
+    }
+    (result.len() != header_len).then_some(result)
 }
 
 #[cfg(test)]
@@ -245,6 +323,27 @@ mod tests {
         assert!(exported.contains("\"say \"\"hello\"\"\t世界\""));
         assert!(exported.contains("\"问候\n第二行\""));
         assert!(exported.contains("Deleted program\nAnother program"));
-        assert!(!anki_tsv(&[detail], "ja").contains("hello"));
+        assert!(exported.contains("#guid column:9"));
+        assert!(exported.contains("atogaki-basic-item"));
+        assert!(!anki_tsv(&[detail.clone()], "ja").contains("hello"));
+
+        let mut detail = detail;
+        detail.item.item_type = "selection".into();
+        let text = "🙂 She said <hi> {{c9::literal}}.";
+        detail.occurrences[0].segment_source_snapshot = text.into();
+        detail.occurrences[0].selection_start_utf16 = 12;
+        detail.occurrences[0].selection_end_utf16 = 16;
+        let cloze = anki_cloze_tsv(&[detail.clone()], "en").unwrap();
+        assert!(cloze.contains("#notetype:Cloze"));
+        assert!(
+            cloze.contains(
+                "She said {{c1::&lt;hi&gt;}} &#123;&#123;c9&#58;&#58;literal&#125;&#125;"
+            )
+        );
+        assert!(cloze.contains("问候<br>第二行"));
+        assert!(cloze.contains("atogaki-item"));
+        assert!(anki_cloze_tsv(&[detail.clone()], "ja").is_none());
+        detail.item.item_type = "sentence".into();
+        assert!(anki_cloze_tsv(&[detail], "en").is_none());
     }
 }

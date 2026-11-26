@@ -33,7 +33,7 @@ const INDEX_FILE: &str = "atogaki-dictionary-index.sqlite";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct JapaneseLookupRequest {
+pub(crate) struct ListeningLookupRequest {
     text: String,
     start: usize,
     end: usize,
@@ -41,10 +41,10 @@ pub(crate) struct JapaneseLookupRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SaveJapaneseWordRequest {
+pub(crate) struct SaveListeningWordRequest {
     job_id: String,
     segment_id: String,
-    selection: JapaneseLookupRequest,
+    selection: ListeningLookupRequest,
     start: usize,
     end: usize,
     provider_id: String,
@@ -55,14 +55,14 @@ pub(crate) struct SaveJapaneseWordRequest {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct JapaneseLookup {
-    words: Vec<JapaneseWord>,
+pub(crate) struct ListeningLookup {
+    words: Vec<ListeningWord>,
     notices: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct JapaneseWord {
+struct ListeningWord {
     start: usize,
     end: usize,
     surface: String,
@@ -71,7 +71,7 @@ struct JapaneseWord {
     unknown: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     form_note: Option<&'static str>,
-    entries: Vec<JapaneseEntry>,
+    entries: Vec<ListeningEntry>,
 }
 
 #[derive(Clone)]
@@ -106,8 +106,8 @@ impl DictionaryLookupService {
 
     pub(crate) async fn lookup_japanese(
         &self,
-        request: &JapaneseLookupRequest,
-    ) -> Result<JapaneseLookup> {
+        request: &ListeningLookupRequest,
+    ) -> Result<ListeningLookup> {
         let text = &request.text;
         let length = text.encode_utf16().count();
         anyhow::ensure!(
@@ -163,7 +163,7 @@ impl DictionaryLookupService {
                     }
                 }
             }
-            words.push(JapaneseWord {
+            words.push(ListeningWord {
                 start: word.start,
                 end,
                 surface: String::from_utf16(&utf16[word.start..end])?,
@@ -178,14 +178,14 @@ impl DictionaryLookupService {
                 entries,
             });
         }
-        Ok(JapaneseLookup { words, notices })
+        Ok(ListeningLookup { words, notices })
     }
 
     async fn japanese_entries_for_word(
         &self,
         provider: &str,
         word: &Word,
-    ) -> Result<Vec<JapaneseEntry>> {
+    ) -> Result<Vec<ListeningEntry>> {
         let query = &word.lemma;
         let mut entries = self.japanese_entries(provider, query).await?;
         if entries.is_empty() && !word.reading.is_empty() && query != &word.reading {
@@ -205,7 +205,7 @@ impl DictionaryLookupService {
         Ok(entries)
     }
 
-    async fn japanese_entries(&self, provider: &str, query: &str) -> Result<Vec<JapaneseEntry>> {
+    async fn japanese_entries(&self, provider: &str, query: &str) -> Result<Vec<ListeningEntry>> {
         match provider {
             "tomoshi" => self.tomoshi_entries(query, 12).await,
             "jmdict" => self.jmdict_entries(query, 12).await,
@@ -215,9 +215,110 @@ impl DictionaryLookupService {
 
     pub(crate) async fn save_japanese_word(
         &self,
-        request: SaveJapaneseWordRequest,
+        request: SaveListeningWordRequest,
     ) -> Result<LocalLearningItemDetail> {
         let lookup = self.lookup_japanese(&request.selection).await?;
+        self.save_listening_word(request, lookup).await
+    }
+
+    pub(crate) async fn lookup_english(
+        &self,
+        request: &ListeningLookupRequest,
+    ) -> Result<ListeningLookup> {
+        let text = &request.text;
+        let length = text.encode_utf16().count();
+        anyhow::ensure!(
+            length <= 4096 && request.start <= request.end && request.end <= length,
+            "查词位置无效或字幕过长"
+        );
+        let source = self.directory.join("ecdict.csv");
+        require_file(&source, "ECDICT 基础英中")?;
+        let version = package_version(&source);
+        self.ensure_index("ecdict", &version, &source).await?;
+        let tokens = crate::english_learning::tokens(text);
+        let selected = tokens
+            .iter()
+            .filter(|word| {
+                word.start < request.end.max(request.start + 1) && request.start < word.end
+            })
+            .collect::<Vec<_>>();
+        let mut words = Vec::new();
+        if (2..=6).contains(&selected.len()) {
+            let first = selected[0];
+            let last = selected[selected.len() - 1];
+            let surface = &text[first.byte_start..last.byte_end];
+            let normalized = surface
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .replace('’', "'");
+            let mut entries = self.find_index_entries("ecdict", &normalized, 4).await?;
+            if entries.is_empty()
+                && let Some((head, rest)) = normalized.split_once(' ')
+            {
+                let variants = self.find_index_entries("ecdict", head, 4).await?;
+                for lemma in variants
+                    .into_iter()
+                    .map(|variant| variant.headword)
+                    .chain(english_lemma_candidates(head))
+                    .filter(|lemma| !lemma.eq_ignore_ascii_case(head))
+                {
+                    entries = self
+                        .find_index_entries("ecdict", &format!("{lemma} {rest}"), 4)
+                        .await?;
+                    if !entries.is_empty() {
+                        break;
+                    }
+                }
+            }
+            if !entries.is_empty() {
+                words.push(english_word(
+                    first.start,
+                    last.end,
+                    surface,
+                    entries,
+                    &version,
+                ));
+            }
+        }
+        for word in selected.iter().take(8) {
+            let query = word.surface.replace('’', "'");
+            let mut entries = self.find_index_entries("ecdict", &query, 4).await?;
+            if entries.is_empty()
+                && let Some(entry) = self
+                    .query_index_candidates("ecdict", &english_lemma_candidates(&query))
+                    .await?
+            {
+                entries.push(entry);
+            }
+            words.push(english_word(
+                word.start,
+                word.end,
+                word.surface,
+                entries,
+                &version,
+            ));
+        }
+        let notices = (selected.len() > 8)
+            .then(|| "选区较长，显示前 8 个词。可缩小选区继续查找。".to_owned())
+            .into_iter()
+            .collect();
+        Ok(ListeningLookup { words, notices })
+    }
+
+    pub(crate) async fn save_english_word(
+        &self,
+        request: SaveListeningWordRequest,
+    ) -> Result<LocalLearningItemDetail> {
+        let lookup = self.lookup_english(&request.selection).await?;
+        self.save_listening_word(request, lookup).await
+    }
+
+    async fn save_listening_word(
+        &self,
+        request: SaveListeningWordRequest,
+        lookup: ListeningLookup,
+    ) -> Result<LocalLearningItemDetail> {
         let entry = lookup
             .words
             .into_iter()
@@ -240,7 +341,11 @@ impl DictionaryLookupService {
                 },
                 NewLocalLearningDictionarySelection {
                     source_snapshot: request.selection.text,
-                    entry_id: entry.id.clone(),
+                    entry_id: if entry.provider_id == "ecdict" {
+                        serde_json::to_string(&(&entry.version, &entry.id))?
+                    } else {
+                        entry.id.clone()
+                    },
                     lookup: entry.into_result(""),
                     sense_index: request.sense_index,
                 },
@@ -267,6 +372,16 @@ impl DictionaryLookupService {
         let query = detail.item.source_text.trim();
         if query.is_empty() {
             bail!("学习条目没有可查询的文本");
+        }
+        if provider_id == "ecdict"
+            && detail
+                .lookup_results
+                .iter()
+                .any(|result| result.provider_id == provider_id)
+            && self.learning.dictionary_entry_id(item_id).await?.is_some()
+        {
+            ensure_language(&detail, "en", "ECDICT")?;
+            return Ok(detail);
         }
         if matches!(provider_id, "jmdict" | "tomoshi")
             && let Some(entry_id) = self.learning.dictionary_entry_id(item_id).await?
@@ -318,7 +433,7 @@ impl DictionaryLookupService {
             .ok_or_else(|| anyhow!("JMdict 中没有找到“{query}”的精确词形"))
     }
 
-    async fn jmdict_entries(&self, query: &str, limit: i64) -> Result<Vec<JapaneseEntry>> {
+    async fn jmdict_entries(&self, query: &str, limit: i64) -> Result<Vec<ListeningEntry>> {
         let source = self.directory.join("jmdict-eng.json.tgz");
         require_file(&source, "JMdict")?;
         let version = package_version(&source);
@@ -327,7 +442,7 @@ impl DictionaryLookupService {
             .find_index_entries("jmdict", query, limit)
             .await?
             .into_iter()
-            .map(|entry| JapaneseEntry::from_jmdict(entry, version.clone()))
+            .map(|entry| ListeningEntry::from_jmdict(entry, version.clone()))
             .collect())
     }
 
@@ -448,7 +563,7 @@ impl DictionaryLookupService {
             .ok_or_else(|| anyhow!("Tomoshi 中没有找到“{query}”的可显示中文释义"))
     }
 
-    async fn tomoshi_entries(&self, query: &str, limit: i64) -> Result<Vec<JapaneseEntry>> {
+    async fn tomoshi_entries(&self, query: &str, limit: i64) -> Result<Vec<ListeningEntry>> {
         let compressed = self.directory.join("tomoshi-dict-open.db.zst");
         require_file(&compressed, "Tomoshi")?;
         let version = package_version(&compressed);
@@ -489,7 +604,7 @@ impl DictionaryLookupService {
             if senses.is_empty() {
                 continue;
             }
-            entries.push(JapaneseEntry {
+            entries.push(ListeningEntry {
                 id: row.try_get("id")?,
                 provider_id: "tomoshi",
                 provider_name: "Tomoshi",
@@ -721,7 +836,7 @@ fn require_file(path: &Path, name: &str) -> Result<()> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct JapaneseEntry {
+struct ListeningEntry {
     id: String,
     provider_id: &'static str,
     provider_name: &'static str,
@@ -734,7 +849,26 @@ struct JapaneseEntry {
     license: &'static str,
 }
 
-impl JapaneseEntry {
+impl ListeningEntry {
+    fn from_ecdict(entry: IndexedEntry, version: &str) -> Self {
+        Self {
+            id: entry.id,
+            provider_id: "ecdict",
+            provider_name: "ECDICT 基础英中",
+            headword: entry.headword,
+            readings: entry.reading.into_iter().collect(),
+            senses: entry
+                .senses
+                .into_iter()
+                .flat_map(ecdict_listening_senses)
+                .collect(),
+            version: version.into(),
+            attribution: "ECDICT contributors / Linwei (skywind3000)",
+            source_url: "https://github.com/skywind3000/ECDICT",
+            license: "MIT（上游声明；混合历史数据来源见项目 README）",
+        }
+    }
+
     fn from_jmdict(entry: IndexedEntry, version: String) -> Self {
         Self {
             id: entry.id,
@@ -767,6 +901,95 @@ impl JapaneseEntry {
             fetched_at_unix: now_unix(),
             cache_expires_at_unix: None,
         }
+    }
+}
+
+fn ecdict_listening_senses(sense: LocalLearningLookupSense) -> Vec<LocalLearningLookupSense> {
+    let mut result = Vec::new();
+    for text in &sense.definitions {
+        for line in text
+            .split("\\n")
+            .flat_map(str::lines)
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            let (pos, definition) = line
+                .split_once(". ")
+                .filter(|(pos, _)| {
+                    matches!(
+                        *pos,
+                        "n" | "v"
+                            | "vt"
+                            | "vi"
+                            | "a"
+                            | "adj"
+                            | "ad"
+                            | "adv"
+                            | "prep"
+                            | "pron"
+                            | "conj"
+                            | "int"
+                            | "abbr"
+                    )
+                })
+                .map_or((sense.part_of_speech.clone(), line), |(pos, text)| {
+                    (Some(format!("{pos}.")), text)
+                });
+            // Split short Chinese gloss lists. Keep sentences and explanation
+            // punctuation together so each saved choice is intelligible.
+            let parts = definition
+                .split([',', '，'])
+                .map(str::trim)
+                .collect::<Vec<_>>();
+            let glosses = if parts.iter().all(|part| {
+                !part.is_empty()
+                    && part.chars().count() <= 12
+                    && part
+                        .chars()
+                        .all(|ch| matches!(ch, '\u{3400}'..='\u{9fff}' | ' '))
+            }) {
+                parts
+            } else {
+                vec![definition]
+            };
+            result.extend(
+                glosses
+                    .into_iter()
+                    .map(|definition| LocalLearningLookupSense {
+                        part_of_speech: pos.clone(),
+                        definitions: vec![definition.into()],
+                        examples: Vec::new(),
+                    }),
+            );
+        }
+    }
+    result
+}
+
+fn english_word(
+    start: usize,
+    end: usize,
+    surface: &str,
+    entries: Vec<IndexedEntry>,
+    version: &str,
+) -> ListeningWord {
+    let entries = entries
+        .into_iter()
+        .map(|entry| ListeningEntry::from_ecdict(entry, version))
+        .collect::<Vec<_>>();
+    let primary = entries.first();
+    ListeningWord {
+        start,
+        end,
+        surface: surface.into(),
+        lemma: primary.map_or_else(|| surface.into(), |entry| entry.headword.clone()),
+        reading: primary
+            .and_then(|entry| entry.readings.first())
+            .cloned()
+            .unwrap_or_default(),
+        unknown: primary.is_none(),
+        form_note: None,
+        entries,
     }
 }
 
@@ -1382,6 +1605,159 @@ mod tests {
     };
 
     #[tokio::test]
+    async fn english_listening_resolves_phrasal_inflections_and_collects_by_sense() {
+        use std::sync::Arc;
+
+        use atogaki_subtitle::{
+            application::{
+                JobSnapshot, LocalLearningService, MutableTranslationProvider,
+                UnconfiguredTranslationProvider, job_manifest::JobManifest, job_status::JobStatus,
+            },
+            domain::{LanguageCode, LanguagePair, TranscriptSegment},
+            infrastructure::{
+                job_store::Job,
+                local_db::{LocalDatabase, NewLocalLearningSelection},
+            },
+        };
+
+        use super::{DictionaryLookupService, ListeningLookupRequest, SaveListeningWordRequest};
+        use crate::desktop_settings::DesktopSettingsService;
+
+        let root = std::env::temp_dir().join(format!("atogaki-english-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("ecdict.csv"),
+            "word,phonetic,definition,translation,pos,exchange\ntake,,,拿,v,p:took/d:taken\ntake off,,,\"起飞, 脱下\",v,\n",
+        ).unwrap();
+        let db = LocalDatabase::open(root.join("work.sqlite")).await.unwrap();
+        let learning = LocalLearningService::new(db.clone());
+        let settings = DesktopSettingsService::new(
+            db.clone(),
+            MutableTranslationProvider::new(Arc::new(UnconfiguredTranslationProvider)),
+            root.join("models"),
+            None,
+            None,
+            None,
+            None,
+        );
+        let service = DictionaryLookupService::new(root.clone(), learning.clone(), settings);
+        let mut prior_id = None;
+        let mut manual_id = None;
+        for (text, surface) in [
+            ("✈️ The plane has taken off.", "taken off"),
+            ("Planes take off here.", "take off"),
+        ] {
+            let job = Job::create_in(&root.join("jobs")).unwrap();
+            let mut manifest = JobManifest::new(
+                &job,
+                None,
+                None,
+                LanguagePair::new(LanguageCode::English, LanguageCode::SimplifiedChinese).unwrap(),
+            );
+            manifest.mark(JobStatus::Done);
+            let segment = TranscriptSegment::new(1_000, 2_400, text.into());
+            db.sync_snapshot(&JobSnapshot {
+                manifest: manifest.clone(),
+                segments: vec![segment.clone()],
+            })
+            .await
+            .unwrap();
+            let byte = text.find(surface).unwrap();
+            let start = text[..byte].encode_utf16().count();
+            let end = start + surface.len();
+            let lookup = service
+                .lookup_english(&ListeningLookupRequest {
+                    text: text.into(),
+                    start,
+                    end,
+                })
+                .await
+                .unwrap();
+            let phrase = &lookup.words[0];
+            assert_eq!(
+                (phrase.start, phrase.end, phrase.lemma.as_str()),
+                (start, end, "take off")
+            );
+            let entry = &phrase.entries[0];
+            assert_eq!(entry.senses.len(), 2);
+            let save = |sense_index, snapshot: &str| SaveListeningWordRequest {
+                job_id: manifest.job_id.clone(),
+                segment_id: segment.id.clone(),
+                selection: ListeningLookupRequest {
+                    text: snapshot.into(),
+                    start,
+                    end,
+                },
+                start,
+                end,
+                provider_id: entry.provider_id.into(),
+                entry_id: entry.id.clone(),
+                version: entry.version.clone(),
+                sense_index,
+            };
+            let saved = service.save_english_word(save(0, text)).await.unwrap();
+            assert_eq!(saved.item.meaning_text.as_deref(), Some("起飞"));
+            let manual = NewLocalLearningSelection {
+                job_id: manifest.job_id.clone(),
+                segment_id: segment.id.clone(),
+                item_type: "selection".into(),
+                selection_start_utf16: (end - 3) as i64,
+                selection_end_utf16: end as i64,
+            };
+            let manual_item = learning.save_selection(manual.clone()).await.unwrap();
+            assert_eq!(manual_item.item.source_text, "off");
+            assert_eq!(
+                learning.save_selection(manual).await.unwrap().item.id,
+                manual_item.item.id
+            );
+            if let Some(previous) = manual_id.replace(manual_item.item.id) {
+                assert_ne!(Some(previous), manual_id);
+            }
+            assert!(
+                service
+                    .save_english_word(save(0, &format!("{text}!")))
+                    .await
+                    .is_err()
+            );
+            if let Some(id) = &prior_id {
+                assert_eq!(&saved.item.id, id);
+                assert_eq!(saved.item.occurrence_count, 2);
+                let second_sense = service.save_english_word(save(1, text)).await.unwrap();
+                assert_ne!(second_sense.item.id, *id);
+                assert_eq!(second_sense.item.meaning_text.as_deref(), Some("脱下"));
+            } else {
+                prior_id = Some(saved.item.id);
+                use crate::english_learning::{SaveRequest, Selection, analyze, save};
+                let selection = Selection {
+                    job_id: manifest.job_id.clone(),
+                    segment_id: segment.id.clone(),
+                    source_text: text.into(),
+                    start: 0,
+                    end: text.encode_utf16().count(),
+                };
+                let grammar = analyze(&selection).unwrap().remove(0);
+                let grammar_item = save(
+                    &learning,
+                    SaveRequest {
+                        selection,
+                        id: grammar.id.into(),
+                        start: grammar.start,
+                        end: grammar.end,
+                    },
+                )
+                .await
+                .unwrap();
+                assert_eq!(grammar_item.item.grammar_id.as_deref(), Some("en:perfect"));
+                assert_eq!(grammar_item.occurrences[0].segment_source_snapshot, text);
+            }
+        }
+        drop(service);
+        drop(learning);
+        db.close().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     #[ignore = "requires a writable QA copy of the installed Sudachi, Tomoshi and JMdict packages"]
     async fn japanese_word_lookup_collects_original_occurrences_by_sense() {
         use std::sync::Arc;
@@ -1401,7 +1777,7 @@ mod tests {
 
         use crate::desktop_settings::DesktopSettingsService;
 
-        use super::{DictionaryLookupService, JapaneseLookupRequest, SaveJapaneseWordRequest};
+        use super::{DictionaryLookupService, ListeningLookupRequest, SaveListeningWordRequest};
 
         let dictionaries = PathBuf::from(std::env::var_os("ATOGAKI_DICTIONARY_SMOKE_DIR").unwrap());
         let root = std::env::temp_dir().join(format!("atogaki-japanese-{}", uuid::Uuid::new_v4()));
@@ -1434,7 +1810,7 @@ mod tests {
         let mut second_sense = None;
         for (segment, start, end, expected) in [(&first, 6, 11, "読んで"), (&second, 6, 6, "読み")]
         {
-            let selection = JapaneseLookupRequest {
+            let selection = ListeningLookupRequest {
                 text: segment.source_text.clone(),
                 start,
                 end,
@@ -1459,10 +1835,10 @@ mod tests {
                     .iter()
                     .any(|entry| entry.provider_id == "jmdict" && entry.id == "1456360")
             );
-            let save = |sense_index, source: String| SaveJapaneseWordRequest {
+            let save = |sense_index, source: String| SaveListeningWordRequest {
                 job_id: manifest.job_id.clone(),
                 segment_id: segment.id.clone(),
-                selection: JapaneseLookupRequest {
+                selection: ListeningLookupRequest {
                     text: source,
                     start,
                     end,
@@ -1520,7 +1896,7 @@ mod tests {
             saved_id = Some(item.item.id);
         }
         let suffix = service
-            .lookup_japanese(&JapaneseLookupRequest {
+            .lookup_japanese(&ListeningLookupRequest {
                 text: first.source_text.clone(),
                 start: 8,
                 end: 8,
@@ -1530,7 +1906,7 @@ mod tests {
         assert_eq!(suffix.words[0].lemma, "読む");
         assert!(second_sense.is_some());
         let homophones = service
-            .lookup_japanese(&JapaneseLookupRequest {
+            .lookup_japanese(&ListeningLookupRequest {
                 text: "はしを渡ってきた".into(),
                 start: 0,
                 end: 0,

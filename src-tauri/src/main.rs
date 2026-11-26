@@ -8,6 +8,7 @@ mod desktop_settings;
 mod desktop_update;
 mod dictionary_download;
 mod dictionary_lookup;
+mod english_learning;
 mod japanese_grammar;
 mod japanese_morphology;
 mod media_server;
@@ -761,8 +762,8 @@ async fn save_learning_selection(
 #[tauri::command]
 async fn lookup_listening_japanese(
     state: State<'_, DesktopState>,
-    request: dictionary_lookup::JapaneseLookupRequest,
-) -> Result<dictionary_lookup::JapaneseLookup, String> {
+    request: dictionary_lookup::ListeningLookupRequest,
+) -> Result<dictionary_lookup::ListeningLookup, String> {
     state
         .dictionary_lookup_service
         .lookup_japanese(&request)
@@ -773,11 +774,52 @@ async fn lookup_listening_japanese(
 #[tauri::command]
 async fn save_listening_japanese_word(
     state: State<'_, DesktopState>,
-    request: dictionary_lookup::SaveJapaneseWordRequest,
+    request: dictionary_lookup::SaveListeningWordRequest,
 ) -> Result<LocalLearningItemDetail, String> {
     state
         .dictionary_lookup_service
         .save_japanese_word(request)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn lookup_listening_english(
+    state: State<'_, DesktopState>,
+    request: dictionary_lookup::ListeningLookupRequest,
+) -> Result<dictionary_lookup::ListeningLookup, String> {
+    state
+        .dictionary_lookup_service
+        .lookup_english(&request)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn save_listening_english_word(
+    state: State<'_, DesktopState>,
+    request: dictionary_lookup::SaveListeningWordRequest,
+) -> Result<LocalLearningItemDetail, String> {
+    state
+        .dictionary_lookup_service
+        .save_english_word(request)
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+fn analyze_listening_english_grammar(
+    request: english_learning::Selection,
+) -> Result<Vec<english_learning::GrammarMatch>, String> {
+    english_learning::analyze(&request).map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn save_listening_english_grammar(
+    state: State<'_, DesktopState>,
+    request: english_learning::SaveRequest,
+) -> Result<LocalLearningItemDetail, String> {
+    english_learning::save(&state.learning_service, request)
         .await
         .map_err(|error| format!("{error:#}"))
 }
@@ -1690,6 +1732,7 @@ async fn export_learning_anki(
     app: AppHandle,
     state: State<'_, DesktopState>,
     language: String,
+    cloze: Option<bool>,
 ) -> Result<Option<String>, String> {
     if !matches!(language.as_str(), "ja" | "en" | "ko") {
         return Err("不支持的单词本语言".into());
@@ -1699,13 +1742,20 @@ async fn export_learning_anki(
         .list_items()
         .await
         .map_err(|e| e.to_string())?;
-    let output = atogaki_subtitle::application::local_learning_service::anki_tsv(&items, &language);
+    use atogaki_subtitle::application::local_learning_service::{anki_cloze_tsv, anki_tsv};
+    let cloze = cloze.unwrap_or(false);
+    let output = if cloze {
+        anki_cloze_tsv(&items, &language).ok_or("当前单词本没有可用于挖空的词句。")?
+    } else {
+        anki_tsv(&items, &language)
+    };
+    let suffix = if cloze { "-cloze" } else { "" };
     let (sender, receiver) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
         .set_title("导出 Anki 文本资料")
         .add_filter("TSV", &["tsv"])
-        .set_file_name(format!("Atogaki-{language}.tsv"))
+        .set_file_name(format!("Atogaki-{language}{suffix}.tsv"))
         .save_file(move |selection| {
             let _ = sender.send(selection);
         });
@@ -2517,6 +2567,10 @@ fn main() {
             save_learning_selection,
             lookup_listening_japanese,
             save_listening_japanese_word,
+            lookup_listening_english,
+            save_listening_english_word,
+            analyze_listening_english_grammar,
+            save_listening_english_grammar,
             list_japanese_grammar,
             japanese_grammar_entry,
             analyze_listening_japanese_grammar,

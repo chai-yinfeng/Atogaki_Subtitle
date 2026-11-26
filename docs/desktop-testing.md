@@ -342,6 +342,10 @@ ATOGAKI_DICTIONARY_SMOKE_DIR=/absolute/path/to/qa-dictionaries \
 
 实词库验证覆盖「読んで／読み」原形与读音、两词形合并且来源时间独立、不同义项分别收藏、过期字幕拒绝写入，以及假名「はし」返回多个词条。真实节目的排序和使用体验由用户试用确认。
 
+英语可运行 `node scripts/verify-listening-english.cjs`，覆盖点词、选短语、句型说明、选义收藏、挖空卡揭示、回听和挖空导出请求。Rust 使用小型 ECDICT 测试包检查真实索引及事务，覆盖变形短语、跨节目累积、不同义项独立以及快照过期拒绝；核心测试检查挖空 TSV 的 UTF-16 范围、转义和导出筛选。WebKit 使用合成字幕与 IPC。
+
+两种 TSV 都已用 Anki 官方 Python 包导入临时资料库。普通 TSV 将 Expression 和 Meaning 映射到正面和背面。相同词头、相同挖空例句但义项不同的两张卡，在两种格式中各生成两条笔记，重复导入后仍为四张卡。
+
 `queries_merriam_webster_with_saved_key` 会读取钥匙串并使用一次英语词典 API 调用，仅在专门验证 Merriam-Webster 时按测试名运行。运行包含忽略用例的桌面回归时，用 `--skip queries_merriam_webster_with_saved_key` 排除该联机测试。
 
 ## 收听日语句型

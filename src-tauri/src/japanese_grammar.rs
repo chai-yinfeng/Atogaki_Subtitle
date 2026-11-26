@@ -210,6 +210,7 @@ async fn selection_context(learning: &LocalLearningService, request: &Request) -
             &request.job_id,
             &request.segment_id,
             request.end_segment_id(),
+            "ja",
         )
         .await?;
     Sentence::from_cues(cues, request)
@@ -296,6 +297,7 @@ pub(crate) async fn save(
                 selection_end_utf16: end,
             },
             NewLocalLearningGrammarSelection {
+                source_language: "ja",
                 grammar_id: entry.id.clone(),
                 title: entry.pattern.clone(),
                 meaning: entry.meaning.clone(),
