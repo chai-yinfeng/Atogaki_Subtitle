@@ -202,6 +202,8 @@ fn assets(state: &DesktopOnlineSession) -> Result<Assets, String> {
             } else {
                 assets.finals.push(model);
             }
+        } else if item.id == "online-silero-v6.3" && item.installed(&models) {
+            assets.vad = model.path;
         } else if item.category == "draft" {
             let lang = item.id.trim_start_matches("draft-");
             if item.installed(&models) || !assets.drafts.contains_key(lang) {
@@ -287,7 +289,13 @@ pub async fn online_choices(
     let translators = vec![
         Choice {
             id: "hy-mt2".into(),
-            name: "Hy-MT2 1.8B".into(),
+            name: a
+                .hy_mt2
+                .as_deref()
+                .and_then(|path| path.file_stem())
+                .and_then(|name| name.to_str())
+                .unwrap_or("Hy-MT3 1.8B")
+                .into(),
             ready: a.hy_mt2.as_ref().is_some_and(|p| p.is_file())
                 && desktop_llama_server_path().is_file(),
         },
@@ -420,6 +428,9 @@ pub async fn start_online_session(
         .map_err(|e| e.to_string())?
         .or(a.hy_mt2);
     let mut r = runtime(&app, &state)?;
+    if !a.vad.is_file() {
+        return Err("请先在「设置 → 识别」下载实时字幕用的 Silero VAD。".into());
+    }
     let final_model = a
         .finals
         .iter()
@@ -456,7 +467,9 @@ pub async fn start_online_session(
         let mut config = match options.translation_backend.as_str() {
             "hy-mt2" => LocalLlamaConfig::hy_mt2(
                 desktop_llama_server_path(),
-                a.hy_mt2.ok_or("未安装Hy-MT2翻译模型")?,
+                a.hy_mt2
+                    .filter(|path| path.is_file())
+                    .ok_or("请先在「设置 → 翻译」下载 Hy-MT3 1.8B。")?,
                 String::new(),
             ),
             "index-translate" => LocalLlamaConfig::index_translate(
@@ -787,6 +800,16 @@ mod model_tests {
             root.join("legacy-qwen")
         );
         assert_eq!(merged.vad, root.join("legacy-vad.onnx"));
+        let managed_vad = root.join("models/online/silero-v6.3.onnx");
+        std::fs::write(&managed_vad, b"incomplete").unwrap();
+        assert_eq!(assets(&state).unwrap().vad, merged.vad);
+        std::fs::File::options()
+            .write(true)
+            .open(&managed_vad)
+            .unwrap()
+            .set_len(2_204_103)
+            .unwrap();
+        assert_eq!(assets(&state).unwrap().vad, managed_vad);
         std::fs::write(root.join("models/online/manifest.json"), b"invalid JSON").unwrap();
         assert!(assets(&state).is_err());
         std::fs::remove_dir_all(root).unwrap();

@@ -420,7 +420,7 @@ app.innerHTML = `
           <label>节目语言<select id="source-language"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语</option></select></label>
           <label class="task-recognition-setting">识别模型<select id="recognition-model" required><option value="">正在读取模型…</option></select></label>
           <input id="model-path" type="hidden" />
-          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">Hy-MT2 · 本地翻译</option><option value="index-translate-local">Index-Translate 2B · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select></label>
+          <label class="task-translation-setting">翻译方式<select id="task-translation-provider" required><option value="" disabled selected>请选择翻译方式</option><option value="none">仅转录</option><option value="deepseek">DeepSeek · 云端文本翻译</option><option value="gemini">Gemini · 云端文本翻译</option><option value="deepl">DeepL · 云端文本翻译</option><option value="hy-mt2-local">混元 · 本地翻译</option><option value="index-translate-local">Index-Translate 2B · 本地翻译</option><option value="openai-compatible">自定义兼容服务</option></select></label>
           <details id="task-advanced"><summary>高级选项</summary>
           <div class="vad-setting">
             <label><input id="vad-enabled" type="checkbox" checked />语音活动检测</label>
@@ -1564,7 +1564,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
       ? settings.vadModelReady ? "Whisper 与 VAD 已就绪" : "Whisper 已就绪 · VAD 可选"
       : settings.qwenOfflineReady ? "Qwen 与字幕对齐模型已就绪" : "需要准备识别模型";
     const localTranslation = settings.hyMt2ModelReady
-      ? settings.localTranslationRuntimeReady ? " · Hy-MT2 已就绪" : " · Hy-MT2 runtime 缺失"
+      ? settings.localTranslationRuntimeReady ? " · 混元模型已就绪" : " · 本地翻译运行时缺失"
       : "";
     modelReadiness.textContent = `${recognition}${localTranslation}`;
     modelReadiness.classList.toggle("warning", !settings.whisperModelReady&&!settings.qwenOfflineReady);
@@ -1582,7 +1582,7 @@ function renderDesktopSettings(settings: DesktopSettings): void {
         : settings.translationApiKeySource === "local"
           ? settings.hyMt2ModelReady && settings.localTranslationRuntimeReady
             ? "本地 runtime 与模型已就绪；翻译文本不会离开设备"
-            : "本地翻译尚未就绪；请确认当前 App 包含 runtime 并下载 Hy-MT2 模型"
+            : "本地翻译尚未就绪；请确认当前 App 包含本地运行时，并下载 Hy-MT3 1.8B"
           : "尚未配置；Key 仅保存在系统凭据库";
     apiKeyStatus.textContent = settings.credentialError
       ? `${source}。系统凭据库提示：${settings.credentialError}`

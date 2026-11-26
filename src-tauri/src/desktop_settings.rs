@@ -533,10 +533,8 @@ impl DesktopSettingsService {
                     .map(|m| PathBuf::from(&m.path))
             });
         let hy_mt2_model = self
-            .database
-            .get_setting(HY_MT2_MODEL_PATH)
+            .downloaded_model_path("hy-mt2")
             .await?
-            .map(PathBuf::from)
             .filter(|path| path.is_file());
         let translation_provider_id = self
             .database
@@ -671,7 +669,7 @@ impl DesktopSettingsService {
         let hy_mt2_model = normalized_optional_path(request.hy_mt2_model_path);
         validate_optional_model(&whisper_model, "Whisper")?;
         validate_optional_model(&vad_model, "VAD")?;
-        validate_optional_model(&hy_mt2_model, "Hy-MT2")?;
+        validate_optional_model(&hy_mt2_model, "混元 GGUF")?;
         let network = NetworkClientConfig::new(
             &request.network_proxy_mode,
             request.network_proxy_url.clone(),
@@ -1037,7 +1035,16 @@ impl DesktopSettingsService {
             "index-translate" => INDEX_MODEL_PATH,
             _ => bail!("unsupported model kind: {kind}"),
         };
-        Ok(self.database.get_setting(key).await?.map(PathBuf::from))
+        let saved = self.database.get_setting(key).await?.map(PathBuf::from);
+        if kind != "hy-mt2" || saved.as_ref().is_some_and(|path| path.is_file()) {
+            return Ok(saved);
+        }
+        Ok(crate::model_download::model_catalog()
+            .iter()
+            .find(|model| {
+                model.kind == kind && !model.retired && model.installed(&self.models_directory)
+            })
+            .map(|model| self.models_directory.join(&model.file_name)))
     }
 
     pub async fn clear_downloaded_model(&self, kind: &str, path: &Path) -> Result<()> {
@@ -1343,11 +1350,9 @@ impl DesktopSettingsService {
                 let model_path = if let Some(path) = local_model {
                     PathBuf::from(path)
                 } else {
-                    self.database
-                        .get_setting(HY_MT2_MODEL_PATH)
+                    self.downloaded_model_path("hy-mt2")
                         .await?
-                        .map(PathBuf::from)
-                        .unwrap_or_else(|| self.models_directory.join("missing-hy-mt2-model.gguf"))
+                        .unwrap_or_else(|| self.models_directory.join("missing-hy-mt-model.gguf"))
                 };
                 Arc::new(LocalLlamaTranslationProvider::new(
                     LocalLlamaConfig::hy_mt2(
@@ -1505,7 +1510,7 @@ fn provider_display_name(provider_id: &str) -> &'static str {
         DEEPSEEK_PROVIDER_ID => "DeepSeek",
         GEMINI_PROVIDER_ID => "Gemini",
         OPENAI_COMPATIBLE_PROVIDER_ID => "OpenAI-compatible",
-        HY_MT2_LOCAL_PROVIDER_ID => "Hy-MT2（本地）",
+        HY_MT2_LOCAL_PROVIDER_ID => "混元（本地）",
         INDEX_LOCAL_PROVIDER_ID => "Index-Translate 2B（本地）",
         _ => "翻译服务",
     }
@@ -1836,6 +1841,30 @@ mod tests {
             Some("Hy-MT2-1.8B-Q4_K_M")
         );
         assert!(!provider.status().configured);
+
+        let old_profile = service.translation_profile("hy-mt2-local").await.unwrap();
+        let mt3_model = root.join("models/Hy-MT3-1.8B-Q4_K_M.gguf");
+        fs::File::create(&mt3_model)
+            .unwrap()
+            .set_len(1_348_432_160)
+            .unwrap();
+        assert_eq!(
+            service.downloaded_model_path("hy-mt2").await.unwrap(),
+            Some(model.clone())
+        );
+        service
+            .set_downloaded_model("hy-mt2", &mt3_model)
+            .await
+            .unwrap();
+        assert_eq!(
+            provider.status().model.as_deref(),
+            Some("Hy-MT3-1.8B-Q4_K_M")
+        );
+        let old_task = service.task_provider(&old_profile).await.unwrap();
+        assert_eq!(
+            old_task.status().model.as_deref(),
+            Some("Hy-MT2-1.8B-Q4_K_M")
+        );
 
         let index_model = root.join("models/Index-Translate-2B.Q4_K_M.gguf");
         fs::write(&index_model, b"model placeholder").unwrap();

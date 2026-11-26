@@ -31,7 +31,7 @@ macOS 版本没有 Developer ID 签名或公证。核对下载来源与 SHA-256 
 
 1. **本地模型。** 选择已有 `ggml-*.bin`，或下载 Whisper 与 Silero VAD。App 管理的默认目录通常是 `~/Library/Application Support/com.chai-yinfeng.atogaki/models/`，界面会显示本机的实际路径。
 2. **网络。** 选择跟随启动环境、强制直连或自定义 HTTP/HTTPS 代理；也可以填写 HTTPS 模型镜像。连接测试使用当前输入；点击下载会自动保存当前网络草稿。
-3. **翻译方式。** 可选择仅转录、Hy-MT2 本地翻译、DeepL、DeepSeek、Gemini 或高级 OpenAI-compatible 入口。不配置仍可完成本地识别、编辑和原文字幕导出；启动时不访问 Keychain，首次翻译才读取当前 provider 的已有 Key。LLM 入口还可配置模型与口语风格。
+3. **翻译方式。** 可选择仅转录、混元本地翻译、DeepL、DeepSeek、Gemini 或高级 OpenAI-compatible 入口。「设置 → 翻译」可下载 Hy-MT3 1.8B，供文件翻译和实时字幕共用。不配置翻译仍可完成本地识别、编辑和原文字幕导出；首次需要云端翻译时才读取对应 Key。
 
 学习词典与字幕翻译相互独立。JMdict、Tomoshi 和 ECDICT 由用户在设置页明确下载到 `dictionaries/`；Merriam-Webster Key 单独保存到系统凭据库。Collins 未取得可测试的 API 账户，Cambridge API 当前不可用，两者均不出现在产品路径中。
 
@@ -46,7 +46,8 @@ Whisper 模型建议：
 | large-v3 q5_0 | 1.1 GiB | 质量实验档，适合与 medium 做真实节目对比 |
 | large-v3-turbo q5_0 | 547 MiB | 速度/空间实验档 |
 | large-v3-turbo q8_0 | 834 MiB | turbo 的较高精度量化档，适合与 q5 对比 |
-| Silero VAD v6.2.0 | 865 KiB | 推荐与任一 Whisper 模型配套使用 |
+| Silero VAD v6.2.0（GGML） | 865 KiB | 与 Whisper 文件转录配套 |
+| Silero VAD v6.3（ONNX） | 2.20 MB | 实时字幕判断说话和停顿，在「设置 → 识别」下载后下次启动会话生效 |
 
 `large-v3-turbo q5_0` 比 medium 文件更小，是因为它属于更快的 turbo 架构并经过 5-bit 量化；`large-v3 q5_0` 则是原始 large-v3 的 q5 量化版。文件大小不能直接代表识别质量。所有内建下载项都有固定 SHA-256，镜像内容与预期不一致时不会安装。
 

@@ -603,6 +603,12 @@ fn build_download_client(network: &NetworkClientConfig) -> Result<reqwest::Clien
 }
 
 fn download_sources(download_path: &str, model_mirror_url: Option<&str>) -> Vec<DownloadSource> {
+    if download_path.starts_with("https://") {
+        return vec![DownloadSource {
+            label: "模型官方源",
+            url: download_path.into(),
+        }];
+    }
     let official_url = format!("https://huggingface.co/{}", download_path);
     let mut sources = Vec::new();
     if let Some(mirror) = model_mirror_url {
@@ -762,13 +768,28 @@ mod tests {
     }
 
     #[test]
-    fn hy_mt2_catalog_uses_the_validated_revisions_and_hashes() {
+    fn hunyuan_catalog_uses_the_validated_revisions_and_hashes() {
         let models = model_catalog()
             .iter()
             .filter(|model| model.kind == "hy-mt2")
             .collect::<Vec<_>>();
 
-        assert_eq!(models.len(), 2);
+        let (recommended, legacy) = models.split_first().unwrap();
+        assert_eq!(recommended.id, "hy-mt3-1.8b-q4-k-m");
+        assert!(!recommended.retired && recommended.selectable);
+        assert_eq!(recommended.total_bytes(), 1_348_432_160);
+        assert!(
+            recommended.files[0]
+                .download_path
+                .contains("7f97e076a8622b09f3a6f14cff38a733441ace43")
+        );
+        assert_eq!(
+            recommended.files[0].sha256,
+            "bae6e591103654ff43ef0de7d1492f6e6df1f955505f6bb2cc52e86fc399a942"
+        );
+        assert_eq!(legacy.len(), 2);
+        assert!(legacy.iter().all(|model| model.retired));
+        let models = legacy;
         assert_eq!(models[0].id, "hy-mt2-1.8b-q4-k-m");
         assert!(
             models[0].files[0]
@@ -788,6 +809,23 @@ mod tests {
         assert_eq!(
             models[1].files[0].sha256,
             "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b"
+        );
+    }
+
+    #[test]
+    fn online_vad_uses_its_pinned_upstream_url() {
+        let model = model_catalog()
+            .iter()
+            .find(|model| model.id == "online-silero-v6.3")
+            .unwrap();
+        assert!(model.downloadable && !model.selectable);
+        let sources = download_sources(&model.files[0].download_path, Some("https://mirror.test"));
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].url, model.files[0].download_path);
+        assert!(
+            sources[0]
+                .url
+                .starts_with("https://raw.githubusercontent.com/snakers4/silero-vad/")
         );
     }
 
@@ -889,7 +927,16 @@ mod tests {
                         .all(|c| matches!(c, Component::Normal(_)))
                 );
                 if item.downloadable {
-                    assert!(file.download_path.contains("/resolve/"));
+                    if let Some(github_path) = file
+                        .download_path
+                        .strip_prefix("https://raw.githubusercontent.com/")
+                    {
+                        let revision = github_path.split('/').nth(2).unwrap();
+                        assert_eq!(revision.len(), 40);
+                        assert!(revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
+                    } else {
+                        assert!(file.download_path.contains("/resolve/"));
+                    }
                 }
                 if item.bundle && item.downloadable {
                     assert!(file.bytes > 0);

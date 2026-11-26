@@ -34,7 +34,7 @@ docs/                        当前规范、验收、研究与历史
 
 `LocalTaskService` 管理任务与恢复，`JobRunner` 执行处理，`StageScheduler` 管理阶段资源；`LocalWorkspaceService` 管理字幕编辑、翻译写回与导出，`LocalRetranscriptionService` 管理候选，`LocalLearningService` 管理学习资料。样式、字体、烧录、词表分别由已有服务承担。`src-tauri/src/commands/` 只适配对应 IPC；桌面 `main.rs` 仍承担构造和部分命令，不能据已有拆分声称入口已完全收敛。
 
-离线主链为媒体 → 音频块／检查点 → ASR run／timed units → 可编辑 cues → 翻译组／上下文 → 译文 → 回看／导出。音频块、字幕段、翻译组、HTTP batch 是不同对象。完整识别后发布人工工作区；云端可提前处理稳定前缀并保存私有结果，完整发布后核对输入和 revision 才复用。本地 Hy-MT2 在完整识别后独占设备阶段。默认 2 路 ASR、4 路云端请求，详见 [0052](decisions/0052-staged-concurrency-and-early-translation.md)。
+离线主链为媒体 → 音频块／检查点 → ASR run／timed units → 可编辑 cues → 翻译组／上下文 → 译文 → 回看／导出。音频块、字幕段、翻译组、HTTP batch 是不同对象。完整识别后发布人工工作区；云端可提前处理稳定前缀并保存私有结果，完整发布后核对输入和 revision 才复用。混元本地翻译在完整识别后独占设备阶段。默认 2 路 ASR、4 路云端请求，详见 [0052](decisions/0052-staged-concurrency-and-early-translation.md)。
 
 ## 数据边界
 
@@ -62,7 +62,7 @@ SQLite 保存任务索引、当前人工字幕、revision、来源／翻译依�
 
 在线实现从 `codex/online-desktop-integration`（`e06a9c6`）整合进入开发主线，包含原生采集、Rust 会话、Python 推理 worker 与独立字幕显示。v0.1.4 已包含在线字幕的 One Pass／Two Pass 入口。运行环境准备、质量与延迟验收仍是独立事项。在线采集 → CPU 草稿／Qwen 确认 → 独立翻译分组／修订 → 展示的时钟和状态，不等同离线任务的检查点／人工工作区。具体责任、性能证据和仍需讨论的选择见[系统回顾](system-review-2026-11-11.md)。
 
-当前模型／后端与待实施边界统一看[在线合同](online-asr-plan.md)：默认确认 Qwen3-ASR 1.7B 8bit，在线本地翻译为 Hy-MT2／Index-Translate；离线已有云端文本 provider，在线面板未接云端。Gemini selected-range ASR、Gemini 文本翻译及尚未运行的音频端到端参考是不同路径。开发版已接入 Qwen＋DFlash 的 One Pass；录音保存、转离线任务和新机 runtime 准备仍有待推进。
+当前模型／后端与待实施边界统一看[在线合同](online-asr-plan.md)：默认确认 Qwen3-ASR 1.7B 8bit，在线本地翻译为混元／Index-Translate。混元推荐下载 Hy-MT3 1.8B。实时 VAD 使用 ONNX，Whisper 文件 VAD 使用 GGML。离线已有云端文本 provider，在线面板未接云端。Gemini selected-range ASR、Gemini 文本翻译及尚未运行的音频端到端参考是不同路径。开发版已接入 Qwen＋DFlash 的 One Pass；录音保存、转离线任务和新机 runtime 准备仍有待推进。
 
 ## 字幕编辑前端的渐进边界
 

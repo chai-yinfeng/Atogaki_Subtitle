@@ -99,7 +99,7 @@ cargo run --manifest-path src-tauri/Cargo.toml
 
 当前直接使用 `cargo run` 时加载的是最近一次 `ui/dist`，所以修改前端后必须先运行前端构建。`tauri.conf.json` 刻意不配置 `devUrl`，避免普通 `cargo run` 在没有同时启动 Vite server 时显示白屏。开发窗口启动后，首页会显示实际的应用数据目录和 SQLite 任务列表。
 
-当前 macOS 完整桌面配置为 `tauri.macos-complete.conf.json`，在 FFmpeg、FFprobe 和 whisper.cpp 之外打包 `llama-server`。它使用正式 bundle identifier 和系统应用数据目录；Hy-MT2 GGUF 继续按需下载到设置页显示的 `models/` 目录，不嵌入 App。完成稳定桌面改动后运行 `./scripts/install-current-macos-app.sh`，只覆盖 `/Applications/Atogaki.app`，不生成 Test App 或日常测试 DMG。Windows runtime 仍需独立构建与实测。
+当前 macOS 完整桌面配置为 `tauri.macos-complete.conf.json`，在 FFmpeg、FFprobe 和 whisper.cpp 之外打包 `llama-server`。它使用正式 bundle identifier 和系统应用数据目录；Hy-MT3 GGUF 和实时字幕的 Silero 6.3 ONNX 按需下载到设置页显示的 `models/` 目录，不嵌入 App。完成稳定桌面改动后运行 `./scripts/install-current-macos-app.sh`，只覆盖 `/Applications/Atogaki.app`，不生成 Test App 或日常测试 DMG。Windows runtime 仍需独立构建与实测。
 
 打包后的真实窗口回归使用 Tauri CLI；`beforeBuildCommand` 显式把工作目录设置为 `../ui` 后执行 `npm run build`，避免调用位置改变时重复拼接前端路径。正式本地 App 由 `install-current-macos-app.sh` 使用完整 macOS 配置构建、核对四个 sidecar 与签名后替换 `/Applications/Atogaki.app`。配置声明最低 macOS 12.0，与 sidecar 的 deployment target 一致。
 

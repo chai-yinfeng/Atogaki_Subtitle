@@ -45,14 +45,14 @@ impl LocalLlamaConfig {
         let model_id = model_path
             .file_stem()
             .and_then(|name| name.to_str())
-            .unwrap_or("Hy-MT2")
+            .unwrap_or("Hy-MT")
             .to_string();
         Self {
             provider_id: "hy-mt2-local".to_string(),
             runtime_path,
             model_path,
             model_id,
-            provider_name: "Hy-MT2（本地翻译）".to_string(),
+            provider_name: "混元（本地翻译）".to_string(),
             style_instruction,
             context_size: 8_192,
             gpu_layers: 99,

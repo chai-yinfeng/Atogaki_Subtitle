@@ -1778,8 +1778,8 @@ async fn pick_vad_model_file(app: AppHandle) -> Result<Option<String>, String> {
 async fn pick_hy_mt2_model_file(app: AppHandle) -> Result<Option<String>, String> {
     pick_local_file(
         &app,
-        "选择 Hy-MT2 GGUF 模型",
-        "Hy-MT2 模型",
+        "选择混元 GGUF 模型",
+        "混元模型",
         &["gguf"],
         model_picker_directory(&app),
     )

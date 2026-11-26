@@ -122,10 +122,10 @@
   {
     "id": "vad-silero-v6.2.0",
     "kind": "vad",
-    "name": "Silero VAD v6.2.0（推荐）",
+    "name": "Silero VAD v6.2.0（Whisper 文件转录）",
     "fileName": "ggml-silero-v6.2.0.bin",
     "sizeLabel": "约 865 KiB",
-    "recommendedFor": "过滤静音、音乐和环境声，建议与任一 Whisper 模型配套。",
+    "recommendedFor": "供 Whisper 文件转录识别语音区间，使用 GGML 格式。",
     "sourceUrl": "https://github.com/ggml-org/whisper.cpp/blob/master/models/download-vad-model.sh",
     "category": "vad",
     "family": "Silero VAD",
@@ -168,12 +168,36 @@
     ]
   },
   {
+    "id": "hy-mt3-1.8b-q4-k-m",
+    "kind": "hy-mt2",
+    "name": "Hy-MT3 1.8B Q4_K_M（本地翻译推荐）",
+    "fileName": "Hy-MT3-1.8B-Q4_K_M.gguf",
+    "sizeLabel": "约 1.26 GiB",
+    "recommendedFor": "混元本地翻译的推荐模型，适用于文件字幕和实时字幕。",
+    "sourceUrl": "https://huggingface.co/tencent/Hy-MT3-1.8B-GGUF",
+    "category": "translation",
+    "family": "Hy-MT3",
+    "optional": false,
+    "bundle": false,
+    "selectable": true,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "Hy-MT3-1.8B-Q4_K_M.gguf",
+        "downloadPath": "tencent/Hy-MT3-1.8B-GGUF/resolve/7f97e076a8622b09f3a6f14cff38a733441ace43/Hy-MT3-1.8B-Q4_K_M.gguf",
+        "sha256": "bae6e591103654ff43ef0de7d1492f6e6df1f955505f6bb2cc52e86fc399a942",
+        "bytes": 1348432160
+      }
+    ]
+  },
+  {
     "id": "hy-mt2-1.8b-q4-k-m",
     "kind": "hy-mt2",
-    "name": "Hy-MT2 1.8B Q4_K_M（本地翻译推荐）",
+    "name": "Hy-MT2 1.8B Q4_K_M",
     "fileName": "Hy-MT2-1.8B-Q4_K_M.gguf",
     "sizeLabel": "约 1.06 GiB",
-    "recommendedFor": "速度较快，内存占用较低，适合日常本地翻译。",
+    "recommendedFor": "旧版混元模型。已安装时可继续使用。",
     "sourceUrl": "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF",
     "category": "translation",
     "family": "Hy-MT2",
@@ -181,7 +205,7 @@
     "bundle": false,
     "selectable": true,
     "downloadable": true,
-    "retired": false,
+    "retired": true,
     "files": [
       {
         "name": "Hy-MT2-1.8B-Q4_K_M.gguf",
@@ -516,20 +540,44 @@
     ]
   },
   {
+    "id": "online-silero-v6.3",
+    "kind": "online-vad",
+    "category": "vad",
+    "family": "Silero VAD",
+    "name": "Silero VAD v6.3（实时字幕 ONNX）",
+    "fileName": "online/silero-v6.3.onnx",
+    "sizeLabel": "约 2.20 MB",
+    "recommendedFor": "用于实时字幕判断说话和停顿；下载后在下一次实时字幕会话生效。",
+    "sourceUrl": "https://github.com/snakers4/silero-vad/releases/tag/v6.3",
+    "optional": false,
+    "bundle": false,
+    "selectable": false,
+    "downloadable": true,
+    "retired": false,
+    "files": [
+      {
+        "name": "silero-v6.3.onnx",
+        "downloadPath": "https://raw.githubusercontent.com/snakers4/silero-vad/63d4a2a7bfce8cd9bb39ed8fa0afcb5236d73e01/src/silero_vad/data/silero_vad.onnx",
+        "sha256": "f6f4407b41e05e277e7f5cfd9b9ae957b1dfe763c6076a934734c0b448e09b31",
+        "bytes": 2204103
+      }
+    ]
+  },
+  {
     "id": "online-silero-v6.2.3",
     "kind": "online-vad",
     "category": "vad",
     "family": "Silero VAD",
-    "name": "Silero VAD v6.2.3（在线 ONNX）",
+    "name": "Silero VAD v6.2.3（实时字幕旧版）",
     "fileName": "online/silero_vad.onnx",
     "sizeLabel": "约 2.33 MB",
-    "recommendedFor": "在线语音活动检测；当前随本机在线环境准备。不能替代 Whisper 的 GGML VAD。",
+    "recommendedFor": "旧运行环境提供的实时字幕模型。安装 6.3 后优先使用新版。",
     "sourceUrl": "https://github.com/snakers4/silero-vad",
     "optional": false,
     "bundle": false,
     "selectable": false,
     "downloadable": false,
-    "retired": false,
+    "retired": true,
     "files": [
       {
         "name": "silero_vad.onnx",

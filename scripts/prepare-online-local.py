@@ -38,7 +38,8 @@ names={
 'en':('Zipformer English','zipformer-models/sherpa-onnx-streaming-zipformer-en-2023-06-26'),
 'zh':('Zipformer Chinese','zipformer-models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30'),
 'ko':('Zipformer Korean','zipformer-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16')}
-manifest=dict(drafts={},finals=[],vad=str(models/'silero_vad.onnx'),hyMt2=str(models/'Hy-MT2-1.8B-Q4_K_M.gguf'))
+translation_model = models / a.hy_model.name
+manifest=dict(drafts={},finals=[],vad=str(models/'silero_vad.onnx'),hyMt2=str(translation_model))
 for lang,(name,relative) in names.items():
     target=models/lang;copy(assets/relative,target)
     manifest['drafts'][lang]=dict(id=lang,name=name,path=str(target))
@@ -46,7 +47,7 @@ for size in ['0.6B','1.7B']:
     target=models/('qwen-'+size.lower());copy(assets/'qwen-mlx-models'/size,target)
     manifest['finals'].append(dict(id='qwen-'+size.lower(),name='Qwen3-ASR '+size,path=str(target)))
 copy(assets/'silero-v6.2.3/silero_vad.onnx',models/'silero_vad.onnx')
-copy(a.hy_model,models/'Hy-MT2-1.8B-Q4_K_M.gguf')
+copy(a.hy_model,translation_model)
 (models/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 subprocess.run([str(runtime/'bin/python3'),'-s','-c','import sys; import sherpa_onnx; import mlx.core; from mlx_qwen3_asr import Session; print("Private online runtime imports passed:",sys.prefix)'],check=True)
 print('Prepared local online assets:',root)

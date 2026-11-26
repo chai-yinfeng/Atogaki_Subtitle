@@ -2,21 +2,21 @@ const entries = [
   ["deepseek", "DeepSeek", "云端文本翻译；只发送字幕与上下文。"],
   ["gemini", "Gemini", "只发送字幕文本和上下文；与 Gemini 语音识别共用 Key。保存或删除 Key 会同时影响两处，音频上传仍需单独授权。"],
   ["deepl", "DeepL", "云端文本翻译；使用独立的 DeepL 凭据。"],
-  ["hy-mt2-local", "Hy-MT2 · 本地翻译", "本地翻译，不上传字幕。"],
+  ["hy-mt2-local", "混元 · 本地翻译", "本地翻译，不上传字幕。"],
   ["index-translate-local", "Index-Translate 2B · 本地翻译", "本地翻译，不上传字幕。"],
   ["openai-compatible", "OpenAI-compatible", "高级：自定义端点、模型与独立凭据。"],
 ] as const;
 
 export function translationProviderTemplate(): string {
   const cards = entries.map(([id, title, description]) => {
-    const card = `<article class="provider-card" data-provider-card="${id}"><h4>${title}</h4><p>${description}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary ${["hy-mt2-local", "index-translate-local"].includes(id) ? "hidden" : ""}" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<label class="local-model-choice">翻译模型<select id="local-translation-model-choice"></select></label><div class="settings-path-row"><label>模型文件<input id="settings-hy-mt2-model" placeholder="选择 Hy-MT2 GGUF" /></label><button id="settings-choose-hy-mt2" type="button" class="secondary">选择文件</button></div>' : id === "index-translate-local" ? '' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div></article>`;
+    const card = `<article class="provider-card" data-provider-card="${id}"><h4>${title}</h4><p>${description}</p><p data-provider-readiness role="status"></p><button type="button" class="secondary" data-configure-provider>配置此后端</button><button type="button" class="secondary ${["hy-mt2-local", "index-translate-local"].includes(id) ? "hidden" : ""}" data-test-provider>测试已保存配置（发送 Hello.，可能计费）</button>${id === "hy-mt2-local" ? '<label class="local-model-choice">翻译模型<select id="local-translation-model-choice"></select></label><div class="settings-path-row"><label>模型文件<input id="settings-hy-mt2-model" placeholder="选择混元 GGUF" /></label><button id="settings-choose-hy-mt2" type="button" class="secondary">选择文件</button></div>' : id === "index-translate-local" ? '' : '<button type="button" class="secondary" data-check-provider>检查凭据是否存在</button>'}<div data-provider-editor></div></article>`;
     return card;
   }).join("");
   return `<section class="settings-section hidden" data-settings-page="translation" data-translation-settings>
     <div class="settings-section-heading"><div><strong>翻译</strong><span>本地模型完全离线运行；云端 provider 只发送原文字幕和上下文。</span></div><span id="credential-store-label"></span></div>
           <label>离线默认
             <select id="settings-provider">
-              <option value="hy-mt2-local">Hy-MT2（本地翻译）</option>
+              <option value="hy-mt2-local">混元（本地翻译）</option>
               <option value="index-translate-local">Index-Translate 2B（本地翻译）</option>
               <option value="deepl">DeepL（传统翻译 API）</option>
               <option value="deepseek">DeepSeek（LLM API）</option><option value="gemini">Gemini（LLM API）</option>
@@ -25,7 +25,7 @@ export function translationProviderTemplate(): string {
             </select>
           </label>
 
-    <label>在线默认<select id="settings-online-provider"><option value="hy-mt2">Hy-MT2（本地翻译）</option><option value="index-translate">Index-Translate 2B（本地翻译）</option><option value="none">不翻译</option></select></label>
+    <label>在线默认<select id="settings-online-provider"><option value="hy-mt2">混元（本地翻译）</option><option value="index-translate">Index-Translate 2B（本地翻译）</option><option value="none">不翻译</option></select></label>
     <div class="provider-cards">${cards}</div>
     <details class="translation-models"><summary>下载与管理翻译模型</summary><div id="translation-model-catalog" class="model-catalog"></div></details>
     <div class="hidden" data-provider-editor-home><div class="provider-editor hidden">
