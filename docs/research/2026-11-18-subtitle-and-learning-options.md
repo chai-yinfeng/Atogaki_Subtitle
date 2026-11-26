@@ -1,6 +1,24 @@
 # 在线同传、日语学习与离线校对调研
 
-_核查日期：2026-11-18。以下选型均未冻结。采用或淘汰候选时，更新本页的状态、日期和证据，并同步路线图与相关决策。_
+_最近核查：2026-11-26。以下选型均未冻结。采用或淘汰候选时，更新本页的状态、日期和证据，并同步路线图与相关决策。_
+
+## 2026-11-26 模型和服务复核
+
+### 本地模型
+
+- **Hy‑MT3 1.8B 是同档替换候选。** 腾讯 11 月 24 日公开 1.8B、7B 和 30B-A3B。官方 Apache-2.0 的 1.8B Q4_K_M GGUF 为 1,348,432,160 字节，约 1.26 GiB。当前 MT2 同档约 1.06 GiB，文件约增 19%。核对 MT3 GGUF 头的 `hunyuan-dense` 架构及项目固定的 llama.cpp 源码，已确认该架构受支持。固定模型 revision `7f97e076a8622b09f3a6f14cff38a733441ace43` 并核验 SHA-256 `bae6e591103654ff43ef0de7d1492f6e6df1f955505f6bb2cc52e86fc399a942` 后，以 Atogaki v0.1.6 内置的 `llama-server` 运行 `cargo test --locked --offline --lib managed_runtime_translates_and_shuts_down -- --ignored`，一条合成日语通过了加载、字幕 ID、非空译文和进程退出检查。后续用同一份校正日文和确认前文对照 MT2，检查多段对应、漏译、否定、指代、专名和术语。在线另测与 ASR 并行时的等待、峰值内存及译文反复。默认选型仍为 MT2，发布会继续独立保存模型身份和快照。[腾讯发布](https://github.com/Tencent-Hunyuan/Hy-MT3) · [官方 GGUF](https://huggingface.co/tencent/Hy-MT3-1.8B-GGUF) · [现有 MT2 验证](../hy-mt2-validation.md)
+- **Silero VAD 6.3 可以先复核实时路径。** 项目实时字幕使用 6.2.3 ONNX，文件 Whisper 使用 6.2.0 GGML。6.3 更新了 16 kHz／8 kHz 权重，发布说明报告其短停顿和长音频检测改善。在项目现有本机 Python／sherpa-onnx 运行时用当前 16 kHz 阈值与时长设置，两个 ONNX 版本均能处理 65 个 512 样本静音块，均未产生语音事件。真实节目应保持 ASR、阈值和会话设置一致，测背景音乐误触发、吞掉短语、句首切掉、分段密度与等待。Whisper 的 6.3 GGML 转换仍是上游待办。[Silero 发布说明](https://github.com/snakers4/silero-vad/releases/tag/v6.3) · [whisper.cpp 跟踪项](https://github.com/ggml-org/whisper.cpp/issues/4202)
+- **Qwen3-ASR 权重继续作为基线。** 官方开源专用 ASR 仍列 0.6B、1.7B 和 0.6B ForcedAligner。Atogaki 实时可用 MLX 量化版和 1.7B 的 DFlash 加速，文件流程可用 Qwen 加强制对齐。Whisper 已核对到的官方权重仍是 large-v3／turbo 这一代，项目内的 whisper.cpp v1.8.6 可单独对照上游 v1.9.6，优先看 Apple Silicon 耗时、字幕时间及相同输入文字差异。[Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) · [OpenAI Whisper](https://github.com/openai/whisper) · [whisper.cpp v1.9.6](https://github.com/ggml-org/whisper.cpp/releases/tag/v1.9.6)
+
+### 云端入口与候选
+
+- 文件／编辑区已有 DeepL、DeepSeek、Gemini 和 OpenAI-compatible 文本翻译，云端音频局部重识别已有 Gemini 3.5 Transcribe。持续收听系统声音的「在线字幕」使用本地识别和本地翻译，云端实时会话仍是候选。DeepSeek 代码默认 `deepseek-v4-flash`，官方仍接收该别名，实际由 V4.1-Flash-1017 响应，推荐标识为 `deepseek-flash`。通用 OpenAI-compatible 可以尝试通用千问模型。专用 Qwen-MT 必须提交 `translation_options`，并需适配现有按字幕 ID 返回结构化数据的合同。[DeepSeek 模型与价格](https://api-docs.deepseek.com/quick_start/pricing/) · [Qwen-MT API](https://help.aliyun.com/zh/model-studio/qwen-mt-api)
+- **实时同传。** 大陆首选仍是百炼 Qwen3.8 LiveTranslate。11 月 23 日的 WebSocket 指南确认可以只要文本，原文和译文有各自的增量事件。北京区音频输入 ¥40／百万 token、文本输出 ¥100／百万 token，建连需对应业务空间的 API Host 和 Key。腾讯云日中实时语音翻译可作国内备选，公开价 ¥5／小时。Google Gemini 3.5 Live Translate 仍标为 Preview，可取得原文和译文，官方示例也返回译音，字幕模式的计费待连接验收。OpenAI 另有专用 `gpt-realtime-translate`，持续返回译音和字幕增量，公开价 $0.034／分钟音频。Google 和 OpenAI 的 API 支持地区均不含中国大陆，留作受支持地区的对照。[百炼 WebSocket](https://help.aliyun.com/zh/model-studio/livetranslate-realtime-websocket-access) · [百炼价格](https://help.aliyun.com/zh/model-studio/qwen3-8-livetranslate-flash-realtime) · [腾讯日中接口](https://cloud.tencent.com/document/product/1093/127565) · [腾讯价格](https://cloud.tencent.com/document/product/1093/35686) · [Google Live 指南](https://aistudio.google.com/docs/live-api/live-translate) · [Google 地区](https://ai.google.dev/gemini-api/docs/available-regions) · [OpenAI 模型](https://developers.openai.com/api/docs/models/gpt-realtime-translate) · [OpenAI 地区](https://developers.openai.com/api/docs/supported-countries)
+- **纯转写。** 新增国内候选 Qwen-Audio 3.1 ASR Flash Streaming，官方列日语，支持热词和上下文，北京标价每百万 token 输入 ¥6、输出 ¥4.5。它适合作为日文原文的云端对照。若目标是给实时中文字幕兜底，先测完整音频到译文链路。未调用付费接口，本轮未读取现有 Key。[Qwen-Audio 3.1 价格](https://help.aliyun.com/zh/model-studio/qwen-audio-3-1-asr-flash-streaming) · [语种和能力](https://help.aliyun.com/zh/model-studio/asr-model/)
+
+### 学习功能的下一轮验证
+
+v0.1.6 已交付查词、词形说明、句型分析、526 张中文句型卡、21 张基础概念卡、收藏回听、Anki TSV 和本地误报／漏报反馈。78 个条目可自动匹配。上一轮 40 条保留字幕中，13 个标记位置命中 8 个，范围均已对齐。下一期独立电台先固定条目和应高亮范围，逐项核对漏识别、误识别及高亮边界。反馈先按 ASR 原文有误、形态解析、通用接续规则和候选排序归因，再决定规则层改动。另有两个使用候选：把口语活用和同形词的上下文证据直接展示在查词结果里，以及复习时先隐藏释义、听完原句再揭示。两项先确认使用需求，沿用现有词条、语法条目和节目时间点。[匹配与反馈](../decisions/0095-grammar-in-context-and-local-feedback.md)
 
 ## 在线字幕
 
